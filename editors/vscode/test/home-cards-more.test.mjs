@@ -311,7 +311,10 @@ for (const theme of ["dark-modern", "light-modern"]) {
       await p.click(`${sel("widgets")} [data-tile="${W[3]}"]`); await x.rest(60);
       assert.deepEqual((await posted(p, "homeWidgetOpen")).at(-1), { type: "homeWidgetOpen", id: W[3], chat_id: "chat_4" });
       await p.click(`${sel("widgets")} .hc-all`); await x.rest(60);
-      assert.deepEqual((await posted(p, "homeLibraryOpen")).at(-1), { type: "homeLibraryOpen", view: "widgets" });
+      // (The side bar's own Library, on that tab; it was the editor's page until Library v2.)
+      assert.deepEqual(await p.evaluate(() => [document.getElementById("side-tab-library").getAttribute("aria-selected"), document.querySelector('#library-tabs [aria-selected="true"]')?.dataset.tab]), ["true", "widgets"]);
+      assert.deepEqual(await posted(p, "homeLibraryOpen"), [], "not the editor's page");
+      await p.click("#side-tab-home"); await x.rest(200);
       // Large: two side by side.
       await x.resize(700);
       s = await stack(p, "widgets");
@@ -346,7 +349,9 @@ for (const theme of ["dark-modern", "light-modern"]) {
       await p.click(`${sel("artifacts")} [data-tile="${A[5]}"]`); await x.rest(60);
       assert.deepEqual((await posted(p, "artifactOpen")).at(-1), { type: "artifactOpen", id: A[5], artifactType: "doc", title: "Ferry plan" }, "a click opens it in an editor tab");
       await p.click(`${sel("artifacts")} .hc-all`); await x.rest(60);
-      assert.deepEqual((await posted(p, "homeLibraryOpen")).at(-1), { type: "homeLibraryOpen", view: "artifacts" });
+      assert.deepEqual(await p.evaluate(() => [document.getElementById("side-tab-library").getAttribute("aria-selected"), document.querySelector('#library-tabs [aria-selected="true"]')?.dataset.tab]), ["true", "artifacts"]);
+      assert.deepEqual(await posted(p, "homeLibraryOpen"), [], "not the editor's page");
+      await p.click("#side-tab-home"); await x.rest(200);
       await x.resize(700);
       s = await stack(p, "artifacts");
       assert.deepEqual(s.tiles, [A[4], A[5]], "Large: four to a page, and the page that holds the one it showed (the last two of six)"); assert.equal(s.dots.length, 2); assert.equal(s.inside, true);

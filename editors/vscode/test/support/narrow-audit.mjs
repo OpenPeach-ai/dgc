@@ -22,7 +22,7 @@ export const narrowAudit = (opts = {}) => {
   const hiddenByDesign = (e) => { for (let p = e; p; p = up(p)) { const b = p.getBoundingClientRect(); if (b.width <= 2 || b.height <= 2) return true; const s = getComputedStyle(p); if (parseFloat(s.opacity) === 0 || s.clipPath !== "none" && /inset\(\s*(50|100)%/.test(s.clipPath)) return true; } return false; };
   // (A path, an address or a model's name may wrap where it must in running text, in a link and on a row; in a heading
   // or on a tab it ends in "…" instead.)
-  const HEADING = "h1, h2, h3, h4, h5, h6, summary, legend, [role=tab], .home-title, .set-title";
+  const HEADING = "h1, h2, h3, h4, h5, h6, summary, legend, [role=tab], .dgc-pagehead-title, .set-title";
   const out = { broken: [], cut: [], clipped: [], sideways: [], inner: [], page: false, width: innerWidth };
   // A button that shows a name, not a command: what a dropdown has chosen, a tab, a row of a menu or a list, a title.
   const NAMED = "[aria-haspopup], [role=tab], [role=option], [role^=menuitem], [role=row], .thread-title, .lib-row-maker, .dgc-dock-item, [data-name]";

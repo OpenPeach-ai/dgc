@@ -1,6 +1,7 @@
 // The ChatDGC Library in its editor tab (media/library.js, the page src/chatdgc.ts serves) scrolls (13 Nov: with many
 // artifacts the list could not be scrolled at all: the page takes main.css, whose body never scrolls, and nothing in the
-// Library did). In real Chromium on the real page: with 200 of them, in each tab (Files, Widgets, Artifacts), the last
+// Library did). The one Library module draws it since Library v2; in its editor tab the list scrolls inside the page.
+// In real Chromium on the real page: with 200 of them, in each tab (Files, Widgets, Artifacts), the last
 // row is reached by the wheel and by the keyboard (the list takes the keyboard; End, PageDown and the arrows scroll
 // it), while the title, the search field and the tab strip stay where they are, at any window height.
 import { after, before, test } from "node:test";
@@ -36,10 +37,10 @@ export async function fullLibrary(page, send) {
   await page.waitForTimeout(80);
 }
 const now = (page) => page.evaluate(() => {
-  const list = document.getElementById("lib-list"), rows = [...list.children], last = rows.at(-1), box = (n) => { const r = n.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+  const list = document.getElementById("library-list"), rows = [...list.children], last = rows.at(-1), box = (n) => { const r = n.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
   const seen = (n) => { if (!n) return false; const r = n.getBoundingClientRect(), mid = (r.top + r.bottom) / 2, at = document.elementFromPoint(r.left + 20, mid); return r.top >= -0.5 && r.bottom <= innerHeight + 0.5 && !!at && n.contains(at); };
-  return { rows: rows.length, lastSeen: seen(last), firstSeen: seen(rows[0]), title: box(document.querySelector(".lib-title")), search: box(document.getElementById("lib-search")), tabs: box(document.getElementById("lib-views")),
-    tabsSeen: document.getElementById("lib-views").checkVisibility() && box(document.getElementById("lib-views")).top >= 0, sideways: document.documentElement.scrollWidth > innerWidth + 1, focus: document.activeElement?.id || document.activeElement?.className || "" };
+  return { rows: rows.length, lastSeen: seen(last), firstSeen: seen(rows[0]), title: box(document.querySelector(".dgc-lib .dgc-pagehead-title")), search: box(document.getElementById("library-search")), tabs: box(document.getElementById("library-tabs")),
+    tabsSeen: document.getElementById("library-tabs").checkVisibility() && box(document.getElementById("library-tabs")).top >= 0, sideways: document.documentElement.scrollWidth > innerWidth + 1, focus: document.activeElement?.id || document.activeElement?.className || "" };
 });
 const TABS = [["files", "Files", "library"], ["widgets", "Widgets", "widgets"], ["artifacts", "Artifacts", "artifacts"]];
 for (const theme of ["dark-modern", "light-modern"]) for (const [width, height] of [[900, 760], [420, 420]]) {
@@ -50,7 +51,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const [width, height] 
       const p = s.page;
       await fullLibrary(p, s.send);
       for (const [view, name] of TABS) {
-        await p.click(`#lib-views [role="tab"] >> text=${name}`);
+        await p.click(`#library-tab-${view}`);
         if (view === "widgets") await s.send({ type: "widgets", widgets: WIDGETS, next: null });
         if (view === "artifacts") await s.send({ type: "artifacts", items: ARTIFACTS });
         if (view === "files") await s.send({ type: "library", files: FILES, total: FILES.length, next: null, counts: { pdf: FILES.length }, origins: {} });
@@ -59,29 +60,29 @@ for (const theme of ["dark-modern", "light-modern"]) for (const [width, height] 
         assert.equal(top.rows, 200, `${name}: its 200 rows are in the list`);
         assert.deepEqual([top.firstSeen, top.lastSeen, top.tabsSeen, top.sideways], [true, false, true, false], `${name}: the first row shows, the last is far below, the tabs are in sight`);
         // The wheel, over the list.
-        const first = await p.locator("#lib-list > *").first().boundingBox();
+        const first = await p.locator("#library-list > *").first().boundingBox();
         await p.mouse.move(first.x + 40, first.y + 10);
         for (let i = 0; i < 60 && !(await now(p)).lastSeen; i++) { await p.mouse.wheel(0, 900); await p.waitForTimeout(25); }
         const wheeled = await now(p);
         assert.equal(wheeled.lastSeen, true, `${name}: the wheel reaches the last row`);
         assert.deepEqual([wheeled.title, wheeled.search, wheeled.tabs], [top.title, top.search, top.tabs], `${name}: the title, the search field and the tab strip stayed where they were`);
         // Back to the top with the keyboard, then to the end: the list takes the keyboard.
-        await p.focus("#lib-list");
+        await p.focus("#library-list");
         const until = (what, check) => p.waitForFunction(check, null, { timeout: 4000 }).then(() => true, () => false).then((ok) => assert.equal(ok, true, `${name}: ${what}`));
         await p.keyboard.press("Home");
-        await until("Home goes back to the first row", () => document.getElementById("lib-list").scrollTop === 0);
+        await until("Home goes back to the first row", () => document.getElementById("library-list").scrollTop === 0);
         assert.equal((await now(p)).firstSeen, true, `${name}: the first row shows again`);
         await p.keyboard.press("PageDown");
-        await until("PageDown scrolls the list", () => document.getElementById("lib-list").scrollTop > 40);
+        await until("PageDown scrolls the list", () => document.getElementById("library-list").scrollTop > 40);
         await p.keyboard.press("End");
-        await until("End reaches the list's end", () => { const l = document.getElementById("lib-list"); return l.scrollTop + l.clientHeight >= l.scrollHeight - 1; });
+        await until("End reaches the list's end", () => { const l = document.getElementById("library-list"); return l.scrollTop + l.clientHeight >= l.scrollHeight - 1; });
         const keyed = await now(p);
         assert.equal(keyed.lastSeen, true, `${name}: End reaches the last row`);
         assert.deepEqual([keyed.title, keyed.tabs], [top.title, top.tabs], `${name}: and the header is still in place`);
         await p.keyboard.press("Home");
-        await until("Home again", () => document.getElementById("lib-list").scrollTop === 0);
+        await until("Home again", () => document.getElementById("library-list").scrollTop === 0);
         for (let i = 0; i < 6; i++) await p.keyboard.press("ArrowDown");
-        await until("the arrows scroll it", () => document.getElementById("lib-list").scrollTop > 0);
+        await until("the arrows scroll it", () => document.getElementById("library-list").scrollTop > 0);
       }
       assert.deepEqual(s.errors || [], []);
     } finally { await s.page.close(); }

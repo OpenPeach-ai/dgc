@@ -57,7 +57,7 @@ for (const theme of THEMES) for (const width of WIDTHS) {
         // In two columns, the first column keeps the left edge and the last the right one.
         const cards = [...document.querySelectorAll("#home-hub .dgc-hub-card")].filter((c) => c.checkVisibility()).map((c) => c.getBoundingClientRect());
         const cardEdges = cards.length ? [["cards, left", Math.round((Math.min(...cards.map((c) => c.left)) - inner.left) * 10) / 10], ["cards, right", Math.round((inner.right - Math.max(...cards.map((c) => c.right))) * 10) / 10]] : [];
-        const left = [".hc-back", ".dgc-hub-head h2", ".hc-earlier", "#sessions-search", "#chats-search", ".home-title", "#sessions-list .session-blob", "#chats-list > .chat-row .session-blob",
+        const left = [".hc-back", ".dgc-hub-head h2", ".hc-earlier", "#sessions-search", "#chats-search", ".dgc-pagehead-title", "#sessions-list .session-blob", "#chats-list > .chat-row .session-blob",
           "#projects-title", "#chats-sub", "#sessions-all"].flatMap((s) => at(s, "left"));
         const right = [".dgc-hub-clear", "#sessions-new", "#chats-new", "#sessions-list .session-age", "#chats-list > .chat-row .session-age", ".project-count"].flatMap((s) => at(s, "right"));
         const bar = document.querySelector("#side-tabs .dgc-tabs-bar").getBoundingClientRect();

@@ -24,17 +24,18 @@ function documents() {
   const own = read("media/chatdgc.css") + read("media/voicebar.css");
   const styled = (doc) => prepare(doc).replace("</head>", `<style>${codicon()}</style><style>${css}</style><style>${own}</style></head>`);
   const chat = docs.find((d) => d.includes('id="cd-input"'));
-  const library = docs.find((d) => d.includes('id="lib-list"'));
+  const library = docs.find((d) => d.includes('id="library-root"') || d.includes('id="lib-list"'));
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   cached = { chat: { html: styled(chat), js: scripts(chat) }, library: { html: styled(library), js: scripts(library) }, markdownJs };
   return cached;
 }
 
-async function open(browser, which, { width, height, theme, state }) {
+async function open(browser, which, { width, height, theme, state, touch = false, forced = false, scale = 2 }) {
   const docs = documents();
   const { html, js } = docs[which];
-  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2 });
+  // (touch: a finger, no pointer; forced: Windows High Contrast.)
+  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale, hasTouch: touch, forcedColors: forced ? "active" : "none" });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.setContent(html, { waitUntil: "load" });
@@ -52,7 +53,7 @@ async function open(browser, which, { width, height, theme, state }) {
 }
 
 export const openChat = (browser, { width = 900, height = 760, theme = "dark-modern", state } = {}) => open(browser, "chat", { width, height, theme, state });
-export const openLibrary = (browser, { width = 900, height = 760, theme = "dark-modern", state } = {}) => open(browser, "library", { width, height, theme, state });
+export const openLibrary = (browser, { width = 900, height = 760, theme = "dark-modern", state, touch, forced, scale } = {}) => open(browser, "library", { width, height, theme, state, touch, forced, scale });
 
 export const OFFER = { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
                        exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["html"], page: ["html", "zip"] } };

@@ -18,7 +18,9 @@
 @import url("./shared/hub.css");
 @import url("./shared/mosaic.css");
 @import url("./shared/homecards.css");
-@import url("./shared/librarypage.css");
+@import url("./shared/pagehead.css");
+@import url("./shared/library.css");
+@import url("./icons/library-iris/library.css");
 @import url("./shared/notes.css");
 @import url("./shared/whatsnew.css");
 @import url("./shared/pipswelcome.css");
@@ -183,14 +185,8 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
    past the side bar's end). */
 #sessions-host > * { flex:none; }
 /* Work and Chat each open with one row: their search box, then New, the one filled pill here (neutral, never purple). */
-/* The Work and Chat tabs' header row, as the Pips tab's (live round 1, 14 Nov): the tab's name at the left, ⋯ at the
-   right, a line under it, then the search bar. */
-#sessions-host .home-head { display:flex; align-items:center; gap:10px; min-width:0; min-height:28px; padding:2px 0 var(--sp-2); border-bottom:1px solid var(--hair); }
-#sessions-host .home-title { flex:1 1 auto; min-width:0; margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-strong); font:var(--w-semi) 15px/1.3 var(--sans); }
-#sessions-host .home-more { appearance:none; flex:none; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; width:28px; height:28px; margin:0; padding:0; border:0; border-radius:var(--btn-r, 6px);
-  background:transparent; color:var(--text-2, var(--muted)); cursor:pointer; transition:background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
-#sessions-host .home-more:hover, #sessions-host .home-more[aria-expanded="true"] { background:var(--wash); color:var(--text); }
-#sessions-host .home-more:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:1px; }
+/* The Work, Chat and Library tabs open with the header row every page of the side bar wears (media/shared/pagehead.css;
+   one component since 15 Nov: the tab's name at the left, ⋯ at the right, a line under it), then the search bar. */
 #sessions-host .home-bar { display:flex; align-items:center; gap:var(--sp-2); min-width:0; }
 #sessions-host .home-bar .sessions-search { flex:1 1 auto; min-width:0; margin:0; }
 #sessions-host .home-new { flex:none; display:inline-flex; align-items:center; gap:3px; box-sizing:border-box; height:var(--control); margin:0; padding:0 12px 0 8px; border:0; border-radius: var(--btn-r, 6px);

@@ -3,7 +3,7 @@
 //   - one centred tab bar at the top, under the header row: Home, Work, Chat, Pips, as names only; it replaces the header's Pips button and the Pips block
 //   - the tab you are on is lit in the accent; pointing at another only changes its name to the text colour (13 Nov)
 //   - the keyboard: Left and Right move and choose (wrapping), Home and End jump, and the bar is one tab stop
-//   - the five names fit at 280 px; under 280 px the tabs are icons (side-tabs-icons.test.mjs), down to 170 px
+//   - the five names fit at 292 px; under 292 px the tabs are icons (side-tabs-icons.test.mjs), down to 170 px
 //   - Home: everything that needs you or is new is one card of one size and style, from a session (its blob) or a Pip
 //     (its face), in two groups, "Needs you" then "New"; each card's answers work; an empty Home says so in one line
 //   - Show: All, Work, Chat, Personal Pips, Project Pips, each with its count; kept until changed; Home's number counts all
@@ -67,15 +67,15 @@ const PIP_WAITS = `pip:${pipId("b")}`, PIP_NEW = `setup:${SETUP}`, PIP_READ_1 = 
 
 // ---- the tab bar -----------------------------------------------------------------------------------------------------
 for (const width of [300, 700]) {
-  test(`${width}px: one centred tab bar at the top of the side bar, names only: Home, Work, Chat, Pips, Library`, async (t) => {
+  test(`${width}px: one centred tab bar at the top of the side bar, names only: Home, Work, Chat, Library, Pips`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openDock(browser, { tab: "home", width, height: 700 });
     try {
       const bar = await x.tabs();
       assert.equal(bar.shown, true, "the side bar has a tab bar");
       assert.equal(bar.role, "tablist");
-      assert.deepEqual(names(bar), ["Home", "Work", "Chat", "Pips", "Library"], "five tabs, in this order (Library is the fifth since 15 Nov)");
-      assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 1, 0], "names only: no icon in any tab but the Core Pip's face on Pips (side-tab-pips-face.test.mjs)");
+      assert.deepEqual(names(bar), ["Home", "Work", "Chat", "Library", "Pips"], "five tabs, in this order (Library before Pips since 15 Nov: Pips stays last)");
+      assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 1, 1], "names: no line icon in any tab; Library wears his books (library-iris-browser.test.mjs) and Pips the Core Pip's face (side-tab-pips-face.test.mjs)");
       assert.deepEqual(chosen(bar), ["home"], "it opens on Home");
       assert.ok(Math.abs((bar.bar.left + bar.bar.right) / 2 - width / 2) < 0.6, `the bar is centred (${bar.bar.left} to ${bar.bar.right} of ${width})`);
       assert.ok(bar.bar.left >= 11.5 && bar.bar.right <= width - 11.5, "it keeps the side bar's 12 px gutter");
@@ -91,7 +91,7 @@ for (const width of [300, 700]) {
       const old = await x.page.evaluate(() => ["#sessions-pips", "#home-tabs", "#sessions-fold", ".home-pips-head"].filter((sel) => document.querySelector(sel)));
       assert.deepEqual(old, [], "the Pips block and the Work | Chat pair are gone");
       // Each tab names the panel it shows, and that panel says which tab it belongs to.
-      assert.deepEqual(bar.tabs.map((x) => x.controls), ["home-hub", "work-home", "chats-home", "pips-host", "library-home"]);
+      assert.deepEqual(bar.tabs.map((x) => x.controls), ["home-hub", "work-home", "chats-home", "library-home", "pips-host"]);
       assert.deepEqual([bar.panel, bar.panelRole, bar.panelLabelledBy], ["home-hub", "tabpanel", "side-tab-home"]);
       // Home shows its count: every card on it.
       const hub = await x.hub();
@@ -166,20 +166,20 @@ test("the keyboard: Left and Right move between the tabs and choose, Home and En
     bar = await press("ArrowRight");
     assert.deepEqual([chosen(bar), bar.focus, bar.panel], [["chat"], "chat", "chats-home"]);
     bar = await press("ArrowRight");
-    assert.deepEqual([chosen(bar), bar.focus, bar.panel], [["pips"], "pips", "pips-host"], "Right again: Pips, and the Pips page");
-    assert.equal(bar.shown, true, "the tab bar stays over the Pips page");
+    assert.deepEqual([chosen(bar), bar.focus, bar.panel], [["library"], "library", "library-home"], "Right again: Library");
     bar = await press("ArrowRight");
-    assert.deepEqual([chosen(bar), bar.focus, bar.panel], [["library"], "library", "library-home"], "Right again: Library, the last tab");
+    assert.deepEqual([chosen(bar), bar.focus, bar.panel], [["pips"], "pips", "pips-host"], "Right again: Pips, the last tab, and the Pips page");
+    assert.equal(bar.shown, true, "the tab bar stays over the Pips page");
     bar = await press("ArrowRight");
     assert.deepEqual([chosen(bar), bar.focus, bar.panel], [["home"], "home", "home-hub"], "Right from the last wraps to the first");
     bar = await press("ArrowLeft");
-    assert.deepEqual([chosen(bar), bar.focus], [["library"], "library"], "Left from the first wraps to the last");
+    assert.deepEqual([chosen(bar), bar.focus], [["pips"], "pips"], "Left from the first wraps to the last");
     bar = await press("Home");
     assert.deepEqual([chosen(bar), bar.focus, bar.panel], [["home"], "home", "home-hub"], "Home: the first tab");
     bar = await press("End");
-    assert.deepEqual([chosen(bar), bar.focus], [["library"], "library"], "End: the last tab");
+    assert.deepEqual([chosen(bar), bar.focus], [["pips"], "pips"], "End: the last tab");
     bar = await press("ArrowLeft");
-    assert.deepEqual([chosen(bar), bar.focus], [["pips"], "pips"]);
+    assert.deepEqual([chosen(bar), bar.focus], [["library"], "library"]);
     bar = await press("ArrowLeft");
     assert.deepEqual([chosen(bar), bar.focus, bar.panel], [["chat"], "chat", "chats-home"]);
     assert.deepEqual(bar.tabs.map((x) => x.tab), [-1, -1, 0, -1, -1], "the tab stop moved with the choice");
@@ -212,18 +212,18 @@ test("the tab you were on is kept: a reload comes back to it", async (t) => {
   } finally { await again.close(); }
 });
 
-test("a narrow side bar: the five names fit at 280 px; under 280 px the tabs are icons, down to 170 px", async (t) => {
+test("a narrow side bar: the five names fit at 292 px; under 292 px the tabs are icons, down to 170 px", async (t) => {
   if (skipOrFail(t)) return;
-  for (const width of [280, 199, 170]) {
+  for (const width of [292, 199, 170]) {
     const x = await openDock(browser, { tab: "home", width, height: 600 });
     try {
       const bar = await x.tabs();
-      assert.deepEqual(names(bar), ["Home", "Work", "Chat", "Pips", "Library"], `${width}px: five names`);
+      assert.deepEqual(names(bar), ["Home", "Work", "Chat", "Library", "Pips"], `${width}px: five names`);
       assert.ok(bar.bar.left >= 0 && bar.bar.right <= width, `${width}px: the bar is inside the side bar (${bar.bar.left} to ${bar.bar.right})`);
       assert.ok(tab(bar, "home").countBox, `${width}px: Home still says something waits`);
       const count = tab(bar, "home").countBox;
-      if (width >= 280) {
-        assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 1, 0], `${width}px: words, and no icon but the face on Pips`);
+      if (width >= 292) {
+        assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 1, 1], `${width}px: words, and no icon but his books on Library and the face on Pips`);
         assert.ok(bar.tabs.every((x) => !x.clipped), `${width}px: no name is cut`);
         for (let i = 1; i < bar.tabs.length; i++) assert.ok(bar.tabs[i].words.left >= bar.tabs[i - 1].words.right + 3, `${width}px: ${bar.tabs[i].name} does not touch ${bar.tabs[i - 1].name}`);
         assert.ok(count.left >= tab(bar, "home").words.right + 2 && count.right <= tab(bar, "home").right, `${width}px: the number is beside Home's name, inside its tab`);
@@ -248,9 +248,11 @@ test("a DGC with no ChatDGC has no Chat tab, and the arrows pass over it", async
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "home", tabs: false, width: 300, height: 600 });
   try {
-    assert.deepEqual(names(await x.tabs()), ["Home", "Work", "Pips", "Library"]);
+    assert.deepEqual(names(await x.tabs()), ["Home", "Work", "Library", "Pips"]);
     await x.page.focus("#side-tab-work"); await x.page.keyboard.press("ArrowRight"); await x.page.keyboard.press("ArrowRight"); await settle(x.page, 150);
-    assert.deepEqual(chosen(await x.tabs()), ["pips"], "Home, then Right twice: Work, then Pips");
+    assert.deepEqual(chosen(await x.tabs()), ["library"], "Home, then Right twice: Work, then Library (Chat is passed over)");
+    await x.page.keyboard.press("ArrowRight"); await settle(x.page, 150);
+    assert.deepEqual(chosen(await x.tabs()), ["pips"], "then Pips");
   } finally { await x.close(); }
 });
 

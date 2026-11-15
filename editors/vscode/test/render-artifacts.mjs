@@ -166,12 +166,15 @@ for (const [tone, theme] of THEMES_SHOT) {
     const s = await openLibrary(browser, { width, height: 720, theme });
     await s.send({ type: "widgetsOffered", on: true });
     await s.send({ type: "artifactsOffered", on: true });
-    await s.page.click("#lib-views .lib-view:has-text('Artifacts')");
+    await s.page.click("#library-tab-artifacts");
     await s.send({ type: "artifacts", items: ITEMS });
     await s.page.waitForTimeout(100);
     await shoot(s.page, `library-artifacts-${label}-${tone}`);
-    await s.page.locator('#lib-made .lib-kind[data-value="work"]').click();
-    await s.page.locator('.lib-artifact[data-type="sheet"] [aria-label="Download…"]').click();
+    await s.page.click("#library-filter-maker"); await s.page.locator(".dgc-pop .dgc-menu-row", { hasText: "Work" }).first().click(); await s.page.waitForTimeout(250);
+    const sheet = s.page.locator('#library-list .lib-row[data-type="sheet"]');
+    if (await sheet.locator('[data-act="export"]').isVisible()) await sheet.locator('[data-act="export"]').click();
+    else { await sheet.hover(); await sheet.locator(".lib-row-more").click(); await s.page.locator(".dgc-pop .dgc-menu-row", { hasText: "Download" }).click(); }
+    await s.page.waitForTimeout(300);
     await shoot(s.page, `library-artifacts-filtered-export-${label}-${tone}`);
     await s.page.close();
   }

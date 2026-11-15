@@ -693,9 +693,9 @@ test("ChatDGC's tabs wear its own mark, the speech bubble, so they aren't taken 
   chat.open("");
   chat.openLibrary();
   const [tab, library] = world.panels;
-  for (const panel of [tab, library]) {
-    assert.deepEqual([drawn(panel.iconPath.light), drawn(panel.iconPath.dark)], [mark("light"), mark("dark")], "the SVG itself, light and dark");
-  }
+  assert.deepEqual([drawn(tab.iconPath.light), drawn(tab.iconPath.dark)], [mark("light"), mark("dark")], "the SVG itself, light and dark");
+  // (The Library's own tab wears the Library's icon, his Iris books, since Library v2: the test of its editor tab, below.)
+  assert.match(String(library.iconPath.light.fsPath || library.iconPath.light.path || library.iconPath.light), /library-iris-32\.png$/);
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const command = manifest.contributes.commands.find((c) => c.command === "dgc.newChatDGC");
   assert.deepEqual(command.icon, { light: "media/chatdgc-tab-light.svg", dark: "media/chatdgc-tab-dark.svg" });
@@ -1352,7 +1352,7 @@ test("the Library: its own tab, its files asked for, and each file's actions thr
   assert.equal(sent.filter((c) => c.type === "chatdgc_library_file").length, 3, "a file the Library didn't name isn't touched (save, Save to project…, remove)");
 });
 
-test("the Library lists Work's images from DGC (images_library), and only those may be shown, opened or copied", async () => {
+test("the Library lists every image DGC made or kept (images_library: every surface, or the one asked for) with who made it, and only those may be shown, opened or copied", async () => {
   const fs = globalThis.__DGC_TEST_VSCODE.workspace.fs;
   const read = [], copied = [];
   fs.readFile = async (uri) => { read.push(uri.fsPath); return Buffer.from("png-bytes"); };
@@ -1360,7 +1360,11 @@ test("the Library lists Work's images from DGC (images_library), and only those 
   const asked = [];
   const made = { path: "/home/me/app/assets/generated/fox.png", rel: "assets/generated/fox.png", surface: "work", generator: "comfy",
                  generator_name: "ComfyUI on gpu-box", provider: "comfyui", model: "sdxl", prompt: "a red fox", seed: 4, width: 768, height: 320,
-                 bytes: 46000, cost_usd: 0, created_at: "2026-11-02T08:00:00+00:00", project: "/home/me/app", session: "s-1" };
+                 bytes: 46000, cost_usd: 0, created_at: "2026-11-02T08:00:00+00:00", project: "/home/me/app", session: "s-1",
+                 made_by: { kind: "session", id: "s-1", name: "Snow scenes", secret: "never passed on" } };
+  // One a Pip kept on purpose (dgc/image_keep.py): `kept`, its title and why.
+  const kept = { path: "/home/me/.dgc/images/kept/owl.png", rel: "", surface: "pip", prompt: "The barn owl", kept: true, title: "The barn owl", why: "For the bird count", width: 640, height: 480, bytes: 9000,
+                 created_at: "2026-11-03T08:00:00+00:00", pip: "pip_" + "b".repeat(32), made_by: { kind: "pip", id: "pip_" + "b".repeat(32), name: "Bird counter" }, source: "https://example.test/owl.png" };
   try {
     // A backend without images_library: the Library is told, and nothing is asked.
     chat.openLibrary();
@@ -1371,16 +1375,25 @@ test("the Library lists Work's images from DGC (images_library), and only those 
     await tick();
     assert.deepEqual(lib.last("workImagesOffered"), { type: "workImagesOffered", on: false });
     host.imagesOffered = () => true;
-    host.imagesLibrary = async (cmd) => { asked.push(cmd); return { type: "images_library", images: [made, { path: "/etc/passwd" }], total: 2, next_offset: null }; };
+    host.imagesLibrary = async (cmd) => { asked.push(cmd); return { type: "images_library", images: [made, kept, { path: "/etc/passwd" }].filter((i) => !cmd.surface || !i.surface || i.surface === cmd.surface), total: 3, next_offset: null }; };
     lib.say({ type: "ready", kind: "" });
     assert.deepEqual(lib.last("workImagesOffered"), { type: "workImagesOffered", on: true });
     lib.say({ type: "workImages", query: "fox", offset: 0, limit: 60, seq: 2 });
     await tick();
-    assert.deepEqual(asked, [{ query: "fox", surface: "work", limit: 60, offset: 0 }], "Work's own images");
+    assert.deepEqual(asked, [{ query: "fox", limit: 60, offset: 0 }], "every surface: Work's, ChatDGC's and the Pips' (no `surface` is named)");
     const answer = lib.last("workImages");
     assert.equal(answer.seq, 2);
-    assert.deepEqual(answer.images.map((i) => i.path), [made.path], "only picture files DGC made");
+    assert.deepEqual(answer.images.map((i) => i.path), [made.path, kept.path], "only picture files DGC made or kept");
     assert.equal(answer.images[0].generator_name, "ComfyUI on gpu-box");
+    assert.deepEqual([answer.images[0].surface, answer.images[0].made_by], ["work", { kind: "session", id: "s-1", name: "Snow scenes" }], "who made it, by name: its three fields and no more");
+    assert.deepEqual([answer.images[0].kept, answer.images[0].title], [undefined, undefined], "a made image is not a kept one");
+    assert.deepEqual([answer.images[1].kept, answer.images[1].title, answer.images[1].why, answer.images[1].made_by.name], [true, "The barn owl", "For the bird count", "Bird counter"], "a kept one says so, with its title and why");
+    assert.equal("source" in answer.images[1], false, "where it was fetched from is not the page's to know");
+    // One maker's surface, when the page asks for one; anything else is every surface.
+    lib.say({ type: "workImages", query: "", offset: 0, limit: 60, seq: 3, surface: "pip" });
+    lib.say({ type: "workImages", query: "", offset: 0, limit: 60, seq: 4, surface: "../etc" });
+    await tick();
+    assert.deepEqual(asked.slice(1), [{ surface: "pip", limit: 60, offset: 0 }, { limit: 60, offset: 0 }]);
     lib.say({ type: "workImage", path: made.path });
     await tick();
     assert.deepEqual(lib.last("workImageData"), { type: "workImageData", path: made.path, data: `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}` });
@@ -2212,7 +2225,7 @@ test("the home's Chat list: Archive from a row, Undo, and the archived chats wit
 });
 
 // ---- the side bar's Library tab (0.52, 15 Nov): the Library's own host answers it, through the side bar
-test("the side bar's Library tab is answered by the Library's host: its lists, a row opened, what changed; never the full Library's own actions", async () => {
+test("the side bar's Library tab is answered by the Library's host as its editor tab is (one module draws both): its lists, a row opened or removed, what changed; never a pin", async () => {
   const hub = fakeArtifacts();
   const made = { id: "ar_" + "1".repeat(16), type: "page", title: "Open invoices", made_by: { kind: "pip", id: "pip_" + "b".repeat(32), name: "Tile checker" }, made_as: "card" };
   hub.list = async () => [made];
@@ -2229,15 +2242,66 @@ test("the side bar's Library tab is answered by the Library's host: its lists, a
   assert.deepEqual(hub.opened, [[made.id, { type: "page", title: "Open invoices" }]], "a row opens in an editor tab, as the full Library's does");
   await chat.sideLibrary({ type: "open", file: { id: "att_" + "3".repeat(32), source: "chat", chat_id: ID(1) } });
   assert.equal(world.panels.length, 1, "a chat's file opens the chat it is in");
-  // What only the full Library does is not the tab's to ask: a removal, a pin, a save.
+  // The tab asks what the editor tab asks, checked the same way: a removal asks you first, there as here.
+  hub.answer = false;
   await chat.sideLibrary({ type: "artifactRemove", artifact: { id: made.id, title: "Open invoices" } });
-  await chat.sideLibrary({ type: "remove", file: { id: "att_" + "3".repeat(32), source: "chat", chat_id: ID(1) } });
+  assert.deepEqual(hub.removed, [{ id: made.id, title: "Open invoices" }], "asked first");
+  assert.deepEqual(side("artifactRemoved"), [], "you said no: it stays");
+  hub.answer = true;
+  await chat.sideLibrary({ type: "artifactRemove", artifact: { id: made.id, title: "Open invoices" } });
+  assert.deepEqual(side("artifactRemoved"), [{ type: "artifactRemoved", id: made.id }], "you said yes: the tab is told");
+  await chat.sideLibrary({ type: "artifactExport", artifact: { id: made.id, title: "Open invoices", type: "page", exports: ["html"] }, format: "html" });
+  assert.equal(hub.exported.at(-1)[1], "html");
+  world.answer = undefined;
+  await chat.sideLibrary({ type: "remove", file: { id: "att_" + "3".repeat(32), name: "map.png", source: "chat", chat_id: ID(1) } });
+  assert.equal(world.warnings.length, 1, "a file's delete asks first too"); assert.equal(last("chatdgc_library_file"), undefined, "not answered: nothing is deleted");
+  // Every image, with who made it; every video.
+  host.imagesOffered = () => true;
+  host.imagesLibrary = async (cmd) => ({ type: "images_library", images: [{ path: "/home/me/.dgc/images/chat/a.png", prompt: "a", surface: "chat", made_by: { kind: "chat", id: ID(1), name: "Goa" } }], total: 1, next_offset: null, asked: cmd });
+  await chat.sideLibrary({ type: "workImages", seq: 1, offset: 0, limit: 60 });
+  assert.deepEqual(side("workImages")[0].images[0].made_by, { kind: "chat", id: ID(1), name: "Goa" });
+  // Never a pin (the side bar's own dock answers those), nor a maker's name or the settings (the side bar opens them itself).
+  const before = host.home.length, shown = [];
+  host.openSettings = (section) => shown.push(section); host.openMaker = (maker) => shown.push(maker);
   await chat.sideLibrary({ type: "dockToggle", item: { kind: "artifact", id: made.id, title: "x" } });
-  assert.deepEqual(hub.removed, []); assert.equal(world.warnings.length, 0); assert.equal(last("chatdgc_library_file"), undefined);
+  await chat.sideLibrary({ type: "maker", maker: { kind: "session", id: "s-1", name: "x" } });
+  await chat.sideLibrary({ type: "settings", section: "security" });
+  assert.equal(host.home.length, before); assert.deepEqual(shown, []);
+  delete host.imagesOffered; delete host.imagesLibrary; delete host.openSettings; delete host.openMaker;
   // An artifact made or changed anywhere: the tab hears it.
   hub.tell({ type: "artifactChanged", artifact: { id: made.id, type: "page", version: 2 }, op: "changed" });
   assert.deepEqual(side("artifactChanged").at(-1), { type: "artifactChanged", artifact: { id: made.id, type: "page", version: 2 }, op: "changed" });
   // Nothing in the side bar opens the full Library by the old messages any more.
   assert.equal(await chat.homeMessage({ type: "chatdgcLibrary" }), false);
   assert.equal(world.panels.filter((p) => p.viewType === CHATDGC_LIBRARY).length, 0);
+});
+
+test("the Library's editor tab: his Iris books on its tab, opened on the tab asked for, a maker's name leads back, ⋯ opens the settings", async () => {
+  const shown = [];
+  host.openSettings = (section) => shown.push(["settings", section]); host.openMaker = (maker) => shown.push(["maker", maker]);
+  try {
+    // "Open the Library in the editor", from the side bar's Library, on the tab it was on.
+    await chat.homeCardsMessage({ type: "homeLibraryOpen", view: "images" });
+    const lib = world.panels.find((p) => p.viewType === CHATDGC_LIBRARY);
+    assert.ok(lib, "the Library opened in a tab of its own");
+    for (const tone of ["light", "dark"]) assert.match(String(lib.iconPath[tone].fsPath || lib.iconPath[tone].path || lib.iconPath[tone]), /media[\\/]icons[\\/]library-iris[\\/]png[\\/]library-iris-32\.png$/, `its tab icon is his PNG (${tone})`);
+    lib.say({ type: "ready" });
+    assert.deepEqual(lib.last("view"), { type: "view", view: "images" });
+    await chat.homeCardsMessage({ type: "homeLibraryOpen", view: "videos" });
+    assert.deepEqual(lib.last("view"), { type: "view", view: "videos" }, "already open: shown on the tab asked for");
+    await chat.homeCardsMessage({ type: "homeLibraryOpen", view: "../x" });
+    assert.deepEqual(lib.last("view"), { type: "view", view: "videos" }, "never a tab the page made up");
+    assert.equal(world.panels.filter((p) => p.viewType === CHATDGC_LIBRARY).length, 1, "one Library tab");
+    // A maker's name: a chat opens here; a session and a Pip are the window's to open; nothing else is.
+    const tabs = world.panels.length;
+    lib.say({ type: "maker", maker: { kind: "chat", id: ID(4), name: "Goa" } });
+    assert.equal(world.panels.length, tabs + 1, "the chat that made it opens");
+    lib.say({ type: "maker", maker: { kind: "session", id: "20261106-101500-a1", name: "Fix totals" } });
+    lib.say({ type: "maker", maker: { kind: "pip", id: "pip_" + "b".repeat(32), name: "Tile checker" } });
+    lib.say({ type: "maker", maker: { kind: "pip", id: "../x", name: "x" } });
+    lib.say({ type: "maker", maker: { kind: "cli", id: "", name: "" } });
+    lib.say({ type: "settings", section: "security" });
+    await tick();
+    assert.deepEqual(shown, [["maker", { kind: "session", id: "20261106-101500-a1", name: "Fix totals" }], ["maker", { kind: "pip", id: "pip_" + "b".repeat(32), name: "Tile checker" }], ["settings", "security"]]);
+  } finally { delete host.openSettings; delete host.openMaker; }
 });

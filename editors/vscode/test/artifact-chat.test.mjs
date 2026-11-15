@@ -115,42 +115,50 @@ test("a reply that is still being written shows its cards as they come, and no n
   } finally { await s.page.close(); }
 });
 
+// (The Library is one module since Library v2, media/library.js: these read it in its editor tab. A filter is a
+// dropdown button; a row's actions are its buttons at this width.)
+const libTabs = (s) => s.page.locator('#library-tabs [role="tab"]:not([hidden])').allTextContents();
+const libNames = (s) => s.page.locator("#library-list .lib-row-name").allTextContents();
+const libPick = async (s, which, label) => { await s.page.click(`#library-filter-${which}`); await s.page.waitForSelector(".dgc-pop .dgc-menu-row");
+  await s.page.locator(".dgc-pop .dgc-menu-row", { hasText: label }).first().click(); await s.page.waitForTimeout(250); };
+const libOffers = async (s, on) => { for (const [type, tab] of [["widgetsOffered", "widgets"], ["workImagesOffered", "images"], ["videosOffered", "videos"], ["artifactsOffered", "artifacts"]]) await s.send({ type, on: on.includes(tab) }); };
+
 test("the Library's Artifacts tab: only when offered, newest first, by kind and by where it was made", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openLibrary(browser);
   try {
-    await s.send({ type: "widgetsOffered", on: false });
-    await s.send({ type: "artifactsOffered", on: false });
-    assert.equal(await s.page.locator("#lib-views").isHidden(), true, "no tabs without a second view");
+    await libOffers(s, []);
+    assert.deepEqual(await libTabs(s), ["Files"]);
+    assert.equal(await s.page.locator("#library-tabs").isHidden(), true, "no tabs without a second view");
     await s.send({ type: "artifactsOffered", on: true });
-    assert.deepEqual(await s.page.locator("#lib-views .lib-view").allTextContents(), ["Files", "Artifacts"]);
-    await s.page.click("#lib-views .lib-view:has-text('Artifacts')");
-    assert.deepEqual((await s.posted("artifactList")).length, 1);
+    assert.deepEqual(await libTabs(s), ["Artifacts", "Widgets", "Files"], "Artifacts, and Widgets for the cards among them");
+    await s.page.click("#library-tab-artifacts");
+    assert.ok((await s.posted("artifactList")).length >= 1);
     await s.send({ type: "artifacts", items: [...ITEMS].reverse() });
-    const names = () => s.page.locator(".lib-artifact .lib-name").allTextContents();
-    assert.deepEqual(await names(), ["Q3 plan", "Home budget", "Store sales", "Tip calculator", "Launch notes"], "newest change first");
-    assert.match(await s.page.locator(".lib-artifact .lib-meta").first().textContent(), /^Slides · version 3 · made in Chat · /);
-    const chip = (bar, value) => s.page.locator(`#${bar} .lib-kind[data-value="${value}"]`);
-    assert.deepEqual(await s.page.locator("#lib-kinds .lib-kind").allTextContents(), ["All5", "Documents1", "Slides1", "Spreadsheets1", "Pages1", "Dashboards1"]);
-    assert.deepEqual(await s.page.locator("#lib-made .lib-kind").allTextContents(), ["Anywhere5", "Chat2", "Work2", "Pips1"]);
-    await chip("lib-made", "work").click();
-    assert.deepEqual(await names(), ["Home budget", "Tip calculator"]);
-    assert.equal(await chip("lib-made", "work").getAttribute("aria-pressed"), "true");
-    await chip("lib-kinds", "page").click();
-    assert.deepEqual(await names(), ["Tip calculator"]);
-    await chip("lib-made", "").click();
-    await chip("lib-kinds", "").click();
-    await s.page.fill("#lib-search", "budget");
-    await s.page.waitForTimeout(320);
-    assert.deepEqual(await names(), ["Home budget"], "searched by name");
-    await s.page.fill("#lib-search", "");
-    await s.page.waitForTimeout(320);
-    const row = s.page.locator('.lib-artifact[data-type="dashboard"]');
+    assert.deepEqual(await libNames(s), ["Q3 plan", "Home budget", "Store sales", "Tip calculator", "Launch notes"], "newest change first");
+    assert.match(await s.page.locator("#library-list .lib-row-meta").first().textContent(), /^made in Chat · \S+ · Deck · version 3$/);
+    await s.page.click("#library-filter-kind"); await s.page.waitForSelector(".dgc-pop .dgc-menu-row");
+    assert.deepEqual(await s.page.locator(".dgc-pop .dgc-menu-label").allTextContents(), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards"]);
+    await s.page.keyboard.press("Escape"); await s.page.waitForTimeout(200);
+    await libPick(s, "maker", "Work");
+    assert.deepEqual(await libNames(s), ["Home budget", "Tip calculator"]);
+    assert.equal(await s.page.locator("#library-filter-maker .dgc-folder-v").textContent(), "Work");
+    await libPick(s, "kind", "Pages");
+    assert.deepEqual(await libNames(s), ["Tip calculator"]);
+    await libPick(s, "maker", "Anyone");
+    await libPick(s, "kind", "All");
+    await s.page.fill("#library-search", "budget");
+    await s.page.waitForTimeout(420);
+    assert.deepEqual(await libNames(s), ["Home budget"], "searched by name");
+    await s.page.fill("#library-search", "");
+    await s.page.waitForTimeout(420);
+    const row = s.page.locator('#library-list .lib-row[data-type="dashboard"]');
     await row.locator('[aria-label="Open it"]').click();
     assert.equal((await s.posted("artifactOpen"))[0].artifact.id, ITEMS[2].id);
     await row.locator('[aria-label="Download…"]').click();
-    assert.deepEqual(await row.locator(".lib-menu-item").allTextContents(), ["Web page (.html)"], "a dashboard's one format");
-    await row.locator(".lib-menu-item").click();
+    await s.page.waitForSelector(".dgc-pop .dgc-menu-row");
+    assert.deepEqual(await s.page.locator(".dgc-pop .dgc-menu-label").allTextContents(), ["Web page (.html)"], "a dashboard's one format");
+    await s.page.locator(".dgc-pop .dgc-menu-row").click();
     assert.deepEqual((await s.posted("artifactExport")).map((m) => [m.artifact.id, m.format]), [[ITEMS[2].id, "html"]]);
     await row.locator('[aria-label^="Remove"]').click();
     const [remove] = await s.posted("artifactRemove");
@@ -169,9 +177,10 @@ test("Work Library opens saved Outputs filtered to Work, while Chat can show all
     await s.send({ type: "artifactsOffered", on: true });
     await s.send({ type: "artifacts", items: ITEMS });
     await s.send({ type: "view", view: "artifacts-work" });
-    assert.deepEqual(await s.page.locator(".lib-artifact .lib-name").allTextContents(), ["Home budget", "Tip calculator"]);
-    await s.send({ type: "view", view: "artifacts" });
-    assert.equal(await s.page.locator(".lib-artifact").count(), ITEMS.length);
+    assert.deepEqual(await libNames(s), ["Home budget", "Tip calculator"]);
+    assert.equal(await s.page.locator("#library-filter-maker .dgc-folder-v").textContent(), "Work", "the maker filter says so, and can be changed");
+    await libPick(s, "maker", "Anyone");
+    assert.equal(await s.page.locator("#library-list .lib-row").count(), ITEMS.length);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
@@ -182,8 +191,9 @@ test("at 360px nothing runs off the edge: the Library's rows and the chat's Outp
   try {
     await lib.send({ type: "widgetsOffered", on: true });
     await lib.send({ type: "artifactsOffered", on: true });
-    await lib.page.click("#lib-views .lib-view:has-text('Artifacts')");
+    await lib.page.click("#library-tab-artifacts");
     await lib.send({ type: "artifacts", items: ITEMS });
+    assert.equal(await lib.page.locator("#library-list .lib-row").count(), ITEMS.length);
     const wide = await lib.page.evaluate(() => [...document.querySelectorAll("body *")].filter((n) => n.getBoundingClientRect().right > window.innerWidth + 1).map((n) => n.className));
     assert.deepEqual(wide, [], "every row and its actions within reach");
   } finally { await lib.page.close(); }
@@ -232,10 +242,11 @@ test("ChatDGC's artifact and file cards are the shared card, and a click anywher
   try {
     const file = (n, name, type) => ({ source: "chat", chat_id: `chat_${"a".repeat(32)}`, id: `att_${String(n).repeat(32)}`, name, kind: "document", type, size: 5000, created_at: "2026-10-28T08:39:00Z", chat_title: "Q3" });
     await lib.send({ type: "library", files: [file(1, "invoice.pdf", "pdf"), file(2, "review.docx", "document"), file(3, "auth/redirect.ts", "code")], total: 3, next: 3, counts: { pdf: 1, document: 1, code: 1 } });
-    const rows = () => lib.page.locator(".lib-row .lib-preview .dgc-sheet").evaluateAll((ns) => ns.map((n) => [n.dataset.kind, n.querySelector(".dgc-sheet-tag").textContent, Math.round(n.getBoundingClientRect().width)]));
+    await libOffers(lib, []);
+    const rows = () => lib.page.locator("#library-list .lib-row .lib-row-thumb .dgc-sheet").evaluateAll((ns) => ns.map((n) => [n.dataset.kind, n.querySelector(".dgc-sheet-tag").textContent, Math.round(n.getBoundingClientRect().width)]));
     assert.deepEqual(await rows(), [["pdf", "PDF", 33], ["doc", "DOCX", 33], ["code", "TS", 33]], "a file's row: its kind's sheet, its ending on the tab");
     await lib.send({ type: "artifactsOffered", on: true });
-    await lib.page.click("#lib-views .lib-view:has-text('Artifacts')");
+    await lib.page.click("#library-tab-artifacts");
     await lib.send({ type: "artifacts", items: ITEMS });
     assert.deepEqual((await rows()).map((r) => r[0]), ["slides", "sheet", "dashboard", "page", "doc"], "what DGC made: a sheet for each kind");
     assert.deepEqual(lib.errors, []);

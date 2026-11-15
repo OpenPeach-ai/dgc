@@ -141,7 +141,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [640, 3
       const more = async (id) => { await p.mouse.move(2, 2);
         await p.evaluate(() => { const s = document.createElement("style"); s.id = "no-fades"; s.textContent = "*, *::before, *::after { transition: none !important; }"; document.head.append(s); });
         await settle(p, 60); await p.hover(`#${id}`); await settle(p, 60);
-        return p.evaluate((i) => { const n = document.getElementById(i), s = getComputedStyle(n), r = n.getBoundingClientRect(), row = document.getElementById("sessions-host").getBoundingClientRect(), head = n.closest(".home-head").getBoundingClientRect();
+        return p.evaluate((i) => { const n = document.getElementById(i), s = getComputedStyle(n), r = n.getBoundingClientRect(), row = document.getElementById("sessions-host").getBoundingClientRect(), head = n.closest(".dgc-pagehead").getBoundingClientRect();
           return { size: [Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10], radius: s.borderTopLeftRadius, fill: s.backgroundColor, line: r.width > row.width * 0.6, right: Math.round((head.right - r.right) * 10) / 10 }; }, id).finally(() => p.evaluate(() => document.getElementById("no-fades")?.remove())); };
       assert.equal(await p.locator("#work-library, #chats-library").count(), 0, "no Library button on Work or Chat");
       const workMore = await more("work-more");

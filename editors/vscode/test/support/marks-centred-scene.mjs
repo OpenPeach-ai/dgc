@@ -149,11 +149,11 @@ export async function eachSurface(browser, { width, theme }, visit) {
     await l.send({ type: "view", view: "artifacts" });
     await l.send({ type: "artifacts", items: [...ITEMS] });
     await settle(l.page);
-    await visit("the Library's Artifacts rows", l.page, "#lib-list", "words");
+    await visit("the Library's Artifacts rows", l.page, "#library-list", "words");
     await l.send({ type: "view", view: "widgets" });
     await l.send({ type: "widgets", widgets: [1, 2, 3].map((n) => ({ id: WG(n), title: `Widget ${n}`, chat: { id: `chat_${"a".repeat(32)}`, title: "Q3 planning" }, created_at: at(n), bytes: 900 })), total: 3, next: null });
     await settle(l.page);
-    await visit("the Library's Widgets rows", l.page, "#lib-list", "words");
+    await visit("the Library's Widgets rows", l.page, "#library-list", "words");
     errors.push(...l.errors);
   } finally { await l.page.close(); }
 

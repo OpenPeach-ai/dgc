@@ -36,7 +36,6 @@ test("the words say Incognito everywhere a person reads them; the wire keeps `te
   assert.ok(toggle.includes(GHOST), "the ghost he picked (D)");
   assert.doesNotMatch(toggle, /codicon/, "no stand-in icon beside it");
   assert.match(page, /id="cd-temp-badge"[^>]*>[\s\S]{0,700}Incognito<\/span>/, "the header's badge");
-  assert.match(page, /Incognito chats keep none\./, "the Library's note");
   assert.doesNotMatch(page.replace(/<!--[\s\S]*?-->/g, ""), />[^<]*\bTemporary\b[^<]*</, "no Temporary left in the page's words");
   assert.match(read("media/chatdgc.js"), /temporary/, "the conversation's field is still `temporary`");
   for (const file of ["media/library.js", "src/settingsClient.js"]) {

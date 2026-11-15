@@ -1,5 +1,5 @@
 // The side bar as the panel builds it (src/panel.ts, media/main.js, media/main.css) with the real Pips bundle and
-// faces, in real Chromium: the five tabs (Home, Work, Chat, Pips, Library), Home's cards, and Work's and Chat's lists. A stub
+// faces, in real Chromium: the five tabs (Home, Work, Chat, Library, Pips), Home's cards, and Work's and Chat's lists. A stub
 // host answers the Pips control channel from window.__state, which a test may change before the next poll.
 // Shared by the side bar's tests and the before/after pictures. Not a *.test.mjs file. No port is opened: the page is
 // routed.
@@ -194,7 +194,7 @@ export const tabsNow = (page) => page.evaluate(() => {
   const bar = nav.querySelector(".dgc-tabs-bar");
   const tabs = [...nav.querySelectorAll('[role="tab"]')].map((t) => { const flip = t.querySelector(".dgc-tab-flip"), front = t.querySelector(".dgc-tab-front"), count = t.querySelector(".dgc-tab-count");
     return { id: t.dataset.tab, name: front?.textContent || "", selected: t.getAttribute("aria-selected") === "true", tab: t.tabIndex, shown: t.checkVisibility(), label: t.getAttribute("aria-label") || "",
-      controls: t.getAttribute("aria-controls"), icons: [...t.querySelectorAll("svg, img, .codicon")].filter((n) => n.checkVisibility({ opacityProperty: true })).length,   // (the ones seen: each tab holds its icon for a narrow side bar)
+      controls: t.getAttribute("aria-controls"), icons: [...t.querySelectorAll("svg, img, .codicon, .library-iris")].filter((n) => n.checkVisibility({ opacityProperty: true })).length,   // (the ones seen: each tab holds its icon for a narrow side bar)
       color: getComputedStyle(t).color, weight: getComputedStyle(front || t).fontWeight,
       // (front, frontOpacity: the name itself, which once turned over under the pointer; copies: how many times the name is in the tab.)
       glow: Number(getComputedStyle(t.querySelector(".dgc-tab-glow")).opacity), front: front ? getComputedStyle(front).transform : "", copies: t.querySelectorAll(".dgc-tab-word").length,

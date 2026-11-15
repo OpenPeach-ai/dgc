@@ -1,0 +1,158 @@
+/* The Library (media/library.js; Library v2, 0.52, 15 Nov): one look for both places it shows, the side bar's tab and
+   its own editor tab. From the top: the header row every page has (pagehead.css), the search field, the five tabs
+   (Artifacts, Widgets, Images, Videos, Files), the chosen tab's filter line, the rows. Each is --lib-gap (8 px) under
+   the one before: "the dropdowns for Type and By literally touch the search bar" was the miss this answers. One
+   design language: every control is 28 px tall with the button family's 6 px corner; nothing is a pill.
+   Narrow or wide is the page's own width: under 560 px a row keeps one ⋯ for what it can do; from 560 px each thing
+   is its own icon button and the row says more about itself. Tokens from tokens.css. */
+.dgc-lib { --lib-gap: var(--sp-2); box-sizing: border-box; display: flex; flex-direction: column; gap: var(--lib-gap); min-width: 0; color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.dgc-lib[hidden] { display: none; }
+.dgc-lib > * { flex: none; }
+.dgc-lib .lib-bar { display: flex; min-width: 0; }
+.dgc-lib .lib-search { box-sizing: border-box; flex: 1 1 auto; min-width: 0; width: 100%; height: var(--btn-h); margin: 0; padding: 0 10px; border: 1px solid transparent; border-radius: var(--btn-r); background: var(--field);
+  color: var(--text-strong); font: var(--w-reg) var(--t-sm)/1 var(--sans); }
+.dgc-lib .lib-search:focus { outline: none; border-color: var(--vscode-focusBorder, var(--text)); }
+.dgc-lib .lib-search::placeholder { color: var(--muted-firm); opacity: 1; }
+
+/* ---- the tabs: one bar the search field's width and height, the chosen tab raised (as Pips' Personal | Project) ---- */
+.dgc-lib .lib-tabs { container-type: inline-size; box-sizing: border-box; display: flex; align-items: stretch; gap: 2px; min-width: 0; height: var(--btn-h); padding: 2px; border: 1px solid var(--border); border-radius: var(--btn-r); background: transparent; }
+.dgc-lib .lib-tabs[hidden] { display: none; }
+.dgc-lib .lib-tab { appearance: none; position: relative; box-sizing: border-box; flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 100%; margin: 0; padding: 0 4px;
+  border: 1px solid transparent; border-radius: max(2px, calc(var(--btn-r) - 2px)); background: transparent; color: var(--text-2); font: var(--w-med) var(--t-sm)/1 var(--sans); white-space: nowrap; cursor: pointer;
+  transition: color var(--dur-hover, .12s) ease, background-color var(--dur-hover, .12s) ease; }
+.dgc-lib .lib-tab[hidden] { display: none; }
+.dgc-lib .lib-tab:hover { color: var(--text); }
+/* (The chosen tab is a tint of the text on the page's own ground, with a line round it: it reads in dark and in light,
+   in the side bar and on the editor's ground.) */
+.dgc-lib .lib-tab[aria-selected="true"] { border-color: var(--border-strong); background: var(--field); color: var(--text-strong); }
+.dgc-lib .lib-tab:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.dgc-lib .lib-tab-word { display: block; min-width: 0; }
+/* Each tab's icon is in the page beside its word, and is drawn alone when the words would not fit (below); with room
+   to spare it sits before the word. */
+.dgc-lib .lib-tab .lib-tab-icon.codicon { display: none; flex: none; font-size: 14px; line-height: 1; }
+@container (min-width: 460px) {
+  .dgc-lib .lib-tab .lib-tab-icon.codicon { display: block; }
+}
+/* A narrow side bar. The five names are about 200 px of words; under 276 px of bar the tabs give up some of their
+   padding, and under 256 px (a side bar of about 286 px) the names would soon be cut, so each tab is its icon alone,
+   in five tabs of one width; the word stays in the page for a screen reader, in a 1 px box, and is the tab's label on
+   hover. (The side bar's own tabs follow the same rule at 292 px.) */
+@container (max-width: 275px) {
+  .dgc-lib .lib-tab { padding: 0 2px; }
+}
+@container (max-width: 255px) {
+  .dgc-lib .lib-tab { flex: 1 1 0; gap: 0; padding: 0; }
+  .dgc-lib .lib-tab .lib-tab-icon.codicon { display: block; font-size: 15px; }
+  .dgc-lib .lib-tab-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+
+/* ---- the chosen tab's filter line: dropdown buttons of the Project Folder button's shape ---- */
+.dgc-lib .lib-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.dgc-lib .lib-filter { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+/* A kind is a word and is never cut ("Dashboards"); a maker's name beside it is what ends in "…". */
+.dgc-lib .lib-filter[data-filter="kind"], .dgc-lib .lib-filter[data-filter="origin"] { flex: none; }
+.dgc-lib .lib-filter .dgc-folder-v { white-space: nowrap; }
+.dgc-lib .lib-status { margin: 0; padding: 0; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.dgc-lib .lib-status[hidden] { display: none; }
+.dgc-lib .lib-status[data-kind="error"] { color: var(--err-text); }
+
+/* ---- the rows: a small picture or the kind's sheet, the title on one line, and who made it under it ---- */
+.dgc-lib .lib-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dgc-lib .lib-list:empty { display: none; }
+.dgc-lib .lib-row { position: relative; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; min-width: 0; min-height: 48px; margin: 0 calc(-1 * var(--lib-bleed, 8px)); padding: 4px calc(var(--lib-bleed, 8px) - 1px);
+  border: 1px solid transparent; border-radius: var(--btn-r); cursor: pointer; user-select: none; }
+.dgc-lib .lib-row:hover { background: var(--row-hover); }
+.dgc-lib .lib-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+/* (Flex, not grid: a sheet a little taller than its place stays centred on the row's words.) */
+.dgc-lib .lib-row-thumb { flex: none; display: flex; align-items: center; justify-content: center; width: 32px; height: 38px; line-height: 0; color: var(--muted); }
+.dgc-lib .lib-row-thumb > * { flex: none; }
+.dgc-lib .lib-row-thumb img { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; background: var(--field); }
+.dgc-lib .lib-row-thumb img:not([src]) { visibility: hidden; }
+.dgc-lib .lib-row-thumb .codicon { font-size: 18px; }
+.dgc-lib .lib-row-sheet > .dgc-sheet { scale: .86; transform-origin: center; }
+.dgc-lib .lib-row-mark [data-mark] { --size: 30px; }
+.dgc-lib .lib-row-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.dgc-lib .lib-row-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
+.dgc-lib .lib-row-meta { display: flex; align-items: baseline; min-width: 0; color: var(--text-2); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric: tabular-nums; white-space: pre; }
+.dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-meta { color: color-mix(in srgb, var(--text) 80%, transparent); }
+.dgc-lib .lib-row-by { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dgc-lib .lib-row-by:has(+ .lib-row-maker) { flex: none; }
+/* The maker's name: a link back to that Pip's chat, that session or that chat. A link, never a button's box. */
+.dgc-lib .lib-row-maker { appearance: none; flex: 0 1 auto; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 2px; background: none; color: inherit; font: inherit; white-space: pre; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.dgc-lib button.lib-row-maker { color: var(--text); cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 2px; }
+.dgc-lib button.lib-row-maker:is(:hover, :focus-visible) { color: var(--text-strong); text-decoration-color: currentColor; }
+/* (Where nothing can be pointed at, a quiet line says the name can be pressed.) */
+@media (hover: none) { .dgc-lib button.lib-row-maker { text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); } }
+.dgc-lib button.lib-row-maker:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.dgc-lib .lib-row-when { flex: none; }
+/* (Its kind, version, size: said where there is room; always in the row's label.) */
+.dgc-lib .lib-row-facts { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* What a row can do. One icon button each (28 px, the 6 px corner), or one ⋯ holding the same list. */
+.dgc-lib .lib-row-actions { display: none; flex: none; align-items: center; gap: 2px; }
+.dgc-lib .lib-act, .dgc-lib .lib-row-more { appearance: none; flex: none; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: var(--btn-r);
+  background: transparent; color: var(--text-2); cursor: pointer; }
+.dgc-lib .lib-act .codicon { font-size: 16px; }
+.dgc-lib .lib-act:hover, .dgc-lib .lib-row-more:hover, .dgc-lib .lib-act[aria-expanded="true"], .dgc-lib .lib-row-more[aria-expanded="true"] { background: var(--wash); color: var(--text); }
+.dgc-lib .lib-act:focus-visible, .dgc-lib .lib-row-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.dgc-lib .lib-act[data-act="remove"]:hover { color: var(--err-text); }
+.dgc-lib .lib-pin[aria-pressed="true"] { color: var(--text); }
+/* The row's ⋯ lies over the row's end while the row is pointed at or holds the focus: the title and the maker's line
+   keep their whole width and nothing moves under the pointer. Its ground is the row's own (the hover wash over the
+   page), so the words it covers do not show through. Where nothing can be pointed at it is always there, and the row
+   keeps room for it. */
+.dgc-lib .lib-row-more { position: absolute; top: 50%; right: 3px; translate: 0 -50%; display: none; background: linear-gradient(var(--row-hover), var(--row-hover)), var(--lib-ground, var(--bg)); }
+.dgc-lib .lib-row-more:hover, .dgc-lib .lib-row-more[aria-expanded="true"] { background: linear-gradient(var(--wash), var(--wash)), linear-gradient(var(--row-hover), var(--row-hover)), var(--lib-ground, var(--bg)); }
+.dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-more, .dgc-lib .lib-row-more[aria-expanded="true"] { display: inline-flex; }
+@media (hover: none) {
+  .dgc-lib .lib-row-more { position: static; translate: none; display: inline-flex; background: transparent; box-shadow: none; }
+}
+/* A video playing in its row takes a line of its own under it. */
+.dgc-lib .lib-row > figure.made-video { flex: 1 0 100%; min-width: 0; margin: var(--sp-2) 0 var(--sp-1); cursor: auto; }
+.dgc-lib .lib-load { appearance: none; align-self: flex-start; margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); cursor: pointer; }
+.dgc-lib .lib-load[hidden] { display: none; }
+.dgc-lib .lib-load:hover { text-decoration: underline; }
+.dgc-lib .lib-load:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+
+/* ---- wide (its editor tab, or a wide side bar): each action its own button, and more said on the row ---- */
+@media (min-width: 560px) {
+  .dgc-lib .lib-row { gap: 0 var(--sp-3); min-height: 54px; }
+  .dgc-lib .lib-row-thumb { width: 36px; height: 44px; }
+  .dgc-lib .lib-row-thumb img { width: 36px; height: 36px; }
+  .dgc-lib .lib-row-sheet > .dgc-sheet { scale: 1; }
+  .dgc-lib .lib-row-mark [data-mark] { --size: 36px; }
+  .dgc-lib .lib-row-actions { display: inline-flex; }
+  .dgc-lib .lib-row .lib-row-more, .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-more { display: none; }
+  .dgc-lib .lib-row-facts { display: block; }
+  .dgc-lib .lib-row-name { font-weight: var(--w-med); }
+}
+/* ---- narrow: a filter is one word: what is chosen ("PDFs", "Tile checker", "Anyone"), or, for a kind or an origin
+   left on All, its key ("Kind", "From"), so two buttons never both read "All". A second filter that still does not fit
+   goes under the first (a word on a button is never cut; a maker's name ends in "…" only when longer than the whole
+   line). ---- */
+@media (max-width: 259px) {
+  .dgc-lib .lib-filters { gap: var(--sp-1) var(--sp-2); }
+  .dgc-lib .lib-filter { padding: 0 6px 0 8px; gap: 4px; }
+  .dgc-lib .lib-filter:not([data-all]) .dgc-folder-k { display: none; }
+  .dgc-lib .lib-filter[data-all] .dgc-folder-v { display: none; }
+  .dgc-lib .lib-filter[data-all] .dgc-folder-k { color: var(--text-strong); font-weight: var(--w-med); }
+  .dgc-lib .lib-row { gap: 0 8px; }
+  /* "made by Tile checker" is "by Tile checker" here, and "made in Work" is "in Work": the name, or the place, is what
+     must stay ("kept by" stays whole). What is still too long ends in "…". */
+  .dgc-lib .lib-row-pre { display: none; }
+  .dgc-lib .lib-row-maker { min-width: 2.5em; }
+}
+
+/* ---- in its own editor tab: one column, the list scrolling inside the page ---- */
+.lib-body { margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); }
+.lib-body .dgc-lib { --lib-bleed: var(--sp-2); width: 100%; max-width: 860px; height: 100%; min-height: 0; margin: 0 auto; padding: var(--sp-4) var(--sp-4) var(--sp-5); overflow-y: auto; }
+.lib-body .dgc-lib > .lib-list { flex: 1 1 auto; min-height: 96px; margin: 0 calc(-1 * var(--lib-bleed)); padding: 0 var(--lib-bleed); overflow-y: auto; scrollbar-gutter: stable; }
+.lib-body .dgc-lib > .lib-list:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+@media (max-width: 480px) { .lib-body .dgc-lib { padding-left: var(--sp-3); padding-right: var(--sp-3); } }
+
+@media (forced-colors: active) {
+  .dgc-lib .lib-tabs { border-color: CanvasText; }
+  .dgc-lib .lib-tab[aria-selected="true"] { border-color: Highlight; background: Highlight; color: HighlightText; forced-color-adjust: none; }
+  .dgc-lib .lib-row:hover { background: Highlight; color: HighlightText; forced-color-adjust: none; }
+  .dgc-lib button.lib-row-maker { color: LinkText; }
+  .dgc-lib .lib-search { border-color: CanvasText; }
+}

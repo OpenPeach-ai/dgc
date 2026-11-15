@@ -724,78 +724,7 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
   font: var(--w-med) var(--t-sm)/1.3 var(--sans); cursor: pointer; }
 .cd-project-delete:hover { text-decoration: underline; }
 
-/* The Library (ChatGPT's): every file attached in ChatDGC, a list you can search and narrow to one kind. */
-.lib-body { margin: 0; background: var(--bg); color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
-/* width: 100%: with auto margins in the body's column it was sized to its content, and in a narrow tab that ran past the
-   edge (a 403px Library in a 360px tab: its words cut off, a row's last action out of reach). */
-.lib { box-sizing: border-box; width: 100%; max-width: 860px; margin: 0 auto; padding: var(--sp-5) var(--sp-4) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-3); }
-/* It scrolls (13 Nov: it could not; the page's body never scrolls, main.css, and nothing in the Library did, so a
-   long list ran out of reach under the tab's end). The page is the tab's height: its title, search field, tab strip
-   and filters stay where they are and the list scrolls between them and the tab's end, with the keyboard too (the list
-   takes focus: arrows, PageDown, Home and End). In a tab too short for that, the whole page scrolls as well. */
-.lib-body { overflow: hidden; }
-.lib { height: 100%; min-height: 0; overflow-y: auto; }
-.lib > * { flex: none; }
-.lib > .lib-list { flex: 1 1 auto; min-height: 96px; overflow-y: auto; scrollbar-gutter: stable; }
-.lib-list:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
-.lib-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
-.lib-title { display: inline-flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-strong); font: var(--w-semi) 22px/1.25 var(--sans); }
-.lib-title .codicon { font-size: 20px; color: var(--muted); }
-.lib-search { width: min(320px, 100%); }
-.lib-about { margin: 0; color: var(--muted); font-size: var(--t-xs); }
-.lib-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
-/* Files and Widgets: the Library's two lists, as tabs. */
-.lib-views { display: flex; gap: var(--sp-3); border-bottom: 1px solid var(--border); }
-.lib-view { padding: 6px 2px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none;
-  color: var(--muted); font: inherit; font-weight: var(--w-semi); cursor: pointer; }
-.lib-view:hover { color: var(--text); }
-.lib-view[aria-selected="true"] { color: var(--text-strong); border-bottom-color: var(--accent); }
-.lib-view:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
-.lib-kind { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border: 1px solid var(--border-strong);
-  border-radius: var(--btn-r, 6px); background: transparent; color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
-.lib-kind:hover { color: var(--text); border-color: var(--text); }
-.lib-kind[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text-strong); }
-.lib-kind:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-.lib-kind-count { color: var(--faint); font-variant-numeric: tabular-nums; }
-.lib-kind[aria-pressed="true"] .lib-kind-count { color: var(--muted-firm); }   /* (on the chosen kind's wash the faint grey read 4.3:1) */
-.lib-status { margin: var(--sp-3) 0; color: var(--muted); }
-.lib-status[hidden] { display: none; }
-.lib-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
-.lib-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; padding: var(--sp-2) var(--sp-1); border-bottom: 1px solid var(--border); }
-.lib-row:hover { background: var(--surface); }
-.lib-preview { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; overflow: hidden;
-  border-radius: var(--r-md); background: var(--surface2); color: var(--muted); }
-.lib-preview img { width: 100%; height: 100%; object-fit: cover; }
-/* A row's small sheet of its kind (media/shared/filesheet.css) needs no tile under it, and room for its tab. */
-.lib-preview.lib-sheet { overflow: visible; background: none; border: 0; box-shadow: none; }
-.lib-preview .codicon { font-size: 18px; }
-/* A widget's row: its Folio (media/shared/folio.css), with no tile under it. */
-.lib-preview.lib-widget { overflow: visible; background: none; line-height: 0; }
-.lib-preview.lib-widget [data-mark] { --size: 36px; }
-.lib-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.lib-name { overflow: hidden; color: var(--text); font: var(--w-med) var(--t-sm)/1.35 var(--sans); text-overflow: ellipsis; white-space: nowrap; }
-.lib-meta { overflow: hidden; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-overflow: ellipsis; white-space: nowrap; }
-.lib-actions { flex: none; display: flex; gap: 2px; }
-.lib-action { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0;
-  border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
-.lib-action:hover { background: var(--surface2); color: var(--text); }
-.lib-action:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-.lib-action[aria-label^="Delete"]:hover { color: var(--err-text); }
-/* Pinned to the dock: the pin is filled, in the text colour. */
-.lib-pin[aria-pressed="true"] { color: var(--text); }
-.lib-more { align-self: center; }
-/* The Artifacts tab: a kind's mark, and Export's formats in a menu under its button. */
-.lib-artifact .lib-preview .codicon { color: var(--accent-text); }
-body.vscode-light .lib-artifact .lib-preview .codicon, body.vscode-high-contrast-light .lib-artifact .lib-preview .codicon { color: var(--link); }
-.lib-menu-wrap { position: relative; display: inline-flex; }
-.lib-menu { position: absolute; top: calc(100% + var(--sp-1)); right: 0; z-index: 15; min-width: 210px; padding: var(--sp-1);
-  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); }
-
-.lib-menu-item { display: block; width: 100%; padding: var(--sp-2); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text);
-  text-align: left; white-space: nowrap; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.2 var(--sans); }
-.lib-menu-item:hover, .lib-menu-item:focus-visible { background: var(--sel); color: var(--text-strong); outline: none; }
-.lib-action[aria-label^="Remove"]:hover { color: var(--err-text); }
-@media (max-width: 560px) { .lib-actions { flex-wrap: wrap; width: 60px; } }
+/* (The Library's look is media/shared/library.css: one module draws it here, in its editor tab, and in the side bar.) */
 
 /* A plugin's card under a reply (ChatGPT's confirmation): what it would do, its inputs (editable), and the choice. */
 .cd-card { display: flex; flex-direction: column; gap: var(--sp-2); max-width: 560px; margin: var(--sp-2) 0; padding: var(--sp-3);
@@ -1085,11 +1014,8 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
   .cd-continue, .cd-card-actions button.primary { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; }
 }
 /* The narrowest side bar (live round 1, finding 28, 14 Nov): the line under an answer (its time, its buttons, its
-   model) takes a second line rather than running off the page; the Library's kinds take a second line too. */
+   model) takes a second line rather than running off the page. */
 @media (max-width: 260px) {
   .cd-actions { flex-wrap: wrap; }
   .cd-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lib-views { flex-wrap: wrap; column-gap: var(--sp-2); row-gap: 0; }
-  .lib { padding-left: var(--sp-3); padding-right: var(--sp-3); }
-  .lib-row { flex-wrap: wrap; gap: var(--sp-2); }
 }

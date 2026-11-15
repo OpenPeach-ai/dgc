@@ -1225,12 +1225,16 @@
     const sheets = window.DgcFileSheet, plush = window.PipConcepts?.plush;
     const renamed = [], gone = [];
     const items = dockState.pins.map((pin) => {
-      const item = { key: pin.key, kind: pin.kind, title: pin.title, state: "", icon: "", dot: "", badge: 0 };
+      // (fresh: a new message nobody has read: the small purple dot at the tile's top-right corner; his ask of 15 Nov.
+      // It is what the lists already know: a Work session's reply nobody saw and a chat's answer that came unseen
+      // (hubNews), a Pip's unread messages (list_pip_unread). The number waiting for your okay wins the corner.)
+      const item = { key: pin.key, kind: pin.kind, title: pin.title, state: "", icon: "", dot: "", badge: 0, fresh: false };
       if (pin.kind === "work") {
         const live = sessionItems.find((s) => s.id === pin.id), running = !!live && (live.running === true || !!live.windowless);
         if (live) item.title = sessionTitle(live);
         item.colour = colourOf("work", pin.id);
         item.badge = live?.waiting === true ? 1 : 0;
+        item.fresh = !running && (hubNews.work[pin.id] !== undefined || workReplies.has(pin.id));
         item.dot = running ? "live" : live?.open ? "open" : "";
         item.state = live?.waiting === true ? "Wants your okay" : live?.windowless ? "Running, no window" : running ? "Running" : live?.open ? "Open in a tab"
           : `Work session${live ? ` · ${sessionAge(live.when)}` : ""}`;
@@ -1264,6 +1268,7 @@
         if (live?.title) item.title = String(live.title);
         item.colour = colourOf("chat", pin.id);
         item.dot = running ? "live" : open ? "open" : "";
+        item.fresh = !running && hubNews.chat[pin.id] !== undefined;
         const when = live ? chatWhen(live.updated_at) : "";
         item.state = running ? "Answering" : open ? "Open in a tab" : `ChatDGC chat${when ? ` · ${when}` : ""}`;
         item.icon = markHtml("chat", pin.id, running);
@@ -1272,6 +1277,7 @@
         if (live) item.title = live.name;
         else if (dockPips.complete && dockPips.scopes.includes(pin.look?.ws)) gone.push(pin.key);
         item.badge = live?.waiting || 0;
+        item.fresh = (Number(live?.unread) || 0) > 0;
         item.state = live?.waiting ? `${live.waiting} waiting for you` : live?.line || (live ? "Nothing is waiting for you" : "Pip");
         let face = "";
         try { face = plush ? plush.markup({ index: Math.max(0, PIP_BODIES.indexOf(body)), name: item.title }, item.badge ? "waiting_approval" : "idle", `dock-${pin.id}`, { includeStyles: false }) : ""; } catch { face = ""; }
@@ -1313,6 +1319,7 @@
       colours: msg.colours && typeof msg.colours === "object" ? msg.colours : {}, since: Number(msg.since) || 0,
       show: ["hover", "never"].includes(msg.show) ? msg.show : "always", most: Number(msg.most) || 8, size: Number(msg.size) || 34 };
     keeper?.said(msg);
+    libraryPage?.message({ type: "dock", pins: dockState.pins });      // each Library row knows whether it is pinned
     // A session's colour may have changed (or the host has only now said what it keeps): its row's mark and its card's follow.
     const colours = JSON.stringify(dockState.colours);
     if (colours !== dockColours || first) { dockColours = colours; if (lastSessions && chatPlace === "home") { renderSessions(lastSessions); if (lastChats) renderChats(lastChats); } }
@@ -1660,6 +1667,12 @@
     button.setAttribute("aria-expanded", "true");
     window.DgcBlob?.popup(button, { keyboard: true, label, place: "below", rows, onPick: pick, onClose: () => button.setAttribute("aria-expanded", "false") });
   }
+  // Work's and Chat's header row: the one every page of the side bar wears (media/shared/pagehead.js; the Library draws
+  // its own with it, and so does the Pips view), so the four are one row: the same title, ⋯, height, padding and line.
+  for (const [id, title, more] of [["work-head", "Work", { id: "work-more", label: "More for Work", tip: "More: archived sessions and settings" }],
+    ["chats-head", "Chat", { id: "chats-more-menu", label: "More for Chat", tip: "More: an incognito chat, what DGC remembers, archived chats and settings" }]]) {
+    const head = $(id); if (head && window.DgcPageHead) head.outerHTML = window.DgcPageHead.html({ title, more });
+  }
   $("work-more")?.addEventListener("click", (event) => { event.stopPropagation(); homeMoreMenu($("work-more"), "Work",
     [{ id: "archived", label: "Archived sessions", icon: "archive" }, { id: "agents", label: "Sub-agent settings", icon: "settings" }, { id: "settings", label: "Work settings", icon: "settings" }],
     (what) => { if (what === "archived") showArchivedList("work"); else vscode.postMessage({ type: "openSettings", section: what === "agents" ? "models" : "general" }); }); });
@@ -1667,12 +1680,13 @@
     [{ id: "incognito", label: "New incognito chat", icon: "chat" }, { id: "memory", label: "What DGC remembers", icon: "open" }, { id: "archived", label: "Archived chats", icon: "archive" }, { id: "settings", label: "Chat settings", icon: "settings" }],
     (what) => { if (what === "incognito") vscode.postMessage({ type: "chatdgcNew", temporary: true }); else if (what === "archived") showArchivedList("chat");
       else vscode.postMessage({ type: "openSettings", section: what === "memory" ? "memory" : "chatdgc" }); }); });
-  // ---- the side bar's tabs: Home, Work, Chat, Pips (media/shared/tabs.css) ----------------------------------------------
+  // ---- the side bar's tabs: Home, Work, Chat, Library, Pips (media/shared/tabs.css) ----------------------------------------------
   // One bar at the top of the side bar, over every screen of it. Home is the hub (below); Work lists this project's
   // sessions and Chat your ChatDGC chats, each with its own search and New; Pips is the Pips view, as it is. The tab is
   // kept in the page's state, so a reload comes back to it. A DGC with no ChatDGC has no Chat tab, and one with no Pips
   // no Pips tab. Left and Right move between the tabs and choose as they go; Home and End jump to the first and last.
-  const SIDE_TABS = ["home", "work", "chat", "pips", "library"];
+  // (Library before Pips, so Pips stays last: his call, 15 Nov.)
+  const SIDE_TABS = ["home", "work", "chat", "library", "pips"];
   // The tabs that are a page of this home (Pips is its own view): where Pips' own "back" may return to.
   const LIST_TABS = ["home", "work", "chat", "library"];
   const pageState = () => { try { return vscode.getState() || {}; } catch { return {}; } };
@@ -1696,32 +1710,37 @@
     }
     libraryTabShown(sideTab === "library" && sessionsOpen);
   }
-  // ---- the Library tab (media/shared/librarypage.js): everything DGC made, who made it, one click back to them ---------
-  // The Library's own host answers it (src/chatdgc.ts, "sideLibrary"). A maker's name leads back: a Pip to its chat, a
-  // Work session and a chat to their editor tabs. ⋯ holds the full Library (the big grid in an editor tab).
+  // ---- the Library tab (media/library.js): the ONE Library module, mounted narrow here; its editor tab mounts it wide ----
+  // The Library's own host answers it (src/chatdgc.ts, through "sideLibrary"): the same messages its editor tab sends.
+  // A maker's name leads back: a Pip to its chat, a Work session and a chat to their editor tabs. A pin goes to this
+  // page's own dock. ⋯ keeps "Open the Library in the editor": the same module, full width, on the tab you are on.
   let libraryPage = null, libraryShowing = false;
+  function libraryMount() {
+    if (libraryPage || !window.DgcLibrary || !$("library-home")) return libraryPage;
+    libraryPage = window.DgcLibrary.mount({
+      host: $("library-home"), place: "side",
+      post: (message) => vscode.postMessage({ type: "sideLibrary", message }),
+      pin: (message) => vscode.postMessage(message),
+      go: (maker) => {
+        if (maker.kind === "pip") openPipsAt({ pip: maker.id });
+        else if (maker.kind === "session") vscode.postMessage({ type: "openSessionInEditor", id: maker.id, title: maker.name });
+        else if (maker.kind === "chat") vscode.postMessage({ type: "chatdgcOpen", id: maker.id });
+        else if (maker.kind === "project") vscode.postMessage({ type: "chatdgcProjectOpen", id: maker.id });
+      },
+      more: [{ id: "full", label: "Open the Library in the editor", icon: "open" }, { id: "settings", label: "Page preview settings", icon: "settings" }],
+      onMore: (what, tab) => { if (what === "full") vscode.postMessage({ type: "homeLibraryOpen", view: tab }); else vscode.postMessage({ type: "openSettings", section: "security" }); },
+      kept: () => pageState().library, keep: (library) => { try { vscode.setState({ ...(vscode.getState() || {}), library }); } catch {} },
+      marks: keeper ? { mark: (kind, id) => markHtml(kind, id, false), wear: (kind, list) => wearMarks(kind, list) } : null,
+    });
+    if (dockSaid) libraryPage.message({ type: "dock", pins: dockState.pins });
+    return libraryPage;
+  }
   function libraryTabShown(on) {
-    if (on && !libraryPage && window.DgcLibraryPage && $("library-list")) {
-      libraryPage = window.DgcLibraryPage.mount({
-        els: { filters: $("library-filters"), status: $("library-status"), list: $("library-list"), more: $("library-load"), search: $("library-search") },
-        post: (message) => vscode.postMessage({ type: "sideLibrary", message }),
-        go: (maker) => {
-          if (maker.kind === "pip") openPipsAt({ pip: maker.id });
-          else if (maker.kind === "session") vscode.postMessage({ type: "openSessionInEditor", id: maker.id, title: maker.name });
-          else if (maker.kind === "chat") vscode.postMessage({ type: "chatdgcOpen", id: maker.id });
-          else if (maker.kind === "project") vscode.postMessage({ type: "chatdgcProjectOpen", id: maker.id });
-        },
-        kept: () => pageState().library, keep: (library) => { try { vscode.setState({ ...(vscode.getState() || {}), library }); } catch {} },
-        menu: homeMoreMenu, sheet: (type, name) => (name ? window.DgcFileSheet?.forFile?.(type, name) : window.DgcFileSheet?.html?.(type)) || "",
-      });
-    }
+    if (on) libraryMount();
     if (on === libraryShowing || !libraryPage) return;
     libraryShowing = on;
     if (on) libraryPage.shown(); else libraryPage.hidden();
   }
-  $("library-more")?.addEventListener("click", (event) => { event.stopPropagation(); homeMoreMenu($("library-more"), "Library",
-    [{ id: "full", label: "Open the full Library", icon: "open" }, { id: "settings", label: "Page preview settings", icon: "settings" }],
-    (what) => { if (what === "full") vscode.postMessage({ type: "homeLibraryOpen", view: "artifacts" }); else vscode.postMessage({ type: "openSettings", section: "security" }); }); });
   function showSideTab(name, focus = false) {
     if (chatPlace !== "home") return;
     const next = SIDE_TABS.includes(name) && sideTabOffered(name) ? name : "home";
@@ -1988,7 +2007,8 @@
     else if (what === "folder") { chooseFolder(arg); showSideTab("work"); }
     else if (what === "pin") toggleFolderPin(arg);
     else if (what === "usage") vscode.postMessage({ type: "openSettings", section: "usage" });       // Settings, on its Token Usage page
-    else if (what === "library") vscode.postMessage({ type: "homeLibraryOpen", view: arg === "widgets" ? "widgets" : "artifacts" });
+    // Home's Widgets and Artifacts cards: the side bar's Library, on that tab (his call, 15 Nov; it was the editor's page).
+    else if (what === "library") { showSideTab("library"); libraryMount()?.view(arg === "widgets" ? "widgets" : "artifacts"); }
     else if (what === "widget") vscode.postMessage({ type: "homeWidgetOpen", id: String(arg?.id || ""), chat_id: String(arg?.chat_id || "") });
     else if (what === "artifact") vscode.postMessage({ type: "artifactOpen", id: String(arg?.id || ""), artifactType: String(arg?.type || ""), title: String(arg?.title || "") });
     else if (what === "open") {

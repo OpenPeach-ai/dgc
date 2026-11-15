@@ -1,0 +1,8 @@
+/* Iris Library. The exact Iris hue/saturation/lightness from the existing sets. */
+.library-iris{--size:24px;--h:247;--sat:87%;--light:65%;position:relative;display:inline-block;flex:none;vertical-align:middle;width:var(--size);height:var(--size);isolation:isolate}
+.library-iris>i{position:absolute;display:block;bottom:15%;width:18%;height:70%;border-radius:calc(var(--size)*.035);overflow:hidden;box-sizing:border-box;background:linear-gradient(145deg,hsl(var(--h) var(--sat) 76%),hsl(var(--h) var(--sat) var(--light)) 45%,hsl(var(--h) var(--sat) 34%));box-shadow:inset calc(var(--size)*.01) calc(var(--size)*.01) calc(var(--size)*.015) #ffffff50,inset calc(var(--size)*-.012) calc(var(--size)*-.015) calc(var(--size)*.02) #17104c45}
+.library-iris>i:nth-child(1){left:10%}
+.library-iris>i:nth-child(2){left:35%;width:20%;height:73%;background:linear-gradient(145deg,hsl(var(--h) 90% 81%),hsl(var(--h) var(--sat) 69%) 45%,hsl(var(--h) var(--sat) 40%))}
+.library-iris>i:nth-child(3){left:72%;height:62%;transform:rotate(-16deg);transform-origin:50% 100%}
+.library-iris>i::before{content:"";position:absolute;inset:-8% 15% 30% -45%;border-radius:40%;background:linear-gradient(150deg,hsl(var(--h) 95% 89% / .65),hsl(var(--h) 85% 71% / .08) 66%,hsl(var(--h) 90% 44% / .25));transform:rotate(-20deg)}
+.library-iris>i::after{content:"";position:absolute;inset:0 20%;background:linear-gradient(to bottom,transparent 0% 15%,hsl(var(--h) 95% 91% / .50) 15% 18%,transparent 18% 78%,hsl(var(--h) 95% 85% / .30) 78% 81%,transparent 81%)}

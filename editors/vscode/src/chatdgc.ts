@@ -28,8 +28,15 @@ import { displayMentions, workspaceFiles } from "./mentionsHost";
  */
 export const CHATDGC_EDITOR = "dgc.chatdgcEditor";
 export const CHATDGC_LIBRARY = "dgc.chatdgcLibrary";
-/** What the side bar's Library tab may ask of the Library's host (the rest is the full Library's own). */
-const SIDE_LIBRARY = new Set(["ready", "list", "artifactList", "artifactOpen", "workImages", "workImage", "workImageOpen", "image", "open"]);
+/** What the side bar's Library tab may ask of the Library's host: all the Library's editor tab asks (they are one
+ *  module, media/library.js), but a pin, which the side bar's own dock answers, and a maker's name and the settings,
+ *  which the side bar opens itself. */
+const SIDE_LIBRARY = new Set(["ready", "list", "image", "open", "use", "save", "saveToProject", "toProject", "remove",
+  "artifactList", "artifactOpen", "artifactExport", "artifactRemove", "widgets", "widgetOpen", "widgetChat", "widgetRemove",
+  "workImages", "workImage", "workImageOpen", "workImageReveal", "workImageSave", "workImageToProject",
+  "videoList", "videoOpen", "videoReveal", "videoSave"]);
+/** The Library's tabs, as a "view" the host may open it on. */
+const LIBRARY_VIEWS = new Set(["artifacts", "artifacts-work", "widgets", "images", "videos", "files"]);
 const LIBRARY_KINDS = new Set(["image", "pdf", "document", "spreadsheet", "presentation", "code", "text"]);
 const ATTACHMENT_ID = /^att_[a-f0-9]{32}$/;
 /** An image DGC made in Work: a picture file DGC saved (images_library), previewed up to this size. */
@@ -72,6 +79,8 @@ export interface ChatDGCHost {
   postHome(message: Record<string, unknown>): void;
   /** Settings at a section (Memory, from "Manage memory" under a reply). */
   openSettings?(section: string): void;
+  /** Who made a Library item, pressed in the Library's editor tab: that Work session in its tab, or that Pip's chat. */
+  openMaker?(maker: { kind: string; id: string; name: string }): void;
   /** What its backend offers ChatDGC (ready.capabilities.chatdgc), or {} before it's ready. */
   chatdgcOffers?(): Record<string, unknown>;
   /** ChatDGC's context window, for every chat: one of CHATDGC_WINDOWS its backend offers. */
@@ -342,23 +351,16 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
-/** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
+/** The Library in its own editor tab. The page holds only where it goes: the ONE Library module (media/library.js, the
+ *  same one the side bar's Library tab mounts) draws the header row, the search field, the tabs, the filters and the
+ *  rows into it, wide. */
 export function libraryDocument(asset: (name: string) => string, cspSource: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)}; media-src blob:;">
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}">
 <title>Library</title></head><body class="lib-body">
-<main class="lib"><header class="lib-head"><h1 class="lib-title"><span class="codicon codicon-library" aria-hidden="true"></span>Library</h1>
-<label class="sr-only" for="lib-search">Search your files by name</label><input id="lib-search" class="cd-field lib-search" type="search" placeholder="Search files" maxlength="200" autocomplete="off"></header>
-<div id="lib-views" class="lib-views" role="tablist" aria-label="Show" hidden></div>
-<p id="lib-about" class="lib-about">Every file you attached in ChatDGC or it made for you, in every chat and project. Incognito chats keep none.</p>
-<div id="lib-origins" class="lib-kinds" role="toolbar" aria-label="Show files" hidden></div>
-<div id="lib-made" class="lib-kinds" role="toolbar" aria-label="Where it was made" hidden></div>
-<div id="lib-kinds" class="lib-kinds" role="toolbar" aria-label="Show"></div>
-<p id="lib-status" class="lib-status" role="status"></p>
-<ul id="lib-list" class="lib-list" aria-label="Your files" role="tabpanel" tabindex="0"></ul>
-<button type="button" id="lib-more" class="cd-edit-cancel lib-more" hidden>Show more</button></main>
-<script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
+<main id="library-root" aria-label="Library"></main>
+<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/shared/pagehead.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
 }
 
 
@@ -586,15 +588,16 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.sidePanel.webview.postMessage({ type: "refresh" });
   }
 
-  /** The side bar's Library tab (media/shared/librarypage.js) as the Library's host sees it: a page that hears through
-   *  the side bar ("sideLibrary"), so the tab and the full Library in its editor tab are answered by the same code. */
+  /** The side bar's Library tab (media/library.js, mounted by media/main.js) as the Library's host sees it: a page
+   *  that hears through the side bar ("sideLibrary"), so the tab and the Library's editor tab, one module, are answered
+   *  by the same code. */
   private readonly sidePanel = { webview: { postMessage: (message: unknown): Thenable<boolean> => {
     try { this.host?.postHome({ type: "sideLibrary", message }); } catch { /* the side bar is closed: nothing to tell */ }
     return Promise.resolve(true);
   } } } as unknown as vscode.WebviewPanel;
 
-  /** What the side bar's Library tab asks: the same messages the full Library's page sends (its lists, a row opened, a
-   *  picture read), checked the same way. Never a pin: the side bar's own dock answers those. */
+  /** What the side bar's Library tab asks: the messages the Library's editor tab sends (SIDE_LIBRARY), checked the
+   *  same way. Never a pin: the side bar's own dock answers those. */
   async sideLibrary(message: any): Promise<void> {
     const type = String(message?.type || "");
     if (!SIDE_LIBRARY.has(type)) return;
@@ -635,7 +638,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     }
   }
 
-  /** Work's images for the Library (images_library), the fields it shows. A path is one images_library listed. */
+  /** The Library's Images (images_library): every image DGC made or kept, in Work, ChatDGC and the Pips (one surface
+   *  when the page asks for one), the fields it shows, each with who made it (`made_by`) and, for one the model kept on
+   *  purpose, `kept` with its title and why. A path is one images_library listed. */
   private async workImages(panel: vscode.WebviewPanel, message: any): Promise<void> {
     const offered = !!this.host?.imagesOffered?.() && !!this.host?.imagesLibrary;
     if (!offered) { void panel.webview.postMessage({ type: "workImagesOffered", on: false }); return; }
@@ -643,23 +648,27 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const offset = Number.isInteger(message?.offset) && message.offset >= 0 ? message.offset : 0;
     const limit = Number.isInteger(message?.limit) && message.limit >= 1 && message.limit <= 60 ? message.limit : 60;
     const query = typeof message?.query === "string" ? message.query.trim().slice(0, 200) : "";
+    const surface = typeof message?.surface === "string" && /^(work|chat|pip)$/.test(message.surface) ? message.surface : "";
     try {
-      const ev = await this.host!.imagesLibrary!({ ...(query ? { query } : {}), surface: "work", limit, offset });
+      const ev = await this.host!.imagesLibrary!({ ...(query ? { query } : {}), ...(surface ? { surface } : {}), limit, offset });
       const images = (Array.isArray(ev?.images) ? ev.images : []).filter((img: any) => typeof img?.path === "string"
         && img.path.length <= 4096 && WORK_IMAGE.test(img.path)).slice(0, 60).map((img: any) => {
         if (this.workImagePaths.size >= 5000) this.workImagePaths.clear();
         this.workImagePaths.add(img.path);
         const words = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : "";
         const count = (value: unknown) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
+        const by = img.made_by && typeof img.made_by === "object" ? img.made_by : null;
         return { path: img.path, rel: words(img.rel, 4096), prompt: words(img.prompt, 500), generator_name: words(img.generator_name, 64),
                  model: words(img.model, 256), project: words(img.project, 4096), created_at: words(img.created_at, 64),
-                 width: count(img.width), height: count(img.height), bytes: count(img.bytes) };
+                 width: count(img.width), height: count(img.height), bytes: count(img.bytes), surface: words(img.surface, 24),
+                 ...(by ? { made_by: { kind: words(by.kind, 24), id: words(by.id, 128), name: words(by.name, 120) } } : {}),
+                 ...(img.kept === true ? { kept: true, title: words(img.title, 200), why: words(img.why, 500) } : {}) };
       });
       void panel.webview.postMessage({ type: "workImages", seq, offset, images, total: Number(ev?.total) || 0,
                                        next: Number.isInteger(ev?.next_offset) ? ev.next_offset : null });
     } catch (err: any) {
       void panel.webview.postMessage({ type: "workImages", seq, offset, images: [], total: 0, next: null,
-                                       error: `Work's images couldn't be listed: ${String(err?.message || err)}` });
+                                       error: `The images couldn't be listed: ${String(err?.message || err)}` });
     }
   }
 
@@ -697,7 +706,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     }
   }
 
-  /** The Library, in a tab of its own (one at a time); `view` "widgets" or "artifacts" opens it on that tab. */
+  /** The Library, in a tab of its own (one at a time); `view` opens it on that tab (LIBRARY_VIEWS). Its tab wears the
+   *  Library's own icon, his Iris books (media/icons/library-iris, the PNG as he made it, light and dark). */
   openLibrary(view = ""): void {
     // Shown again, it asks again: a file attached or made since is there (it keeps its filters).
     if (this.library) {
@@ -709,7 +719,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.libraryView = view;                 // said once the page is ready to hear it
     const panel = vscode.window.createWebviewPanel(CHATDGC_LIBRARY, "Library", vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] });
-    panel.iconPath = this.chatdgcIcon();
+    const iris = vscode.Uri.joinPath(this.context.extensionUri, "media", "icons", "library-iris", "png", "library-iris-32.png");
+    panel.iconPath = { light: iris, dark: iris };
     this.library = panel;
     panel.onDidDispose(() => { if (this.library === panel) this.library = undefined; });
     panel.webview.onDidReceiveMessage((message) => { void this.fromLibrary(panel, message); });
@@ -966,6 +977,18 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       return;
     }
     switch (message?.type) {
+      case "maker": {
+        // A maker's name was pressed in the Library's editor tab: back to that chat, project, session or Pip.
+        const maker = message.maker && typeof message.maker === "object" ? message.maker : {};
+        const kind = String(maker.kind || ""), id = String(maker.id || "");
+        if (kind === "chat" && CONVERSATION_ID.test(id)) this.open(id);
+        else if (kind === "project" && PROJECT_ID.test(id)) this.openProject(id);
+        else if ((kind === "session" && /^[A-Za-z0-9_-]{1,128}$/.test(id)) || (kind === "pip" && /^pip_[0-9a-f]{32}$/.test(id))) this.host?.openMaker?.({ kind, id, name: String(maker.name || "").slice(0, 120) });
+        return;
+      }
+      case "settings":
+        this.host?.openSettings?.(message.section === "security" ? "security" : "general");
+        return;
       case "videoList":
         await this.libraryVideos(panel, message);
         return;
@@ -2800,7 +2823,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       }
       case "homeLibraryOpen":
-        this.openLibrary(message.view === "widgets" && this.widgetLibrary() ? "widgets" : message.view === "artifacts" && this.artifactsOffer() ? "artifacts" : "");
+        // "Open the Library in the editor", from the side bar's Library: on the tab it was on.
+        this.openLibrary(typeof message.view === "string" && LIBRARY_VIEWS.has(message.view) ? message.view : "");
         return;
     }
   }

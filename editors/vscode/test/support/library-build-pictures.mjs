@@ -1,39 +1,16 @@
 // What test/render-library-build.mjs pictures (0.52, 15 Nov: the Library everywhere, Always allow on every Pip card,
 // deep research's row, the site card at the narrowest side bar), item by item. Not a *.test.mjs file.
-import { openLibraryTab, LIB_ARTIFACTS } from "./library-scene.mjs";
 import { openGrid } from "./home-grid-scene.mjs";
 import { openCard, HOLDS } from "./pip-cards-scene.mjs";
 import { openChat as openPipChat } from "./pip-chat-scene.mjs";
 import { openResearch } from "./deep-research-scene.mjs";
 
 const THEMES = ["dark", "light"], WIDTHS = [170, 300, 440, 700];
-const LONG = "A page with a name so long that it cannot fit on one line of a narrow side bar";
 const tag = (width, theme, finger) => `${width}-${theme}${finger ? "-touch" : ""}`;
 
 export const PICTURES = {
-  // 1 + 2. The Library tab: the five tabs, the page, each filter's menu, a filter chosen, many long names, nothing yet.
-  library: async ({ browser, touch, shot }) => {
-    for (const theme of THEMES) for (const width of WIDTHS) for (const finger of [false, true]) {
-      const b = finger ? touch : browser, t = tag(width, theme, finger);
-      let x = await openLibraryTab(b, { width, theme: `${theme}-modern`, touch: finger });
-      try { await shot(x.page, `2-library-${t}`);
-        if (!finger) { await x.page.hover("#library-list .lib-row:nth-child(2) .lib-row-maker"); await x.page.waitForTimeout(250); await shot(x.page, `2-library-row-hover-${t}`); await x.page.mouse.move(1, 1); }
-        await x.menu("type"); await shot(x.page, `2-library-type-menu-${t}`); await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(200);
-        await x.menu("maker"); await shot(x.page, `2-library-maker-menu-${t}`);
-        await x.pick("maker", "Rent or buy: the numbers"); await x.pick("type", "Widgets"); await shot(x.page, `2-library-widgets-of-one-chat-${t}`);
-        await x.pick("type", "Dashboards"); await shot(x.page, `2-library-nothing-found-${t}`);
-        await x.pick("type", "All"); await x.pick("maker", "Anyone");
-        await x.page.click("#library-more"); await x.page.waitForTimeout(350); await shot(x.page, `2-library-more-menu-${t}`);
-      } finally { await x.close(); }
-      if (finger) continue;
-      const many = Array.from({ length: 40 }, (_, k) => ({ ...LIB_ARTIFACTS[k % LIB_ARTIFACTS.length], id: "ar_" + String(k).padStart(16, "a"), title: k % 2 ? `${LONG} (${k})` : `Item ${k}`,
-        ...(k % 3 ? {} : { made_by: { kind: "pip", id: "pip_" + "9".repeat(32), name: "Checkout smoke tests, every night at two" } }) }));
-      x = await openLibraryTab(b, { width, theme: `${theme}-modern`, artifacts: many });
-      try { await shot(x.page, `2-library-many-long-${t}`); } finally { await x.close(); }
-      x = await openLibraryTab(b, { width, theme: `${theme}-modern`, artifacts: [], files: [], images: [] });
-      try { await shot(x.page, `2-library-empty-${t}`); } finally { await x.close(); }
-    }
-  },
+  // (The Library page itself is Library v2's now, one module in the side bar and in its editor tab: its pictures are
+  // test/render-library-v2.mjs.)
   // 1. Home's top row: Library beside Cards (and beside Home's back arrow while a card is open); the five tabs over it.
   home: async ({ browser, touch, shot }) => {
     for (const theme of THEMES) for (const width of WIDTHS) for (const finger of [false, true]) {

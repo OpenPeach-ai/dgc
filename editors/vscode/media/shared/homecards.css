@@ -39,6 +39,8 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-cards-btn, .hc-library-btn, .hc-back, .hc-done { height: var(--btn-h); }
 .hc-cards-btn, .hc-library-btn { gap: 6px; padding: 0 10px 0 8px; }
 .hc-cards-btn { --mosaic-play: paused; }
+/* The Library button's mark: his Iris books at 16 px (their own --size; nothing else of them is touched). */
+.hc-library-btn .library-iris { --size: 16px; }
 /* Library, beside Cards (15 Nov): the same button. At a narrow side bar both are their marks alone (a button becomes an
    icon before a word is cut), each a square of the button's height; the word stays for a screen reader. */
 @media (max-width: 259px) {

@@ -23,8 +23,8 @@ const TABS = { work: { home: "#work-home", title: "Work", search: "#sessions-sea
   chat: { home: "#chats-home", title: "Chat", search: "#chats-search", more: "#chats-more-menu", rows: ["New incognito chat", "What DGC remembers", "Archived chats", "Chat settings"] } };
 const head = (page, t) => page.evaluate(({ home, search, more }) => {
   const box = (n) => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, h: r.height, w: r.width }; };
-  const section = document.querySelector(home), header = section.querySelector(".home-head"); if (!header) return null;
-  const title = header.querySelector(".home-title"), dots = document.querySelector(more), s = getComputedStyle(header);
+  const section = document.querySelector(home), header = section.querySelector(".dgc-pagehead"); if (!header) return null;
+  const title = header.querySelector(".dgc-pagehead-title"), dots = document.querySelector(more), s = getComputedStyle(header);
   return { first: section.firstElementChild === header, header: box(header), title: { ...box(title), text: title.textContent.trim(), tag: title.tagName }, dots: { ...box(dots), label: dots.getAttribute("aria-label"), radius: parseFloat(getComputedStyle(dots).borderTopLeftRadius) },
     line: parseFloat(s.borderBottomWidth), lineStyle: s.borderBottomStyle, search: box(document.querySelector(search)), panel: box(section), sideways: document.documentElement.scrollWidth > innerWidth };
 }, t);

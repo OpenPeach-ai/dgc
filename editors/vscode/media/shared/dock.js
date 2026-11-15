@@ -19,7 +19,7 @@
 //
 // A page gives it what to show; this piece draws, sizes, moves and opens it:
 //   const dock = DgcDock.create({ host, onOpen, onUnpin, onMove, onReorder, onColour, onNew, onMenu });
-//   dock.update({ items: [{ key, kind, title, state, icon, dot, badge, colour, menu, gone }], show, size, offers });
+//   dock.update({ items: [{ key, kind, title, state, icon, dot, badge, fresh, colour, menu, gone }], show, size, offers });
 // An item may bring its menu's first rows itself (`menu`: groups of { id, label, icon, disabled }, a Work folder's: New
 // session here, Open in new window, Unpin); "unpin" and "open" are answered here as ever, anything else by onMenu(key, id).
 // One that is `gone` (a folder that is not there any more) is dimmed.
@@ -88,11 +88,15 @@
       const focused = bar.contains(doc.activeElement) ? keyOf(doc.activeElement) || "+" : "";
       if (stop === null || (stop !== "+" && !items.some((item) => item.key === stop))) stop = items[0]?.key || null;
       bar.innerHTML = items.map((item) => {
-        const said = [item.title, item.state, item.badge && !/waiting|okay/i.test(item.state || "") ? `${item.badge} waiting for you` : ""].filter(Boolean).join(". ");
+        // (A new message nobody has read: a small dot on the tile's top-right corner, never a number. What waits for your
+        // okay wins the corner, so the dot is drawn only where there is no number.)
+        const fresh = !!item.fresh && !item.badge;
+        const said = [item.title, item.state, item.badge && !/waiting|okay/i.test(item.state || "") ? `${item.badge} waiting for you` : "", fresh ? "New message" : ""].filter(Boolean).join(". ");
         return `<button type="button" class="dgc-dock-item" data-key="${esc(item.key)}" data-kind="${esc(item.kind)}"${item.gone ? ' data-gone="1"' : ""} tabindex="${item.key === stop ? 0 : -1}"`
           + ` aria-label="${esc(said)}" aria-haspopup="menu" aria-expanded="false" aria-keyshortcuts="Shift+F10">`
           + `<span class="dgc-dock-tile">${item.icon || ""}</span>`
           + (item.badge ? `<span class="dgc-dock-badge" aria-hidden="true">${esc(item.badge > 99 ? "99+" : item.badge)}</span>` : "")
+          + (fresh ? '<span class="dgc-dock-new" aria-hidden="true"></span>' : "")
           + (item.dot ? `<span class="dgc-dock-dot" data-dot="${item.dot === "live" ? "live" : "open"}" aria-hidden="true"></span>` : "") + "</button>";
       }).join("")
         + (items.length ? '<span class="dgc-dock-sep" aria-hidden="true"></span>' : "")
@@ -248,7 +252,7 @@
       if (named) named.removeAttribute("aria-describedby");
       named = button || null;
       const item = named ? itemOf(named) : null;
-      const title = named?.dataset.add ? "New" : item?.title || "", state = named?.dataset.add ? "A session, a chat, a Pip, or Settings" : item?.state || "";
+      const title = named?.dataset.add ? "New" : item?.title || "", state = named?.dataset.add ? "A session, a chat, a Pip, or Settings" : [item?.fresh && !item?.badge ? "New message" : "", item?.state || ""].filter(Boolean).join(" · ");
       if (!named || !title || menuOpen()) { tip.hidden = true; named = null; return; }
       tip.querySelector("b").textContent = title; tip.querySelector("span").textContent = state;
       tip.hidden = false; named.setAttribute("aria-describedby", tip.id);

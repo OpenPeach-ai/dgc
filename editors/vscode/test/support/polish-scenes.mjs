@@ -124,11 +124,14 @@ export const SCENES = {
   "library-tab": async (b, { width, theme, touch }, visit) => {
     let x = await openLibraryTab(b, { width, theme: modern(theme), touch });
     try { await visit("list", x.page);
-      await x.menu("type"); await visit("type-menu", x.page, { focus: false, hover: false }); await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(200);
+      await x.menu("kind"); await visit("kind-menu", x.page, { focus: false, hover: false }); await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(200);
       await x.menu("maker"); await visit("maker-menu", x.page, { focus: false, hover: false });
-      await x.pick("maker", "Rent or buy: the numbers"); await x.pick("type", "Dashboards"); await visit("long-filters-nothing-found", x.page);
-      await x.pick("type", "All"); await x.pick("maker", "Anyone");
+      await x.pick("maker", "Rent or buy: the numbers"); await x.pick("kind", "Dashboards"); await visit("long-filters-nothing-found", x.page);
+      await x.pick("kind", "All"); await x.pick("maker", "Anyone");
       await x.page.click("#library-more"); await x.page.waitForTimeout(350); await visit("more-menu", x.page, { focus: false, hover: false }); await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(200);
+      // Each of its own tabs (Library v2): Widgets, Images, Videos, Files.
+      for (const tab of ["widgets", "images", "videos", "files"]) { await x.libTab(tab); await visit(tab, x.page); }
+      await x.libTab("artifacts");
       await scrollAll(x.page, "end"); await x.settle(); await visit("list-end", x.page, { focus: false });
     } finally { await x.close(); }
     // Many things with long names, from makers with long names.
@@ -136,7 +139,7 @@ export const SCENES = {
       ...(k % 3 ? {} : { made_by: { kind: "pip", id: "pip_" + "9".repeat(32), name: "Checkout smoke tests, every night at two" } }) }));
     x = await openLibraryTab(b, { width, theme: modern(theme), touch, artifacts: many });
     try { await visit("many-long", x.page); await scrollAll(x.page, "end"); await x.settle(); await visit("many-long-end", x.page, { focus: false }); } finally { await x.close(); }
-    x = await openLibraryTab(b, { width, theme: modern(theme), touch, artifacts: [], files: [], images: [] });
+    x = await openLibraryTab(b, { width, theme: modern(theme), touch, artifacts: [], files: [], images: [], videos: [], widgets: [] });
     try { await visit("empty", x.page); } finally { await x.close(); }
     // Home's top row: Library beside Cards, and beside Back while a card is open.
     const g = await openGrid(b, { width, theme: modern(theme), layout: ["needs", "recent", "clock"], height: 700, touch });

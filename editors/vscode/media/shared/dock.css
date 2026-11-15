@@ -56,6 +56,11 @@
   background: var(--text-strong); color: var(--bg); box-shadow: 0 0 0 1.5px var(--dock-ground);
   font: var(--w-semi) 9.5px/14px var(--sans); font-variant-numeric: tabular-nums; text-align: center; pointer-events: none;
 }
+/* A new message nobody has read: a small purple dot on the same corner (never a number; the number above wins the
+   corner when something also waits for your okay). The dock's ground rings it, so it reads on any tile. */
+.dgc-dock-new { position: absolute; top: -3px; right: -3px; z-index: 1; box-sizing: border-box; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-text);
+  box-shadow: 0 0 0 1.5px var(--dock-ground); pointer-events: none; }
+body.vscode-light .dgc-dock-new, body.vscode-high-contrast-light .dgc-dock-new { background: var(--accent-fill); }
 /* Under the tile: open in an editor (quiet), or running (the accent). */
 .dgc-dock-dot { position: absolute; left: 50%; bottom: -6.5px; width: 3px; height: 3px; margin-left: -1.5px; border-radius: 50%;
   background: color-mix(in srgb, var(--text) 62%, transparent); pointer-events: none; }
@@ -111,6 +116,7 @@ body.vscode-high-contrast .dgc-dock-bar, body.vscode-high-contrast-light .dgc-do
   .dgc-dock-dot, .dgc-dock-dot[data-dot="live"] { forced-color-adjust: none; background: CanvasText; }
   .dgc-dock-dot[data-dot="live"] { background: Highlight; }
   .dgc-dock-badge { forced-color-adjust: none; background: CanvasText; color: Canvas; }
+  .dgc-dock-new { forced-color-adjust: none; background: Highlight; box-shadow: 0 0 0 1.5px Canvas; }
 }
 /* With nothing pinned yet the bar is "+" and one line of words: it stays inside a narrow side bar. */
 .dgc-dock-bar:has(> .dgc-dock-empty) { max-width: calc(100% - 8px); min-width: 0; }

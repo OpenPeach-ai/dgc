@@ -190,11 +190,12 @@ test("the Library: a file, an artifact and a widget each have a pin beside their
   try {
     await x.send({ type: "artifactsOffered", on: true });
     await x.send({ type: "library", files: [{ id: "att_" + "a".repeat(32), name: "Budget.xlsx", type: "spreadsheet", size: 2048, source: "chat", chat_id: "chat_" + "b".repeat(32), chat_title: "Goa", created_at: "2026-11-06T09:00:00Z" }], total: 1 });
-    const pin = x.page.locator("#lib-list .lib-row .lib-pin").first();
+    await x.send({ type: "view", view: "files" });
+    const pin = x.page.locator("#library-list .lib-row .lib-pin").first();
     await pin.waitFor();
     assert.equal(await pin.getAttribute("aria-pressed"), "false");
     assert.match(await pin.getAttribute("aria-label"), /^Pin to the dock: Budget\.xlsx/);
-    assert.equal(await pin.evaluate((b) => b.nextElementSibling?.getAttribute("aria-label")), "Delete from your Library", "beside Delete");
+    assert.equal(await pin.evaluate((b) => b.nextElementSibling?.getAttribute("aria-label")), "Delete from your Library…", "beside Delete");
     await pin.click();
     const [sent] = await x.posted("dockToggle");
     assert.deepEqual([sent.item.kind, sent.item.id, sent.item.title, sent.item.look.type, sent.item.ref.chat_id], ["file", "att_" + "a".repeat(32), "Budget.xlsx", "spreadsheet", "chat_" + "b".repeat(32)]);

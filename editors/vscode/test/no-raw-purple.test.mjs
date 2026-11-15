@@ -99,6 +99,8 @@ const CONTENT = [
   ["media/main.js", /TROUPE_TILES/, "the agent faces' colours in the troupe mark"],
   ["media/main.js", /^\[12\.6, 12\.6, \[|^\[2, 12\.6, \[/, "the agent faces' colours in the troupe mark"],
   ["src/pipProfile.js", /'lilac', 'Lilac'/, "a Pip's profile colour choice"],
+  // His Library icon (Iris): his own stylesheet, shipped byte for byte (library-iris-browser.test.mjs), its shades and all.
+  ["media/icons/library-iris/library.css", /\.library-iris/, "the Library icon's own drawing, as he made it"],
 ];
 const isContent = (file, where) => CONTENT.some(([f, re]) => f === file && re.test(where));
 

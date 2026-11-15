@@ -53,7 +53,7 @@ const settle = (page) => page.evaluate(() => new Promise((done) => requestAnimat
 /** Every Folio under `sel`: its widget, its palette, its markup, its size, whether it rests, and whether its holder and its row hold it. */
 const folios = (page, sel) => page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-mark="folio"]`)].map((m) => {
   const r = m.getBoundingClientRect(), part = getComputedStyle(m.querySelector("i:last-child"));
-  const row = m.closest(".lib-row, .cd-wrow, .cd-widget-card, .dgc-dock-item"), h = row.getBoundingClientRect(), words = row.querySelector(".lib-main, .cd-wwords, .cd-file-words")?.getBoundingClientRect();
+  const row = m.closest(".lib-row, .cd-wrow, .cd-widget-card, .dgc-dock-item"), h = row.getBoundingClientRect(), words = row.querySelector(".lib-row-main, .cd-wwords, .cd-file-words")?.getBoundingClientRect();
   return { id: m.closest("[data-folio]")?.dataset.folio || row.dataset.widget || row.dataset.key || row.querySelector(".lib-pin")?.dataset.pin?.replace("widget:", "") || "", set: m.dataset.mark, palette: m.dataset.palette, cls: m.className, parts: [...m.children].map((c) => c.tagName).join(""),
     hidden: m.getAttribute("aria-hidden"), w: Math.round(r.width * 100) / 100, h: Math.round(r.height * 100) / 100, name: part.animationName, state: part.animationPlayState, time: part.animationDuration,
     inside: r.left >= h.left - 0.5 && r.right <= h.right + 0.5 && r.top >= h.top - 0.5 && r.bottom <= h.bottom + 0.5, clearOfWords: !words || r.right <= words.left + 0.5,
@@ -84,12 +84,13 @@ test("the Library's Widgets tab: every widget wears its Folio, the first palette
       const list = Array.from({ length: 14 }, (_, i) => widget(i + 1));
       await x.send({ type: "widgets", widgets: list, total: 14, next: null });
       await settle(x.page);
-      const marks = await folios(x.page, "#lib-list");
+      const marks = await folios(x.page, "#library-list");
       assert.equal(marks.length, 14, "one for every widget");
       for (const m of marks) {
         assert.match(m.cls, /^folio folio--[a-z]+$/, "span.folio.folio--<palette>");
         assert.deepEqual([m.set, m.parts, m.hidden], ["folio", "III", "true"], "three empty <i>; its name beside it says which widget");
-        assert.deepEqual([m.w, m.h], [36, 36], `36 px in the row's 44 px place (${width})`);
+        // (Library v2: the row is narrow under 560 px, where its mark is 30 px; from there it is 36 px.)
+        assert.deepEqual([m.w, m.h], width < 560 ? [30, 30] : [36, 36], `its size in the row (${width})`);
         assert.ok(m.inside && m.clearOfWords && m.shown, `inside its row and clear of its name (${width})`);
         assert.deepEqual([m.name, m.state], ["folio-tilt", "paused"], "at rest (--folio-play: paused)");
       }
@@ -112,9 +113,12 @@ test("the Library's Widgets tab: every widget wears its Folio, the first palette
     await y.send({ type: "view", view: "widgets" });
     await y.send({ type: "widgets", widgets: [widget(9), widget(2), widget(31), widget(5)], total: 4, next: null });
     await settle(y.page);
-    const marks = await folios(y.page, "#lib-list");
-    assert.deepEqual(marks.map((m) => m.palette).filter((_, i) => i !== 2), [kept[`widget:${WG(9)}`], kept[`widget:${WG(2)}`], kept[`widget:${WG(5)}`]], "each wears what it was given, wherever it now is");
-    assert.ok(![marks[0].palette, marks[1].palette, marks[3].palette].includes(marks[2].palette), "the new one: not what its neighbours wear");
+    const marks = await folios(y.page, "#library-list");
+    // (The Widgets tab lists newest first since Library v2, cards and widgets together: each is found by its id.)
+    const of = (n) => marks.find((m) => m.id === WG(n));
+    assert.equal(marks.length, 4);
+    assert.deepEqual([9, 2, 5].map((n) => of(n).palette), [kept[`widget:${WG(9)}`], kept[`widget:${WG(2)}`], kept[`widget:${WG(5)}`]], "each wears what it was given, wherever it now is");
+    assert.ok(![of(9).palette, of(2).palette, of(5).palette].includes(of(31).palette), "the new one: not what its neighbours wear");
     assert.deepEqual((await y.posted("dockPalettes")).map((m) => m.list.map((r) => r.id)), [[WG(9), WG(2), WG(31), WG(5)]], "asked once, for the list in view");
   } finally { await y.page.close(); }
 });

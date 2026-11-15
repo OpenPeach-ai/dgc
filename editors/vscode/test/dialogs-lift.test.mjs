@@ -222,7 +222,6 @@ const POPOVERS = [
   ["chat", "the widgets of this chat", '<div data-x class="cd-wpanel dgc-popover" style="left:10px;top:10px">m</div>', "media/chatdgc.js", 'el("div", "cd-wpanel dgc-popover")'],
   ["chat", "the context window", '<div style="position:relative;margin-top:300px"><div data-x class="cd-pop dgc-popover">m</div></div>', "src/chatdgc.ts", 'class="cd-pop dgc-popover"'],
   ["chat", "a made file's Download menu", '<span style="position:relative"><span data-x class="cd-artifact-menu dgc-popover">m</span></span>', "media/chatdgc.js", 'el("span", "cd-artifact-menu dgc-popover")'],
-  ["chat", "the Library's Download menu", '<div style="position:relative"><div data-x class="lib-menu dgc-popover">m</div></div>', "media/library.js", 'el("div", "lib-menu dgc-popover")'],
   ["artifact", "an artifact's Download menu", '<div class="art-menu-wrap"><div data-x class="art-menu dgc-popover">m</div></div>', "src/artifacts.ts", 'class="art-menu dgc-popover"'],
   ["artifact", "an artifact's versions", '<section data-x class="art-versions dgc-popover">m</section>', "src/artifacts.ts", 'class="art-versions dgc-popover"'],
   ["canvas", "the canvas's formula box", '<div data-x class="cv-tex dgc-popover" style="left:10px;top:10px">m</div>', "src/canvasEditor.ts", '"cv-tex dgc-popover"'],
@@ -300,7 +299,7 @@ test("nothing that opens bounces or slides across: the shared layers only fade, 
   // No stylesheet keeps a heavy shadow or a dark ground of its own for a popover or a dialog.
   for (const file of ["media/main.css", "media/chatdgc.css", "media/artifact.css", "media/canvas.css", "media/mentions.css", "media/messagequeue.css", "media/trace.css", "media/shared/tray.css", "src/pips.css", "src/settings.css"]) {
     const text = read(file).replace(/\/\*[\s\S]*?\*\//g, "");
-    for (const sel of [".rail-pop", ".amenu", ".prompt-rail-card", ".mod-slash", ".dgc-queue-menu", ".cd-wpanel", ".cd-pop", ".lib-menu", ".cd-artifact-menu", ".art-menu", ".art-versions", ".cv-tex", ".runner-menu", ".pip-picker-list", ".pip-tip-pop",
+    for (const sel of [".rail-pop", ".amenu", ".prompt-rail-card", ".mod-slash", ".dgc-queue-menu", ".cd-wpanel", ".cd-pop", ".cd-artifact-menu", ".art-menu", ".art-versions", ".cv-tex", ".runner-menu", ".pip-picker-list", ".pip-tip-pop",
       ".add-menu", ".model-box-list", ".ctx-combo-list", ".goal-dialog", ".agent-map", ".auto-mode-dialog", ".cd-keys", ".dialog", ".plugin-dialog", ".dgc-trace-dialog", ".art-compare"]) {
       const own = [...text.matchAll(new RegExp(`(?:^|[},\\s])[^{}]*${sel.replace(/[.-]/g, "\\$&")}(?:::backdrop)?\\s*\\{([^{}]*)\\}`, "gm"))].map((m) => m[1]).filter((body) => /box-shadow:\s*0 \d+px \d+px/.test(body) || /::backdrop/.test(body));
       assert.deepEqual(own, [], `${file}: ${sel} has no shadow of its own`);

@@ -90,8 +90,8 @@
   const PIN_D = "M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z";
   const pinSvg = (on, size = 12) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_D}"/></svg>`;
   const PLUS = svg('<path d="M12 5v14M5 12h14"/>', 11, 2.6), CROSS = svg('<path d="M6 6l12 12M18 6L6 18"/>', 10, 2.8), BACK = svg('<path d="M15 18l-6-6 6-6"/>', 12, 2.4), TICK = svg('<path d="M5 12l5 5L20 7"/>', 11, 3);
-  // The Library's mark: books on a shelf, one leaning (the tab's icon, drawn at the Cards mark's size).
-  const LIBRARY_ICON = svg('<path d="M5 4v16M10 4v16M14.5 6.2l4.2 13.4"/>', 14, 2);
+  // The Library's mark: his Iris books (media/icons/library-iris/library.css), exactly as he made them, beside the word.
+  const LIBRARY_ICON = '<span class="library-iris" aria-hidden="true"><i></i><i></i><i></i></span>';
   const GRIP = '<svg class="hc-grip" width="12" height="16" viewBox="0 0 12 16" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="3" r="1.4"/><circle cx="9" cy="3" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="9" cy="8" r="1.4"/><circle cx="3" cy="13" r="1.4"/><circle cx="9" cy="13" r="1.4"/></g></svg>';
   const plural = (n, word, many) => `${n} ${n === 1 ? word : many || word + "s"}`;
   // The Clock: Here and at most this many added time zones (the host's own bound, src/homeCards.ts).

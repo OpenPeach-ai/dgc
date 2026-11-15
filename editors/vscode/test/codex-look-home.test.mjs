@@ -35,7 +35,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     const x = await openHome(browser, { theme, width, tab: "work", sessions: manySessions(20), motion: "reduce" });
     try {
       await x.page.waitForSelector("#sessions-list .session-row");
-      const order = await tops(x.page, ["#side-tabs", "#work-home .home-head", "#sessions-search", "#sessions-list", "#sessions-all"]);
+      const order = await tops(x.page, ["#side-tabs", "#work-home .dgc-pagehead", "#sessions-search", "#sessions-list", "#sessions-all"]);
       assert.deepEqual(order, [...order].sort((a, b) => a - b), `top to bottom: the tabs, the header row, the search box, the list, View all: ${order}`);
       const look = await x.page.evaluate(() => {
         const css = (s) => getComputedStyle(document.querySelector(s)), probe = document.createElement("i"); document.body.append(probe);

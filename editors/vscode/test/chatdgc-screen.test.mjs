@@ -1135,14 +1135,14 @@ test("the side bar has its Chat tab at once when ChatDGC was here last time; a C
     const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
     const tabs = () => page.evaluate(() => [...document.querySelectorAll('#side-tabs [role="tab"]')].filter((t) => t.checkVisibility()).map((t) => t.dataset.tab + (t.getAttribute("aria-selected") === "true" ? "*" : "")));
     await send({ type: "sessions_list", items: [{ id: "20261006-101500-a1", name: "Fix login", when: "2026-10-06 10:15", count: 4 }], searchable: true });
-    assert.deepEqual(await tabs(), ["home", "work", "chat*", "pips", "library"], "the Chat tab, and the side bar back on it, before the backend has said anything");
+    assert.deepEqual(await tabs(), ["home", "work", "chat*", "library", "pips"], "the Chat tab, and the side bar back on it, before the backend has said anything");
     assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#work-home")], [true, false]);
     assert.equal(await page.locator("#chats-status").textContent(), "Loading your chats…");
     assert.equal(await page.locator("#chats-search").getAttribute("placeholder"), "Search chats");
     await send({ type: "chatdgc_list", available: true, total: 0, items: [] });
     assert.match(await page.locator("#chats-status").textContent(), /^No chats yet/, "its answer replaces the wait");
     await send({ type: "chatdgc_list", available: false });
-    assert.deepEqual(await tabs(), ["home*", "work", "pips", "library"], "a CLI with no ChatDGC: no Chat tab, and the side bar goes to Home");
+    assert.deepEqual(await tabs(), ["home*", "work", "library", "pips"], "a CLI with no ChatDGC: no Chat tab, and the side bar goes to Home");
     assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#home-hub")], [false, true]);
     await page.locator("#side-tab-work").click();
     assert.equal(await shown(page, "#sessions-list"), true, "the sessions are on Work, as before");
@@ -1178,7 +1178,7 @@ test("the side bar: Work and Chat are tabs (a long list never hides the other), 
     assert.deepEqual([await shown(page, "#side-tab-chat"), await tab("work").getAttribute("aria-selected"), await shown(page, "#chats-home"),
                       await shown(page, "#work-home")], [true, "true", false, true], "the Chat tab is there; the side bar stays on Work");
     assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#side-tabs .dgc-tab")].map((tab) => tab.id)),
-                     ["side-tab-home", "side-tab-work", "side-tab-chat", "side-tab-pips", "side-tab-library"], "Home, Work, Chat, Pips, Library");
+                     ["side-tab-home", "side-tab-work", "side-tab-chat", "side-tab-library", "side-tab-pips"], "Home, Work, Chat, Library, Pips");
     await tab("chat").click();
     assert.equal(await page.locator("#chats-home").getAttribute("role"), "tabpanel");
     assert.equal(await page.locator("#chats-list .chat-preview").nth(1).textContent(), "…then the Dudhsagar falls on day three.",
@@ -1599,211 +1599,189 @@ test("a Library file in the box goes by id, and a file deleted from the Library 
   } finally { await s.page.close(); }
 });
 
+// The Library in its editor tab: the page src/chatdgc.ts serves, its scripts in the page's own order, on a host these
+// tests play by hand (each message as src/chatdgc.ts would say it). One module (media/library.js) draws it here and in
+// the side bar; what it holds, in both, is library-v2-browser.test.mjs. Here: what it asks the host and when, that a
+// name is always words, and that an answer to something since replaced is dropped.
 function libraryHtml() {
   const source = readFileSync(join(root, "src/chatdgc.ts"), "utf8");
-  const doc = source.slice(source.indexOf("export function libraryDocument")).match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1]
-    .replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "").replace("font-src ;", "font-src data:;");
+  const raw = source.slice(source.indexOf("export function libraryDocument")).match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1];
+  const js = [...raw.matchAll(/asset\("media\/((?:shared\/)?[\w-]+\.js)"\)/g)].map((m) => readFileSync(join(root, "media", m[1]), "utf8")).join("\n");
+  const doc = raw.replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "").replace("font-src ;", "font-src data:;");
   const codicon = readFileSync(join(root, "media/codicon.css"), "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
   const css = readStylesheet(join(root, "media/main.css")).replace(/@import[^;]*;/, "");
   const own = readFileSync(join(root, "media/chatdgc.css"), "utf8");
-  return { html: doc.replace("</head>", `<style>${codicon}</style><style>${css}</style><style>${own}</style></head>`),
-           js: readFileSync(join(root, "media/library.js"), "utf8") };
+  return { html: doc.replace("</head>", `<style>${codicon}</style><style>${css}</style><style>${own}</style></head>`), js };
 }
-
-test("the Library: every file you attached, by kind, searched by name, each with its actions", async (t) => {
-  if (skipOrFail(t)) return;
+/** Opens it. `offers`: which tabs this DGC keeps (artifacts, widgets, images, videos; Files always), said as the host says them. */
+async function openLibraryPage(offers = {}) {
   const { html, js } = libraryHtml();
   const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
+  await page.setContent(html, { waitUntil: "load" });
+  await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
+  await page.evaluate((code) => {
+    window.__posted = []; window.__state = undefined;
+    window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
+    eval(code);
+  }, js);
+  const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
+  const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
+  for (const [tab, type] of [["widgets", "widgetsOffered"], ["images", "workImagesOffered"], ["artifacts", "artifactsOffered"], ["videos", "videosOffered"]]) await send({ type, on: offers[tab] === true });
+  const tabs = () => page.locator('#library-tabs [role="tab"]:not([hidden])').allTextContents();
+  /** A filter's menu, opened: its rows' words. pick(which, label) chooses one. */
+  const menu = async (which) => { await page.click(`#library-filter-${which}`); await page.waitForSelector(".dgc-pop .dgc-menu-row"); return page.locator(".dgc-pop .dgc-menu-label").allTextContents(); };
+  const pick = async (which, label) => { if (!(await page.locator(".dgc-pop").count())) await menu(which); await page.locator(".dgc-pop .dgc-menu-row", { hasText: label }).first().click(); await page.waitForTimeout(250); };
+  const names = () => page.locator("#library-list .lib-row-name").allTextContents();
+  const metas = () => page.locator("#library-list .lib-row-meta").allTextContents();
+  const status = async () => (await page.locator("#library-status").isHidden() ? "" : page.locator("#library-status").textContent());
+  return { page, errors, send, posted, tabs, menu, pick, names, metas, status };
+}
+
+test("the Library's Files: every file you attached, by kind, searched by name, each with its actions", async (t) => {
+  if (skipOrFail(t)) return;
+  const { page, errors, send, posted, tabs, menu, pick, names, metas, status } = await openLibraryPage();
   try {
-    await page.setContent(html, { waitUntil: "load" });
-    await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
-    await page.evaluate((code) => {
-      window.__posted = []; window.__state = undefined;
-      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
-      eval(code);
-    }, js);
-    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
-    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
-    assert.deepEqual(await posted("ready"), [{ type: "ready", kind: "" }]);
-    assert.equal(await page.locator("#lib-status").textContent(), "Loading…");
+    assert.deepEqual(await posted("ready"), [{ type: "ready" }]);
+    assert.deepEqual(await tabs(), ["Files"], "a DGC that keeps only files");
+    assert.equal(await page.locator("#library-tabs").isHidden(), true, "one tab is no tab bar");
+    assert.equal(await status(), "Loading…");
+    assert.equal((await posted("list")).length, 0, "the files come with ready's own answer: not asked for twice");
     const today = new Date().toISOString();
     const files = [
       { source: "chat", chat_id: `chat_${"a".repeat(32)}`, id: `att_${"1".repeat(32)}`, name: "sign.png", kind: "image", type: "image", size: 7000, created_at: today, chat_title: "Sign" },
-      { source: "chat", chat_id: `chat_${"b".repeat(32)}`, id: `att_${"2".repeat(32)}`, name: '<img src=x onerror="window.__owned=1">.pdf', kind: "document", type: "pdf", size: 52000, created_at: "2026-01-02T10:00:00Z", chat_title: "Visa", project_name: "Travel" },
+      { source: "chat", chat_id: `chat_${"b".repeat(32)}`, id: `att_${"2".repeat(32)}`, name: '<img src=x onerror="window.__owned=1">.pdf', kind: "document", type: "pdf", size: 52000, created_at: "2026-01-02T10:00:00Z", chat_title: "Visa <b>x</b>", project_name: "Travel" },
       { source: "project", project_id: `proj_${"c".repeat(32)}`, id: `att_${"3".repeat(32)}`, name: "Hotel", kind: "text", type: "text", size: 40, created_at: today, project_name: "Goa trip" }];
     await send({ type: "library", files, total: 3, next: 3, counts: { image: 1, pdf: 1, text: 1, document: 0 } });
-    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ["sign.png", '<img src=x onerror="window.__owned=1">.pdf', "Hotel"]);
-    assert.equal(await page.evaluate(() => document.querySelectorAll(".lib-name img").length + (window.__owned || 0)), 0, "names are words");
-    const metas = await page.locator(".lib-meta").allTextContents();
-    assert.deepEqual([metas[0], metas[2]], ["Image · 7 KB · in “Sign” · Today", "Pasted text · 40 B · in the project Goa trip · Today"]);
-    assert.match(metas[1], /^PDF · 51 KB · in “Visa” · Travel · (2 Jan|Jan 2)$/, "the date as this machine writes it");
-    assert.deepEqual(await page.locator(".lib-kind").allInnerTexts(), ["All\n3", "Images\n1", "PDFs\n1", "Pasted text\n1"], "only the kinds there are");
+    assert.deepEqual(await names(), ["sign.png", '<img src=x onerror="window.__owned=1">.pdf', "Hotel"]);
+    assert.equal(await page.evaluate(() => document.querySelectorAll("#library-list img:not([data-pic]), #library-list b").length + (window.__owned || 0)), 0, "names are words");
+    const said = await metas();
+    assert.deepEqual([said[0], said[2]], ["in Sign · now · Image · 7 KB", "in Goa trip · now · Pasted text · 40 B"]);
+    assert.match(said[1], /^in Visa <b>x<\/b> · \d+(mo|y) · PDF · 51 KB · Travel$/);
+    assert.deepEqual(await menu("kind"), ["All", "Images", "PDFs", "Pasted text"], "only the kinds there are");
+    await page.keyboard.press("Escape"); await page.waitForTimeout(200);
     assert.deepEqual((await posted("image")).map((m) => m.file.id), [`att_${"1".repeat(32)}`], "an image's preview, asked for by id");
     await send({ type: "image", id: `att_${"1".repeat(32)}`, data: "data:image/png;base64,iVBORw0KGgo=" });
-    assert.equal(await page.locator(".lib-preview img").getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
+    assert.equal(await page.locator("#library-list .lib-row-thumb img").getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
+    await send({ type: "image", id: `att_${"1".repeat(32)}`, data: "javascript:alert(1)" });
+    assert.equal(await page.locator('#library-list img[src^="javascript"]').count(), 0, "only a picture's own data is ever shown");
     if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library.png") });
-    const second = page.locator(".lib-row").nth(1);
-    for (const label of ["Open the chat it's in", "Use in a new chat", "Save a copy…", "Add a copy to a project…", "Delete from your Library"]) {
+    const second = page.locator("#library-list .lib-row").nth(1);
+    for (const label of ["Open the chat it's in", "Use in a new chat", "Save a copy…", "Add a copy to a project…", "Delete from your Library…"]) {
       await second.locator(`button[aria-label="${label}"]`).click();
     }
     assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.file))).map((m) => [m.type, m.file.id]),
       [["image", `att_${"1".repeat(32)}`], ...["open", "use", "save", "toProject", "remove"].map((type) => [type, `att_${"2".repeat(32)}`])]);
-    assert.equal(await page.locator('.lib-row').nth(2).locator('button[aria-label^="Open the project"]').getAttribute("aria-label"), "Open the project Goa trip");
-    await page.locator(".lib-kind", { hasText: "PDFs" }).click();
+    assert.equal(await page.locator("#library-list .lib-row").nth(2).locator('button[aria-label^="Open the project"]').getAttribute("aria-label"), "Open the project Goa trip");
+    await pick("kind", "PDFs");
     assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "pdf", offset: 0 });
-    assert.equal(await page.evaluate(() => window.__state?.kind), "pdf", "remembered");
+    assert.equal(await page.evaluate(() => window.__state?.library?.filters?.files?.kind), "pdf", "remembered");
     await send({ type: "library", files: [files[1]], total: 2, next: 1, counts: { pdf: 2 } });
-    await page.locator("#lib-more").click();
+    await page.locator("#library-load").click();
     assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "pdf", offset: 1 });
     await send({ type: "library", files: [{ ...files[1], id: `att_${"4".repeat(32)}`, name: "older.pdf" }], total: 2, next: null, counts: { pdf: 2 } });
-    assert.equal(await page.locator(".lib-row").count(), 2, "the next page adds to the list");
-    assert.equal(await page.locator("#lib-more").isHidden(), true);
-    await page.locator("#lib-search").fill("tax");
+    assert.equal(await page.locator("#library-list .lib-row").count(), 2, "the next page adds to the list");
+    assert.equal(await page.locator("#library-load").isHidden(), true);
+    await page.locator("#library-search").fill("tax");
     // The search waits for typing to pause: wait for its request rather than a fixed time, which fails on a busy machine.
     await page.waitForFunction(() => window.__posted.filter((m) => m.type === "list").at(-1)?.query === "tax", null, { timeout: 5000 });
     assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "tax", kind: "pdf", offset: 0 });
     await send({ type: "library", files: [], total: 0, next: null, counts: { pdf: 0 } });
-    assert.equal(await page.locator("#lib-status").textContent(), "No file named like “tax”.");
+    assert.equal(await status(), "No file named like “tax”.");
     await send({ type: "error", message: "That file is no longer in your Library." });
-    assert.equal(await page.locator("#lib-status").textContent(), "That file is no longer in your Library.");
+    assert.equal(await status(), "That file is no longer in your Library.");
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
 
-test("the Library's Images show Work's images beside ChatDGC's, newest first, and Made in Work shows only them", async (t) => {
+test("the Library's Images: every image DGC made or kept, on every surface, asked for a page at a time; a late answer is dropped", async (t) => {
   if (skipOrFail(t)) return;
-  const { html, js } = libraryHtml();
-  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(String(error)));
+  const { page, errors, send, posted, tabs, pick, names, metas } = await openLibraryPage({ images: true });
   try {
-    await page.setContent(html, { waitUntil: "load" });
-    await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
-    await page.evaluate((code) => {
-      window.__posted = []; window.__state = undefined;
-      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
-      eval(code);
-    }, js);
-    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
-    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
     const hour = (h) => new Date(Date.now() - h * 3600000).toISOString();
-    const chatImage = { source: "chat", chat_id: `chat_${"a".repeat(32)}`, id: `att_${"1".repeat(32)}`, name: "sign.png", kind: "image", type: "image",
-                        size: 7000, created_at: hour(1), chat_title: "Sign", made: true };
-    const pdf = { source: "chat", chat_id: `chat_${"b".repeat(32)}`, id: `att_${"2".repeat(32)}`, name: "visa.pdf", kind: "document", type: "pdf", size: 52000, created_at: hour(3), chat_title: "Visa" };
-    await send({ type: "library", files: [chatImage, pdf], total: 2, next: null, counts: { image: 1, pdf: 1 }, origins: { made: 1, uploaded: 1 } });
-    assert.deepEqual(await posted("workImages"), [], "not before the backend says it lists them");
-    await send({ type: "workImagesOffered", on: true });
+    assert.deepEqual(await tabs(), ["Images", "Files"]);
+    assert.equal(await page.locator("#library-tab-images").getAttribute("aria-selected"), "true", "the first tab this DGC keeps is the one it opens on");
+    await send({ type: "library", files: [], total: 0, next: null, counts: {} });
+    assert.equal((await posted("workImages")).length, 1, "asked once, when its tab came on screen");
     const ask = (await posted("workImages")).at(-1);
-    assert.deepEqual({ ...ask, seq: undefined }, { type: "workImages", query: "", offset: 0, limit: 60, seq: undefined });
-    const fox = { path: '/home/me/app/assets/generated/fox <img src=x onerror="window.__owned=1">.png', rel: 'assets/generated/fox <img src=x onerror="window.__owned=1">.png', prompt: "a red fox in snow",
-                  generator_name: "ComfyUI on gpu-box", project: "/home/me/app", created_at: hour(0.5), width: 768, height: 320, bytes: 46000 };
-    const owl = { ...fox, path: "/home/me/app/assets/generated/owl.png", rel: "assets/generated/owl.png", prompt: "an owl", created_at: hour(2) };
-    await send({ type: "workImages", seq: ask.seq, offset: 0, images: [fox, owl], total: 2, next: null });
-    assert.match(await page.locator("#lib-about").textContent(), /and every image DGC made in Work/);
-    assert.deepEqual(await page.locator("#lib-kinds .lib-kind").allInnerTexts(), ["All\n4", "Images\n3", "PDFs\n1"], "Work's images count among the Images");
-    assert.deepEqual(await page.locator("#lib-origins .lib-kind").allInnerTexts(), ["All\n4", "Uploaded\n1", "Made by ChatDGC\n1", "Made in Work\n2"]);
-    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ['fox <img src=x onerror="window.__owned=1">.png', "sign.png", "owl.png", "visa.pdf"], "newest first");
-    assert.equal(await page.evaluate(() => document.querySelectorAll(".lib-name img").length + (window.__owned || 0)), 0, "names are words");
-    const meta = await page.locator(".lib-work .lib-meta").first().textContent();
-    assert.equal(meta, "Image · 768×320 · 45 KB · made in Work · app · ComfyUI on gpu-box · Today");
-    assert.equal(await page.locator(".lib-work .lib-name").first().getAttribute("title"), "a red fox in snow", "its prompt one hover away");
+    assert.deepEqual({ ...ask, seq: undefined }, { type: "workImages", query: "", offset: 0, limit: 60, seq: undefined }, "every surface: no `surface` is named");
+    const fox = { path: '/home/me/app/assets/generated/fox <img src=x onerror="window.__owned=1">.png', rel: 'assets/generated/fox <img src=x onerror="window.__owned=1">.png', prompt: 'a red fox <b>in</b> snow',
+                  generator_name: "ComfyUI on gpu-box", project: "/home/me/app", created_at: hour(0.5), width: 768, height: 320, bytes: 46000, surface: "work",
+                  made_by: { kind: "session", id: "20261106-101500-a1", name: 'Snow <i>scenes</i>' } };
+    const owl = { ...fox, path: "/home/me/.dgc/images/kept/owl.png", rel: "", prompt: "An owl", title: "The barn owl", why: "For the bird count", kept: true, surface: "pip", created_at: hour(2),
+                  made_by: { kind: "pip", id: "pip_" + "b".repeat(32), name: "Bird counter" }, generator_name: "", project: "" };
+    await send({ type: "workImages", seq: ask.seq, offset: 0, images: [fox, owl], total: 3, next: 2 });
+    assert.deepEqual(await names(), ['a red fox <b>in</b> snow', "The barn owl"], "a made image by its words, a kept one by its title");
+    assert.equal(await page.evaluate(() => document.querySelectorAll("#library-list img:not([data-pic]), #library-list b, #library-list i").length + (window.__owned || 0)), 0, "names are words");
+    assert.deepEqual(await metas(), ["made by Snow <i>scenes</i> · 30m · 768×320 · 45 KB · ComfyUI on gpu-box · app", "kept by Bird counter · 2h · 768×320 · 45 KB"]);
+    assert.match(await page.locator("#library-list .lib-row").nth(1).getAttribute("title"), /For the bird count/, "why it was kept, one hover away");
     assert.deepEqual((await posted("workImage")).map((m) => m.path), [fox.path, owl.path], "each preview asked for by its path");
     await send({ type: "workImageData", path: fox.path, data: "data:image/png;base64,iVBORw0KGgo=" });
-    assert.equal(await page.locator(".lib-work img").first().getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
-    for (const label of ["Open the image", "Show it in its folder", "Save a copy…"]) await page.locator(".lib-work").first().locator(`button[aria-label="${label}"]`).click();
-    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => /^workImage(Open|Reveal|Save)$/.test(m.type)))).map((m) => [m.type, m.path]),
-      [["workImageOpen", fox.path], ["workImageReveal", fox.path], ["workImageSave", fox.path]]);
-    if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library-work-images.png") });
-    // PDFs: no Work image among them, but still counted under Images.
-    await page.locator("#lib-kinds .lib-kind", { hasText: "PDFs" }).click();
-    const counting = (await posted("workImages")).at(-1);
-    assert.equal(counting.limit, 1, "on another kind, only how many there are");
-    await send({ type: "library", files: [pdf], total: 1, next: null, counts: { image: 1, pdf: 1 }, origins: { made: 1, uploaded: 1 } });
-    await send({ type: "workImages", seq: counting.seq, offset: 0, images: [fox], total: 2, next: 1 });
-    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ["visa.pdf"]);
-    assert.equal(await page.locator("#lib-more").isHidden(), true, "no more of Work's to show on PDFs");
-    // Made in Work: only Work's images.
-    await page.locator("#lib-kinds .lib-kind", { hasText: "All" }).click();
-    await page.locator("#lib-origins .lib-kind", { hasText: "Made in Work" }).click();
-    const list = (await posted("list")).at(-1);
-    assert.equal(list.origin, undefined, "ChatDGC is asked for its counts only");
-    const own = (await posted("workImages")).at(-1);
-    await send({ type: "library", files: [chatImage, pdf], total: 2, next: null, counts: { image: 1, pdf: 1 }, origins: { made: 1, uploaded: 1 } });
-    await send({ type: "workImages", seq: own.seq, offset: 0, images: [fox, owl], total: 3, next: 2 });
-    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ['fox <img src=x onerror="window.__owned=1">.png', "owl.png"]);
-    assert.deepEqual(await page.locator("#lib-kinds .lib-kind").allInnerTexts(), ["All\n3", "Images\n3"]);
-    await page.locator("#lib-more").click();
+    assert.equal(await page.locator("#library-list .lib-row-thumb img").first().getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
+    for (const label of ["Open the image", "Show it in its folder", "Save a copy…", "Save to project…"]) await page.locator("#library-list .lib-row").first().locator(`button[aria-label="${label}"]`).click();
+    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => /^workImage(Open|Reveal|Save|ToProject)$/.test(m.type)))).map((m) => [m.type, m.path]),
+      [["workImageOpen", fox.path], ["workImageReveal", fox.path], ["workImageSave", fox.path], ["workImageToProject", fox.path]]);
+    if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library-images.png") });
+    // Show more: the next page, added to the list.
+    await page.locator("#library-load").click();
     const next = (await posted("workImages")).at(-1);
-    assert.equal(next.offset, 2, "the next page of Work's images");
-    // A search answered after a newer one is dropped.
-    await send({ type: "workImages", seq: own.seq, offset: 0, images: [], total: 0, next: null });
-    assert.equal(await page.locator(".lib-row").count(), 2);
-    // Only Work has made images: no Uploaded or Made by ChatDGC filter to offer.
-    await page.locator("#lib-origins .lib-kind", { hasText: "All" }).click();
-    const all = (await posted("workImages")).at(-1);
-    await send({ type: "library", files: [], total: 0, next: null, counts: {}, origins: { made: 0, uploaded: 0 } });
-    await send({ type: "workImages", seq: all.seq, offset: 0, images: [fox], total: 1, next: null });
-    assert.deepEqual(await page.locator("#lib-origins .lib-kind").allInnerTexts(), ["All\n1", "Made in Work\n1"]);
-    // A backend that stops listing them: Made in Work goes, and the Library is as it was.
+    assert.deepEqual([next.offset, next.seq], [2, ask.seq], "the next page of the same list");
+    await send({ type: "workImages", seq: next.seq, offset: 2, images: [{ ...fox, path: "/home/me/app/assets/generated/hare.png", prompt: "a hare" }], total: 3, next: null });
+    assert.deepEqual(await names(), ['a red fox <b>in</b> snow', "The barn owl", "a hare"]);
+    assert.equal(await page.locator("#library-load").isHidden(), true);
+    // One maker: the host is asked for that surface. An answer to what was asked before is dropped.
+    await pick("maker", "Pips");
+    const pips = (await posted("workImages")).at(-1);
+    assert.deepEqual([pips.surface, pips.offset, pips.seq > ask.seq], ["pip", 0, true]);
+    await send({ type: "workImages", seq: ask.seq, offset: 0, images: [fox], total: 1, next: null });
+    assert.equal((await names()).includes("The barn owl"), true, "a late answer to the older list changes nothing");
+    await send({ type: "workImages", seq: pips.seq, offset: 0, images: [owl], total: 1, next: null });
+    assert.deepEqual(await names(), ["The barn owl"]);
+    // A backend that stops listing images: the tab goes, and the Library is on what it still keeps.
     await send({ type: "workImagesOffered", on: false });
-    assert.equal(await page.evaluate(() => [...document.querySelectorAll("#lib-origins .lib-kind")].some((c) => /Made in Work/.test(c.textContent))), false);
-    assert.equal(await page.locator(".lib-work").count(), 0);
+    assert.deepEqual(await tabs(), ["Files"]);
+    assert.equal(await page.locator("#library-tab-files").getAttribute("aria-selected"), "true");
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
 
-test("the Library's widgets: a tab of their own once the backend keeps them, each to open beside you, see its chat, or delete", async (t) => {
+test("the Library's Widgets: a tab of their own once the backend keeps them, each to open beside you, see its chat, or delete", async (t) => {
   if (skipOrFail(t)) return;
-  const { html, js } = libraryHtml();
-  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(String(error)));
+  const { page, errors, send, posted, tabs, names, metas, status } = await openLibraryPage();
   try {
-    await page.setContent(html, { waitUntil: "load" });
-    await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
-    await page.evaluate((code) => {
-      window.__posted = []; window.__state = undefined;
-      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
-      eval(code);
-    }, js);
-    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
-    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
     await send({ type: "library", files: [], total: 0, next: null, counts: {} });
-    assert.equal(await page.locator("#lib-views").isHidden(), true, "not before the backend says it keeps them");
-    await send({ type: "widgetsOffered", on: true });
-    assert.deepEqual(await page.locator(".lib-view").allTextContents(), ["Files", "Widgets"]);
+    assert.deepEqual(await tabs(), ["Files"], "not before the backend says it keeps them");
+    await send({ type: "artifactsOffered", on: true }); await send({ type: "widgetsOffered", on: true });
+    assert.deepEqual(await tabs(), ["Artifacts", "Widgets", "Files"]);
     // Opened from a chat's Widgets list ("Open the Library"): on its Widgets tab.
     await send({ type: "view", view: "widgets" });
-    assert.equal(await page.locator(".lib-view", { hasText: "Widgets" }).getAttribute("aria-selected"), "true");
+    assert.equal(await page.locator("#library-tab-widgets").getAttribute("aria-selected"), "true");
     assert.deepEqual((await posted("widgets")).at(-1), { type: "widgets", query: "", offset: 0 });
-    await page.locator(".lib-view", { hasText: "Files" }).click();
-    await page.locator(".lib-view", { hasText: "Widgets" }).click();
-    assert.deepEqual((await posted("widgets")).at(-1), { type: "widgets", query: "", offset: 0 });
-    assert.equal(await page.evaluate(() => window.__state?.view), "widgets", "remembered");
-    assert.equal(await page.locator("#lib-search").getAttribute("placeholder"), "Search widgets");
-    assert.equal(await page.locator("#lib-kinds").isHidden(), true);
-    assert.match(await page.locator("#lib-about").textContent(), /^Every calculator, timer or quiz ChatDGC made for you/);
+    assert.equal(await page.evaluate(() => window.__state?.library?.tab), "widgets", "remembered");
+    assert.equal(await page.locator("#library-search").getAttribute("placeholder"), "Search widgets");
+    assert.deepEqual(await page.locator("#library-filters .lib-filter .dgc-folder-k").allTextContents(), ["By"], "its filter is the maker");
     const w = { chat_id: `chat_${"a".repeat(32)}`, id: `wg_${"1".repeat(16)}`, message_id: M(2), title: "EMI <b>calculator</b>",
                 created_at: new Date().toISOString(), chat_title: "Home loan" };
+    await send({ type: "artifacts", items: [] });
     await send({ type: "widgets", widgets: [w], total: 1, next: null });
-    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ["EMI <b>calculator</b>"], "a name is words");
-    assert.equal(await page.locator(".lib-meta").textContent(), "Interactive · in “Home loan” · Today");
+    assert.deepEqual(await names(), ["EMI <b>calculator</b>"], "a name is words");
+    assert.deepEqual(await metas(), ["made by Home loan · now · Interactive"]);
     if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library-widgets.png") });
-    for (const label of ["Open it beside you", "Open the chat it's in", "Delete the widget"]) await page.locator(`button[aria-label="${label}"]`).click();
+    for (const label of ["Open it beside you", "Open the chat it's in", "Delete the widget…"]) await page.locator(`#library-list button[aria-label="${label}"]`).click();
     assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.widget))).map((m) => [m.type, m.widget.id]),
                      [["widgetOpen", w.id], ["widgetChat", w.id], ["widgetRemove", w.id]]);
-    await page.locator("#lib-search").fill("tip");
-    await page.waitForTimeout(400);
+    await page.locator("#library-search").fill("tip");
+    await page.waitForFunction(() => window.__posted.filter((m) => m.type === "widgets").at(-1)?.query === "tip", null, { timeout: 5000 });
     assert.deepEqual((await posted("widgets")).at(-1), { type: "widgets", query: "tip", offset: 0 });
     await send({ type: "widgets", widgets: [], total: 0, next: null });
-    assert.equal(await page.locator("#lib-status").textContent(), "No widget named like “tip”.");
-    // A backend that no longer keeps them: back to the files.
-    await send({ type: "widgetsOffered", on: false });
-    assert.equal(await page.locator("#lib-views").isHidden(), true);
-    assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "", offset: 0 });
+    assert.equal(await status(), "No widget named like “tip”.");
+    // A backend that keeps neither any more: back to the files.
+    await send({ type: "widgetsOffered", on: false }); await send({ type: "artifactsOffered", on: false });
+    assert.deepEqual(await tabs(), ["Files"]);
+    assert.equal(await page.locator("#library-tab-files").getAttribute("aria-selected"), "true");
+    assert.equal((await posted("list")).at(-1).query, "tip", "its words go with it to the tab it lands on");
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
@@ -3240,36 +3218,24 @@ test("memory: a reply says what it saved, with Forget, and the way to everything
   } finally { await s.page.close(); }
 });
 
-test("the Library: once ChatDGC has made a file, show what you uploaded or what it made", async (t) => {
+test("the Library's Files: show what you uploaded or what ChatDGC made; shown again, it asks again with the filter kept", async (t) => {
   if (skipOrFail(t)) return;
-  const { html, js } = libraryHtml();
-  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(String(error)));
+  const { page, errors, send, posted, menu, pick, names, metas } = await openLibraryPage();
   try {
-    await page.setContent(html, { waitUntil: "load" });
-    await page.evaluate((code) => {
-      window.__posted = []; window.__state = undefined;
-      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
-      eval(code);
-    }, js);
-    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
-    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
-    await send({ type: "library", files: [], total: 0, next: null, counts: {}, origins: { made: 0, uploaded: 0 } });
-    assert.equal(await page.locator("#lib-origins").isHidden(), true, "nothing made yet: no filter to show");
     const made = { source: "chat", chat_id: `chat_${"a".repeat(32)}`, id: `att_${"1".repeat(32)}`, name: "LRS brief.docx", kind: "document",
                    type: "document", size: 4754, created_at: new Date().toISOString(), chat_title: "Visa", made: true };
     await send({ type: "library", files: [made], total: 1, next: null, counts: { document: 1 }, origins: { made: 1, uploaded: 2 } });
-    assert.deepEqual(await page.locator("#lib-origins .lib-kind").allInnerTexts(), ["All\n3", "Uploaded\n2", "Made by ChatDGC\n1"]);
-    assert.equal(await page.locator(".lib-meta").textContent(), "Document · 5 KB · made in “Visa” · Today");
-    await page.locator("#lib-origins .lib-kind", { hasText: "Made by ChatDGC" }).click();
+    assert.deepEqual(await page.locator("#library-filters .lib-filter").allTextContents(), ["KindAll", "FromAll"]);
+    assert.deepEqual(await menu("origin"), ["All", "Uploaded", "Made by ChatDGC"]);
+    assert.deepEqual(await metas(), ["made by Visa · now · Document · 5 KB"]);
+    await pick("origin", "Made by ChatDGC");
     assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "", origin: "made", offset: 0 });
     await send({ type: "library", files: [made], total: 1, next: null, counts: { document: 1 }, origins: { made: 1, uploaded: 2 } });
-    assert.equal(await page.locator("#lib-origins .lib-kind[aria-pressed=true]").innerText(), "Made by ChatDGC\n1");
+    assert.equal(await page.locator("#library-filter-origin .dgc-folder-v").textContent(), "Made by ChatDGC");
     await send({ type: "refresh" });
     assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "", origin: "made", offset: 0 },
                      "shown again: asked again, with the filter kept");
-    assert.equal(await page.locator(".lib-name").count(), 1, "what it showed stays until the new list comes");
+    assert.equal((await names()).length, 1, "what it showed stays until the new list comes");
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
@@ -4298,24 +4264,13 @@ test("a video card says its length and price first, then follows its job into th
   } finally { await s.page.close(); }
 });
 
-test("the Library's Videos (0.51): every video DGC made, by where it was made, each to play here or open", async (t) => {
+test("the Library's Videos (0.51): every video DGC made, by who made it, each to play here or open", async (t) => {
   if (skipOrFail(t)) return;
-  const { html, js } = libraryHtml();
-  const player = readFileSync(join(root, "media/videoPlayer.js"), "utf8");
-  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(String(error)));
+  const { page, errors, send, posted, tabs, pick, names, metas } = await openLibraryPage({ videos: true });
   try {
-    await page.setContent(html, { waitUntil: "load" });
-    await page.evaluate(([p, code]) => {
-      window.__posted = []; window.__state = undefined;
-      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
-      eval(p); eval(code);
-    }, [player, js]);
-    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
-    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
-    await send({ type: "videosOffered", on: true });
-    await page.locator(".lib-view", { hasText: "Videos" }).click();
+    await send({ type: "library", files: [], total: 0, next: null, counts: {} });
+    assert.deepEqual(await tabs(), ["Videos", "Files"]);
+    await page.click("#library-tab-videos");
     // Each request carries its own sequence number, so a late reply to an older search is ignored.
     const unseq = (m) => { assert.equal(typeof m.seq, "number", "a Library request carries its sequence"); const { seq, ...rest } = m; return rest; };
     assert.deepEqual((await posted("videoList")).map(unseq), [{ type: "videoList", query: "", offset: 0 }]);
@@ -4323,20 +4278,18 @@ test("the Library's Videos (0.51): every video DGC made, by where it was made, e
     // The host echoes the request's sequence; a reply without it would be an answer to an older search.
     await send({ type: "videos", seq: (await posted("videoList")).at(-1).seq, offset: 0, total: 2, next: null, counts: { work: 1, chat: 1, pip: 0 }, videos: [
       { path: "/home/me/.dgc/videos/sessions/s1/a-felt-ball.mp4", prompt: "a felt ball rolls", seconds: 5, width: 1280, height: 720,
-        bytes: 2100000, generator_name: "fal Wan 2.2 5B", surface: "work", created_at: today, job: "vid_0123456789ab" },
+        bytes: 2100000, generator_name: "fal Wan 2.2 5B", surface: "work", made_by: { kind: "session", id: "20261106-101500-a1", name: "Felt toys" }, created_at: today, job: "vid_0123456789ab" },
       { path: "/home/me/.dgc/videos/chats/c/waves.mp4", prompt: "waves at dusk", seconds: 8, surface: "chat", created_at: today }] });
-    assert.deepEqual(await page.locator(".lib-video .lib-name").allTextContents(), ["a felt ball rolls", "waves at dusk"]);
-    assert.equal(await page.locator(".lib-video .lib-meta").first().textContent(), "5 s · 1280×720 · 2.0 MB · fal Wan 2.2 5B · made in Work · Today");
-    assert.deepEqual(await page.locator("#lib-made .lib-kind span:first-child").allTextContents(), ["Anywhere", "Work", "ChatDGC"],
-      "filters by where it was made (none from Pips yet, so no Pips chip)");
-    await page.locator("#lib-made .lib-kind", { hasText: "Work" }).click();
+    assert.deepEqual(await names(), ["a felt ball rolls", "waves at dusk"]);
+    assert.deepEqual(await metas(), ["made by Felt toys · now · 5 s · 1280×720 · 2.0 MB · fal Wan 2.2 5B", "made in Chat · now · 8 s"], "who made it; an older DGC says only where");
+    await pick("maker", "Work");
     assert.deepEqual(unseq((await posted("videoList")).at(-1)), { type: "videoList", query: "", offset: 0, surface: "work" });
     await send({ type: "videos", seq: (await posted("videoList")).at(-1).seq, offset: 0, total: 1, next: null, videos: [{ path: "/home/me/.dgc/videos/sessions/s1/a-felt-ball.mp4",
       prompt: "a felt ball rolls", seconds: 5, surface: "work", created_at: today, job: "vid_0123456789ab" }] });
-    await page.locator(".lib-video .lib-action[title='Play it here']").click();
-    assert.equal(await page.locator(".lib-video figure.made-video video").count(), 1, "played here, with the shared player");
+    await page.locator('#library-list .lib-act[title="Play it here"]').click();
+    assert.equal(await page.locator("#library-list .lib-row figure.made-video video").count(), 1, "played here, with the shared player");
     assert.equal((await posted("videoData"))[0].path, "/home/me/.dgc/videos/sessions/s1/a-felt-ball.mp4");
-    await page.locator(".lib-video .lib-action[title='Open it in your player']").click();
+    await page.locator('#library-list .lib-act[title="Open it in your player"]').click();
     assert.equal((await posted("videoOpen"))[0].path, "/home/me/.dgc/videos/sessions/s1/a-felt-ball.mp4");
     assert.deepEqual(errors, []);
   } finally { await page.close(); }

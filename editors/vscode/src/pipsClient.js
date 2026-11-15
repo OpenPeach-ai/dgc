@@ -5,6 +5,8 @@ import '../media/shared/tokens.css';
 // One menu for every "+" and picker, as in Work and ChatDGC (window.DgcMenu).
 import '../media/shared/menu.css';
 import '../media/shared/menu.js';
+import '../media/shared/pagehead.css';
+import '../media/shared/pagehead.js';   // window.DgcPageHead: the header row Work, Chat, Library and Pips all wear
 // The Project Folder dropdown, as over the Work sessions (window.DgcFolderPick).
 import '../media/shared/folders.css';
 import '../media/shared/folderpick.css';
@@ -583,11 +585,11 @@ function keepRunningMarkup(){
 function runnerMarkup(more=false) {
   if(!remoteHost&&(S.loading||!S.connected&&!S.connectFailed))return '';   // only connecting or loading: the logo says so, and no row says "Not connected"
   const r=S.runner,paused=r?.paused;
-  const state=`<span class="runner-status"><i class="status-dot${r?.online?' online':''}" aria-hidden="true"></i>${!S.connected?'Not connected to DGC':!S.enabled?'Pips are off':r?(paused?'Pips stopped':r.online?'Pips running':'Pips not running'):'Can’t tell if Pips are running'}</span>`;
+  const state=`<span class="runner-status${more?' dgc-pagehead-aside':''}"><i class="status-dot${r?.online?' online':''}" aria-hidden="true"></i>${!S.connected?'Not connected to DGC':!S.enabled?'Pips are off':r?(paused?'Pips stopped':r.online?'Pips running':'Pips not running'):'Can’t tell if Pips are running'}</span>`;
   const start=remoteHost?'':`${r&&!r.online&&!paused?button('start-runner','Start Pips',S.busy||!usable()):''}${paused?button('resume-runner','Resume Pips…',S.busy||!usable()):''}`;
   const counts=r?`<span class="muted">${r.counts.queued} waiting to start · ${r.counts.running} working</span>`:'';
   const controls=`${button('refresh','Refresh',!usable())}${button('stop-all','Stop all Pips…',!usable()||S.busy,'danger')}`;
-  return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls">${more?`<summary id="runner-controls-toggle" class="topbar-icon" aria-label="Controls" title="Controls: refresh, stop all Pips, turn Pips off">${simpleIcon('more')}</summary>`:'<summary id="runner-controls-toggle">Controls</summary>'}<div class="runner-menu dgc-popover">${counts}${keepRunningMarkup()}${desktopNotificationsMarkup()}<div class="actions">${controls}</div><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${remoteHost?'<p class="muted">To start or resume Pips, run <code>dgc pips resume</code> and <code>dgc pips serve</code> on that computer. From here you can’t turn Pips on or change how they run.</p>':button('disable','Turn off Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
+  return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls">${more?`<summary id="runner-controls-toggle" class="${window.DgcPageHead.MORE}" aria-label="Controls" title="Controls: refresh, stop all Pips, turn Pips off">${window.DgcPageHead.DOTS}</summary>`:'<summary id="runner-controls-toggle">Controls</summary>'}<div class="runner-menu dgc-popover">${counts}${keepRunningMarkup()}${desktopNotificationsMarkup()}<div class="actions">${controls}</div><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${remoteHost?'<p class="muted">To start or resume Pips, run <code>dgc pips resume</code> and <code>dgc pips serve</code> on that computer. From here you can’t turn Pips on or change how they run.</p>':button('disable','Turn off Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
 }
 // Only connecting or loading: DGC's slash logo, breathing as the panel's own header does. The pulse is timed from the page's
 // clock, so a redraw between connecting and loading carries on where it was.
@@ -5182,7 +5184,8 @@ function simplePipHeader(){
  return `<header class="pip-topbar"><button type="button" id="simple-to-chat" class="topbar-icon" aria-label="Back to the chat" title="Back to the chat">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${esc(project||folderPip?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small></div>${actions}${computerMenuMarkup()}</header>`;
 }
 function simpleMarkup(){
- const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup(true)}</header>${scopeTabsMarkup()}`;
+ // The header row every page of the side bar wears (media/shared/pagehead.js): "Pips" at the left, its status dot beside it, ⋯ (the Controls) at the right, the line under it.
+ const bar=`${window.DgcPageHead.html({title:'Pips',level:1,cls:'simple-bar',rest:runnerMarkup(true)})}${scopeTabsMarkup()}`;
  const notes=`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}${undoRejectMarkup()}`;
  if(pipsSettings.view&&(!S.selected||S.overview)&&!S.create)return `${pipsSettingsMarkup()}${notes}`;
  // Needs attention's View all: a page of its own. A new Pip rejected there says so in its own place, not in a line above.

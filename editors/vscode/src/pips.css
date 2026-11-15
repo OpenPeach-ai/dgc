@@ -217,9 +217,13 @@ aside>button:not(.job){margin:6px 6px 0 0}
    bar's ground --surface), so both are the same greys in a tab and in the side bar. */
 :host,:root{--pip-bubble:color-mix(in srgb,var(--vscode-foreground) 8%,transparent);--bubble:color-mix(in srgb,var(--vscode-foreground,#d7d7da) 9%,var(--vscode-editor-background,#1f1f1f));--box:color-mix(in srgb,var(--vscode-foreground,#d7d7da) 4%,var(--vscode-editor-background,#1f1f1f))}
 .simple-pips #app{display:flex;flex-direction:column;min-height:100%}
-.simple-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex:none}
-.simple-bar h1{font-size:15px;margin:0;flex:none;white-space:nowrap}
-.simple-bar .runner{margin-left:auto;padding-top:0}
+/* The Pips view's header row is the one every page of the side bar wears (media/shared/pagehead.css, drawn by
+   DgcPageHead: the same title, ⋯, height, padding and line as Work, Chat and Library; his words of 15 Nov). Here is only
+   where it sits (the page's 12 px margin, 4 px under the tab bar, as theirs) and what is Pips' own in it: the status
+   dot beside the title, Start/Resume when Pips are stopped, and the runner's error on a row of its own. */
+.dgc-pagehead.simple-bar{flex-wrap:wrap;margin:var(--sp-1,4px) var(--sp-3,12px) 0}
+.dgc-pagehead.simple-bar>.runner{flex:1 1 0;display:flex;flex-wrap:nowrap;align-items:center;justify-content:flex-end;gap:8px;min-width:0;margin:0;padding:0}
+.dgc-pagehead.simple-bar .runner-status{margin-right:auto}
 /* The runner's words stay whole: squeezed, "Start runner" wrapped and ran into Controls. */
 .simple-bar .compact-runner button,.simple-bar .runner-controls summary,.simple-bar .runner-status{white-space:nowrap;flex:none}
 /* The runner's error is its own row under the bar. In the bar's row it took the room the title and
@@ -1518,9 +1522,6 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 
 /* ui-07: the Pips list, a Pip's page and Pips settings.
    The list: Controls is a "…" button on the bar (its menu is the same), and a Pip's name is one line. */
-.simple-bar .runner-controls summary.topbar-icon{width:28px;height:28px;min-height:28px;padding:0;border:0;border-radius:var(--r-row,8px);color:var(--text-2,var(--muted));justify-content:center}
-.simple-bar .runner-controls summary.topbar-icon:hover,.simple-bar .runner-controls[open] summary.topbar-icon{background:var(--wash,var(--pip-wash));color:var(--vscode-foreground)}
-.simple-bar .runner-controls summary.topbar-icon:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
 .pip-row-copy strong{min-width:0}
 .pip-row-name{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pip-row-copy .primary-badge{flex:none}

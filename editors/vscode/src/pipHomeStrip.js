@@ -115,11 +115,14 @@ export function mountHomePips(options) {
   }
   return rows.sort((a, b) => a.rank - b.rank);     // stable: Core first, then as the Pips view orders them
  }
- // Every Pip here, for the dock: its name, its face's body, what waits on it and its news in a few words.
+ // Every Pip here, for the dock: its name, its face's body, what waits on it, its news in a few words, and how many of
+ // its messages are not read yet (list_pip_unread, as Home counts them: the dock's new-message dot).
  function tellDock() {
   if (!options.onPips) return;
+  const unreadNow = pips ? shownUnread() : [];
   const list = (pips || []).map(pip => { const waiting = waitingOn(attention, pip.id, pip.reviews), fresh = waiting ? null : news(pip.id);
-   return {id: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type, waiting, line: pip.blocked ? `Can't run: ${pip.blocked}` : fresh ? fresh.line : ''}; });
+   return {id: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type, waiting, line: pip.blocked ? `Can't run: ${pip.blocked}` : fresh ? fresh.line : '',
+    unread: unreadNow.find(item => item.pip_id === pip.id)?.count || 0}; });
   options.onPips({pips: list, complete: listedAll && !!pips, scopes: listedScopes});
  }
  // A Pip with cards waiting opens at the newest one (its chat, its computer), as Needs attention does.

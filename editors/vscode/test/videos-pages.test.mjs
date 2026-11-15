@@ -171,19 +171,21 @@ test("The host passes a video generator's fields on to DGC, checked, and nothing
 });
 
 
-function library(view = "videos") {
-  const w = new JSDOM("<body>" + ["views", "about", "search", "list", "more", "status", "origins", "kinds", "made"]
-    .map((id) => id === "search" ? '<input id="lib-search">' : `<div id="lib-${id}"></div>`).join("") + "</body>",
-    { runScripts: "outside-only" }).window;
+// The Library is one module (media/library.js) since Library v2: here in its editor tab's page, in jsdom, on the tab
+// the page kept. Its menus are the shared small menu (media/shared/blob.js).
+function library(tab = "videos") {
+  const w = new JSDOM('<body class="lib-body"><main id="library-root"></main></body>', { runScripts: "outside-only" }).window;
   windows.push(w);
   const sent = [];
-  w.acquireVsCodeApi = () => ({ getState: () => ({ view }), setState() {}, postMessage: (m) => sent.push(m) });
-  w.eval(readFileSync(src + "../media/library.js", "utf8"));
+  w.acquireVsCodeApi = () => ({ getState: () => ({ library: { tab } }), setState() {}, postMessage: (m) => sent.push(m) });
+  for (const file of ["shared/blob.js", "shared/pagehead.js", "library.js"]) w.eval(readFileSync(src + "../media/" + file, "utf8"));
   const message = (m) => w.dispatchEvent(new w.MessageEvent("message", { data: m }));
   const $ = (selector) => w.document.querySelector(selector);
   return { w, sent, message, $, latest: (type) => sent.filter((m) => m.type === type).at(-1),
-    async search(text) { $("#lib-search").value = text; $("#lib-search").dispatchEvent(new w.Event("input"));
-      await new Promise((resolve) => setTimeout(resolve, 280)); } };
+    async search(text) { $("#library-search").value = text; $("#library-search").dispatchEvent(new w.Event("input"));
+      await new Promise((resolve) => setTimeout(resolve, 320)); },
+    /** Chooses a row of a filter's menu by its first words. */
+    pick(which, label) { $(`#library-filter-${which}`).click(); [...w.document.querySelectorAll(".dgc-pop .dgc-menu-row")].find((b) => b.textContent.trim().startsWith(label)).click(); } };
 }
 const videoReply = (request, text, extra = {}) => ({ type: "videos", seq: request.seq, offset: request.offset,
   videos: [{ path: `/tmp/${text}.mp4`, prompt: text }], total: 1, next: null, ...extra });
@@ -192,45 +194,50 @@ test("Library ignores stale video searches, pagination and surface replies", asy
   const x = library();
   x.message({ type: "videosOffered", on: true });
   const old = x.latest("videoList");
+  assert.ok(old, "the Videos tab it was left on is asked for");
   await x.search("new");
   const current = x.latest("videoList");
+  assert.ok(current.seq > old.seq && current.query === "new");
   x.message(videoReply(current, "NEW RESULT", { next: 1 }));
   x.message(videoReply(old, "OLD RESULT", { total: 99, counts: { work: 99 } }));
-  assert.match(x.$("#lib-list").textContent, /NEW RESULT/);
-  assert.doesNotMatch(x.$("#lib-list").textContent, /OLD RESULT/);
-  assert.equal(x.$("#lib-more").hidden, false, "stale next/counts cannot change the current list");
-  x.$("#lib-more").click();
+  assert.match(x.$("#library-list").textContent, /NEW RESULT/);
+  assert.doesNotMatch(x.$("#library-list").textContent, /OLD RESULT/);
+  assert.equal(x.$("#library-load").hidden, false, "stale next/counts cannot change the current list");
+  x.$("#library-load").click();
   const page = x.latest("videoList");
+  assert.equal(page.offset, 1, "the next page");
   await x.search("latest");
   const latest = x.latest("videoList");
   x.message(videoReply(page, "OLD PAGE"));
-  assert.equal(x.$("#lib-status").textContent, "Loading…");
+  assert.doesNotMatch(x.$("#library-list").textContent, /OLD PAGE/, "a page of the search since replaced is not added");
   x.message(videoReply(latest, "LATEST RESULT", { counts: { work: 1 } }));
-  assert.doesNotMatch(x.$("#lib-list").textContent, /OLD PAGE/);
-  [...x.w.document.querySelectorAll("#lib-made button")].find((b) => b.textContent.startsWith("Work")).click();
+  assert.match(x.$("#library-list").textContent, /LATEST RESULT/);
+  assert.doesNotMatch(x.$("#library-list").textContent, /OLD PAGE|NEW RESULT/);
+  x.pick("maker", "Work");
   const filtered = x.latest("videoList");
   assert.equal(filtered.surface, "work");
-  x.message(videoReply(filtered, "WORK RESULT"));
+  x.message(videoReply(filtered, "WORK RESULT", { videos: [{ path: "/tmp/work.mp4", prompt: "WORK RESULT", surface: "work" }] }));
   x.message(videoReply(latest, "WRONG SURFACE"));
-  assert.match(x.$("#lib-list").textContent, /WORK RESULT/);
-  assert.doesNotMatch(x.$("#lib-list").textContent, /WRONG SURFACE/);
+  assert.match(x.$("#library-list").textContent, /WORK RESULT/);
+  assert.doesNotMatch(x.$("#library-list").textContent, /WRONG SURFACE/);
 });
 
-test("Library keeps video and Work image errors through render and clears them on retry", () => {
+test("Library keeps video and image errors through render and clears them on retry", () => {
   for (const kind of ["videos", "workImages"]) {
-    const x = library(kind === "videos" ? "videos" : "files");
+    const x = library(kind === "videos" ? "videos" : "images");
     x.message({ type: kind === "videos" ? "videosOffered" : "workImagesOffered", on: true });
     const requestType = kind === "videos" ? "videoList" : "workImages";
     const reply = { type: kind, seq: x.latest(requestType).seq, offset: 0, videos: [], images: [], total: 0, next: null,
       error: "The saved files could not be read. Try again." };
     x.message(reply);
-    if (kind === "workImages") x.message({ type: "library", files: [], total: 0, next: null });
-    assert.equal(x.$("#lib-status").textContent, reply.error);
-    assert.equal(x.$("#lib-status").hidden, false);
+    x.message({ type: "library", files: [], total: 0, next: null });
+    x.message({ type: "dock", pins: [] });
+    assert.equal(x.$("#library-status").textContent, reply.error);
+    assert.equal(x.$("#library-status").hidden, false);
     x.message({ type: "refresh" });
-    assert.doesNotMatch(x.$("#lib-status").textContent, /could not be read/);
+    assert.doesNotMatch(x.$("#library-status").textContent, /could not be read/);
     x.message({ ...reply, seq: x.latest(requestType).seq, error: undefined });
-    assert.doesNotMatch(x.$("#lib-status").textContent, /could not be read/);
+    assert.doesNotMatch(x.$("#library-status").textContent, /could not be read/);
   }
 });
 
