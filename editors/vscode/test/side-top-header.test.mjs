@@ -60,7 +60,7 @@ for (const width of [240, 300, 700]) {
       assert.ok(h.bar.top - h.box.bottom <= 8, `and close under it (${h.bar.top - h.box.bottom})`);
       assert.ok(h.box.bottom <= 44, `the header is one short row (${h.box.bottom})`);
       assert.ok(Math.abs((h.bar.left + h.bar.right) / 2 - width / 2) < 0.6, "the tab bar is centred, as before");
-      assert.deepEqual(h.tabs, ["home", "work", "chat", "pips"]);
+      assert.deepEqual(h.tabs, ["home", "work", "chat", "pips", "library"]);
       assert.deepEqual(h.clipped, [], "no tab's name is cut");
       assert.equal(h.overflowX, false, "nothing runs off the side");
       assert.deepEqual(x.errors, []);

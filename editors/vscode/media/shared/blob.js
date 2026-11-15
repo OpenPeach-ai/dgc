@@ -68,8 +68,12 @@
     menu.className = "dgc-menu dgc-pop"; menu.setAttribute("role", "menu");
     if (label) menu.setAttribute("aria-label", label);
     const groups = (Array.isArray(rows[0]) ? rows : [rows]).filter((g) => g && g.length);
-    const row = (r) => `<button type="button" role="menuitem" class="dgc-menu-row${r.danger ? " is-danger" : ""}" data-id="${esc(r.id)}"${r.disabled ? " disabled" : ""}>`
-      + (r.icon ? `<span class="dgc-pop-icon">${icon(r.icon)}</span>` : "") + `<span class="dgc-menu-label">${esc(r.label)}</span></button>`;
+    // (A row with `checked` said, true or false, is one of a picker's: the chosen one wears the check. A row that is
+    // only { head } is a small heading over the rows after it.)
+    const CHECK = '<svg class="dgc-menu-check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const row = (r) => (r.head ? `<div class="dgc-menu-head" role="presentation"><span>${esc(r.head)}</span></div>`
+      : `<button type="button" role="${r.checked === undefined ? "menuitem" : "menuitemradio"}"${r.checked === undefined ? "" : ` aria-checked="${r.checked ? "true" : "false"}"`} class="dgc-menu-row${r.danger ? " is-danger" : ""}" data-id="${esc(r.id)}"${r.disabled ? " disabled" : ""}>`
+      + (r.icon ? `<span class="dgc-pop-icon">${icon(r.icon)}</span>` : "") + `<span class="dgc-menu-label">${esc(r.label)}</span>${r.checked === undefined ? "" : CHECK}</button>`);
     menu.innerHTML = (head ? `<div class="dgc-menu-head" role="presentation"><span>${esc(head)}</span></div>` : "")
       + groups.map((g, i) => (i ? '<div class="dgc-menu-div mdiv" role="separator"></div>' : "") + g.map(row).join("")).join("")
       + (colour ? (groups.length ? '<div class="dgc-menu-div mdiv" role="separator"></div>' : "") + swatches(colour.kind, colour) : "");

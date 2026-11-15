@@ -1,5 +1,5 @@
 // The side bar as the panel builds it (src/panel.ts, media/main.js, media/main.css) with the real Pips bundle and
-// faces, in real Chromium: the four tabs (Home, Work, Chat, Pips), Home's cards, and Work's and Chat's lists. A stub
+// faces, in real Chromium: the five tabs (Home, Work, Chat, Pips, Library), Home's cards, and Work's and Chat's lists. A stub
 // host answers the Pips control channel from window.__state, which a test may change before the next poll.
 // Shared by the side bar's tests and the before/after pictures. Not a *.test.mjs file. No port is opened: the page is
 // routed.
@@ -200,7 +200,7 @@ export const tabsNow = (page) => page.evaluate(() => {
       glow: Number(getComputedStyle(t.querySelector(".dgc-tab-glow")).opacity), front: front ? getComputedStyle(front).transform : "", copies: t.querySelectorAll(".dgc-tab-word").length,
       frontOpacity: front ? Number(getComputedStyle(front).opacity) : 1,
       count: count && !count.hidden ? count.textContent : "", countBox: count && !count.hidden ? rect(count) : null, clipped: rect(flip).left < rect(t).left - 0.5 || (count && !count.hidden ? rect(count) : rect(flip)).right > rect(t).right + 0.5, words: rect(flip), ...rect(t) }; });
-  const panel = ["home-hub", "work-home", "chats-home"].map((id) => document.getElementById(id)).find((n) => n?.checkVisibility()) || (document.getElementById("pips-host").checkVisibility() ? document.getElementById("pips-host") : null);
+  const panel = ["home-hub", "work-home", "chats-home", "library-home"].map((id) => document.getElementById(id)).find((n) => n?.checkVisibility()) || (document.getElementById("pips-host").checkVisibility() ? document.getElementById("pips-host") : null);
   return { shown: nav.checkVisibility(), role: bar.getAttribute("role"), nav: rect(nav), bar: rect(bar), tabs, panel: panel?.id || "", panelRole: panel?.getAttribute("role") || "", panelLabelledBy: panel?.getAttribute("aria-labelledby") || "",
     focus: document.activeElement?.dataset?.tab || document.activeElement?.id || "", header: !!document.getElementById("phead")?.checkVisibility(), width: innerWidth, overflowX: document.documentElement.scrollWidth > innerWidth };
 });

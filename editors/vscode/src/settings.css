@@ -599,6 +599,13 @@ input[type=checkbox],input[type=radio]{height:auto;padding:0;accent-color:var(--
  #page .actions{flex-wrap:wrap;max-width:100%}
  #page button:not(.info):not([role=switch]),#page select,#page input:not([type=checkbox]):not([type=radio]){max-width:100%}
  #page button.secondary.wide{width:100%}
+ /* (A button with a row of its own keeps all its words: the narrowest-words walk, once it looked at buttons (15 Nov),
+    found "Browse directory" and "Reset to defaults" cut at 170 and 220 px, squeezed beside their neighbours.) */
+ #page .page-heading>.actions{flex:1 1 100%}
+ #page .actions>button.secondary.wide,#page .field.dev-reset>button{flex:1 0 100%;margin-left:0}
+ /* (Where even a whole row is shorter than the button's words (a page column of about 90 px at 170), they go onto a
+    second line, whole: never "Browse dire…".) */
+ #page button.secondary.wide{height:auto;min-height:var(--btn-h);padding:4px;line-height:1.25;white-space:normal;overflow:visible;text-overflow:clip}
  #page [role=tablist],#page .chips{flex-wrap:wrap}
  #page .chips>button{flex:none}
  #page button.info{flex:none;min-width:16px}

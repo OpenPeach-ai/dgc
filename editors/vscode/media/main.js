@@ -1672,18 +1672,20 @@
   // sessions and Chat your ChatDGC chats, each with its own search and New; Pips is the Pips view, as it is. The tab is
   // kept in the page's state, so a reload comes back to it. A DGC with no ChatDGC has no Chat tab, and one with no Pips
   // no Pips tab. Left and Right move between the tabs and choose as they go; Home and End jump to the first and last.
-  const SIDE_TABS = ["home", "work", "chat", "pips"];
+  const SIDE_TABS = ["home", "work", "chat", "pips", "library"];
+  // The tabs that are a page of this home (Pips is its own view): where Pips' own "back" may return to.
+  const LIST_TABS = ["home", "work", "chat", "library"];
   const pageState = () => { try { return vscode.getState() || {}; } catch { return {}; } };
   let sideTab = SIDE_TABS.includes(pageState().sideTab) ? pageState().sideTab : "home";
   // The tab Pips' own "back" returns to: the last one that was not Pips.
-  let lastListTab = sideTab !== "pips" ? sideTab : ["home", "work", "chat"].includes(pageState().sideList) ? pageState().sideList : "home";
+  let lastListTab = sideTab !== "pips" ? sideTab : LIST_TABS.includes(pageState().sideList) ? pageState().sideList : "home";
   const keepSideTab = () => { try { vscode.setState({ ...(vscode.getState() || {}), sideTab, sideList: lastListTab }); } catch {} };
   const sideTabOffered = (name) => (name === "chat" ? chatsAvailable : name === "pips" ? !!window.DgcPips?.mount : true);
   function paintSideTabs() {
     const nav = $("side-tabs");
     if (chatPlace !== "home" || !nav) return;
     nav.hidden = false;
-    const panels = { home: $("home-hub"), work: $("work-home"), chat: $("chats-home") };
+    const panels = { home: $("home-hub"), work: $("work-home"), chat: $("chats-home"), library: $("library-home") };
     for (const name of SIDE_TABS) {
       const tab = $(`side-tab-${name}`), chosen = sideTab === name;
       if (!tab) continue;
@@ -1692,7 +1694,34 @@
       tab.tabIndex = chosen ? 0 : -1;
       if (panels[name]) panels[name].hidden = !chosen;
     }
+    libraryTabShown(sideTab === "library" && sessionsOpen);
   }
+  // ---- the Library tab (media/shared/librarypage.js): everything DGC made, who made it, one click back to them ---------
+  // The Library's own host answers it (src/chatdgc.ts, "sideLibrary"). A maker's name leads back: a Pip to its chat, a
+  // Work session and a chat to their editor tabs. ⋯ holds the full Library (the big grid in an editor tab).
+  let libraryPage = null, libraryShowing = false;
+  function libraryTabShown(on) {
+    if (on && !libraryPage && window.DgcLibraryPage && $("library-list")) {
+      libraryPage = window.DgcLibraryPage.mount({
+        els: { filters: $("library-filters"), status: $("library-status"), list: $("library-list"), more: $("library-load"), search: $("library-search") },
+        post: (message) => vscode.postMessage({ type: "sideLibrary", message }),
+        go: (maker) => {
+          if (maker.kind === "pip") openPipsAt({ pip: maker.id });
+          else if (maker.kind === "session") vscode.postMessage({ type: "openSessionInEditor", id: maker.id, title: maker.name });
+          else if (maker.kind === "chat") vscode.postMessage({ type: "chatdgcOpen", id: maker.id });
+          else if (maker.kind === "project") vscode.postMessage({ type: "chatdgcProjectOpen", id: maker.id });
+        },
+        kept: () => pageState().library, keep: (library) => { try { vscode.setState({ ...(vscode.getState() || {}), library }); } catch {} },
+        menu: homeMoreMenu, sheet: (type, name) => (name ? window.DgcFileSheet?.forFile?.(type, name) : window.DgcFileSheet?.html?.(type)) || "",
+      });
+    }
+    if (on === libraryShowing || !libraryPage) return;
+    libraryShowing = on;
+    if (on) libraryPage.shown(); else libraryPage.hidden();
+  }
+  $("library-more")?.addEventListener("click", (event) => { event.stopPropagation(); homeMoreMenu($("library-more"), "Library",
+    [{ id: "full", label: "Open the full Library", icon: "open" }, { id: "settings", label: "Page preview settings", icon: "settings" }],
+    (what) => { if (what === "full") vscode.postMessage({ type: "homeLibraryOpen", view: "artifacts" }); else vscode.postMessage({ type: "openSettings", section: "security" }); }); });
   function showSideTab(name, focus = false) {
     if (chatPlace !== "home") return;
     const next = SIDE_TABS.includes(name) && sideTabOffered(name) ? name : "home";
@@ -3344,7 +3373,7 @@
     code_intel: "braces", git_diff: "file-diff", write_file: "file-plus", create_file: "file-plus",
     edit_file: "pencil", apply_patch: "pencil", multi_edit: "pencil", save_memory: "bookmark", remember: "bookmark", forget: "bookmark",
     bash: "square-terminal", bash_output: "square-terminal", bash_kill: "square-terminal", python: "code",
-    web_search: "globe", web_fetch: "globe", browser: "globe", view_image: "image",
+    web_search: "globe", web_fetch: "globe", deep_research: "globe", browser: "globe", view_image: "image",
     present_plan: "clipboard-list", present_document: "file-text", propose_options: "circle-help",
     task: "bot", todo: "list-todo", skill: "sparkle", add_skill: "sparkle", notes: "notebook-pen",
     monitor: "activity", monitor_stop: "activity", artifact: "app-window", update_goal: "target",
@@ -3398,6 +3427,9 @@
     remember: ["Remembering", "Remembered"], forget: ["Forgetting", "Forgot"],
     bash: ["Running", "Ran"], bash_output: ["Checking process", "Checked process"], bash_kill: ["Stopping process", "Stopped process"],
     grep: ["Searching", "Searched"], web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"],
+    // Deep research (dgc/deep_research.py) is named, in plain words, while it runs and after (live round 1, finding 43:
+    // its row read "Using a tool" and "Running deep_research").
+    deep_research: ["Deep research", "Deep research"],
     view_image: ["Viewing image", "Viewed image"], browser: ["Using browser", "Used browser"],
     present_plan: ["Preparing plan", "Prepared plan"],
     present_document: ["Preparing document", "Prepared document"],
@@ -3420,6 +3452,16 @@
   // CLI, a task that was refused or never started, an agent the backend stopped listing) reads
   // "Delegated Write the parser", which is also what a reload of it draws.
   const NAMES_ITS_AGENT = new Set(["message_task", "close_task", "task", "continue_task"]);
+  // A step that keeps its own name once it is done too ("Deep research", never "Used 1 tool").
+  const KEEPS_ITS_NAME = new Set(["deep_research"]);
+  // A step whose progress lines are sentences DGC wrote for a person ("Round 9 of 16: choosing what to search",
+  // "Writing the report from 127 sources"): drawn in the body font, where a command or a path is monospace.
+  const PROSE_PROGRESS = new Set(["deep_research"]);
+  // How long deep research may read at each depth (dgc/deep_research.py DEPTHS; standard and thorough read longer on a
+  // model with a wide window, WIDER), then it writes. Shown in place of the turn's generic time estimate, which is
+  // made from ordinary turns and said "~1–3 min left" on an 8-minute research.
+  const RESEARCH_READS = { quick: "reads for up to 5 min", standard: "reads for up to 15–25 min", thorough: "reads for up to 30–50 min" };
+  const researchRunning = (owner) => [...(owner?.block?.querySelectorAll('.tool[data-tool-name="deep_research"][data-status="running"]') || [])].at(-1) || null;
   // A failed step of these never reached its helper: a delegation refused before the helper started (its
   // copy of the project couldn't be made, say) read "Delegated Analyze the data · 1 issue", and the agents
   // chip beside it said 0, which looked like the chip was wrong. It says so in its own words instead.
@@ -5692,9 +5734,13 @@
     const detail = narrow ? "" : full;
     const shortened = narrow && !waiting && !turn.handoff ? `${activity.label} · ${full}` : "";
     if ((turn.act.getAttribute("title") || "") !== shortened) hoverTip.retitle(turn.act, shortened);
+    // A step the backend has no words for is "Running <its id>" (dgc/ui.py activity_verb): where this page has the
+    // step's plain name, that is said ("Deep research", never "Running deep_research").
+    const stepId = activity && activity.state === "tool" ? /^Running ([a-z][a-z0-9_]*)$/.exec(activity.label)?.[1] : "";
+    const label = stepId && KEEPS_ITS_NAME.has(stepId) ? TOOL_COPY[stepId][0] : activity ? activity.label : "";
     const nextVerb = waiting ? "waiting for your input"
       : turn.handoff ? "generating handoff…"
-        : activity ? activity.label + (detail ? ` · ${detail}` : "")
+        : activity ? label + (detail ? ` · ${detail}` : "")
           : "Working";
     if (verb.textContent !== nextVerb) {
       verb.textContent = nextVerb;
@@ -5712,7 +5758,12 @@
     // the TUI's shape, and it is what makes a long gate visible instead of a growing total.
     const clock = activity && phase !== total ? `${elapsedWords(phase * 1000)} · ${elapsedWords(total * 1000)}`
       : elapsedWords(total * 1000);
-    const eta = turn.eta ? ` · ${turn.eta}` : "";
+    // While deep research runs, the turn's generic estimate says nothing true of it: its depth's own budget instead.
+    const research = researchRunning(turn);
+    // (In a narrow side bar the line has no room for it beside the clocks: nothing, rather than words cut short.)
+    const slim = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 360px)").matches;
+    const left = research ? (slim ? "" : RESEARCH_READS[research.dataset.depth || "quick"] || "") : turn.eta;
+    const eta = left ? ` · ${left}` : "";
     meta.textContent = `(${clock}${eta} · ↓ ${Math.round(turn.chars / 4)} tok)`;
   }
   function toolArgChars(args) {
@@ -6846,7 +6897,7 @@
       counts.web && (past ? "searched the web" : "searching the web"),
       counts.fetched && fetchedPhrase(cards, past),
       // A failed helper step that names no helper (a batch sent without its `tasks`) says only that it failed.
-      counts.other && (past ? named || failedAgentStep(loneOther).toLowerCase() || `used ${plural(counts.other, "tool", "tools")}` : otherPresent),
+      counts.other && (past ? named || failedAgentStep(loneOther).toLowerCase() || (KEEPS_ITS_NAME.has(loneName) ? TOOL_COPY[loneName][1].toLowerCase() : `used ${plural(counts.other, "tool", "tools")}`) : otherPresent),
     ].filter(Boolean);
     const sentence = phrases.length > 1
       ? `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`
@@ -7094,7 +7145,7 @@
     const last = items.at(-1);
     const runningCard = items.filter((node) => node.matches(".tool") && node.dataset.status === "running").at(-1);
     const reason = last?._reason;
-    let state = "done", verb = "", arg = "", time = "";
+    let state = "done", verb = "", arg = "", time = "", prose = false;
     if (reason && reasonLabel(reason) === "Thinking…") {
       state = "thinking"; verb = "Thinking…";
       const seconds = reason.startedAt == null ? 0 : Math.floor((Date.now() - reason.startedAt) / 1000);
@@ -7105,9 +7156,11 @@
       verb = card.querySelector(".verb")?.textContent || "";
       arg = runningCard?._progressMessage || card.querySelector(".arg")?.textContent || "";
       time = card.querySelector(".tool-time")?.textContent || "";
+      prose = !!runningCard?._progressMessage && PROSE_PROGRESS.has(canonicalTool(runningCard.dataset.toolName));
     } else if (reason) verb = reasonLabel(reason);
     else if (last) verb = (last.querySelector(".thought-label")?.textContent || "").trim();
     if (live.dataset.state !== state) live.dataset.state = state;
+    if (prose) live.dataset.arg = "prose"; else delete live.dataset.arg;
     for (const [selector, text] of [[".tg-live-verb", verb], [".tg-live-arg", arg], [".tg-live-time", time]]) {
       const node = live.querySelector(selector);
       if (node.textContent !== text) {
@@ -7280,6 +7333,8 @@
     // the card itself: the transcript names the agent, its page shows the work.
     if (canonicalTool(ev.name) === "task" && typeof ev.args?.prompt === "string") c._agentPrompt = ev.args.prompt.slice(0, 20000);
     // What a picture or video was asked for: its folded block's header names it ("1 picture · a felt purple ball").
+    // How deep a research was asked to go (quick when the model says nothing: the tool's own default).
+    if (canonicalTool(ev.name) === "deep_research") c.dataset.depth = ["quick", "standard", "thorough"].includes(ev.args?.depth) ? ev.args.depth : "quick";
     if (["generate_image", "generate_video"].includes(canonicalTool(ev.name)) && typeof ev.args?.prompt === "string") {
       c.dataset.prompt = ev.args.prompt.replace(/\s+/g, " ").trim().slice(0, 200);
     }
@@ -13560,6 +13615,7 @@ function permissionChoices(ev) {
     if (typeof msg.type === "string" && msg.type.startsWith("homeNote")) { home?.notes(msg); return; }
     // "DGC: New Note" from the palette: Home, with a new note open in Notes.
     if (msg.type === "homeNewNote") { showSideTab("home"); home?.newNote(); return; }
+    if (msg.type === "sideLibrary") { libraryPage?.message(msg.message); return; }
     if (msg.type === "whatsNew") { openWhatsNew(msg); return; }
     if (msg.type === "pipsWelcome") { openPipsWelcome(msg); return; }
     if (msg.type === "pipsMacNote") { openPipsMacNote(); return; }

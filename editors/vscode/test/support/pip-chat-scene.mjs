@@ -170,7 +170,9 @@ export const host = (opts) => `(${function (PIP, opts) {
     artifact: { id: "ar_" + "d".repeat(16), type: "doc", title: "Billing review: findings", version: 1 } };
   const hold = { id: "compact_" + "c".repeat(32), pip_id: PIP, workspace_id: W, run_id: run(opts.running ? "9" : "2"), digest: "d".repeat(64), frame: null, status: "pending", created_at: at(1),
     expires_at: "2036-11-07T04:00:00Z", resolved_at: null, resolved_by: null, continuation_run_id: null,
-    summary: { method: "POST", host: "news.example", path: "/account/alerts", page: "https://news.example/account", route: "/account/alerts", asks_because: "maybe_payment", asks_word: "account",
+    // (opts.hold as an object is the held step's own summary: a new site, a payment, app data for a site, the floor.)
+    summary: opts.hold && typeof opts.hold === "object" ? { method: "POST", host: "news.example", path: "/", page: "", fields: [], more_fields: 0, body_bytes: 0, ...opts.hold }
+      : { method: "POST", host: "news.example", path: "/account/alerts", page: "https://news.example/account", route: "/account/alerts", asks_because: "maybe_payment", asks_word: "account",
       fields: [{ name: "email", value: "me@mail.example" }], more_fields: 0, body_bytes: 30 } };
   const levels = [["ask", "Ask me first", "It asks before it sends, submits or changes anything."], ["approve", "Approve for me", "It does the everyday things and asks for the rest."],
     ["full", "Full access", "It does everything it can without asking."]].map(([level, n, says]) => ({ level, name: n, says }));
@@ -241,8 +243,13 @@ export const host = (opts) => `(${function (PIP, opts) {
       get_pip_backup: () => ({ backup: { pip_id: PIP, provider: "", model: "" } }), list_pip_templates: () => ({ templates: [] }),
       get_pip_artifacts: () => ({ artifacts: { report_as: "chat", dashboards: ["ar_" + "1".repeat(16)], report_doc: "", report_sheet: "" } }),
       list_artifact_dashboards: () => ({ dashboards: [{ id: "ar_" + "1".repeat(16), title: "Sales this week", version: 3 }, { id: "ar_" + "2".repeat(16), title: "Open bugs", version: 1 }] }),
+      // (opts.grants "every": the Always allows of 15 Nov too: app data carried to a site and into its Terminal, the
+      // could-delete-everything command, a payment; each by DGC's own label.)
       list_pip_action_grants: () => ({ pip_id: PIP, grants: project ? [] : [{ id: grant, kind: "gmail_send", server: "gmail", account: "me@mail.example", tool: "send", label: "Send email to sam@mail.example",
-        created_at: at(600), created_by: "editor-user", connection_digest: "c".repeat(64), schema_digest: "d".repeat(64) }] }),
+        created_at: at(600), created_by: "editor-user", connection_digest: "c".repeat(64), schema_digest: "d".repeat(64) },
+        ...(opts.grants === "every" ? [["1", "CARRY quantobra.pt", "quantobra.pt", "browser", "Carry what it read from your apps to quantobra.pt"], ["2", "CARRY Terminal", "Terminal", "browser", "Run what it read from your apps in its own Terminal"],
+          ["3", "FLOOR Terminal", "Terminal", "terminal", "Run commands that could delete everything in its Files"], ["4", "PAY POST /checkout/pay", "shop.example", "browser", "Submit in its browser to shop.example/checkout/pay (a payment, inside its daily limit)"]]
+          .map(([n, tool, server, account, label]) => ({ id: "grant_" + n.repeat(32), kind: "computer_submit", server, account, tool, label, created_at: at(60), created_by: "editor-user", connection_digest: "c".repeat(64), schema_digest: n.repeat(64) })) : [])] }),
       get_pip_usage: () => ({ usage: { pip_id: PIP, today: { day, runs: 2, tokens: 48200 }, last_30_days: { runs: 31, tokens: 912000 }, days: [{ day, runs: 2, tokens: 48200 }], daily_cap: null, capped_today: false } }),
       get_pip_notify_settings: () => ({ settings: { pip_id: PIP, min_severity: "low", alert_severity: null, revision: 0, is_default: true } }),
       get_pip_outcomes: () => ({ outcomes: { pip_id: PIP, name, pip_type: pip.pip_type, history_truncated: false, reported: 5, accepted: 2, dismissed: 1, still_reported: 3, gone_after_change: 2, gone_without_change: 0, checkpoints_examined: 4 } }),

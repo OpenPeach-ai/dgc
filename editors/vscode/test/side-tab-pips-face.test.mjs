@@ -6,7 +6,7 @@
 //     holds the order, the gap and the centring), about the height of the word's line, never cut
 //   - it is alive (it breathes and blinks) and keeps still under reduced motion
 //   - the tab's name for a screen reader is still "Pips"; choosing tabs moves nothing; the keys work as before
-//   - the four tabs still fit at 240 px; at 170 px (icons: side-tabs-icons.test.mjs) Pips is the face alone
+//   - the five tabs still fit at 280 px (four fitted at 240 before Library, 15 Nov); at 170 px (icons: side-tabs-icons.test.mjs) Pips is the face alone
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openDock } from "./support/dock-scene.mjs";
@@ -41,14 +41,14 @@ const tabsNow = (page) => page.evaluate(() => [...document.querySelectorAll('#si
     name: t.getAttribute("aria-label") || [...t.querySelectorAll("*")].filter((n) => !n.children.length && !n.closest('[aria-hidden="true"]')).map((n) => n.textContent).join("").trim() };
 }));
 
-for (const width of [240, 300, 700]) {
+for (const width of [280, 300, 700]) {
   test(`${width}px: only the Pips tab wears the Core Pip's face, beside its name, at the height of the word's line`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openDock(browser, { tab: "home", width, height: 600 });
     try {
       const tabs = await tabsNow(x.page), pips = tabs.find((tab) => tab.id === "pips");
-      assert.deepEqual(tabs.map((tab) => [tab.id, !!tab.face]), [["home", false], ["work", false], ["chat", false], ["pips", true]], "Pips, and only Pips");
-      assert.deepEqual(tabs.filter((tab) => tab.id !== "pips").map((tab) => tab.pictures), [0, 0, 0], "Home, Work and Chat stay names only");
+      assert.deepEqual(tabs.map((tab) => [tab.id, !!tab.face]), [["home", false], ["work", false], ["chat", false], ["pips", true], ["library", false]], "Pips, and only Pips");
+      assert.deepEqual(tabs.filter((tab) => tab.id !== "pips").map((tab) => tab.pictures), [0, 0, 0, 0], "Home, Work, Chat and Library stay names only");
       const f = pips.face;
       assert.equal(f.hidden, "true", "the face is decoration");
       assert.equal(pips.name, "Pips", "the tab is still named Pips");
@@ -73,15 +73,19 @@ for (const width of [240, 300, 700]) {
   });
 }
 
-test("the keyboard is as it was: Left and Right move and choose, wrapping through Pips", async (t) => {
+test("the keyboard is as it was: Left and Right move and choose, wrapping at the ends; Pips is between Chat and Library", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "home", width: 300, height: 600 });
   try {
     await x.page.focus("#side-tab-home");
     await x.page.keyboard.press("ArrowLeft"); await settle(x.page, 200);
+    assert.deepEqual((await tabsNow(x.page)).filter((tab) => tab.selected).map((tab) => tab.id), ["library"], "Left of Home wraps to the last tab, Library");
+    await x.page.keyboard.press("ArrowLeft"); await settle(x.page, 200);
     assert.deepEqual((await tabsNow(x.page)).filter((tab) => tab.selected).map((tab) => tab.id), ["pips"]);
     assert.equal(await x.page.evaluate(() => document.activeElement?.id), "side-tab-pips", "the keyboard is on the tab, never on its face");
     assert.equal(await x.page.evaluate(() => document.querySelectorAll("#side-tab-pips [tabindex], #side-tab-pips button, #side-tab-pips a").length), 0, "nothing in the tab takes the keyboard");
+    await x.page.keyboard.press("ArrowRight"); await settle(x.page, 200);
+    assert.deepEqual((await tabsNow(x.page)).filter((tab) => tab.selected).map((tab) => tab.id), ["library"]);
     await x.page.keyboard.press("ArrowRight"); await settle(x.page, 200);
     assert.deepEqual((await tabsNow(x.page)).filter((tab) => tab.selected).map((tab) => tab.id), ["home"]);
   } finally { await x.close(); }
@@ -101,10 +105,10 @@ test("170px, the narrowest side bar: the tabs are icons, and Pips is the face al
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "home", width: 170, height: 600 });
   try {
-    // (Under 240 px the words are not drawn and each tab is an icon: side-tabs-icons.test.mjs.)
+    // (Under 280 px the words are not drawn and each tab is an icon: side-tabs-icons.test.mjs.)
     const tabs = await tabsNow(x.page);
     for (const tab of tabs) assert.ok(tab.word.width <= 1.5 && tab.word.height <= 1.5, `${tab.id}: its word is not drawn (${tab.word.width} x ${tab.word.height})`);
-    assert.deepEqual(tabs.map((tab) => [tab.id, tab.name.replace(/:.*/, "")]), [["home", "Home"], ["work", "Work"], ["chat", "Chat"], ["pips", "Pips"]], "each tab keeps its name");
+    assert.deepEqual(tabs.map((tab) => [tab.id, tab.name.replace(/:.*/, "")]), [["home", "Home"], ["work", "Work"], ["chat", "Chat"], ["pips", "Pips"], ["library", "Library"]], "each tab keeps its name");
     const pips = tabs.find((tab) => tab.id === "pips");
     assert.ok(pips.face && pips.face.left >= pips.box.left - 0.5 && pips.face.right <= pips.box.right + 0.5, "the face fits in its tab");
     assert.ok(Math.abs((pips.face.left + pips.face.right) / 2 - (pips.box.left + pips.box.right) / 2) <= 1, "in the middle of it");

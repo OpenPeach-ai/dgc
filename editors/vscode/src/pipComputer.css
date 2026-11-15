@@ -289,6 +289,8 @@ body.pc-screen-mode{padding:0}
 .pc-card-line{margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--t-sm);line-height:1.4;color:var(--muted-firm)}
 .pc-card-detail{display:grid;gap:4px;margin-top:2px;font-size:var(--t-sm);line-height:1.45;color:var(--muted-firm);overflow-wrap:anywhere}
 .pc-card-detail[hidden],.pc-card-line[hidden]{display:none}
+/* A payment's one quiet line over its answers (15 Nov): its Always allow pays only within the Pip's daily limit. */
+.pc-card-limit{margin:4px 0 0;font-size:var(--t-xs);line-height:1.4;color:var(--muted-firm)}
 .pc-card-detail .pc-sends{color:var(--text)}
 .pc-card-actions{position:relative;z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
 /* The answers: pills. The one that lets it through is solid, in the text's own colour; the others are outlined. */

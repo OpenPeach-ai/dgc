@@ -395,18 +395,19 @@ test('a false alarm is not called a payment: an honest line, and Always allow',a
  assert.match(card.querySelector('small').textContent,/It mentions “billing”, so DGC asks\. Nothing shows it’s a payment\. Nothing has been sent\./);
  assert.ok(card.querySelector(`[data-computer-always="${a.id}"]`));
 });
-test('a real payment says Pay, is reviewed first and never offers Always allow, in its card and in its review',async()=>{
+test('a real payment says Pay, is reviewed first, and offers Always allow inside its daily limit, in its card and in its review',async()=>{
  for(const signs of [{payment:true},{asks_because:'payment'}]){
   const a=hold({host:'shop.example',path:'/checkout/complete',route:'/checkout/complete',...signs}),x=await chatWith([a]);
   const card=x.d.querySelector(`[data-computer-card="${a.id}"]`);
   assert.equal(card.querySelector('strong').textContent,'Pay on shop.example?');
   assert.ok(card.classList.contains('allow-card'));
-  assert.deepEqual([...card.querySelectorAll('.app-link-actions button')].map(b=>b.textContent),['Review…','Reject']);
-  assert.equal(card.querySelector('[data-computer-always]'),null);
-  assert.doesNotMatch(card.textContent,/Always allow/);
+  assert.deepEqual([...card.querySelectorAll('.app-link-actions button')].map(b=>b.textContent),['Review…','Always allow','Reject']);
+  assert.ok(card.querySelector(`[data-computer-always="${a.id}"]`).classList.contains('quiet'),'the same quiet button as on every other card');
+  assert.equal(card.querySelector('.allow-limit').textContent,'Inside its daily limit');
+  assert.match(card.querySelector('[data-computer-always]').title,/pays? .*only inside .*daily limit/i);
   x.click(`[data-computer-card="${a.id}"] .primary`);await x.drain();
   assert.ok(x.d.querySelector('#review-confirm'),'its review opens');
-  assert.equal(x.d.querySelector('#review-always'),null,'with no Always allow');
+  assert.ok(x.d.querySelector('#review-always'),'with Always allow');
  }
 });
 

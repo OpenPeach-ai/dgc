@@ -73,7 +73,7 @@ import {attentionPage,waitingOn,needWords,attentionMarkup,attentionAllMarkup,att
 import {answerFor,sendItemAnswer,readVisits} from './pipCardAnswers.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
-import {carefulPage,carefulMarkup,carefulWords,settledWords,isPayment,asksEveryTime,asksWords,coversWords,coversDetail} from './pipCareful.js';
+import {carefulPage,carefulMarkup,carefulWords,wordsHtml,addressHtml,settledWords,isPayment,asksEveryTime,offersAlways,limitWords,asksWords,coversWords,coversDetail} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {pipLogins,pipLogin,SLOW_READ} from './pipsModel.js';
 import {mergeChatPage} from './pipsModel.js';
@@ -1965,7 +1965,7 @@ function grantsMarkup(){
  if(!g)return grantsState.error?`<section class="section" aria-label="Allowed without asking"><h2>Allowed without asking</h2>${errorMarkup(grantsState.error)}</section>`:'';
  const off=S.busy||!usable();
  return `<section class="section" aria-label="Allowed without asking"><h2>Allowed without asking${infoTip('pipAllowedSays','Allowed without asking',g.grants.length?`When ${esc(S.pip?.name||'this Pip')} drafts one of these, it goes ahead without asking and tells you after. Anything else waits for you.`:'Every email, event or app action this Pip drafts waits for you. Choose <b>Always allow</b> when you approve one to let it do that kind of action on its own.')}</h2>${g.grants.length
-   ?`${g.grants.map(x=>`<div class="grant-row"><span>${esc(x.label)} <span class="muted">· ${x.account==='connection_managed'?'the account its connection uses':'account '+esc(x.account)}</span></span><button type="button" data-revoke-grant="${esc(x.id)}"${off?' disabled':''}>Stop allowing</button></div>`).join('')}`
+   ?`${g.grants.map(x=>`<div class="grant-row"><span>${esc(x.label)} <span class="muted">· ${esc(grantWhere(x,true))}</span></span><button type="button" data-revoke-grant="${esc(x.id)}"${off?' disabled':''}>Stop allowing</button></div>`).join('')}`
    :'<p class="muted">Nothing yet.</p>'}</section>`;
 }
 function revokeGrant(grantId){
@@ -2217,25 +2217,28 @@ function waitingCard(a,count){
  if(!words)return computerSubmitCard(a,name,off,count);
  const yes=s.kind==='login'?`<button type="button" class="primary" data-login-card="${esc(a.id)}"${off}>${esc(words[2])}</button>`
   :`<button type="button" class="primary" data-computer-decide="${esc(a.id)}" data-approve="1"${off}>${esc(words[2])}</button>`;
- return `<div class="dgc-card app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${esc(words[0])}</strong><small>${esc(words[1])}</small></div>${count}</div><div class="dgc-card-actions app-link-actions">${yes}<button type="button" class="quiet" data-computer-decide="${esc(a.id)}" data-approve="0"${off}>Not now</button></div></div>`;
+ return `<div class="dgc-card app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(words[0],s,esc)}</strong><small>${wordsHtml(words[1],s,esc)}</small></div>${count}</div><div class="dgc-card-actions app-link-actions">${yes}${offersAlways(s)?`<button type="button" class="quiet" data-computer-always="${esc(a.id)}"${off} title="${esc(coversDetail(s,name))}">Always allow</button>`:''}<button type="button" class="quiet" data-computer-decide="${esc(a.id)}" data-approve="0"${off}>Not now</button></div></div>`;
 }
 // A submit its computer holds, as the Soft card (approved 2026-11-05): what it is, what Always allow would cover, Send once /
-// Always allow / Reject, and the rest under Details. A payment is never sent in one tap and never always allowed: Review…
-// shows it first.
+// Always allow / Reject, and the rest under Details. A payment is never sent once in one tap: Review… shows it first. Since
+// 15 Nov its card has Always allow too (his call: on every card), with one quiet line, "Inside its daily limit": a payment
+// on that grant is made only within the Pip's daily dollar limit.
 function computerSubmitCard(a,name,off,count=''){
  const s=a.summary,id=esc(a.id),pay=isPayment(s),every=asksEveryTime(s),title=pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
  // What it sends is chips, one a field ("amount: 5350.00"), hidden ones (a card number) left out; the line under the title says why DGC asks.
  const line=[s.payment===true?'It sends payment card details.':'',asksWords(s),'Nothing has been sent.'].filter(Boolean).join(' ');
  const sends=DgcCard.chips((Array.isArray(s.fields)?s.fields:[]).filter(f=>f&&typeof f.value==='string'&&f.value.trim()&&f.value!=='•••').map(f=>({label:`${f.name}: ${f.value.replace(/\s+/g,' ').trim()}`})),'What it sends');
  const rows=(Array.isArray(s.fields)?s.fields:[]).filter(f=>f.value!=='•••').map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join('');
- const details=`<details class="allow-details"><summary><span class="allow-preview" title="${esc(every?`${s.method} ${s.host}${s.path}`:coversWords(s))}">${esc(every?`${s.method} ${s.host}${s.path}`:coversWords(s))}</span><span>Details</span></summary>`
-  +`<dl class="allow-meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd>${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}${rows}</dl>`
+ const limit=limitWords(s);
+ const details=`<details class="allow-details"><summary><span class="allow-preview" title="${esc(coversWords(s))}">${esc(coversWords(s))}</span><span>Details</span></summary>`
+  +`<dl class="allow-meta"><dt>Sends to</dt><dd>${addressHtml(`${s.host}${s.path}`,esc)}</dd>${s.page?`<dt>From page</dt><dd>${addressHtml(s.page,esc)}</dd>`:''}${rows}</dl>`
   +(s.more_fields?`<p class="app-link-note">And ${esc(String(s.more_fields))} more fields.</p>`:'')
-  +(every?'':`<p class="app-link-note">${esc(coversDetail(s,name))}</p>`)+(pay?'':`<button type="button" class="link allow-see" data-computer-action="${id}"${off}>See the page…</button>`)
+  +`<p class="app-link-note">${addressHtml(coversDetail(s,name),esc)}</p>`+(pay?'':`<button type="button" class="link allow-see" data-computer-action="${id}"${off}>See the page…</button>`)
   +'</details>';
- const actions=pay?`<button type="button" class="primary" data-computer-action="${id}"${off}>Review…</button>`
-  :`<button type="button" class="primary" data-computer-decide="${id}" data-approve="1"${off}>Send once</button>${every?'':`<button type="button" class="quiet" data-computer-always="${id}"${off} title="${esc(coversDetail(s,name))}">Always allow</button>`}`;
- return `<div class="dgc-card allow-card" data-state="waiting" data-computer-card="${id}" role="group" aria-label="${esc(title)}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${pay?'!':'↗'}</span><div class="dgc-card-words app-link-words"><strong>${esc(title)}</strong><small>${esc(line)}</small></div>${count}</div>${sends}${details}<div class="dgc-card-actions app-link-actions">${actions}<button type="button" class="quiet" data-computer-decide="${id}" data-approve="0"${off}>Reject</button></div></div>`;
+ const always=`<button type="button" class="quiet" data-computer-always="${id}"${off} title="${esc(coversDetail(s,name))}">Always allow</button>`;
+ const actions=(pay?`<button type="button" class="primary" data-computer-action="${id}"${off}>Review…</button>`
+  :`<button type="button" class="primary" data-computer-decide="${id}" data-approve="1"${off}>Send once</button>`)+always;
+ return `<div class="dgc-card allow-card" data-state="waiting" data-computer-card="${id}" role="group" aria-label="${esc(title)}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${pay?'!':'↗'}</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(title,s,esc)}</strong><small>${esc(line)}</small></div>${count}</div>${sends}${details}${limit?`<p class="app-link-note allow-limit">${esc(limit)}</p>`:''}<div class="dgc-card-actions app-link-actions">${actions}<button type="button" class="quiet" data-computer-decide="${id}" data-approve="0"${off}>Reject</button></div></div>`;
 }
 async function decideInChat(id,approve){
  const pip=S.selected,a=computerState.pip===pip?computerState.value?.actions?.find(x=>x.id===id):null;if(!a||S.busy||!usable())return;
@@ -2323,14 +2326,14 @@ async function openComputerAction(id){
   // Careful mode held it before anything happened: allow the site, or this one carrying of app data.
   openReview({title:words[0],description:words[1],
    body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta">${s.kind==='site'?`<dt>Site</dt><dd>${esc(s.shown||s.site||s.host)}</dd><dt>Address</dt><dd>${esc(s.host)}${esc(s.path)}</dd>`:`<dt>Goes onto</dt><dd>${esc(s.host)}${esc(s.path)}</dd>`}${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}</dl>${s.kind==='text'?`<p class="muted">Exactly this, all of it:</p><pre class="message-review-body">${esc(typeof s.text==='string'?s.text:s.fields.map(f=>f.value).join('\n'))}</pre>`:''}`,
-   secondary:{id:'reject-computer-action',label:'Not now'},confirm:words[2],always:false,expiresAt:a.expires_at,computerAction:a.id,carefulKind:s.kind,
+   secondary:{id:'reject-computer-action',label:'Not now'},confirm:words[2],always:offersAlways(s),expiresAt:a.expires_at,computerAction:a.id,carefulKind:s.kind,
    request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
   return;
  }
  const pay=asksEveryTime(s),name=S.pip?.name||'The Pip';
- openReview({title:'Send this once?',description:`${name} wants to send a form to ${s.host}. Nothing has been sent.${pay?'':` ${coversDetail(s,name)}`}`,
-  body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':pay?'<p class="notice">This looks like a payment, so it asks every time.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
-  confirm:'Send once',always:!pay,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
+ openReview({title:'Send this once?',description:`${name} wants to send a form to ${s.host}. Nothing has been sent. ${coversDetail(s,name)}`,
+  body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':pay?'<p class="notice">This looks like a payment.</p>':''}${pay?'<p class="muted">Always allow pays only inside its daily limit.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
+  confirm:'Send once',always:true,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
 }
 async function decideComputerAction(review,approve){
  if(S.busy||!usable())return;const token=scope();S.busy=true;renderReview();
@@ -5774,7 +5777,7 @@ async function pluginRun(id,always=false){
  let call;
  try{call=connectorCall(edit?{tool:a.call.tool,arguments:editedArguments(a.call.arguments||{},edit.values)}:a.call);}catch(error){cardError(edit,error);return;}
  const changed=edit&&JSON.stringify(call.arguments)!==JSON.stringify(a.call.arguments);
- if(edit)edit.error='';always=always&&!plugin.money;pluginBusy=id;render();
+ if(edit)edit.error='';always=always&&!plugin.asks;pluginBusy=id;render();
  try{
   const expected={source_run_id:draft.source_run_id,server:a.server,connection_digest:a.connection_digest,schema_digest:a.schema_digest,call};
   const prepared=(await send('prepare_pip_connector_draft',{draft_id:draft.id,expected_digest:draft.digest,call})).action;
@@ -5998,12 +6001,20 @@ function pipPageMarkup(){
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
 // can be taken back here, as its Allow card promises.
+// The line under a grant's label: the account it runs on; for the grants of 15 Nov (a careful card's, the floor's, a
+// payment's: their tool starts CARRY, FLOOR or PAY), where it applies in plain words, never the tool or "browser".
+function grantWhere(x,inline=false){
+ const tool=String(x.tool||''),terminal=x.account==='terminal'||x.server==='Terminal';
+ const words=tool.startsWith('CARRY ')?`Careful mode · its ${terminal?'Terminal':'browser'}`:tool.startsWith('FLOOR ')?'Its Terminal':tool.startsWith('PAY ')?'A payment · its browser'
+  :x.account==='connection_managed'?'The account its connection uses':inline?`account ${x.account}`:x.account;
+ return inline?words.charAt(0).toLowerCase()+words.slice(1):words;
+}
 function allowedMarkup(){
  if(S.apiVersion<41)return '';
  if(grantsState.pip!==S.selected){void loadGrants();return '';}
  const grants=grantsState.value?.grants||[];if(!grants.length)return '';
  const off=S.busy||!usable();
- return `<section class="pip-page-group" aria-label="Allowed without asking"><h3 class="pip-page-label">Allowed without asking</h3><ul class="pip-page-list">${grants.map(x=>`<li class="pip-page-row static"><span class="row-words"><span>${esc(x.label)}</span><small>${x.account==='connection_managed'?'The account its connection uses':esc(x.account)}</small></span><button type="button" class="quiet pill" data-revoke-grant="${esc(x.id)}"${off?' disabled':''}>Stop allowing</button></li>`).join('')}</ul></section>`;
+ return `<section class="pip-page-group" aria-label="Allowed without asking"><h3 class="pip-page-label">Allowed without asking</h3><ul class="pip-page-list">${grants.map(x=>`<li class="pip-page-row static"><span class="row-words"><span>${esc(x.label)}</span><small>${esc(grantWhere(x))}</small></span><button type="button" class="quiet pill" data-revoke-grant="${esc(x.id)}"${off?' disabled':''}>Stop allowing</button></li>`).join('')}</ul></section>`;
 }
 function pipPageMenu(){
  const p=S.pip,off=S.busy||!usable();

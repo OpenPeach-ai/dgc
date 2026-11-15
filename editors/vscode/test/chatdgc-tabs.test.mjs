@@ -2210,3 +2210,34 @@ test("the home's Chat list: Archive from a row, Undo, and the archived chats wit
   assert.deepEqual({ ...last("chatdgc_update"), request_id: "" }, { type: "chatdgc_update", conversation_id: ID(3), delete: true, request_id: "" });
   assert.equal(world.warnings.length, 1);
 });
+
+// ---- the side bar's Library tab (0.52, 15 Nov): the Library's own host answers it, through the side bar
+test("the side bar's Library tab is answered by the Library's host: its lists, a row opened, what changed; never the full Library's own actions", async () => {
+  const hub = fakeArtifacts();
+  const made = { id: "ar_" + "1".repeat(16), type: "page", title: "Open invoices", made_by: { kind: "pip", id: "pip_" + "b".repeat(32), name: "Tile checker" }, made_as: "card" };
+  hub.list = async () => [made];
+  chat.useArtifacts(hub);
+  const side = (type) => host.home.filter((m) => m.type === "sideLibrary" && m.message.type === type).map((m) => m.message);
+  await chat.sideLibrary({ type: "ready" });
+  assert.deepEqual(side("artifactsOffered"), [{ type: "artifactsOffered", on: true }]);
+  assert.equal(last("chatdgc_library").limit, 60, "the files are asked for as the full Library asks");
+  chat.onEvent({ type: "chatdgc_library", request_id: last("chatdgc_library").request_id, files: [{ id: "att_" + "3".repeat(32), name: "map.png", type: "image", source: "chat", chat_id: ID(1) }], total: 1, next_offset: null, counts: {} });
+  assert.equal(side("library")[0].files[0].name, "map.png");
+  await chat.sideLibrary({ type: "artifactList" });
+  assert.deepEqual(side("artifacts")[0].items, [made], "each item with who made it and what made it");
+  await chat.sideLibrary({ type: "artifactOpen", artifact: { id: made.id, type: "page", title: "Open invoices" } });
+  assert.deepEqual(hub.opened, [[made.id, { type: "page", title: "Open invoices" }]], "a row opens in an editor tab, as the full Library's does");
+  await chat.sideLibrary({ type: "open", file: { id: "att_" + "3".repeat(32), source: "chat", chat_id: ID(1) } });
+  assert.equal(world.panels.length, 1, "a chat's file opens the chat it is in");
+  // What only the full Library does is not the tab's to ask: a removal, a pin, a save.
+  await chat.sideLibrary({ type: "artifactRemove", artifact: { id: made.id, title: "Open invoices" } });
+  await chat.sideLibrary({ type: "remove", file: { id: "att_" + "3".repeat(32), source: "chat", chat_id: ID(1) } });
+  await chat.sideLibrary({ type: "dockToggle", item: { kind: "artifact", id: made.id, title: "x" } });
+  assert.deepEqual(hub.removed, []); assert.equal(world.warnings.length, 0); assert.equal(last("chatdgc_library_file"), undefined);
+  // An artifact made or changed anywhere: the tab hears it.
+  hub.tell({ type: "artifactChanged", artifact: { id: made.id, type: "page", version: 2 }, op: "changed" });
+  assert.deepEqual(side("artifactChanged").at(-1), { type: "artifactChanged", artifact: { id: made.id, type: "page", version: 2 }, op: "changed" });
+  // Nothing in the side bar opens the full Library by the old messages any more.
+  assert.equal(await chat.homeMessage({ type: "chatdgcLibrary" }), false);
+  assert.equal(world.panels.filter((p) => p.viewType === CHATDGC_LIBRARY).length, 0);
+});

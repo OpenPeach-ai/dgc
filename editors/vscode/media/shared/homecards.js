@@ -90,6 +90,8 @@
   const PIN_D = "M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z";
   const pinSvg = (on, size = 12) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_D}"/></svg>`;
   const PLUS = svg('<path d="M12 5v14M5 12h14"/>', 11, 2.6), CROSS = svg('<path d="M6 6l12 12M18 6L6 18"/>', 10, 2.8), BACK = svg('<path d="M15 18l-6-6 6-6"/>', 12, 2.4), TICK = svg('<path d="M5 12l5 5L20 7"/>', 11, 3);
+  // The Library's mark: books on a shelf, one leaning (the tab's icon, drawn at the Cards mark's size).
+  const LIBRARY_ICON = svg('<path d="M5 4v16M10 4v16M14.5 6.2l4.2 13.4"/>', 14, 2);
   const GRIP = '<svg class="hc-grip" width="12" height="16" viewBox="0 0 12 16" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="3" r="1.4"/><circle cx="9" cy="3" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="9" cy="8" r="1.4"/><circle cx="3" cy="13" r="1.4"/><circle cx="9" cy="13" r="1.4"/></g></svg>';
   const plural = (n, word, many) => `${n} ${n === 1 ? word : many || word + "s"}`;
   // The Clock: Here and at most this many added time zones (the host's own bound, src/homeCards.ts).
@@ -477,7 +479,9 @@
       if (ui.arranging && !order.length) ui.arranging = false;
       // The head: Cards at the top right; while Home is arranged, what to do and Done.
       const headHtml = `${ui.arranging ? `<span class="hc-arr-title">Arrange Home</span><span class="hc-cap hc-arr-cap">drag to move · × to remove</span><span class="hc-sp"></span><button type="button" class="hc-btn hc-solid hc-done">Done</button>` : ui.open ? `<button type="button" class="hc-btn hc-back" title="Back to Home (Escape)">${BACK}Home</button><span class="hc-sp"></span>` : '<span class="hc-sp"></span>'}`
-        + `<button type="button" class="hc-btn hc-cards-btn" aria-haspopup="dialog" title="Cards: add, remove and arrange what is on Home">${mosaic("ember", 16)}Cards</button>`;
+        // Library, beside Cards and of its shape (his call, 15 Nov): it opens the side bar's Library tab. Not while Home is arranged.
+        + (ui.arranging ? "" : `<button type="button" class="hc-btn hc-library-btn" title="Library: everything DGC made for you, and who made it" aria-label="Library">${LIBRARY_ICON}<span class="hc-btn-word">Library</span></button>`)
+        + `<button type="button" class="hc-btn hc-cards-btn" aria-haspopup="dialog" title="Cards: add, remove and arrange what is on Home" aria-label="Cards">${mosaic("ember", 16)}<span class="hc-btn-word">Cards</span></button>`;
       if (head.__html !== headHtml) { const had = doc.activeElement && head.contains(doc.activeElement) ? doc.activeElement.className : ""; head.__html = headHtml; head.innerHTML = headHtml; if (had) head.querySelector(`.${had.trim().split(/\s+/).join(".")}`)?.focus({ preventScroll: true }); }
       const notesHtml = (d.notes || []).map((n) => `<p class="dgc-hub-note" role="status">${esc(n.text)}${n.retry ? ' <button type="button" class="dgc-hub-link dgc-hub-retry" title="Ask DGC again">Retry</button>' : ""}</p>`).join("");
       if (notes.__html !== notesHtml) { notes.__html = notesHtml; notes.innerHTML = notesHtml; }
@@ -870,6 +874,7 @@
     host.addEventListener("click", (e) => {
       const t = e.target, card = t.closest(".hc-card"), id = card?.dataset.card;
       if (t.closest(".hc-cards-btn")) { openLibrary(); return; }
+      if (t.closest(".hc-library-btn")) { act?.("tab", "library"); return; }
       if (t.closest(".hc-done")) { arrange(false); return; }
       if (t.closest(".hc-back")) { close(); return; }
       if (t.closest(".dgc-hub-retry")) { act?.("retry"); return; }

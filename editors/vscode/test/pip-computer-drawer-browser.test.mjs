@@ -67,7 +67,9 @@ const leave = async (p) => { const v = p.viewportSize(); await p.mouse.move(20, 
 for (const width of WIDTHS) {
   test(`at ${width}px the drawer floats over the screen at its top right, the stack folds and fans, and the screen never moves or shrinks`, async (t) => {
     if (skipOrFail(t)) return;
-    const x = await openComputer(browser, { width, height: 700 });
+    // (A tab tall enough for three cards whole: since 15 Nov a payment's and a careful card's have Always allow too, so
+    // in a narrow drawer their answers take two rows. A shorter tab scrolls the list: the next test.)
+    const x = await openComputer(browser, { width, height: width < 400 ? 860 : 700 });
     try {
       const idle = await look(x.p);
       assert.equal(idle.bell, null, "no bell with nothing waiting"); assert.equal(idle.drawer, null);

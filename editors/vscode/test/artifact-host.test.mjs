@@ -499,3 +499,18 @@ test("dashboard consent uses the displayed content version and is gated for olde
   panel.say({ type: "allow", source: "sales", allowed: false, base_version: 3 });
   assert.equal("base_version" in last("artifact_allow_source"), false);
 });
+
+// ---- who made it (0.52, 15 Nov): the Library names each item's maker, and its Widgets are the Pages a card or a widget made
+test("an artifact's view keeps who made it (made_by) and what made a Page (made_as, or the process's legacy record)", () => {
+  const { artifactView } = artifactsModule();
+  const base = { id: "ar_" + "a".repeat(16), type: "page", title: "Open invoices", version: 1, origin: { surface: "pip", pip: "pip_x" } };
+  assert.deepEqual(artifactView({ ...base, made_by: { kind: "pip", id: "pip_x", name: "Tile checker", more: 1 } }).made_by, { kind: "pip", id: "pip_x", name: "Tile checker" });
+  assert.equal(artifactView(base).made_by, undefined, "an older DGC says nothing");
+  assert.equal(artifactView({ ...base, made_by: { kind: "<b>", id: "x", name: "y" } }).made_by, undefined, "only a plain kind");
+  assert.equal(artifactView({ ...base, made_by: { kind: "session", id: 7, name: "n".repeat(500) } }).made_by.name.length, 120);
+  assert.equal(artifactView({ ...base, made_as: "card" }).made_as, "card");
+  assert.equal(artifactView({ ...base, made_as: "anything" }).made_as, undefined);
+  assert.equal(artifactView({ ...base, legacy: { card: "abc", card_place: "pip::x:" } }).made_as, "card");
+  assert.equal(artifactView({ ...base, legacy: { widget: "wg_1", chat: "chat_1" } }).made_as, "widget");
+  assert.equal(artifactView({ ...base, legacy: { made: "att_1" } }).made_as, undefined, "a sheet from a chat's file is not a widget");
+});

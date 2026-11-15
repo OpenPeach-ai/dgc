@@ -62,8 +62,11 @@ export function check(assert, found, { where, sizes = ["h", "hSm"], oneFilled = 
   const small = (b) => Math.round(b.height) === tokens.hSm, fixed = boxed.filter((b) => !(free && free.test(b.cls)));
   const odd = fixed.filter((b) => ![small(b) ? tokens.wSm : tokens.w, tokens.wWide].includes(Math.round(b.width)));
   const shared = new Map(); for (const b of odd) shared.set(b.card + "@" + b.top, [...(shared.get(b.card + "@" + b.top) || []), b]);
-  const uneven = [...shared.values()].filter((row) => row.length < 2 || new Set(row.map((b) => Math.round(b.width))).size > 1 || row.some((b) => b.width > (small(b) ? tokens.wSm : tokens.w))).flat();
-  assert.deepEqual(uneven.map((b) => `${b.word} ${b.width}`), [], `${where}: every button is the one box of its size (${tokens.w} or ${tokens.wSm} px wide; ${tokens.wWide} wide), or shares a narrow row equally`);
+  // (Since 15 Nov a button in a shared row is never narrower than its own words (finding 45: "Allow…", "Not n…"): the
+  // one whose words need a little more than an equal share has it, and the others share the rest, all words whole.)
+  const nearly = (row) => row.every((b) => !b.cut) && Math.max(...row.map((b) => b.width)) - Math.min(...row.map((b) => b.width)) <= 16;
+  const uneven = [...shared.values()].filter((row) => row.length < 2 || (new Set(row.map((b) => Math.round(b.width))).size > 1 && !nearly(row)) || row.some((b) => b.width > (small(b) ? tokens.wSm : tokens.w))).flat();
+  assert.deepEqual(uneven.map((b) => `${b.word} ${b.width}`), [], `${where}: every button is the one box of its size (${tokens.w} or ${tokens.wSm} px wide; ${tokens.wWide} wide), or shares a narrow row equally (but for the room its own words need)`);
   assert.deepEqual(boxed.filter((b) => (b.cut && !b.titled) || b.lines > 1).map((b) => b.word), [], `${where}: no label is cut (but a name too long for the box, which its title says whole) or wrapped`);
   // Columns line up on both edges: buttons one over another in a card share their left and right.
   const cols = new Map(); for (const b of fixed) cols.set(b.card, [...(cols.get(b.card) || []), b]);

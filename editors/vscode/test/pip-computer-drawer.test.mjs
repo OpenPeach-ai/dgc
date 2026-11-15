@@ -120,8 +120,8 @@ test('every approval is a notification card, newest first: a tile for its kind, 
   ['form','shop.example','4m','Send a form to shop.example'],
   ['site','news.example','2h','Let Shopper visit news.example?'],
   ['signin','bank.example','2d','Save a login for bank.example so Shopper can sign in itself?']]);
- assert.deepEqual(x.cards().map(c=>c.buttons),[['Send once','Reject'],['Allow once','Not now'],['Send once','Always allow','Reject'],['Allow this site','Not now'],['Not now']]);
- assert.deepEqual(x.cards().map(c=>c.solid),[[true,false],[true,false],[true,false,false],[true,false],[false]],'the answer that lets it through is the solid one; a login has none here');
+ assert.deepEqual(x.cards().map(c=>c.buttons),[['Send once','Always allow','Reject'],['Allow once','Always allow','Not now'],['Send once','Always allow','Reject'],['Allow this site','Not now'],['Not now']],'Always allow on every card that DGC can grant (15 Nov): a payment and app data too; a new site and a login never');
+ assert.deepEqual(x.cards().map(c=>c.solid),[[true,false,false],[true,false,false],[true,false,false],[true,false],[false]],'the answer that lets it through is the solid one; a login has none here');
  assert.ok(x.cards().every(c=>c.state==='waiting'&&c.done===null));
  for(const card of x.all('#pc-drawer .pc-card')){assert.ok(card.querySelector('.pc-card-tile svg'),'each has its kind\'s icon');assert.equal(card.getAttribute('role'),'listitem');}
  assert.equal(x.$('#pc-drawer .pc-waiting').getAttribute('role'),'list');
@@ -285,7 +285,7 @@ test('a card that arrives opens the drawer; collapsed, it shows alone for 6 seco
  await x.arrive([PAY,FORM]);
  assert.equal(x.bell().count,'2','the count goes up');assert.equal(x.bell().expanded,'false','the drawer stays collapsed');
  assert.ok(x.shown());assert.ok(x.$('#pc-drawer').classList.contains('pc-drawer-banner'),'a banner');
- assert.deepEqual(x.cards().map(c=>[c.id,c.buttons]),[[PAY.id,['Send once','Reject']]],'the new one alone, with its buttons');
+ assert.deepEqual(x.cards().map(c=>[c.id,c.buttons]),[[PAY.id,['Send once','Always allow','Reject']]],'the new one alone, with its buttons');
  assert.equal(x.$('#pc-drawer .pc-drawer-head'),null,'no header on a banner');
  await x.wait(5500);await x.poll();
  assert.ok(x.shown(),'still there at 5.5 s');

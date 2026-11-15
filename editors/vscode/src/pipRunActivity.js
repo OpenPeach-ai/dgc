@@ -14,6 +14,8 @@ const TOOLS={
   write_file:p=>p?['Writing ',code(name(p))]:['Writing a file'], edit_file:p=>p?['Editing ',code(name(p))]:['Editing a file'],
   multi_edit:p=>p?['Editing ',code(name(p))]:['Editing a file'], apply_patch:()=>['Applying a change'],
   web_search:()=>['Searching the web'], web_fetch:()=>['Reading a web page'], task:()=>['Asking a helper'],
+  // Deep research (dgc/pip_research.py), named as Work's row names it (live round 1, finding 43).
+  deep_research:()=>['Deep research'],
 };
 // The run's own steps, said the way its activity list says them.
 const STEPS={pip_run_queued:'Waiting to start',pip_run_started:'Getting started',pip_run_snapshot:'Getting the code ready',pip_run_cancelling:'Stopping'};

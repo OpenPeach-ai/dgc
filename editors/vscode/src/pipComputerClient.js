@@ -674,7 +674,8 @@ async function decide(id,how){
    const result=await send('always_allow_pip_computer_action',{action_id:a.id,expected_digest:a.digest});
    const done=pipComputerAction(result.action,S.pip.id);
    if(done.id!==a.id||done.status!=='approved'||!result.grant)throw Error('The approval did not complete. Refresh and try again.');
-   S.notice='Sent, and allowed from now on for this browser request.';
+   const kind=a.summary?.kind,label=typeof result.grant.label==='string'?result.grant.label:'';
+   S.notice=(kind==='text'||kind==='floor')&&label?`Allowed, and from now on without asking: ${label}.`:'Sent, and allowed from now on for this browser request.';
   }else{
    const d=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve:how==='send'})).action,S.pip.id);
    if(d.id!==a.id||d.status!==(how==='send'?'approved':'rejected'))throw Error('The saved decision differs from your choice. Refresh and try again.');

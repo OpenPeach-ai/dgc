@@ -28,6 +28,26 @@ export function carefulMarkup(state, {esc, busy = false, error = '', pipName = '
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '') + '</section>';
 }
 
+/** A card's words as HTML with every site's name in them kept whole (finding 45, live round 1: at 170 px "quantobra.pt"
+ *  broke to "quantobra.p / t?"). Each name of `summary` (its site, the address shown, its host) is one piece that never
+ *  breaks inside and ends in "…" when it is longer than the line, said whole in its title; a "?" right after a name
+ *  stays with it. `esc` escapes text for HTML. */
+export function wordsHtml(text, summary, esc) {
+  const names = [...new Set([summary?.shown, summary?.host, summary?.site].filter(n => typeof n === 'string' && n.length > 3 && n.toLowerCase() !== 'terminal'))]
+    .sort((a, b) => b.length - a.length);
+  let out = esc(String(text ?? ''));
+  if (!names.length) return out;
+  const quoted = names.map(n => esc(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return out.replace(new RegExp(`(^|[^\\w.-])(${quoted.join('|')})(\\?)?(?![\\w-])`, 'g'),
+    (_all, before, name, mark) => `${before}<span class="card-domain" title="${name}">${name}${mark || ''}</span>`);
+}
+
+/** An address as HTML that breaks only between its pieces (after each "/", before "?" and "&"), never inside one:
+ *  a browser left to itself breaks "news.example/account/alerts" wherever the line ends. `esc` escapes text for HTML. */
+export function addressHtml(text, esc) {
+  return esc(String(text ?? '')).replace(/\/(?=[^\s/])/g, '/<wbr>').replace(/([^\s])(\?|&amp;)(?=[^\s])/g, '$1<wbr>$2');
+}
+
 /** A careful-mode hold, in words: [title, what it is, confirm label]. Null for an ordinary held submit. */
 export function carefulWords(summary, pipName = 'The Pip') {
   if (summary?.kind === 'site') return [`Let ${pipName} visit ${summary.site || summary.host}?`,
@@ -61,21 +81,37 @@ export function settledWords(action) {
   return outcome ? [outcome, what] : null;
 }
 
-/** A payment asks every time and never gets Always allow: a card number in it, or real signs of paying (pip_levels.classify). */
+/** A payment: a card number in it, or real signs of paying (pip_levels.classify). It asks at every level; since 15 Nov
+ *  its card has Always allow too, and a payment on that grant is made only inside the Pip's daily dollar limit. */
 export function isPayment(summary) {
   return summary?.payment === true || summary?.asks_because === 'payment';
 }
 
-/** A pay, buy or order step (agreed 10 Nov): never offered Always allow, as a payment isn't (pip_computer.never_replayed). */
+/** A pay, buy or order step (pip_computer.never_replayed): its Always allow is a payment's, apart from any other given
+ *  on the same address, and it pays only inside the Pip's daily dollar limit. (The name is from when these asked every
+ *  time, with no Always allow: 10 Nov to 15 Nov.) */
 export function asksEveryTime(summary) {
   return isPayment(summary) || (summary?.asks_because === 'maybe_payment' && summary?.asks_word === 'order');
+}
+
+/** Whether a held step's card offers Always allow (his call, 15 Nov: every card DGC can grant one for). A new site has
+ *  none (Allow adds the site for good) and neither has a login to save; every other card has: a form, a payment or an
+ *  order, what it read from your apps going to one site or into its own Terminal, and the command that could delete
+ *  everything in its Files (pip_computer.approve_always). */
+export function offersAlways(summary) {
+  return summary?.kind !== 'site' && summary?.kind !== 'login' && summary?.kind !== 'yours';
+}
+
+/** A payment's one quiet line beside its Always allow: it pays only within the Pip's daily dollar limit. "" for the rest. */
+export function limitWords(summary) {
+  return offersAlways(summary) && asksEveryTime(summary) ? 'Inside its daily limit' : '';
 }
 
 /** Why its level or DGC still asks, in a line (API 58). A maybe is about money only by one word, and says so plainly. */
 export function asksWords(summary) {
   const because = summary?.asks_because;
   if (because === 'payment') return 'It looks like a payment, so it asks at every level.';
-  if (because === 'maybe_payment' && summary.asks_word === 'order') return 'It may place an order, so it asks every time.';
+  if (because === 'maybe_payment' && summary.asks_word === 'order') return 'It may place an order, so DGC asks.';
   if (because === 'maybe_payment') return `It mentions “${summary.asks_word || 'money'}”, so DGC asks. Nothing shows it’s a payment.`;
   if (because === 'consequential') return 'Its level asks before this.';
   if (because === 'unsure') return 'DGC can’t tell what this does, so it asks.';
@@ -88,14 +124,26 @@ export function asksWords(summary) {
   return '';
 }
 
+/** Where a careful card carries what the Pip read from your apps: "into its own Terminal", or "to <site>". */
+function carryWhere(summary) {
+  const host = String(summary?.host || '');
+  return host.toLowerCase() === 'terminal' ? 'into its own Terminal' : `to ${summary?.site || host || 'this site'}`;
+}
+
 /** What an Always allow on a held submit covers: its site, method and address's shape (pip_action_grants.route_of), in
  * plain words. `route` comes from DGC; a hold from before it had one covers its own address. */
 export function coversWords(summary) {
+  if (summary?.kind === 'text') return `Always allow covers what it read from your apps going ${carryWhere(summary)}`;
+  if (summary?.kind === 'floor') return 'Always allow covers commands that could delete everything in its Files';
+  if (asksEveryTime(summary)) return `Always allow covers payments to ${String(summary?.host || 'this site')}, inside its daily limit`;
   const route = String(summary?.route || summary?.path || '/');
   return `Always allow covers ${String(summary?.method || 'POST').toUpperCase()} ${route}${route.includes('*') ? ', whatever the ID' : ''}`;
 }
 
 export function coversDetail(summary, pipName = 'The Pip') {
+  if (summary?.kind === 'text') return `Always allow lets ${pipName} put what it read from your apps ${carryWhere(summary)} without asking, and tells you after. Anywhere else still asks. Take it back in its Settings.`;
+  if (summary?.kind === 'floor') return `Always allow lets ${pipName} run commands that could delete everything in its Files, in its own Terminal, without asking. Take it back in its Settings.`;
+  if (asksEveryTime(summary)) return `Always allow lets ${pipName} pay on ${summary?.host || 'this site'} without asking, only inside its daily limit, and tells you after. Past the limit, or where DGC can’t read the amount, it still asks. Take it back in its Settings.`;
   const route = String(summary?.route || summary?.path || '/');
   return `Always allow lets ${pipName} send this again without asking, and tells you after: ${String(summary?.method || 'POST').toUpperCase()} to ${summary?.host || ''}${route}`
     + `${route.includes('*') ? ', where * is any ID or number' : ''}. A different site, method or page still asks, and so does a payment.`;

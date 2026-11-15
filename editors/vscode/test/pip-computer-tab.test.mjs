@@ -138,7 +138,9 @@ test('a held payment says what it pays, and never a hidden card field',async()=>
  assert.match(card,/Pay on pay.hospital.example/);
  assert.match(card,/billno SMH\/OP\/26\/118734 · amount 5350.00/);
  assert.doesNotMatch(card,/card_number/);
- assert.equal(x.d.querySelector(`[data-always="${actionId}"]`),null,'a payment has no Always allow');
+ // His call, 15 Nov: Always allow on every card, a payment's too, and it says it pays only inside the Pip's daily limit.
+ assert.ok(x.d.querySelector(`[data-always="${actionId}"]`),'a payment has Always allow');
+ assert.match(card,/Inside its daily limit/);
 });
 
 test('what the Pip would submit waits at the top with Send once, Always allow and Reject',async()=>{
@@ -180,10 +182,11 @@ test('an older computer poll cannot restore a card after Always allow succeeds',
  assert.match(x.d.body.textContent,/Sent, and allowed from now on/);
 });
 
-test('a real payment with no card number in it is Pay and never Always allow; a false alarm is neither',async()=>{
+test('a real payment with no card number in it is Pay, with Always allow inside its daily limit; a false alarm is a plain form',async()=>{
  const pay=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,asks_because:'payment'}}]})});await pay.drain();
  assert.match(pay.d.querySelector('.pc-waiting').textContent,/Pay on shop\.example/);
- assert.equal(pay.d.querySelector(`[data-always="${actionId}"]`),null);
+ assert.ok(pay.d.querySelector(`[data-always="${actionId}"]`));
+ assert.match(pay.d.querySelector('.pc-waiting').textContent,/Inside its daily limit/);
  const maybe=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,route:'/accounts/*/billing',asks_because:'maybe_payment',asks_word:'billing'}}]})});await maybe.drain();
  const text=maybe.d.querySelector('.pc-waiting').textContent;
  assert.match(text,/Send a form to shop\.example/);
@@ -191,14 +194,28 @@ test('a real payment with no card number in it is Pay and never Always allow; a 
  assert.match(text,/Always allow covers POST \/accounts\/\*\/billing, whatever the ID\./);
  assert.ok(maybe.d.querySelector(`[data-always="${actionId}"]`));
  assert.doesNotMatch(text,/Cloudflare/);
+ assert.doesNotMatch(text,/Inside its daily limit/,'only a payment says so');
 });
 
-test('a payment waits with Send once and Reject, never Always allow',async()=>{
+test('a payment waits with Send once, Always allow and Reject, in the order of every other card',async()=>{
  const x=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,payment:true}}]})});await x.drain();
  assert.ok(x.d.querySelector(`[data-send="${actionId}"]`));assert.ok(x.d.querySelector(`[data-reject="${actionId}"]`));
- assert.equal(x.d.querySelector(`[data-always="${actionId}"]`),null,'a payment asks every time');
+ assert.deepEqual([...x.d.querySelectorAll('.pc-waiting .pc-card-actions button')].map(b=>b.textContent),['Send once','Always allow','Reject']);
+ x.click(`[data-always="${actionId}"]`);await x.drain();
+ assert.equal(x.requests('always_allow_pip_computer_action')[0].request.action_id,actionId,'it asks DGC for the grant');
  const plain=setup({status:computer({pending:1,actions:[hold]})});await plain.drain();
  assert.ok(plain.d.querySelector(`[data-always="${actionId}"]`),'any other submit can be always allowed');
+});
+
+test('careful mode: what it read from your apps going to a site, and the could-delete-everything command, wait with Always allow too',async()=>{
+ const text={...hold,summary:{kind:'text',read_from_apps:true,method:'TYPE',host:'forum.example',path:'/post',page:'https://forum.example/post',fields:[{name:'typed',value:'code 482913'}],text:'code 482913',more_fields:0,body_bytes:0}};
+ const x=setup({status:computer({pending:1,actions:[text]})});await x.drain();
+ assert.deepEqual([...x.d.querySelectorAll('.pc-waiting .pc-card-actions button')].map(b=>b.textContent),['Allow once','Always allow','Not now']);
+ const floor={...hold,summary:{kind:'floor',floor:'could delete everything in its Files',method:'RUN',host:'Terminal',path:'/',page:'',fields:[{name:'command',value:'rm -rf ~/Files'}],more_fields:0,body_bytes:0}};
+ const y=setup({status:computer({pending:1,actions:[floor]})});await y.drain();
+ assert.deepEqual([...y.d.querySelectorAll('.pc-waiting .pc-card-actions button')].map(b=>b.textContent),['Allow once','Always allow','Not now']);
+ y.click(`[data-always="${actionId}"]`);await y.drain();
+ assert.equal(y.requests('always_allow_pip_computer_action')[0].request.action_id,actionId);
 });
 
 test('careful mode: a new site waits as "Let Shopper visit…" with Allow this site and Not now, never Always allow',async()=>{

@@ -13,6 +13,13 @@
 .dgc-pop { position: fixed; z-index: 60; box-sizing: border-box; min-width: min(176px, calc(100vw - 12px)); max-width: min(248px, calc(100vw - 12px)); max-height: calc(100vh - 12px); overflow-y: auto;
   transform-origin: var(--pop-x, 50%) var(--pop-y, 100%); animation: dgc-pop-in var(--dur-menu) var(--ease-out); }
 @keyframes dgc-pop-in { from { opacity: 0; transform: translateY(4px) scale(.98); } }
+/* The narrowest side bar (under 220 px a menu is at most about 160 px wide): in the ⋯ menus of the Work, Chat and
+   Library tabs, whose rows are commands, a row's words go onto a second line whole, where they ended in "…" ("Open
+   the full …", "Page preview…"; 15 Nov). A menu of names (folders, makers) keeps one line and its "…". */
+@media (max-width: 219px) {
+  .dgc-pop:is([aria-label="Library"], [aria-label="Work"], [aria-label="Chat"]) .dgc-menu-row { padding-top: 5px; padding-bottom: 5px; }
+  .dgc-pop:is([aria-label="Library"], [aria-label="Work"], [aria-label="Chat"]) .dgc-menu-row .dgc-menu-label { white-space: normal; overflow: visible; text-overflow: clip; }
+}
 .dgc-pop .dgc-menu-row.is-danger { color: var(--del-text); }
 .dgc-pop .dgc-menu-row .dgc-pop-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: var(--muted); }
 .dgc-pop .dgc-menu-row:hover .dgc-pop-icon { color: var(--text); }

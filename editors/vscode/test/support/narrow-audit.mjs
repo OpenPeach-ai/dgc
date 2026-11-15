@@ -4,6 +4,10 @@
 //             than its box. Ordinary words anywhere; a path, an address or a model's name only in a heading or a button
 //             (in running text those may wrap where they must).
 //   cut       a word cut off part-way by a box that hides what runs over, with no "…" ("Trace" shown as "Tr").
+//   clipped   a button whose own words are cut, "…" or not ("Allow…", "Not n…" on a Pip's site card at 170 px: live
+//             round 1, finding 45). A button's words are a command: at the narrowest the buttons go one under the
+//             other or become icons, and never lose letters. Not a name a button shows (the value of a dropdown, a
+//             tab's or a chat's title, a menu's row, a maker's name): those may end in "…".
 //   sideways  a box with a sideways scrollbar of its own, and the page itself running off sideways.
 //   inner     a Home card that scrolls by itself (the Needs you card's own scrollbar).
 // Not a *.test.mjs file.
@@ -19,7 +23,12 @@ export const narrowAudit = (opts = {}) => {
   // (A path, an address or a model's name may wrap where it must in running text, in a link and on a row; in a heading
   // or on a tab it ends in "…" instead.)
   const HEADING = "h1, h2, h3, h4, h5, h6, summary, legend, [role=tab], .home-title, .set-title";
-  const out = { broken: [], cut: [], sideways: [], inner: [], page: false, width: innerWidth };
+  const out = { broken: [], cut: [], clipped: [], sideways: [], inner: [], page: false, width: innerWidth };
+  // A button that shows a name, not a command: what a dropdown has chosen, a tab, a row of a menu or a list, a title.
+  const NAMED = "[aria-haspopup], [role=tab], [role=option], [role^=menuitem], [role=row], .thread-title, .lib-row-maker, .dgc-dock-item, [data-name]";
+  // The button whose command these words are, or null: up to three plain words ("Allow this site", "Not now", "Always allow").
+  const command = (el) => { const b = el.closest("button, [role=button]"); if (!b || b.closest(NAMED) || b.querySelector(NAMED)) return null;
+    const label = (b.textContent || "").replace(/\s+/g, " ").trim(); return label && label.length <= 24 && label.split(" ").length <= 3 && /^[\p{L}’' …]+$/u.test(label) ? b : null; };
   const push = (list, item) => { if (!list.some((x) => x.what === item.what && x.text === item.text)) list.push(item); };
   const range = document.createRange();
   for (const root of ROOTS) {
@@ -63,6 +72,7 @@ export const narrowAudit = (opts = {}) => {
             if ((over > 2 && r.left < right - 3) || (under > 2 && r.right > left + 3)) {      // part of the word shows, part does not
               if (/auto|scroll/.test(s.overflowX)) break;                                    // it scrolls: listed under sideways
               if (!(dots || clamp || path)) push(out.cut, { what: name(el), by: name(a), text: piece, hidden: Math.round(Math.max(over, under)) });
+              else if (dots && command(el)) push(out.clipped, { what: name(command(el)), by: name(a), text: (command(el).textContent || "").replace(/\s+/g, " ").trim(), hidden: Math.round(Math.max(over, under)) });
               break;
             }
           }

@@ -1,6 +1,6 @@
 // A Pip's eyes and cursor (Pips API 53): you see where the Pip clicks (its cursor in the live view, on the
 // full screen, and in "What it saw"), a text-only Pip's page says how it sees and changes it, an older CLI is
-// never asked, and a payment never offers Always allow.
+// never asked.
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';

@@ -41,6 +41,10 @@ export type ArtifactView = {
   origin?: Record<string, unknown>; exports: string[]; link?: Record<string, unknown>; canvas?: string; file?: string;
   versions?: { n: number; author: string; at: string; summary: string; size?: number }[];
   allowed_sources?: string[];
+  /** Who made it: {kind: pip|session|chat|app|cli, id, name} (name "" when DGC does not know it). */
+  made_by?: { kind: string; id: string; name: string };
+  /** A Page a reply's card ("card") or a ChatDGC widget ("widget") made. */
+  made_as?: "card" | "widget";
 };
 
 /** ready.capabilities.artifacts, checked; undefined when the process doesn't offer artifacts. */
@@ -75,6 +79,15 @@ export function artifactView(raw: any): ArtifactView | undefined {
     origin: raw.origin && typeof raw.origin === "object" ? { ...raw.origin } : {},
     exports: Array.isArray(raw.exports) ? raw.exports.filter((f: unknown) => typeof f === "string" && /^[a-z0-9]{1,8}$/.test(f)).slice(0, 12) : [],
   };
+  // Who made it (0.52): a Pip, a Work session, a chat, an app or the terminal, by name when DGC knows it.
+  if (raw.made_by && typeof raw.made_by === "object" && typeof raw.made_by.kind === "string" && /^[a-z_]{1,24}$/.test(raw.made_by.kind)) {
+    view.made_by = { kind: raw.made_by.kind, id: text(raw.made_by.id, 128), name: text(raw.made_by.name, 120) };
+  }
+  // A Page that a reply's card or a ChatDGC widget made: the Library's Widgets. Said as `made_as`, or read from the
+  // artifact's `legacy` record when the process lists that (card, widget).
+  const legacy = raw.legacy && typeof raw.legacy === "object" ? raw.legacy : {};
+  const as = raw.made_as === "card" || raw.made_as === "widget" ? raw.made_as : legacy.card ? "card" : legacy.widget ? "widget" : "";
+  if (as) view.made_as = as;
   if (raw.link && typeof raw.link === "object") view.link = { ...raw.link };
   if (typeof raw.canvas === "string") view.canvas = raw.canvas.slice(0, 40);
   if (typeof raw.file === "string" && raw.file.length < 4096) view.file = raw.file;

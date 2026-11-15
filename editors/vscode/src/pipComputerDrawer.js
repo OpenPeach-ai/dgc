@@ -4,7 +4,7 @@
 //
 // The drawer is DGC's own page. It is never drawn into the computer's desktop or a frame the Pip reads, and nothing
 // done on it is sent to the computer.
-import {carefulWords,sendsWords,isPayment,asksEveryTime,asksWords,coversWords} from './pipCareful.js';
+import {carefulWords,sendsWords,isPayment,offersAlways,limitWords,asksWords,coversWords} from './pipCareful.js';
 import {esc} from './pipsModel.js';
 
 /** How long things take, in ms: a card springing in, a card leaving, an answered card's moment, a banner's stay, the bell's wiggle. */
@@ -41,11 +41,12 @@ export function cardWords(a,pipName='The Pip'){
  if(words&&s.kind==='login')return {kind:'signin',source:site,title:words[0],line:`${words[1]} Save it from the card in its chat.`,sends:'',text:'',
   answers:[{how:'reject',label:'Not now',done:'Not now'}]};
  if(words)return {kind:s.kind==='floor'?'terminal':s.kind,source:s.kind==='floor'?'Terminal':site,title:words[0],line:words[1],sends:'',text:s.kind==='text'&&typeof s.text==='string'?s.text:'',
-  answers:[{how:'send',label:words[2],done:'Allowed'},{how:'reject',label:'Not now',done:'Not now'}]};
+  answers:[{how:'send',label:words[2],done:'Allowed'},...(offersAlways(s)?[{how:'always',label:'Always allow',done:'Always allowed'}]:[]),{how:'reject',label:'Not now',done:'Not now'}]};
  const asks=asksWords(s),sends=sendsWords(s);
- const line=`${s.payment===true?'Sends payment card details. ':''}${asks}${asks?' ':''}Nothing has been sent.${asksEveryTime(s)?'':` ${coversWords(s)}.`}`;
- return {kind:s.kind==='download'?'download':isPayment(s)?'payment':'form',source:s.host,title:`${isPayment(s)?'Pay on':'Send a form to'} ${s.host}`,line,sends,text:'',
-  answers:[{how:'send',label:'Send once',done:'Sent once'},...(asksEveryTime(s)?[]:[{how:'always',label:'Always allow',done:'Always allowed'}]),{how:'reject',label:'Reject',done:'Rejected'}]};
+ const limit=limitWords(s);
+ const line=`${s.payment===true?'Sends payment card details. ':''}${asks}${asks?' ':''}Nothing has been sent. ${coversWords(s)}.`;
+ return {kind:s.kind==='download'?'download':isPayment(s)?'payment':'form',source:s.host,title:`${isPayment(s)?'Pay on':'Send a form to'} ${s.host}`,line,sends,text:'',limit,
+  answers:[{how:'send',label:'Send once',done:'Sent once'},{how:'always',label:'Always allow',done:'Always allowed'},{how:'reject',label:'Reject',done:'Rejected'}]};
 }
 
 /** The card's title alone, for the bell's own words. */
@@ -63,7 +64,7 @@ function cardMarkup(card,{pipName,now,open}){
   +`<span class="pc-card-tile" aria-hidden="true">${svg(KIND[w.kind]||KIND.form)}</span>`
   +`<div class="pc-card-body"><p class="pc-card-top"><span class="pc-card-source">${esc(w.source)}</span><span aria-hidden="true">·</span><span class="pc-card-age">${esc(ageWords(a.created_at,now))}</span></p>`
   +`<button type="button" class="pc-card-open" id="pc-open-${id}" data-card-open="${id}" aria-expanded="${open}" aria-controls="pc-detail-${id}">${esc(w.title)}</button>`
-  +`<p class="pc-card-line"${open?' hidden':''}>${esc(w.sends||w.line)}</p><div class="pc-card-detail" id="pc-detail-${id}"${open?'':' hidden'}>${detail}</div>${answers}</div>`
+  +`<p class="pc-card-line"${open?' hidden':''}>${esc(w.sends||w.line)}</p><div class="pc-card-detail" id="pc-detail-${id}"${open?'':' hidden'}>${detail}</div>${w.limit&&!answered?`<p class="pc-card-limit">${esc(w.limit)}</p>`:''}${answers}</div>`
   +(answered?`<button type="button" class="pc-card-clear" id="pc-clear-${id}" data-card-clear="${id}" aria-label="Clear" title="Clear">${svg(CLOSE)}</button>`:'<span class="pc-card-live" aria-hidden="true"></span>')
   +'</div>';
 }

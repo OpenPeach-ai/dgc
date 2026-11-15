@@ -33,6 +33,10 @@
 .dgc-card-words { flex: 1 1 auto; min-width: 0; }
 .dgc-card .dgc-card-title, .dgc-card .dgc-card-words > strong { display: block; margin: 0; color: var(--text-strong); font: var(--w-med) var(--t-chat)/1.35 var(--sans); overflow-wrap: anywhere; }
 .dgc-card .dgc-card-sub, .dgc-card .dgc-card-words > small { display: block; margin: 1px 0 0; color: var(--text-2); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); overflow-wrap: anywhere; }
+/* A site's name in a card's words (finding 45): one word, never broken inside. It stays on one line, moves to the next
+   line whole when the rest of this one is too short, and ends in "…" only when it is longer than a whole line (its
+   title says it whole). */
+.dgc-card .card-domain { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .dgc-card-count { flex: none; margin: 2px 0 0 4px; color: var(--text-2); font-size: var(--t-xs); white-space: nowrap; }
 
 /* What exactly: one line of chips. card.js folds the ones that do not fit into "+N"; without it the line is cut. */
@@ -89,13 +93,24 @@
 @container (max-width: 380px) {
   .dgc-card .dgc-card-chips, .dgc-card .dgc-card-actions, .dgc-card .dgc-card-details, .dgc-card .dgc-card-note, .dgc-card .dgc-card-error,
   .dgc-card:has(.dgc-card-face) :is(.dgc-card-chips, .dgc-card-actions, .dgc-card-details, .dgc-card-note, .dgc-card-error) { margin-left: 0; }
-  .dgc-card .dgc-card-actions .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link) { flex: 1 1 0; min-width: 0; max-width: var(--btn-w); padding: 0 4px; overflow: hidden; text-overflow: ellipsis; }   /* (a narrow row is shared equally, never past the button's own size) */
+  /* (A narrow row is shared equally, never past the button's own size, and never under its own words: answers that
+     cannot all keep their words on one row go onto the next. Live round 1, finding 45: at 170 px "Allow this site" and
+     "Not now" read "Allow…" and "Not n…".) */
+  .dgc-card .dgc-card-actions .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link) { flex: 1 1 0; min-width: min-content; max-width: var(--btn-w); padding: 0 4px; overflow: hidden; text-overflow: ellipsis; }
   /* Four answers (an Allow card's: Send, Always allow, Edit, Don't send) are too many for one narrow row: shared by
      four their words were cut ("Alwa…"). They take two rows of two, each the same size, every word whole. */
   .dgc-card .dgc-card-actions:has(> button:not(.dgc-card-link):nth-of-type(4)) > button:not(.dgc-card-link) { flex-basis: 34%; }
   /* (The roomy button keeps room for its own words, and its neighbour has what is left.) */
   .dgc-card .dgc-card-actions .dgc-card-btn.wide, .dgc-card .dgc-card-actions > button:not(.dgc-card-link).wide { min-width: min-content; max-width: var(--btn-w-wide); }
   .dgc-card .dgc-card-actions .dgc-card-toggle { flex: 1 0 100%; margin: 0; text-align: left; }
+}
+/* The narrowest side bar (170 px; the card is then about 140 px): each answer is a row of its own, the card's full
+   width, so every word is whole. */
+@container (max-width: 190px) {
+  .dgc-card .dgc-card-actions { flex-direction: column; align-items: stretch; gap: 6px; }
+  .dgc-card .dgc-card-actions .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link),
+  .dgc-card .dgc-card-actions:has(> button:not(.dgc-card-link):nth-of-type(4)) > button:not(.dgc-card-link),
+  .dgc-card .dgc-card-actions .dgc-card-btn.wide, .dgc-card .dgc-card-actions > button:not(.dgc-card-link).wide { flex: none; width: 100%; min-width: 0; max-width: none; }
 }
 @media (forced-colors: active) {
   .dgc-card, .dgc-card .dgc-chip, .dgc-card .dgc-card-btn { border: 1px solid CanvasText; }

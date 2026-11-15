@@ -160,11 +160,16 @@ test('Don’t says it did not run, where the card was, also after a reload, unti
  assert.equal(moved.d.querySelector('[data-plugin-not-run]'),null,'a newer reply: it is said no more');
 });
 
-test('a plugin that can move money asks every time: no Always allow on its card',async()=>{
+test('a plugin that can move money asks first, and its card has Always allow, which pays only inside the daily limit (15 Nov: on every card)',async()=>{
  const x=setup({plugins:[aave({status:'allowed'})],drafts:[draft('aave')]});await openChat(x);
  const el=x.d.querySelector(`[data-plugin-action="${DRAFT}"]`);
- assert.match(el.textContent,/Run create_record in Aave\?Aave can move money, so Ava asks you every time\./);
- assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Edit','Don’t']);
+ assert.match(el.textContent,/Run create_record in Aave\?Aave can move money, so Ava asks you first\./);
+ assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Always allow','Edit','Don’t']);
+ assert.equal(el.querySelector('.allow-limit').textContent,'Inside its daily limit','one quiet line');
+ assert.ok(el.querySelector('[data-plugin-always]').classList.contains('quiet'),'the same button as on any other plugin card');
+ // It is asked of DGC as any other Always allow is (the backend takes a payment plugin's from its card).
+ x.click(`[data-plugin-always="${DRAFT}"]`);await flush();
+ const prepared=x.requests('prepare_pip_connector_draft')[0];assert.ok(prepared,'prepared first, as Allow is');
 });
 
 test('an allowed plugin card stays out of the chat after a reload and a later reply',async()=>{
@@ -192,13 +197,14 @@ test('Pips API 45: with no per-Pip cards, a plugin action is still its Allow car
  x.click(`[data-plugin-run="${DRAFT}"]`);await flush();
  assert.equal(x.requests('prepare_pip_connector_draft').length,1,'Allow works as before');
  const y=setup({apiVersion:45,plugins:[],drafts:[draft('aave')]});y.setInstalled(owned);await openChat(y);
- assert.deepEqual([...y.d.querySelector(`[data-plugin-action="${DRAFT}"]`).querySelectorAll('button')].map(b=>b.textContent),['Allow','Edit','Don’t'],
-  'a money plugin: no Always allow');
+ assert.deepEqual([...y.d.querySelector(`[data-plugin-action="${DRAFT}"]`).querySelectorAll('button')].map(b=>b.textContent),['Allow','Always allow','Edit','Don’t'],
+  'a money plugin: Always allow too, inside the daily limit');
  // A listing from a CLI that doesn't name servers: still a card, as careful as a money plugin, named by its server.
  const z=setup({apiVersion:45,plugins:[],drafts:[draft()]});z.setInstalled([{plugin:'airtable',name:'Airtable',money:false}]);await openChat(z);
  const unknown=z.d.querySelector(`[data-plugin-action="${DRAFT}"]`);assert.ok(unknown);
  assert.match(unknown.textContent,/Run create_record in airtable\?/);
- assert.deepEqual([...unknown.querySelectorAll('button')].map(b=>b.textContent),['Allow','Edit','Don’t'],'not knowing, it asks every time');
+ assert.deepEqual([...unknown.querySelectorAll('button')].map(b=>b.textContent),['Allow','Always allow','Edit','Don’t'],'not knowing, it is as careful as a money plugin');
+ assert.equal(unknown.querySelector('.allow-limit').textContent,'Inside its daily limit');
 });
 
 test('a plugin you set to Always ask offers Allow once and Don’t only: no Always allow on its card',async()=>{

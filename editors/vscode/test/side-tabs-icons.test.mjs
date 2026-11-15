@@ -1,7 +1,8 @@
 // A narrow side bar shows its tabs as icons (src/panel.ts, media/shared/tabs.css), measured in real Chromium on the
 // side bar's real page (support/dock-scene.mjs). What is held here:
-//   - from 240 px up the four tabs are words, as before: Home, Work, Chat, Pips (700 and 300 px), and no icon is drawn
-//   - under 240 px each tab is an icon alone: a house, a briefcase, two speech bubbles, and the Core Pip's face on Pips
+//   - from 280 px up the five tabs are words: Home, Work, Chat, Pips, Library (700 and 300 px), and no icon is drawn
+//     (240 px with four tabs; Library, the fifth since 15 Nov, needs the room)
+//   - under 280 px each tab is an icon alone: a house, a briefcase, two speech bubbles, the Core Pip's face on Pips, books
 //   - the switch is on the tab bar's own width (a container query), a little before the words would be cut
 //   - nothing is cut at any width from 170 px (the narrowest side bar) to 700 px, with one waiting thing or with "99+"
 //   - each icon tab keeps its name for a screen reader (the word is still there, unseen) and its tooltip
@@ -31,9 +32,9 @@ before(async () => {
 after(async () => { await browser?.close(); });
 
 /** The first width that shows words; one pixel less shows icons. */
-const WORDS_FROM = 240;
-const ICONS = { home: "codicon-home", work: "codicon-briefcase", chat: "codicon-comment-discussion" };
-const IDS = ["home", "work", "chat", "pips"], WORDS = ["Home", "Work", "Chat", "Pips"];
+const WORDS_FROM = 280;      // (240 with four tabs; Library, the fifth since 15 Nov, needs the room)
+const ICONS = { home: "codicon-home", work: "codicon-briefcase", chat: "codicon-comment-discussion", library: "codicon-library" };
+const IDS = ["home", "work", "chat", "pips", "library"], WORDS = ["Home", "Work", "Chat", "Pips", "Library"];
 const settle = (page, ms = 60) => page.evaluate((wait) => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, wait)))), ms);
 const centre = (r) => [r.left + r.width / 2, r.top + r.height / 2];
 const by = (bar, id) => bar.tabs.find((t) => t.id === id);
@@ -103,25 +104,25 @@ for (const width of [700, 300]) {
       const bar = await barNow(x.page);
       assert.equal(form(bar), "words");
       assert.deepEqual(bar.tabs.map((tab) => tab.word.text), WORDS);
-      assert.deepEqual(bar.tabs.map((tab) => !!tab.icon?.seen), [false, false, false, false], "no icon beside a word");
+      assert.deepEqual(bar.tabs.map((tab) => !!tab.icon?.seen), [false, false, false, false, false], "no icon beside a word");
       assert.ok(by(bar, "pips").face, "Pips still wears the Core Pip's face beside its word");
       assert.ok(by(bar, "home").count && by(bar, "home").count.left >= by(bar, "home").flip.right, "Home's number is beside its word");
       assert.deepEqual(cuts(bar), []);
       // The icons are in the page, ready for a narrow side bar, and hidden from a screen reader.
-      assert.deepEqual(bar.tabs.map((tab) => tab.icon?.cls || ""), [ICONS.home, ICONS.work, ICONS.chat, ""], "Home, Work and Chat each hold their icon; Pips has its face");
+      assert.deepEqual(bar.tabs.map((tab) => tab.icon?.cls || ""), [ICONS.home, ICONS.work, ICONS.chat, "", ICONS.library], "Home, Work, Chat and Library each hold their icon; Pips has its face");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
 }
 
-for (const width of [239, 200, 170]) {
-  test(`${width}px, a narrow side bar: each tab is an icon alone: a house, a briefcase, speech bubbles, and Core's face`, async (t) => {
+for (const width of [279, 200, 170]) {
+  test(`${width}px, a narrow side bar: each tab is an icon alone: a house, a briefcase, speech bubbles, Core's face, and books`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openDock(browser, { tab: "home", width, height: 600 });
     try {
       const bar = await barNow(x.page);
       assert.equal(form(bar), "icons");
-      for (const id of ["home", "work", "chat"]) {
+      for (const id of ["home", "work", "chat", "library"]) {
         const tab = by(bar, id), icon = tab.icon;
         assert.equal(icon.cls, ICONS[id], `${id}: its icon`);
         assert.equal(icon.hidden, "true", `${id}: the icon is decoration`);
@@ -137,7 +138,7 @@ for (const width of [239, 200, 170]) {
       assert.ok(Math.abs(pips.face.width - 16) <= 0.6 && Math.abs(pips.face.height - 16) <= 0.6, `the face is the icons' size (${pips.face.width})`);
       assert.ok(Math.abs(centre(pips.face)[0] - centre(pips.box)[0]) <= 1 && Math.abs(centre(pips.face)[1] - centre(pips.box)[1]) <= 1, "in the middle of its tab");
       const widths = bar.tabs.map((tab) => Math.round(tab.box.width));
-      assert.ok(Math.max(...widths) - Math.min(...widths) <= 1, `the four tabs are one width (${widths})`);
+      assert.ok(Math.max(...widths) - Math.min(...widths) <= 1, `the five tabs are one width (${widths})`);
       assert.ok(Math.abs((bar.bar.left + bar.bar.right) / 2 - width / 2) < 0.6, "the bar is centred");
       assert.deepEqual(cuts(bar), []);
       assert.deepEqual(x.errors, []);
@@ -160,7 +161,7 @@ test("the switch is on the tab bar's own width, not the window's", async (t) => 
   } finally { await x.close(); }
 });
 
-test("170 to 700 px, every pixel: nothing is cut, words from 240 px up and icons under it, with one digit and with \"99+\"", async (t) => {
+test("170 to 700 px, every pixel: nothing is cut, words from 280 px up and icons under it, with one digit and with \"99+\"", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "home", width: 700, height: 600 });
   try {
@@ -183,7 +184,7 @@ test("170 to 700 px, every pixel: nothing is cut, words from 240 px up and icons
   } finally { await x.close(); }
 });
 
-test("an icon tab keeps its name for a screen reader and its tooltip: Home, Work, Chat, Pips", async (t) => {
+test("an icon tab keeps its name for a screen reader and its tooltip: Home, Work, Chat, Pips, Library", async (t) => {
   if (skipOrFail(t)) return;
   for (const width of [700, 200]) {
     const x = await openDock(browser, { tab: "home", width, height: 600 });
@@ -197,10 +198,10 @@ test("an icon tab keeps its name for a screen reader and its tooltip: Home, Work
       await cdp.send("Accessibility.enable");
       const { nodes } = await cdp.send("Accessibility.getFullAXTree");
       const heard = nodes.filter((n) => n.role?.value === "tab" && !n.ignored).map((n) => n.name?.value);
-      assert.equal(heard.length, 4, `${width}px: four tabs are heard (${heard})`);
+      assert.equal(heard.length, 5, `${width}px: five tabs are heard (${heard})`);
       assert.match(heard[0], /^Home: \d+ things need you or are new$/, `${width}px: Home, with what waits`);
-      assert.deepEqual(heard.slice(1), ["Work", "Chat", "Pips"], `${width}px: the names a screen reader hears`);
-      for (const name of ["Work", "Chat", "Pips"]) assert.equal(await x.page.getByRole("tab", { name, exact: true }).count(), 1, `${width}px: one tab named ${name}`);
+      assert.deepEqual(heard.slice(1), ["Work", "Chat", "Pips", "Library"], `${width}px: the names a screen reader hears`);
+      for (const name of ["Work", "Chat", "Pips", "Library"]) assert.equal(await x.page.getByRole("tab", { name, exact: true }).count(), 1, `${width}px: one tab named ${name}`);
       // The tooltip begins with the tab's name.
       assert.deepEqual(bar.tabs.map((tab) => tab.title.split(":")[0]), WORDS, `${width}px: each tooltip names its tab`);
       assert.deepEqual(x.errors, []);
@@ -210,7 +211,7 @@ test("an icon tab keeps its name for a screen reader and its tooltip: Home, Work
 
 test("Home's number stays a number, small, on its icon's upper right corner", async (t) => {
   if (skipOrFail(t)) return;
-  for (const width of [239, 200, 170]) {
+  for (const width of [279, 200, 170]) {
     const x = await openDock(browser, { tab: "home", width, height: 600 });
     try {
       for (const number of ["", "12", "99+"]) {
@@ -325,12 +326,16 @@ test("icon tabs and the keyboard: Left and Right move and choose, wrapping; Home
     await x.page.keyboard.press("Home");
     assert.deepEqual(await chosen(), ["icons", "home", "home", "home"], "Home: the first");
     await x.page.keyboard.press("ArrowLeft");
-    assert.deepEqual((await chosen()).slice(0, 2), ["icons", "pips"], "Left from the first wraps to Pips");
+    assert.deepEqual(await chosen(), ["icons", "library", "library", "library"], "Left from the first wraps to Library, the last");
+    await x.page.keyboard.press("ArrowLeft");
+    assert.deepEqual((await chosen()).slice(0, 2), ["icons", "pips"], "then Pips");
     await x.page.focus("#side-tab-pips");
+    await x.page.keyboard.press("ArrowRight");
+    assert.deepEqual((await chosen()).slice(0, 2), ["icons", "library"], "Right of Pips is Library");
     await x.page.keyboard.press("ArrowRight");
     assert.deepEqual(await chosen(), ["icons", "home", "home", "home"], "Right from the last wraps to Home");
     await x.page.keyboard.press("End");
-    assert.deepEqual((await chosen()).slice(0, 2), ["icons", "pips"], "End: the last");
+    assert.deepEqual(await chosen(), ["icons", "library", "library", "library"], "End: the last");
     // A click chooses as before.
     await x.page.click("#side-tab-chat");
     await x.page.mouse.move(100, 400); await x.page.waitForTimeout(700);   // (the pointer away, so the icon faces you again)

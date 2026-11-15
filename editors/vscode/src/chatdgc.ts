@@ -28,6 +28,8 @@ import { displayMentions, workspaceFiles } from "./mentionsHost";
  */
 export const CHATDGC_EDITOR = "dgc.chatdgcEditor";
 export const CHATDGC_LIBRARY = "dgc.chatdgcLibrary";
+/** What the side bar's Library tab may ask of the Library's host (the rest is the full Library's own). */
+const SIDE_LIBRARY = new Set(["ready", "list", "artifactList", "artifactOpen", "workImages", "workImage", "workImageOpen", "image", "open"]);
 const LIBRARY_KINDS = new Set(["image", "pdf", "document", "spreadsheet", "presentation", "code", "text"]);
 const ATTACHMENT_ID = /^att_[a-f0-9]{32}$/;
 /** An image DGC made in Work: a picture file DGC saved (images_library), previewed up to this size. */
@@ -422,11 +424,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       if (message.type === "artifactsOffered") {
         for (const tab of this.tabs) this.post(tab, { type: "artifacts", offered: message.offered ?? null });
         if (this.library) void this.library.webview.postMessage({ type: "artifactsOffered", on: !!message.offered });
+        this.sidePanel.webview.postMessage({ type: "artifactsOffered", on: !!message.offered });
         return;
       }
       if (message.type === "artifactChanged") {
         for (const tab of this.tabs) this.post(tab, { type: "artifactChanged", artifact: message.artifact, op: message.op });
         if (this.library) void this.library.webview.postMessage({ type: "artifactChanged", artifact: message.artifact, op: message.op });
+        this.sidePanel.webview.postMessage({ type: "artifactChanged", artifact: message.artifact, op: message.op });
       }
     });
   }
@@ -579,6 +583,22 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   /** A chat's model made pictures: an open Library lists them. */
   imagesMade(): void {
     if (this.library) void this.library.webview.postMessage({ type: "refresh" });
+    this.sidePanel.webview.postMessage({ type: "refresh" });
+  }
+
+  /** The side bar's Library tab (media/shared/librarypage.js) as the Library's host sees it: a page that hears through
+   *  the side bar ("sideLibrary"), so the tab and the full Library in its editor tab are answered by the same code. */
+  private readonly sidePanel = { webview: { postMessage: (message: unknown): Thenable<boolean> => {
+    try { this.host?.postHome({ type: "sideLibrary", message }); } catch { /* the side bar is closed: nothing to tell */ }
+    return Promise.resolve(true);
+  } } } as unknown as vscode.WebviewPanel;
+
+  /** What the side bar's Library tab asks: the same messages the full Library's page sends (its lists, a row opened, a
+   *  picture read), checked the same way. Never a pin: the side bar's own dock answers those. */
+  async sideLibrary(message: any): Promise<void> {
+    const type = String(message?.type || "");
+    if (!SIDE_LIBRARY.has(type)) return;
+    await this.fromLibrary(this.sidePanel, message);
   }
 
   /** The Library's videos (videos_library): a page of them, each with its poster frame as a small data URI, and how many
@@ -2806,9 +2826,6 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return true;
       case "chatdgcProjectOpen":
         this.openProject(String(message.id || ""));
-        return true;
-      case "chatdgcLibrary":
-        this.openLibrary();
         return true;
       case "chatdgcProjectNew": {
         const name = await vscode.window.showInputBox({ prompt: "Name the new project: its chats, files and instructions stay together",

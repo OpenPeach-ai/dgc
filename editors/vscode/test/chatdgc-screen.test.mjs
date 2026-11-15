@@ -1135,14 +1135,14 @@ test("the side bar has its Chat tab at once when ChatDGC was here last time; a C
     const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
     const tabs = () => page.evaluate(() => [...document.querySelectorAll('#side-tabs [role="tab"]')].filter((t) => t.checkVisibility()).map((t) => t.dataset.tab + (t.getAttribute("aria-selected") === "true" ? "*" : "")));
     await send({ type: "sessions_list", items: [{ id: "20261006-101500-a1", name: "Fix login", when: "2026-10-06 10:15", count: 4 }], searchable: true });
-    assert.deepEqual(await tabs(), ["home", "work", "chat*", "pips"], "the Chat tab, and the side bar back on it, before the backend has said anything");
+    assert.deepEqual(await tabs(), ["home", "work", "chat*", "pips", "library"], "the Chat tab, and the side bar back on it, before the backend has said anything");
     assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#work-home")], [true, false]);
     assert.equal(await page.locator("#chats-status").textContent(), "Loading your chats…");
     assert.equal(await page.locator("#chats-search").getAttribute("placeholder"), "Search chats");
     await send({ type: "chatdgc_list", available: true, total: 0, items: [] });
     assert.match(await page.locator("#chats-status").textContent(), /^No chats yet/, "its answer replaces the wait");
     await send({ type: "chatdgc_list", available: false });
-    assert.deepEqual(await tabs(), ["home*", "work", "pips"], "a CLI with no ChatDGC: no Chat tab, and the side bar goes to Home");
+    assert.deepEqual(await tabs(), ["home*", "work", "pips", "library"], "a CLI with no ChatDGC: no Chat tab, and the side bar goes to Home");
     assert.deepEqual([await shown(page, "#chats-home"), await shown(page, "#home-hub")], [false, true]);
     await page.locator("#side-tab-work").click();
     assert.equal(await shown(page, "#sessions-list"), true, "the sessions are on Work, as before");
@@ -1178,7 +1178,7 @@ test("the side bar: Work and Chat are tabs (a long list never hides the other), 
     assert.deepEqual([await shown(page, "#side-tab-chat"), await tab("work").getAttribute("aria-selected"), await shown(page, "#chats-home"),
                       await shown(page, "#work-home")], [true, "true", false, true], "the Chat tab is there; the side bar stays on Work");
     assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#side-tabs .dgc-tab")].map((tab) => tab.id)),
-                     ["side-tab-home", "side-tab-work", "side-tab-chat", "side-tab-pips"], "Home, Work, Chat, Pips");
+                     ["side-tab-home", "side-tab-work", "side-tab-chat", "side-tab-pips", "side-tab-library"], "Home, Work, Chat, Pips, Library");
     await tab("chat").click();
     assert.equal(await page.locator("#chats-home").getAttribute("role"), "tabpanel");
     assert.equal(await page.locator("#chats-list .chat-preview").nth(1).textContent(), "…then the Dudhsagar falls on day three.",

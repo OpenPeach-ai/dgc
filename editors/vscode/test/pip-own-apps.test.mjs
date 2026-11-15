@@ -81,11 +81,12 @@ test('a change a Pip proposes in your own app is the Allow card, naming the app 
  assert.equal(x.d.querySelector(`[data-plugin-action="${DRAFT}"]`),null,'settled');
 });
 
-test('a tool of yours that moves money asks every time: no Always allow on its card',async()=>{
+test('a tool of yours that moves money asks first, and its card has Always allow inside the daily limit (15 Nov: on every card)',async()=>{
  const x=setup({drafts:[draft({tool:'refund_order',arguments:{order_id:'ord_17'}})]});await openChat(x);
  const el=x.d.querySelector(`[data-plugin-action="${DRAFT}"]`);
- assert.match(el.textContent,/Run refund_order in Shop app\?Shop app can move money, so Ava asks you every time\./);
- assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Edit','Don’t']);
+ assert.match(el.textContent,/Run refund_order in Shop app\?Shop app can move money, so Ava asks you first\./);
+ assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Always allow','Edit','Don’t']);
+ assert.equal(el.querySelector('.allow-limit').textContent,'Inside its daily limit');
 });
 
 test('Pips settings → Apps: your own app reads like a connection, an update waits with Accept, and no secret is shown',async()=>{

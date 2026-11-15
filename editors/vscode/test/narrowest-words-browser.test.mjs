@@ -5,6 +5,8 @@
 //     line beside its buttons; "Workflows" broke to "Workflow / s"). Buttons beside a heading turn to icons first,
 //     then the heading ends in "…";
 //   - no word is cut part-way with no "…" ("Trace" read "Tr" under an answer);
+//   - no button's own words are cut, "…" or not (finding 45: a Pip's site card read "Allow…" and "Not n…" at 170 px):
+//     the buttons go one under the other, or become icons;
 //   - nothing has a sideways scrollbar it should not have (the composer's, at about 220 px), and the page itself never
 //     runs off sideways;
 //   - a card on Home never scrolls by itself (the Needs you card's own scrollbar).
@@ -35,24 +37,25 @@ const SCROLLS_ON_PURPOSE = /(^|> )pre\b|\bcode\b|table|\.katex|\.mermaid|\.dgc-s
 const WIDTHS = [170, 220, 300];
 
 for (const scene of Object.keys(SCENES)) for (const width of WIDTHS) {
-  test(`${scene} at ${width} px: no word on two lines, none cut without “…”, no sideways scrollbar, no card scrolling by itself`, async (t) => {
+  test(`${scene} at ${width} px: no word on two lines, none cut without “…”, no button's words cut, no sideways scrollbar, no card scrolling by itself`, async (t) => {
     if (skipOrFail(t)) return;
-    const found = { broken: [], cut: [], sideways: [], inner: [], page: [] }, states = [];
+    const found = { broken: [], cut: [], clipped: [], sideways: [], inner: [], page: [] }, states = [];
     await SCENES[scene](browser, { width, theme: "dark", touch: false }, async (state, page, o = {}) => {
       await page.mouse.move(1, 1);
       await page.evaluate(() => new Promise((d) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(d, 120)))));
       const a = await page.evaluate(narrowAudit, { scope: o.scope || "" });
       states.push(state);
-      for (const key of ["broken", "cut", "sideways", "inner"]) for (const x of a[key]) {
+      for (const key of ["broken", "cut", "clipped", "sideways", "inner"]) for (const x of a[key]) {
         if (key === "sideways" && SCROLLS_ON_PURPOSE.test(x.what)) continue;
-        const line = key === "broken" ? `${state}: “${x.text}” on ${x.lines} lines in ${x.what} (${x.box}px)` : key === "cut" ? `${state}: “${x.text}” cut by ${x.hidden}px in ${x.what} (by ${x.by})` : `${state}: ${x.what} ${key === "inner" ? "scrolls by itself" : "scrolls sideways"}: ${x.text}`;
+        const line = key === "broken" ? `${state}: “${x.text}” on ${x.lines} lines in ${x.what} (${x.box}px)` : key === "cut" ? `${state}: “${x.text}” cut by ${x.hidden}px in ${x.what} (by ${x.by})`
+          : key === "clipped" ? `${state}: the button “${x.text}” is cut by ${x.hidden}px in ${x.what} (by ${x.by})` : `${state}: ${x.what} ${key === "inner" ? "scrolls by itself" : "scrolls sideways"}: ${x.text}`;
         if (!found[key].includes(line)) found[key].push(line);
       }
       if (a.page) found.page.push(state);
     });
     assert.ok(states.length > 0, "the scene showed something");
     t.diagnostic(`${scene} ${width}px: ${states.length} states`);
-    assert.deepEqual(found, { broken: [], cut: [], sideways: [], inner: [], page: [] });
+    assert.deepEqual(found, { broken: [], cut: [], clipped: [], sideways: [], inner: [], page: [] });
   });
 }
 

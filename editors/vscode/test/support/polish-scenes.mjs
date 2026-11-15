@@ -15,6 +15,8 @@ import { openChat as openPipChat } from "./pip-chat-scene.mjs";
 import { openSettings, DEV_TABLE } from "./settings-scene.mjs";
 const DEV = { dev_limits_table: DEV_TABLE, dev_tools_capable: true };
 import { openNoteTab } from "./notes-tab-scene.mjs";
+import { openLibraryTab, LIB_ARTIFACTS } from "./library-scene.mjs";
+import { openCard, HOLDS } from "./pip-cards-scene.mjs";
 
 const modern = (theme) => `${theme}-modern`;
 const settle = (page, ms = 160) => page.evaluate((n) => new Promise((d) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(d, n)))), ms);
@@ -117,6 +119,38 @@ export const SCENES = {
       await scrollAll(x.page, "end"); await x.settle(); await visit("many-long-end", x.page, { focus: false });
       await x.send({ type: "chatdgc_list", available: true, items: [], open: [], answering: [] }); await x.settle(); await visit("empty", x.page);
     } finally { await x.close(); }
+  },
+  // ---- the Library tab (15 Nov): its rows, each filter's menu, a filter that finds nothing, an empty Library ------------------
+  "library-tab": async (b, { width, theme, touch }, visit) => {
+    let x = await openLibraryTab(b, { width, theme: modern(theme), touch });
+    try { await visit("list", x.page);
+      await x.menu("type"); await visit("type-menu", x.page, { focus: false, hover: false }); await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(200);
+      await x.menu("maker"); await visit("maker-menu", x.page, { focus: false, hover: false });
+      await x.pick("maker", "Rent or buy: the numbers"); await x.pick("type", "Dashboards"); await visit("long-filters-nothing-found", x.page);
+      await x.pick("type", "All"); await x.pick("maker", "Anyone");
+      await x.page.click("#library-more"); await x.page.waitForTimeout(350); await visit("more-menu", x.page, { focus: false, hover: false }); await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(200);
+      await scrollAll(x.page, "end"); await x.settle(); await visit("list-end", x.page, { focus: false });
+    } finally { await x.close(); }
+    // Many things with long names, from makers with long names.
+    const many = Array.from({ length: 60 }, (_, k) => ({ ...LIB_ARTIFACTS[k % LIB_ARTIFACTS.length], id: "ar_" + String(k).padStart(16, "a"), title: k % 2 ? `${LONG} (${k})` : `Item ${k}`,
+      ...(k % 3 ? {} : { made_by: { kind: "pip", id: "pip_" + "9".repeat(32), name: "Checkout smoke tests, every night at two" } }) }));
+    x = await openLibraryTab(b, { width, theme: modern(theme), touch, artifacts: many });
+    try { await visit("many-long", x.page); await scrollAll(x.page, "end"); await x.settle(); await visit("many-long-end", x.page, { focus: false }); } finally { await x.close(); }
+    x = await openLibraryTab(b, { width, theme: modern(theme), touch, artifacts: [], files: [], images: [] });
+    try { await visit("empty", x.page); } finally { await x.close(); }
+    // Home's top row: Library beside Cards, and beside Back while a card is open.
+    const g = await openGrid(b, { width, theme: modern(theme), layout: ["needs", "recent", "clock"], height: 700, touch });
+    try { await g.rest(300); await visit("home-top-row", g.page, { scope: "#home-hub .hc-head" });
+      await g.page.click(card("clock"), { position: { x: 12, y: 8 } }).catch(() => {}); await g.rest(400); await visit("home-top-row-card-open", g.page, { scope: "#home-hub .hc-head" });
+    } finally { await g.close(); }
+  },
+  // ---- a Pip's held steps: each card with its answers (15 Nov: Always allow on every card; finding 45: the site card) --------
+  "pip-held-cards": async (b, { width, theme, touch }, visit) => {
+    const where = width >= 600 ? "tab" : "side";
+    for (const kind of Object.keys(HOLDS)) { const x = await openCard(b, kind, { width, theme, where, touch });
+      try { await x.p.waitForTimeout(200); await visit(kind, x.p, { hover: false });
+        const details = await x.p.evaluateHandle(() => (window.__pipsRoot || document).querySelector("[data-computer-card] details > summary")); if (details.asElement()) { await details.asElement().click().catch(() => {}); await x.p.waitForTimeout(200); await visit(`${kind}-details`, x.p, { hover: false, focus: false }); }
+      } finally { await x.close(); } }
   },
   // ---- a Work session's tab ---------------------------------------------------------------------------------------------
   "work-chat": async (b, { width, theme }, visit) => {

@@ -36,8 +36,15 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-btn:focus-visible, .hc-lnk:focus-visible, .hc-li:focus-visible, .hc-qb:focus-visible, .hc-kb:focus-visible, .hc-card:focus-visible, .hc-plot:focus-visible, .hc-seg button:focus-visible, .hc-field:focus-visible, .hc-tile-open:focus-visible, .hc-here:focus-visible, .hc-x:focus-visible, .hc-zone-x:focus-visible,
 .hc-pin:focus-visible, .hc-mtile:focus-visible, .hc-stack:focus-visible, .hc-dot:focus-visible, .hc-note-view:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-.hc-cards-btn, .hc-back, .hc-done { height: var(--btn-h); }
-.hc-cards-btn { gap: 6px; padding: 0 10px 0 8px; --mosaic-play: paused; }
+.hc-cards-btn, .hc-library-btn, .hc-back, .hc-done { height: var(--btn-h); }
+.hc-cards-btn, .hc-library-btn { gap: 6px; padding: 0 10px 0 8px; }
+.hc-cards-btn { --mosaic-play: paused; }
+/* Library, beside Cards (15 Nov): the same button. At a narrow side bar both are their marks alone (a button becomes an
+   icon before a word is cut), each a square of the button's height; the word stays for a screen reader. */
+@media (max-width: 259px) {
+  .hc-cards-btn, .hc-library-btn { position: relative; width: var(--btn-h); padding: 0; gap: 0; }
+  .hc-cards-btn .hc-btn-word, .hc-library-btn .hc-btn-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 .hc-cards-btn:hover, .hc-cards-btn:focus-visible { --mosaic-play: running; }
 .hc-back { padding: 0 10px 0 5px; }
 .hc-notes:empty { display: none; }
@@ -238,6 +245,10 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-qface { flex: none; display: grid; width: 15px; height: 15px; line-height: 0; }
 .hc-qface :is(.dgc-plush, svg) { width: 100%; height: 100%; }
 .hc-card[data-form="s"] .hc-qb { justify-content: flex-start; height: 26px; font-size: var(--t-xs); }
+/* A small Quick start card in a narrow side bar (found by the narrowest-words walk once it looked at buttons, 15 Nov:
+   "Session" read "Sessi…" at 220 px, in a card 94 px wide): from 201 to 259 px, where two small cards share the row,
+   each button is its word alone. (At 200 px and under the card has the whole row, and its marks are back.) */
+@media (min-width: 201px) and (max-width: 259px) { .hc-card[data-form="s"] .hc-qb > [data-mark] { display: none; } }
 .hc-grid[data-form="l"] .hc-qs { margin-top: auto; }
 .hc-grid[data-form="l"] .hc-qb { flex-direction: column; gap: 6px; height: 72px; font-size: 11.5px; }
 .hc-grid[data-form="l"] .hc-qb > [data-mark] { --size: 20px; width: 20px; height: 20px; }

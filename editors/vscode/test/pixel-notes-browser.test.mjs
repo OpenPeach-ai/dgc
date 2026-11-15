@@ -200,7 +200,7 @@ const pipsTab = (page) => page.evaluate(() => {
     otherOff: Math.abs((box(otherFlip).left + box(otherFlip).right) / 2 - (box(other).left + box(other).right) / 2),
     order: [...tab.children].map((c) => c.className), name: tab.textContent.trim(), sideways: document.documentElement.scrollWidth > innerWidth };
 });
-for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300, 240]) {
+for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300, 280]) {   // (280: the narrowest with words, since Library is the fifth tab)
   test(`the Pips tab: the word "Pips", then the Core Pip's face, the pair centred in the tab (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openDock(browser, { tab: "home", width, height: 600, theme });

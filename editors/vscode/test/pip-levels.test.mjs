@@ -401,20 +401,25 @@ test("a card its level still asks for says why: a saved card's payment, at Do it
   assert.match(card.querySelector(".primary").textContent, /Review…/, "reviewed as any payment");
 });
 
-test("an order press asks every time like a payment: Send once, never Always allow (agreed 10 Nov)", async () => {
+test("an order press asks like a payment, and like a payment its Always allow stays inside the daily limit (15 Nov: Always allow on every card)", async () => {
   const hold = { ...floorHold, id: "compact_" + "8".repeat(32), summary: { method: "POST", host: "shop.teeforge.pip-test.example",
     path: "/items/42", page: "", fields: [{ name: "item", value: "tee" }], more_fields: 0, body_bytes: 9,
     asks_because: "maybe_payment", asks_word: "order", route: "/items/*" } };
   const x = pipsPage({ state: level("approve"), actions: [hold] }); await x.drain(); x.click(`[data-job="${PIP}"]`); await x.drain();
   const card = x.d.querySelector(`[data-computer-card="${hold.id}"]`);
   assert.match(card.querySelector("strong").textContent, /^Send a form to shop\.teeforge\.pip-test\.example\?$/, "not a payment by its title");
-  assert.match(card.textContent, /It may place an order, so it asks every time\. Nothing has been sent\./);
+  assert.match(card.textContent, /It may place an order, so DGC asks\. Nothing has been sent\./);
   assert.ok(card.querySelector("[data-computer-decide][data-approve='1']"), "Send once");
-  assert.equal(card.querySelector("[data-computer-always]"), null, "no Always allow");
-  assert.doesNotMatch(card.textContent, /Always allow/);
+  assert.deepEqual([...card.querySelectorAll(".dgc-card-actions button")].map((b) => b.textContent), ["Send once", "Always allow", "Reject"]);
+  assert.equal(card.querySelector(".allow-limit").textContent, "Inside its daily limit");
   const billing = { ...hold.summary, asks_word: "billing" };
-  assert.equal(careful.asksEveryTime(hold.summary), true);
-  assert.equal(careful.asksEveryTime(billing), false, "one money word alone still offers Always allow");
+  assert.equal(careful.asksEveryTime(hold.summary), true, "it pays: its Always allow is a payment's");
+  assert.equal(careful.asksEveryTime(billing), false, "one money word alone is a plain form");
+  assert.equal(careful.offersAlways(hold.summary), true); assert.equal(careful.offersAlways(billing), true);
+  assert.equal(careful.offersAlways({ kind: "site" }), false, "a new site: Allow adds it for good");
+  assert.equal(careful.offersAlways({ kind: "login" }), false);
+  assert.equal(careful.offersAlways({ kind: "text" }), true); assert.equal(careful.offersAlways({ kind: "floor" }), true);
+  assert.equal(careful.limitWords(hold.summary), "Inside its daily limit"); assert.equal(careful.limitWords(billing), "");
 });
 
 test("a card the fuse holds says so: 25 things on its own in the last hour, and until when", async () => {

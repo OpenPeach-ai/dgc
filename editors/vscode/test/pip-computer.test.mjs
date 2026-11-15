@@ -102,13 +102,27 @@ test('a held submit is reviewed with its screenshot; Send once sends that exact 
  assert.equal(x.d.querySelector('[role=dialog]'),null);assert.match(x.d.body.textContent,/Approved. It is sent within a few seconds, exactly as shown/);
 });
 
-test('a payment held in its browser asks every time: Send once and Reject, never Always allow',async()=>{
- // Reported 2026-10-19: "Payments are never Always-allow", however the Pip clicked (a ref, or by position).
+test('a payment held in its browser offers Always allow too, and says it pays only inside its daily limit',async()=>{
+ // His call, 15 Nov (live round 1, finding 39): Always allow on EVERY Pip card, payments included. (Reported 2026-10-19
+ // it was "Payments are never Always-allow"; the backend now pins a payment's grant and pays only inside the Pip's limit.)
  const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[action({frame:null,summary:{...action().summary,payment:true}})]})});await x.openJob();
  x.click(`[data-computer-action="${actionId}"]`);await flush();
  assert.match(x.d.querySelector('[role=dialog]').textContent,/This sends payment card details\./,'a payment is said plainly');
  assert.ok(x.d.querySelector('#review-confirm'),'Send once');
- assert.equal(x.d.querySelector('#review-always'),null,'no Always allow for a payment');
+ assert.ok(x.d.querySelector('#review-always'),'Always allow for a payment');
+ assert.match(x.d.querySelector('[role=dialog]').textContent,/Always allow pays only inside its daily limit/);
+ x.click('#review-always');
+ const always=x.requests('always_allow_pip_computer_action').at(-1);
+ assert.deepEqual(JSON.parse(JSON.stringify(always.request)),{type:'always_allow_pip_computer_action',action_id:actionId,expected_digest:'d'.repeat(64)});
+});
+test('Always allow on a payment sends it and saves the grant, said by its plain label',async()=>{
+ const pay=action({frame:null,summary:{...action().summary,payment:true}});
+ const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[pay]})});await x.openJob();
+ x.click(`[data-computer-action="${actionId}"]`);await flush();x.click('#review-always');await flush();
+ const always=x.requests('always_allow_pip_computer_action').at(-1);assert.ok(always,'asked');
+ const label='Submit in its browser to shop.example/order (a payment, inside its daily limit)';
+ x.setStatus(computer());x.answer(always,{action:{...pay,status:'approved',resolved_at:'2026-10-04T10:01:00Z',resolved_by:'editor-user'},grant:{id:'grant_'+'a'.repeat(32),kind:'computer_submit',server:'shop.example',connection_digest:'c'.repeat(64),account:'browser',schema_digest:'e'.repeat(64),tool:'PAY POST /order',label,created_at:'2026-10-04T10:01:00Z',created_by:'editor-user'}});await x.drain();
+ assert.match(x.d.body.textContent,/Always allowed: Submit in its browser to shop\.example\/order \(a payment, inside its daily limit\)\./);
 });
 
 test('Always allow sends this submit and lets the Pip make the same one on that site without asking',async()=>{
@@ -257,8 +271,9 @@ test('validators accept the backend shapes and refuse anything else',()=>{
 });
 
 // Careful mode (#9, Pips API 44): a new site or something it read from your apps is held before anything
-// happens. Its card says which; Allow lets the Pip do it (a site stays allowed); there is no Always allow.
-test('a careful hold says what it is: a new site to allow, or app data to put on a page, and never Always allow',async()=>{
+// happens. Its card says which; Allow lets the Pip do it (a site stays allowed). A new site has no Always allow (Allow
+// adds it for good); carrying what it read from your apps has one, for that one destination (his call, 15 Nov).
+test('a careful hold says what it is: a new site to allow (never Always allow), or app data to put on a page (Always allow for that site)',async()=>{
  const site=action({frame:null,summary:{kind:'site',site:'shop.example',shown:'shop.example',method:'GET',host:'shop.example',path:'/deals',page:'https://shop.example/deals',fields:[],more_fields:0,body_bytes:0}});
  const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[site]})});await x.openJob();
  assert.match(x.d.body.textContent,/Let Shopper visit shop\.example\?/);
@@ -276,6 +291,12 @@ test('a careful hold says what it is: a new site to allow, or app data to put on
  y.click(`[data-computer-action="${actionId}"]`);await flush();
  assert.match(y.d.querySelector('[role=dialog]').textContent,/Let Shopper put this on shop\.example\?It read this from your apps.*Goes ontoshop\.example\/checkout.*Exactly this, all of it:code 482913/);
  assert.equal(y.d.querySelector('#review-confirm').textContent,'Allow once');
+ assert.ok(y.d.querySelector('#review-always'),'Always allow, for what it read going to that site');
+ const floor=action({frame:null,summary:{kind:'floor',floor:'could delete everything in its Files',method:'RUN',host:'Terminal',path:'/',page:'',fields:[{name:'command',value:'rm -rf ~/Files'}],more_fields:0,body_bytes:0}});
+ const z=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[floor]})});await z.openJob();
+ z.click(`[data-computer-action="${actionId}"]`);await flush();
+ assert.ok(z.d.querySelector('#review-always'),'the floor card too');z.click('#review-always');await flush();
+ assert.equal(z.requests('always_allow_pip_computer_action').at(-1).request.action_id,actionId);
  y.click('#reject-computer-action');
  assert.equal(y.requests('decide_pip_computer_action').at(-1).request.approve,false);
 });

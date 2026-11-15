@@ -161,10 +161,13 @@ export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName =
   const a = draft.payload.action, id = esc(draft.id), off = busy ? ' disabled' : '';
   // A plugin the user set to Always ask offers Allow once and Don't only, as an ask rule of their own does: an Always
   // allow there would save a grant their Always ask overrides.
-  const sub = plugin.money ? `${esc(plugin.name)} can move money, so ${esc(pipName)} asks you every time.`
+  // (15 Nov, his call: Always allow on every card. A plugin that can move money has it too, and what runs on that grant
+  // pays only inside the Pip's daily dollar limit; the card says so in one quiet line.)
+  const sub = plugin.money ? `${esc(plugin.name)} can move money, so ${esc(pipName)} asks you first.`
     : plugin.asks ? `You set ${esc(plugin.name)} to Always ask, so ${esc(pipName)} asks you every time.`
     : `${esc(pipName)} wants to do this in ${esc(plugin.name)}.`;
-  const always = plugin.money || plugin.asks ? '' : `<button type="button" class="quiet" data-plugin-always="${id}"${off} title="Run this, and let ${esc(pipName)} run ${esc(a.call.tool)} in ${esc(plugin.name)} without asking; take it back on its page">Always allow</button>`;
+  const always = plugin.asks ? '' : `<button type="button" class="quiet" data-plugin-always="${id}"${off} title="Run this, and let ${esc(pipName)} run ${esc(a.call.tool)} in ${esc(plugin.name)} without asking${plugin.money ? ', only inside its daily limit' : ''}; take it back on its page">Always allow</button>`;
+  const limit = plugin.money && !plugin.asks ? '<p class="app-link-note allow-limit">Inside its daily limit</p>' : '';
   const args = a.call.arguments || {};
   // Composio's multi-execute in plain words: each app call, "Gmail · Fetch emails · 5 from Inbox · through Composio".
   const calls = globalThis.DgcPluginCalls ? globalThis.DgcPluginCalls.describe(a.call.tool, args, plugin.name) : null;
@@ -183,7 +186,7 @@ export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName =
     + head(esc, plugin.name, title, sub, plugin.plugin, logo)
     + askedAgainLine(esc, draft) + uses
     + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', { ...f, disabled: busy })).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : shown)
-    + editError(esc, edit)
+    + editError(esc, edit) + limit
     + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-plugin-run="${id}"${off}>${busy ? 'Running…' : plugin.asks ? 'Allow once' : 'Allow'}</button>${always}`
     + (Object.keys(args).length ? editButton(id, Boolean(edit), off) : '')
     + `<button type="button" class="quiet" data-plugin-skip="${id}"${off}>Don’t</button></div></div>`;

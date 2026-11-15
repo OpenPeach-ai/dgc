@@ -1,0 +1,47 @@
+/* The Library tab of the side bar (media/shared/librarypage.js; 0.52, 15 Nov). Its header row, search field and ⋯ are
+   Work's and Chat's (.home-head, .home-bar in media/main.css). Here: the one filter line (two dropdown buttons of the
+   Project Folder button's shape: the type, and who made it) and the rows: a small preview or the type's sheet, the
+   title on one line, and "made by <name> · <when>" under it, where the name is a link back. Tokens from tokens.css. */
+#sessions-host .lib-filters { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+#sessions-host .lib-filter { flex: 0 1 auto; min-width: 0; }
+/* The type is a word and is never cut ("Dashboards"); the maker's name beside it is what ends in "…". */
+#sessions-host #library-type { flex: none; }
+/* The name of what is chosen ends in "…" when the line is short; the key ("Type", "By") goes first, at the narrowest. */
+#sessions-host .lib-filter .dgc-folder-v { white-space: nowrap; }
+#sessions-host .lib-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+#sessions-host .lib-row { box-sizing: border-box; display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 48px; margin: 0 calc(-1 * var(--home-bleed)); padding: 4px calc(var(--home-bleed) - 1px);
+  border: 1px solid transparent; border-radius: var(--r-md); cursor: pointer; user-select: none; }
+#sessions-host .lib-row:hover { background: var(--row-hover); }
+#sessions-host .lib-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+/* The preview: a picture shows itself; anything else its type's sheet (media/shared/filesheet.js), a little smaller. */
+#sessions-host .lib-row-thumb { flex: none; display: grid; place-items: center; width: 32px; height: 38px; line-height: 0; color: var(--muted); }
+#sessions-host .lib-row-thumb img { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; background: var(--field); }
+#sessions-host .lib-row-thumb img:not([src]) { visibility: hidden; }
+#sessions-host .lib-row-sheet > .dgc-sheet { scale: .86; transform-origin: center; }
+#sessions-host .lib-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+#sessions-host .lib-row-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
+#sessions-host .lib-row-meta { display: flex; align-items: baseline; min-width: 0; color: var(--text-2); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric: tabular-nums; white-space: pre; }
+#sessions-host .lib-row:is(:hover, :focus-within) .lib-row-meta { color: color-mix(in srgb, var(--text) 80%, transparent); }
+#sessions-host .lib-row-by { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#sessions-host .lib-row-by:has(+ .lib-row-maker) { flex: none; }
+/* The maker's name: a link back to that Pip's chat, that session or that chat. A link, never a button's box. */
+#sessions-host .lib-row-maker { appearance: none; flex: 0 1 auto; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 2px; background: none; color: inherit; font: inherit; white-space: pre; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+#sessions-host button.lib-row-maker { color: var(--text); cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 2px; }
+#sessions-host button.lib-row-maker:is(:hover, :focus-visible) { color: var(--text-strong); text-decoration-color: currentColor; }
+/* (Where nothing can be pointed at, a quiet line says the name can be pressed.) */
+@media (hover: none) { #sessions-host button.lib-row-maker { text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); } }
+#sessions-host button.lib-row-maker:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+#sessions-host .lib-row-when { flex: none; }
+/* A narrow side bar: the filters lose their keys ("Type", "By") first. If the two still do not fit one line (a long
+   type beside a long name at 170 px), the second goes under the first: a word on a button is never cut, and a maker's
+   name ends in "…" only when it is longer than the whole line. */
+@media (max-width: 259px) {
+  #sessions-host .lib-filters { flex-wrap: wrap; gap: var(--sp-1); }
+  #sessions-host .lib-filter { flex: 0 0 auto; max-width: 100%; padding: 0 6px 0 8px; gap: 4px; }
+  #sessions-host .lib-filter .dgc-folder-k { display: none; }
+  #sessions-host .lib-row { gap: 8px; }
+}
+@media (forced-colors: active) {
+  #sessions-host .lib-row:hover { background: Highlight; color: HighlightText; forced-color-adjust: none; }
+  #sessions-host button.lib-row-maker { color: LinkText; }
+}

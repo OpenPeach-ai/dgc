@@ -113,3 +113,32 @@ test('a settled card says what it was and how it ended, in one line',async()=>{
  assert.equal(settledWords(a({},{resolved_by:'pip-level:full'})),null,'its level let it through: no card');
  assert.equal(settledWords(a({kind:'yours'})),null,'the user did it on its screen: no card');
 });
+
+// ---- 15 Nov: Always allow on every card, and a site's name kept whole (live round 1, findings 39 and 45)
+test('which cards offer Always allow, what a payment says of its limit, and what each Always allow covers, in plain words',async()=>{
+ const c=await import('../src/pipCareful.js');
+ const form={method:'POST',host:'shop.example',path:'/order',route:'/order'},pay={...form,payment:true},order={...form,asks_because:'maybe_payment',asks_word:'order'};
+ const carry={kind:'text',host:'quantobra.pt',site:'quantobra.pt'},term={kind:'text',host:'Terminal'},floor={kind:'floor',host:'Terminal'};
+ for(const s of [form,pay,order,carry,term,floor])assert.equal(c.offersAlways(s),true);
+ for(const s of [{kind:'site'},{kind:'login'},{kind:'yours'}])assert.equal(c.offersAlways(s),false,'a new site, a login, your own action: never');
+ assert.deepEqual([form,pay,order,carry,floor].map(c.limitWords),['','Inside its daily limit','Inside its daily limit','','']);
+ assert.equal(c.coversWords(form),'Always allow covers POST /order');
+ assert.equal(c.coversWords(pay),'Always allow covers payments to shop.example, inside its daily limit');
+ assert.equal(c.coversWords(carry),'Always allow covers what it read from your apps going to quantobra.pt');
+ assert.equal(c.coversWords(term),'Always allow covers what it read from your apps going into its own Terminal');
+ assert.equal(c.coversWords(floor),'Always allow covers commands that could delete everything in its Files');
+ assert.match(c.coversDetail(pay,'Ava'),/lets Ava pay on shop\.example without asking, only inside its daily limit.*Past the limit.*it still asks/);
+ assert.match(c.coversDetail(carry,'Ava'),/lets Ava put what it read from your apps to quantobra\.pt without asking.*Anywhere else still asks/);
+ assert.equal(c.asksWords(order),'It may place an order, so DGC asks.');
+});
+test('a site\'s name in a card\'s words is one piece that never breaks, with its question mark, said whole in its title; everything is escaped',async()=>{
+ const {wordsHtml,carefulWords}=await import('../src/pipCareful.js');
+ const esc=s=>String(s).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+ const s={kind:'site',site:'quantobra.pt',shown:'www.quantobra.pt',host:'www.quantobra.pt'},w=carefulWords(s,'Tile <b>checker</b>');
+ assert.equal(wordsHtml(w[0],s,esc),'Let Tile &lt;b&gt;checker&lt;/b&gt; visit <span class="card-domain" title="quantobra.pt">quantobra.pt?</span>');
+ assert.equal(wordsHtml(w[1],s,esc),'It hasn’t opened <span class="card-domain" title="www.quantobra.pt">www.quantobra.pt</span> for you before. Allow adds the site for good, and it opens it.');
+ assert.equal(wordsHtml('Pay on shop.example?',{host:'shop.example'},esc),'Pay on <span class="card-domain" title="shop.example">shop.example?</span>');
+ assert.equal(wordsHtml('Let Ava run this in its Terminal?',{kind:'floor',host:'Terminal'},esc),'Let Ava run this in its Terminal?','the Terminal is no site');
+ assert.equal(wordsHtml('Visit a.b?',{host:'a.b'},esc),'Visit a.b?','too short to need it');
+ assert.equal(wordsHtml('x <i>',{host:'"><script>.example'},esc),'x &lt;i&gt;');
+});

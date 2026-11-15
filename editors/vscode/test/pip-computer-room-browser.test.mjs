@@ -129,7 +129,7 @@ for (const [width, height] of SIZES) {
   });
 }
 
-test("the bell says how many wait and the first one's name; the drawer's cards answer as the old ones did: Send once, Always allow, Reject, and a payment without Always allow", async (t) => {
+test("the bell says how many wait and the first one's name; the drawer's cards answer as the old ones did: Send once, Always allow, Reject, a payment too (15 Nov: on every card)", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openComputer(browser, { width: 1600, height: 1000, actions: [FORM, PAY] });
   const cardsNow = () => x.p.evaluate(() => [...document.querySelectorAll("#pc-drawer .pc-hold")].map((c) => ({ title: c.querySelector(".pc-card-open").textContent, text: c.textContent, held: c.querySelector(".pc-held-text")?.textContent ?? null, buttons: [...c.querySelectorAll(".pc-card-actions button")].map((b) => b.textContent) })));
@@ -144,7 +144,7 @@ test("the bell says how many wait and the first one's name; the drawer's cards a
     assert.ok(bell.shared && !PURPLE.test(bell.ground) && !PURPLE.test(bell.ink), `the bell is the shared button, not purple: ${JSON.stringify(bell)}`);
     assert.ok(await x.p.isVisible("#pc-drawer"));
     const cards = await cardsNow();
-    assert.deepEqual(cards.map((c) => [c.title, c.buttons]), [["Send a form to shop.example", ["Send once", "Always allow", "Reject"]], ["Pay on pay.example", ["Send once", "Reject"]]]);
+    assert.deepEqual(cards.map((c) => [c.title, c.buttons]), [["Send a form to shop.example", ["Send once", "Always allow", "Reject"]], ["Pay on pay.example", ["Send once", "Always allow", "Reject"]]]);
     assert.match(cards[0].text, /Nothing has been sent\. Always allow covers POST \/order\./);
     assert.match(cards[1].text, /amount 53\.50/); assert.match(cards[1].text, /Sends payment card details\./);
     assert.equal(await x.p.textContent("#pc-drawer .pc-drawer-head h2"), "Waiting for you");
@@ -180,7 +180,7 @@ test("careful mode and a login to save are cards in the drawer too: Allow this s
     assert.equal(await x.p.textContent("#pc-bell .pc-bell-count"), "3");
     assert.equal(await x.p.getAttribute("#pc-bell", "aria-label"), "3 waiting for you: Let Mornings visit news.example?");
     const cards = await x.p.evaluate(() => [...document.querySelectorAll("#pc-drawer .pc-hold")].map((c) => ({ title: c.querySelector(".pc-card-open").textContent, text: c.textContent, held: c.querySelector(".pc-held-text")?.textContent ?? null, buttons: [...c.querySelectorAll(".pc-card-actions button")].map((b) => b.textContent) })));
-    assert.deepEqual(cards.map((c) => [c.title, c.buttons]), [["Let Mornings visit news.example?", ["Allow this site", "Not now"]], ["Let Mornings put this on forum.example?", ["Allow once", "Not now"]],
+    assert.deepEqual(cards.map((c) => [c.title, c.buttons]), [["Let Mornings visit news.example?", ["Allow this site", "Not now"]], ["Let Mornings put this on forum.example?", ["Allow once", "Always allow", "Not now"]],
       ["Save a login for bank.example so Mornings can sign in itself?", ["Not now"]]]);
     assert.equal(cards[1].held, "Dear team,\nthe figures are attached.", "the whole text it would put on the page (in the card's detail)");
     assert.match(cards[2].text, /Save it from the card in its chat\./);

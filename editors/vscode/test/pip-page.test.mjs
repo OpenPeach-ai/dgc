@@ -184,6 +184,18 @@ test('an Always allow you gave is on its page, and Stop allowing takes it back',
  assert.match(x.d.querySelector('[aria-label="Allowed without asking"]').textContent,/Send emails from me@example\.com.*Stop allowing/);
  x.click(`[data-revoke-grant="${grant.id}"]`);await flush();
  assert.equal(x.requests('revoke_pip_action_grant')[0].request.grant_id,grant.id);
+ // The grants of 15 Nov (Always allow on every card): each by DGC's own plain label, where it applies under it (never
+ // "browser" or the tool's CARRY / FLOOR / PAY), and Stop allowing as for the others.
+ const g=(n,tool,server,account,label)=>({id:'grant_'+n.repeat(32),kind:'computer_submit',label,server,account,tool,connection_digest:'a'.repeat(64),schema_digest:n.repeat(64),created_at:now,created_by:'editor-user'});
+ const grants=[g('1','CARRY quantobra.pt','quantobra.pt','browser','Carry what it read from your apps to quantobra.pt'),g('2','CARRY Terminal','Terminal','browser','Run what it read from your apps in its own Terminal'),
+  g('3','FLOOR Terminal','Terminal','terminal','Run commands that could delete everything in its Files'),g('4','PAY POST /checkout/pay','shop.example','browser','Submit in its browser to shop.example/checkout/pay (a payment, inside its daily limit)')];
+ const y=setup({grants});await openPage(y);
+ const rows=[...y.d.querySelectorAll('[aria-label="Allowed without asking"] li')].map(li=>[li.querySelector('.row-words span').textContent,li.querySelector('.row-words small').textContent,li.querySelector('button').textContent]);
+ assert.deepEqual(rows,[['Carry what it read from your apps to quantobra.pt','Careful mode · its browser','Stop allowing'],['Run what it read from your apps in its own Terminal','Careful mode · its Terminal','Stop allowing'],
+  ['Run commands that could delete everything in its Files','Its Terminal','Stop allowing'],['Submit in its browser to shop.example/checkout/pay (a payment, inside its daily limit)','A payment · its browser','Stop allowing']]);
+ assert.doesNotMatch(y.d.querySelector('[aria-label="Allowed without asking"]').textContent,/CARRY|FLOOR|PAY /);
+ y.click(`[data-revoke-grant="${grants[2].id}"]`);await flush();
+ assert.equal(y.requests('revoke_pip_action_grant')[0].request.grant_id,grants[2].id);
 });
 
 test('notifications, name and title are saved from its page',async()=>{
