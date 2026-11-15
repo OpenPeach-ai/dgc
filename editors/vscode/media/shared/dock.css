@@ -70,7 +70,7 @@ body.vscode-light .dgc-dock-dot[data-dot="live"], body.vscode-high-contrast-ligh
 .dgc-dock[data-dragging] .dgc-dock-bar { cursor: grabbing; }
 .dgc-dock-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 /* Nothing pinned yet: "+" and a few quiet words. */
-.dgc-dock-empty { align-self: center; padding: 0 4px 0 2px; color: var(--text-2); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); white-space: nowrap; }
+.dgc-dock-empty { align-self: center; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 4px 0 2px; color: var(--text-2); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); white-space: nowrap; }   /* (in a narrow side bar its words end in “…”: they ran off the page at 170 px, 14 Nov) */
 /* The name of what is pointed at (or focused from the keyboard), just above it. */
 .dgc-dock-tip {
   position: absolute; z-index: 2; box-sizing: border-box; max-width: min(240px, calc(100% - 12px)); padding: 5px 9px 6px; border: 1px solid var(--hair); border-radius: var(--r-md);
@@ -112,3 +112,5 @@ body.vscode-high-contrast .dgc-dock-bar, body.vscode-high-contrast-light .dgc-do
   .dgc-dock-dot[data-dot="live"] { background: Highlight; }
   .dgc-dock-badge { forced-color-adjust: none; background: CanvasText; color: Canvas; }
 }
+/* With nothing pinned yet the bar is "+" and one line of words: it stays inside a narrow side bar. */
+.dgc-dock-bar:has(> .dgc-dock-empty) { max-width: calc(100% - 8px); min-width: 0; }

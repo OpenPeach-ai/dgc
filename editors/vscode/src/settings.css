@@ -580,3 +580,26 @@ input[type=checkbox],input[type=radio]{height:auto;padding:0;accent-color:var(--
 .mcp-paste-row>.secondary{flex:none}
 .mcp-paste-says{margin:0;overflow-wrap:anywhere}.mcp-paste-says.error{color:var(--error)}
 @media (max-width:420px){.mcp-paste-row{flex-wrap:wrap}.mcp-paste-row>textarea{flex-basis:100%;min-height:72px}}
+
+/* ==== A very narrow Settings (live round 1, finding 28, 14 Nov): the rule of every page. A heading never breaks inside
+   a word: it keeps one line and ends in "…", and the buttons beside it go under it. A row's buttons go under its
+   words; a button, a field or a list of tabs is never wider than the page. ==== */
+.section-head :is(h2,h3){overflow-wrap:normal;word-break:normal}
+/* (From 340 px down a heading keeps one line and its buttons go under it: "Your servers · 0" stood on three lines
+   beside two stacked buttons at 300 px.) */
+@media (max-width:340px){
+ .section-head{flex-wrap:wrap;row-gap:6px}
+ .section-head :is(h2,h3){flex:1 1 100%;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .section-head .actions{flex-wrap:wrap;max-width:100%}
+}
+@media (max-width:260px){
+ #page,#page *{min-width:0}
+ #page{overflow-x:hidden}
+ #page :has(>.actions){flex-wrap:wrap}
+ #page .actions{flex-wrap:wrap;max-width:100%}
+ #page button:not(.info):not([role=switch]),#page select,#page input:not([type=checkbox]):not([type=radio]){max-width:100%}
+ #page button.secondary.wide{width:100%}
+ #page [role=tablist],#page .chips{flex-wrap:wrap}
+ #page .chips>button{flex:none}
+ #page button.info{flex:none;min-width:16px}
+}

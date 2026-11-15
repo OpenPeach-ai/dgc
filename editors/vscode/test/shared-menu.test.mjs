@@ -250,7 +250,7 @@ test("the ⋯ fades in, but goes at once when the pointer leaves: a Main or Fall
   const css = readFileSync(new URL("../media/shared/menu.css", import.meta.url), "utf8");
   const resting = css.match(/\.dgc-menu \.dgc-menu-more \{([^}]*)\}/)[1];
   assert.doesNotMatch(resting.match(/transition:[^;]*/)?.[0] || "", /opacity/, "at rest it has no fade: leaving takes it away at once");
-  const shown = css.match(/\.dgc-menu \.dgc-menu-item:is\(:hover, :focus-within\) > \.dgc-menu-more, \.dgc-menu \.dgc-menu-more\[aria-expanded="true"\] \{([^}]*)\}/)[1];
+  const shown = css.match(/\.dgc-menu \.dgc-menu-item:is\(:hover, :has\(:focus-visible\)\) > \.dgc-menu-more, \.dgc-menu \.dgc-menu-more\[aria-expanded="true"\] \{([^}]*)\}/)[1];
   assert.match(shown, /opacity: 1/);
   assert.match(shown, /transition:[^;]*opacity/, "it still fades in");
 });

@@ -385,13 +385,19 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       const g = await bar(page);
       assert.equal(g.on, true);
       const boxRight = g.boxLeft + g.boxWidth;
-      const [ground, ...corners] = await pixels(page, [
+      // (The box has the 6 px family's corner since 14 Nov: the points sit clear of its 1 px edge and of its own soft
+      // shadow, which the old 22 px corner kept far from them. Outside: in the ring beside the top corner. The corner:
+      // the pixel in the box's own square that its round corner leaves to the shell; it also carries the box's own
+      // hairline shadow, a few levels at most, and is never the page's ground where that is another colour.)
+      const [ground, page0, ...corners] = await pixels(page, [
         [g.left + 3, g.top + g.height / 2],          // the bar's own ground, clear of its pills
-        [g.boxLeft - 3, g.boxTop + 3], [g.boxLeft + 1, g.boxTop + 1],
-        [boxRight + 2, g.boxTop + 3], [boxRight - 2, g.boxTop + 1]]);
-      const near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) <= 2);
+        [g.left - 3, g.top + g.height / 2],          // the page's own ground, beside the shell: what a bite would show
+        [g.boxLeft - 5, g.boxTop + 1], [g.boxLeft + 0.25, g.boxTop + 0.25],
+        [boxRight + 4, g.boxTop + 1], [boxRight - 0.75, g.boxTop + 0.25]]);
+      const far = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+      const near = (a, b, by = 2) => far(a, b) <= by;
       for (const [i, colour] of corners.entries())
-        assert.ok(near(colour, ground), `${["left, outside", "left, the corner", "right, outside", "right, the corner"][i]}: rgb(${colour}) is not the shell's rgb(${ground})`);
+        assert.ok(near(colour, ground, i % 2 ? 4 : 2) && (far(page0, ground) <= 4 || far(colour, ground) < far(colour, page0)), `${["left, outside", "left, the corner", "right, outside", "right, the corner"][i]}: rgb(${colour}) is not the shell's rgb(${ground})`);
       assert.deepEqual(errors, []);
     } finally { await page.close(); }
   });

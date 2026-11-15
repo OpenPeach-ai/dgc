@@ -42,7 +42,7 @@ export function makeBackend(o = {}) {
   const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run_" + hex("3"), FIX = "pipfix_" + hex("1"), CHANGE = "pchange_" + hex("1"), WAIT = "pipwait_" + hex("1");
   const sub = !!o.sub, AGENT = "pipagent_" + hex("1"), NAME = sub ? "Tile checker" : "GST watchdog";
   const now = Date.now(), ago = (minutes) => new Date(now - minutes * 60000).toISOString();
-  const state = { fix: o.fix || "none", waiting: o.waiting === false ? "none" : "waiting", level: o.level || "ask", change: o.fix === "applied" ? "applied" : "pending", committed: false,
+  const state = { slots: o.slots || 1, fix: o.fix || "none", waiting: o.waiting === false ? "none" : "waiting", level: o.level || "ask", change: o.fix === "applied" ? "applied" : "pending", committed: false,
     order: o.order || [GST, ERP, MORNINGS, BEDS], requests: [], unread: o.unread || {}, made: [], helper: 0, left: false, again: 0,
     paying: o.paying || "ask", limits: o.limits === false ? null : { usd_per_day: null, max_count: null, sites: null, ...(o.limits || {}) }, spent: o.spent || 0,
     total: { usd_per_day: null, spent_today: 0, ...(o.total || {}) }, knows: {}, notes: (o.notes || []).slice() };
@@ -216,7 +216,8 @@ export function makeBackend(o = {}) {
     start_pip_work_helper: () => { state.helper++; return { asks: state.level !== "full" }; },
     answer_pip_waiting: (r) => { state.waiting = { done: "done", later: "later", not_a_problem: "dismissed", undo: "waiting" }[r.answer]; return { waiting: waitingNow() }; },
     // ---- its sub-agents (Pips API 97), and the one command still to come from DGC (retry_pip_fix) ----
-    list_pip_agents: (r) => ({ agents: r.pip_id === GST && sub ? [agentNow(), ...earlierAgents()].filter(Boolean) : [], slots: 1 }),
+    list_pip_agents: (r) => ({ agents: r.pip_id === GST && sub ? [agentNow(), ...earlierAgents()].filter(Boolean) : [], slots: state.slots }),
+    set_pip_agents: (r) => { state.slots = r.slots; return { slots: r.slots }; },
     stop_pip_agent: () => { state.fix = "stopped"; return { agent: agentNow() }; },
     retry_pip_fix: (r) => { if (r.again) { state.fix = "running"; state.again++; } else state.left = true; return { fix: fixNow()[0] }; },
     list_pip_run_activity: (r) => r.run_id !== FIXRUN ? undefined : { run_id: FIXRUN, pip_id: GST, workspace_id: LIME, next_cursor: Math.max(r.after || 0, 3), has_more: false, history_may_be_truncated: false, retention_limit: 500, retention_scope: "workspace",

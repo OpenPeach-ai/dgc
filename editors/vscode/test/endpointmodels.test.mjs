@@ -48,3 +48,19 @@ test("a host that lists nothing says so; a bad or oversized answer is an error",
   await assert.rejects(listEndpointModels("file:///etc/passwd"), /http:\/\/ or https:\/\//);
   assert.deepEqual(modelIds({ data: [{ id: "a" }, { id: 7 }, "b", null] }), ["a", "b"]);
 });
+
+// Live round 1 (14 Nov, finding 4): Ollama at http://127.0.0.1:11434 was named "Custom host", because the address was
+// matched letter for letter against "http://localhost:11434/v1". An address names its provider whether it says
+// localhost or 127.0.0.1, with /v1 or without, with a slash at its end or not.
+test("a known provider is named by its address however the address is written: localhost or 127.0.0.1, with /v1 or without", () => {
+  const { sameHost } = createRequire(import.meta.url)(bundle);
+  for (const written of ["http://127.0.0.1:11434", "http://127.0.0.1:11434/v1", "http://localhost:11434/", "http://LOCALHOST:11434/v1/", "http://[::1]:11434/v1"]) {
+    assert.equal(sameHost(written, "http://localhost:11434/v1"), true, written);
+  }
+  assert.equal(sameHost("https://api.openai.com/v1/", "https://api.openai.com/v1"), true);
+  assert.equal(sameHost("http://127.0.0.1:8080/v1", "http://localhost:11434/v1"), false, "another port is another host");
+  assert.equal(sameHost("https://localhost:11434/v1", "http://localhost:11434/v1"), false, "and so is another scheme");
+  assert.equal(sameHost("https://openrouter.ai/api", "https://openrouter.ai/api/v1"), true);
+  assert.equal(sameHost("https://example.org/other/v1", "https://openrouter.ai/api/v1"), false);
+  assert.equal(sameHost("", "http://localhost:11434/v1"), false);
+});

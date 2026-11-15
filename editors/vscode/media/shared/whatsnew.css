@@ -119,3 +119,11 @@ body.vscode-high-contrast .wn-dot.on::before, body.vscode-high-contrast-light .w
   .wn-chip.on { background: Highlight; color: HighlightText; }
   .wn-wall, .wn-boxed { border-color: CanvasText; }
 }
+/* The narrowest side bar (14 Nov): the two buttons share the dialog's width, under the dots; nothing runs off sideways. */
+@media (max-width: 230px) {
+  .wn-layer { padding: 8px; }
+  .wn-body { padding: 12px 10px; overflow-x: hidden; }
+  .wn-title { overflow-wrap: break-word; }
+  .wn-actions { flex: 1 1 100%; margin-left: 0; }
+  .wn-actions .dgc-btn { flex: 1 1 0; width: auto; min-width: 0; }
+}

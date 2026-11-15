@@ -40,7 +40,8 @@ test("the width picks each card's form: Small squares two a row at 300 px, Mediu
     assert.deepEqual(g.cards.map((c) => c.id), EVERY, "the cards the user chose, in the user's order");
     assert.equal(g.form, "s");
     assert.deepEqual([...new Set(g.cards.map((c) => c.form))], ["s"], "narrow: every card is in its Small form");
-    for (const c of g.cards) assert.ok(near(c.width, c.height, 1), `${c.id} is a square (${c.width}×${c.height})`);
+    // (Notes is a field at every size: at Small it takes the row instead of a square.)
+    for (const c of g.cards) if (c.id !== "note") assert.ok(near(c.width, c.height, 1), `${c.id} is a square (${c.width}×${c.height})`);
     assert.ok(near(g.cards[0].top, g.cards[1].top) && g.cards[1].left > g.cards[0].right && g.cards[2].top > g.cards[0].bottom - 1, "two squares to a row");
     assert.ok(near(g.cards[0].width * 2 + 8, 300 - 24, 2), `two squares and their gap fill the side bar (${g.cards[0].width})`);
     assert.equal(g.overflowX, false);
@@ -337,8 +338,8 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       assert.ok(await x.page.locator('.hc-grid .hc-card[data-card="weather"] svg.hc-wx').count() >= 1, "the conditions are a drawing on the page, not a picture fetched");
       // Notes (14 Nov, the notes app): the top note Small (a pinned one first, as in every list; it was the newest); the
       // notes by their first lines from Medium up, with New (it said "New note" before the folder button stood beside it).
-      if (form("note") === "s") { assert.match(text("note"), /Call the bank about the card/); assert.doesNotMatch(text("note"), /09:40/); assert.match(text("note"), /3 notes|\+2 notes/); }
-      else { assert.match(text("note"), /Call the bank about the card/); assert.match(text("note"), /Ferry to Porto/); assert.match(text("note"), /New/); }
+      // Notes: at every size only a field (the note edited last), the new-note icon and Open Notes.
+      assert.match(text("note"), /^Notes Ferry to Porto/); assert.match(text("note"), /Open Notes$/); assert.doesNotMatch(text("note"), /Call the bank|\d notes/);
       // Words are read: the quietest word on a card clears 4.5:1 on the card's own ground.
       const low = await x.page.evaluate(() => { const parse = (c) => { const m = c.match(/-?[\d.]+(e-?\d+)?/g)?.map(Number) || [0, 0, 0, 0]; return c.startsWith("color(srgb") ? [m[0] * 255, m[1] * 255, m[2] * 255, m[3] ?? 1] : [m[0], m[1], m[2], m[3] ?? 1]; };
         const over = (top, under) => top.slice(0, 3).map((v, i) => v * top[3] + under[i] * (1 - top[3])).concat(1);

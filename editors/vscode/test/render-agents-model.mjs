@@ -30,11 +30,11 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
   // 1. The model menu, following Settings: the Agents row under the model and thinking.
   await page.click("#btn-model");
   await post(models(AGENTS()));
-  await page.waitForSelector("#modelmenu [data-agents-open]");
+  await page.waitForSelector("#modelmenu .model-tabs");
   await page.waitForTimeout(150);
   await page.screenshot({ path: name("1-menu-agents-row") });
   // 2. The agents list: Same as settings first, the providers, Claude Code and Codex greyed with the reason.
-  await page.click("#modelmenu [data-agents-open]");
+  await page.click("#modelmenu [data-model-tab='agents']");
   await page.waitForSelector("#modelmenu [data-agents-same]");
   await page.waitForTimeout(150);
   await page.screenshot({ path: name("2-agents-list") });

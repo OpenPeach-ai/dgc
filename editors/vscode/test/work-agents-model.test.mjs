@@ -25,7 +25,7 @@ function opened(agents, more = {}) {
   v.send({ type: "models", ids: IDS, current: IDS[0], routes: ROUTES, currentRouteKey: "native",
     fallback: { offered: false }, agents, ...more });
   const menu = v.doc.getElementById("modelmenu");
-  const row = () => menu.querySelector("[data-agents-open]");
+  const row = () => menu.querySelector('.model-tabs [data-model-tab="agents"]');
   const last = (type) => plain(v.posted.filter((m) => m.type === type).at(-1) ?? null);
   return { ...v, menu, row, last };
 }
@@ -33,25 +33,25 @@ function opened(agents, more = {}) {
 test("Work: the Agents row says what this session's agents use; an older CLI has none", () => {
   const a = opened(AGENTS());
   assert.ok(a.row(), "the row is in the menu, beside the model and thinking choices");
-  assert.equal(a.row().querySelector(".agents-row-name").textContent, "Sub-agents", "as Settings › Sub-agents names them");
-  assert.equal(a.row().querySelector(".agents-row-value").textContent, "Same as settings · qwen3-coder");
-  assert.equal(a.row().getAttribute("aria-expanded"), "false");
+  assert.equal(a.row().textContent, "Sub-agents", "as Settings › Sub-agents names them");
+  assert.equal(a.row().title.replace(/^Sub-agents: /, ""), "Same as settings · qwen3-coder");
+  assert.equal(a.row().getAttribute("aria-selected"), "false");
   assert.ok(a.menu.querySelector(".effort-slider"), "thinking stays where it was");
   assert.ok(a.menu.querySelector('[data-i="0"]'), "and so do the session's models");
   assert.deepEqual(a.errors, []);
 
   const none = opened(AGENTS({ model: "", settings_model: "" }));
-  assert.equal(none.row().querySelector(".agents-row-value").textContent, "Same as this chat’s model");
+  assert.equal(none.row().title.replace(/^Sub-agents: /, ""), "Same as this chat’s model");
 
   const own = opened(AGENTS({ own: true, model: "own-coder", base_url: "https://spare.example/v1" }));
-  assert.equal(own.row().querySelector(".agents-row-value").textContent, "own-coder · Spare");
+  assert.equal(own.row().title.replace(/^Sub-agents: /, ""), "own-coder · Spare");
   const here = opened(AGENTS({ own: true, model: "glm-5.3:cloud", base_url: "" }));
-  assert.equal(here.row().querySelector(".agents-row-value").textContent, "glm-5.3:cloud · Ollama", "a model of this chat's own host");
+  assert.equal(here.row().title.replace(/^Sub-agents: /, ""), "glm-5.3:cloud · Ollama", "a model of this chat's own host");
   const elsewhere = opened(AGENTS({ own: true, model: "m1", base_url: "https://agents.example:8443/v1" }));
-  assert.equal(elsewhere.row().querySelector(".agents-row-value").textContent, "m1 · agents.example:8443", "an address no provider lists: its host");
+  assert.equal(elsewhere.row().title.replace(/^Sub-agents: /, ""), "m1 · agents.example:8443", "an address no provider lists: its host");
 
   const routed = opened(AGENTS({ router: true }));
-  assert.equal(routed.row().querySelector(".agents-row-value").textContent, "Same as settings · DGC Router");
+  assert.equal(routed.row().title.replace(/^Sub-agents: /, ""), "Same as settings · DGC Router");
 
   const old = opened({ offered: false });
   assert.equal(old.row(), null, "a CLI that doesn't offer it: no row");
@@ -63,14 +63,14 @@ test("Work: the Agents row says what this session's agents use; an older CLI has
 test("Work: Agents opens the same list to choose for agents: Same as settings first, every provider, a subscription greyed with its reason", () => {
   const a = opened(AGENTS());
   a.row().click();
-  assert.equal(a.row().getAttribute("aria-expanded"), "true");
+  assert.equal(a.row().getAttribute("aria-selected"), "true");
   assert.ok(a.menu.querySelector(".effort-slider"), "the model and thinking card stays mounted");
   assert.equal(a.menu.querySelector("[data-i]"), null, "the session's own model rows are away while agents are chosen");
   const rows = [...a.menu.querySelectorAll(".model-options .model-list-scroll > *")];
   const same = rows[0];
   assert.ok(same.matches("[data-agents-same]"), "Same as settings is the first row");
-  assert.equal(same.querySelector(".dgc-menu-label").textContent, "Same as settings");
-  assert.equal(same.querySelector(".agents-same-what").textContent, "qwen3-coder", "what that is, on its own line, never cut");
+  assert.equal(same.querySelector(".dgc-menu-label").textContent, "Settings’ choice");
+  assert.equal(same.querySelector(".agents-same-what").textContent, "Now: qwen3-coder", "what that is, on its own line, never cut");
   assert.equal(same.getAttribute("aria-checked"), "true", "checked while the session follows Settings");
   assert.deepEqual([...a.menu.querySelectorAll("[data-agents-provider]")].map((b) => b.querySelector(".dgc-menu-label").textContent),
     ["Ollama", "Spare", "Open host"], "a provider by its own name (\"Current host · \" is the main list's)");
@@ -87,9 +87,9 @@ test("Work: Agents opens the same list to choose for agents: Same as settings fi
   assert.equal(a.menu.querySelector("[data-fb-more]"), null, "no fallback ⋯ in this list");
   assert.equal(a.menu.querySelector(".model-options [data-agents-typed]"), null);
   // Back returns to the menu.
-  a.menu.querySelector("[data-agents-back]").click();
+  a.menu.querySelector('.model-tabs [data-model-tab="main"]').click();
   assert.ok(a.menu.querySelector('[data-i="0"]'), "the session's models again");
-  assert.equal(a.row().getAttribute("aria-expanded"), "false");
+  assert.equal(a.row().getAttribute("aria-selected"), "false");
   assert.deepEqual(a.errors, []);
 });
 
@@ -108,10 +108,10 @@ test("Work: a provider's models in the agents list; choosing one is this session
   assert.deepEqual(a.last("setAgentsModel"), { type: "setAgentsModel", provider: SPARE, model: "own-coder" });
   assert.equal(a.posted.filter((m) => m.type === "setSubscription" || m.type === "setModel").length, 0, "the session's own model never moves");
   assert.equal(a.menu.hidden, false, "the menu stays, and says what was chosen");
-  assert.equal(a.row().querySelector(".agents-row-value").textContent, "own-coder · Spare");
+  assert.equal(a.row().title.replace(/^Sub-agents: /, ""), "own-coder · Spare");
   // DGC's answer is what it shows from then on.
   a.send({ type: "agentsModel", ...AGENTS({ own: true, model: "own-coder", base_url: "https://spare.example/v1" }) });
-  assert.equal(a.row().querySelector(".agents-row-value").textContent, "own-coder · Spare");
+  assert.equal(a.row().title.replace(/^Sub-agents: /, ""), "own-coder · Spare");
   assert.deepEqual(models().map((b) => b.getAttribute("aria-checked")), ["false", "true"], "still on its models, the chosen one checked");
   a.menu.querySelector("[data-agents-providers]").click();          // back to the agents list
   assert.equal(a.menu.querySelector("[data-agents-same]").getAttribute("aria-checked"), "false");
@@ -122,7 +122,7 @@ test("Work: a provider's models in the agents list; choosing one is this session
   a.menu.querySelector("[data-agents-providers]").click();
   a.menu.querySelector("[data-agents-same]").click();
   assert.deepEqual(a.last("resetAgentsModel"), { type: "resetAgentsModel" });
-  assert.equal(a.row().querySelector(".agents-row-value").textContent, "Same as settings · qwen3-coder");
+  assert.equal(a.row().title.replace(/^Sub-agents: /, ""), "Same as settings · qwen3-coder");
   assert.deepEqual(a.errors, []);
 });
 
@@ -135,7 +135,7 @@ test("Work: this chat's own host lists its models for agents without asking agai
   assert.deepEqual(models.map((b) => b.querySelector(".dgc-menu-label").textContent), IDS);
   models[1].click();
   assert.deepEqual(a.last("setAgentsModel"), { type: "setAgentsModel", provider: "", model: "glm-5.3:cloud" });
-  assert.equal(a.row().querySelector(".agents-row-value").textContent, "glm-5.3:cloud · Ollama");
+  assert.equal(a.row().title.replace(/^Sub-agents: /, ""), "glm-5.3:cloud · Ollama");
   a.menu.querySelector("[data-agents-providers]").click();
   a.menu.querySelector('[data-agents-provider="2"]').click();
   a.send({ type: "providerModels", id: LISTS, ids: [] });
@@ -149,11 +149,11 @@ test("Work: with DGC Router on, Same as settings is the Router's row; a session'
   const a = opened(AGENTS({ router: true }));
   a.row().click();
   const same = a.menu.querySelector("[data-agents-same]");
-  assert.equal(same.querySelector(".dgc-menu-label").textContent, "Same as settings");
-  assert.equal(same.querySelector(".dgc-menu-sub").textContent, "DGC Router: it picks a free worker for each sub-agent");
+  assert.equal(same.querySelector(".dgc-menu-label").textContent, "Settings’ choice");
+  assert.equal(same.querySelector(".dgc-menu-sub").textContent, "Now: DGC Router, which picks a free worker for each sub-agent");
   assert.equal(same.getAttribute("aria-checked"), "true");
   const own = opened(AGENTS({ router: true, own: true, model: "own-coder", base_url: "https://spare.example/v1" }));
-  assert.equal(own.row().querySelector(".agents-row-value").textContent, "own-coder · Spare", "its own wins over the Router");
+  assert.equal(own.row().title.replace(/^Sub-agents: /, ""), "own-coder · Spare", "its own wins over the Router");
   own.row().click();
   assert.equal(own.menu.querySelector("[data-agents-same]").getAttribute("aria-checked"), "false");
   assert.deepEqual(own.errors, []);

@@ -52,7 +52,7 @@ for (const theme of ["dark", "light"]) for (const [where, width] of PLACES) {
       for (const b of f.prompts) assert.deepEqual([b["border-top-left-radius"], b["border-bottom-right-radius"], b["box-shadow"]], ["20px", "7.5px", "none"], say(b));   // the shared scale, a quarter rounder (0.52 look)
       for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["border-bottom-left-radius"], r["box-shadow"], r["border-top-width"]], ["20px", "7.5px", "none", "0px"], say(r));
       for (const c of f.choices.rows) assert.equal(c["border-top-left-radius"], "10px");
-      assert.equal(f.form["border-top-left-radius"], "22px", "the box keeps the composer's corner");
+      assert.equal(f.form["border-top-left-radius"], "6px", "the box keeps the composer's corner (the buttons' 6 px since 14 Nov)");
       // The 4 px unit: a bubble's padding, the gap inside a message, the space between turns.
       for (const b of [...f.prompts, ...f.replies]) assert.deepEqual([b["padding-top"], b["padding-left"]], ["8px", "12px"]);
       for (const m of f.messages) assert.deepEqual([m["row-gap"], m["margin-bottom"], m["margin-top"]], ["4px", "16px", m.user ? "24px" : "0px"], say(m));

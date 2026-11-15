@@ -76,7 +76,7 @@ export function pipFlowRefusal(request: any, apiVersion: number): string {
 /** A Pip's sub-agents in its chat (Pips API 97, dgc/pip_agents.py; src/pipChat.js): list_pip_agents {pip_id} reads
  *  them for the pill and the agent map, stop_pip_agent {pip_id, agent_id} is Stop, and retry_pip_fix {pip_id, fix_id,
  *  again} answers the Pip after its last try (Try again, or Leave it). Why a request is refused, or '' when it may go. */
-const AGENT_COMMANDS = ['list_pip_agents', 'stop_pip_agent', 'retry_pip_fix'];
+const AGENT_COMMANDS = ['list_pip_agents', 'stop_pip_agent', 'set_pip_agents', 'retry_pip_fix'];
 export const AGENTS_API = 97;
 export function pipAgentsRefusal(request: any, apiVersion: number): string {
   if (!AGENT_COMMANDS.includes(request?.type)) return '';
@@ -84,6 +84,8 @@ export function pipAgentsRefusal(request: any, apiVersion: number): string {
   const id = (v: unknown, re: RegExp) => typeof v === 'string' && re.test(v);
   if (!id(request.pip_id, /^pip_[a-f0-9]{32}$/)) return 'Choose a Pip first.';
   if (request.type === 'stop_pip_agent' && !id(request.agent_id, /^pipagent_[a-f0-9]{32}$/)) return 'Choose the sub-agent to stop.';
+  // Ultra on the Pip's thinking slider: how many of its sub-agents run at once (1, or 4 for Ultra; DGC holds the most).
+  if (request.type === 'set_pip_agents' && !(Number.isSafeInteger(request.slots) && request.slots >= 1 && request.slots <= 64)) return 'A Pip runs 1 to 4 sub-agents at once.';
   if (request.type === 'retry_pip_fix' && !(id(request.fix_id, /^pipfix_[a-f0-9]{32}$/) && typeof request.again === 'boolean')) return 'Answer the Pip: Try again, or Leave it.';
   return '';
 }

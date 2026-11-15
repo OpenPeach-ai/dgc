@@ -3652,7 +3652,8 @@ test("Work's agents model: a saved provider's address, API and key go with it, t
     subagent_api_mode: "chat_completions", subagent_api_key: "sk-spare" });
   assert.deepEqual(world.posted.filter((m) => m.type === "agentsModel").at(-1),
     { type: "agentsModel", offered: true, own: true, model: "own-coder", base_url: "https://spare.example/v1",
-      settings_model: "settings-coder", settings_base_url: "", router: false }, "DGC's answer reaches its model menu, and no key does");
+      settings_model: "settings-coder", settings_base_url: "", router: false,
+      thinking: "", thinking_settable: false, context_size: 0, context_settable: false }, "DGC's answer reaches its model menu, and no key does");
   assert.equal(JSON.stringify(world.posted).includes("sk-spare"), false);
   await world.provider.setSessionAgentsModel("", "glm-5.3:cloud");
   assert.deepEqual(world.of("set_config").at(-1).values, { subagent_model: "glm-5.3:cloud", subagent_base_url: "", subagent_api_mode: "", subagent_api_key: "" });

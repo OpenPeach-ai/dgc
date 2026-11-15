@@ -51,7 +51,7 @@
 .pip-app-root.chat-open{overflow:hidden}.pip-app-root.chat-open #app{height:100%;min-height:0;overflow:hidden}.pip-app-root.chat-open #app>header{flex:none}.pip-app-root.chat-open .layout{flex:1 1 0;min-height:0;overflow:hidden}.pip-app-root.chat-open .layout>aside{overflow:auto}.pip-app-root.chat-open .content[data-view=chat]{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-bottom:10px}.pip-app-root.chat-open .content[data-view=chat]>.back-control{align-self:flex-start;flex:none}.pip-app-root.chat-open .content[data-view=chat]>.tabs,.pip-app-root.chat-open .content[data-view=chat]>.hero{flex:none}.pip-app-root.chat-open .pip-conversation{flex:1 1 0;min-height:0;overflow:visible}.pip-app-root.chat-open .conversation-log{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable}.pip-app-root.chat-open .pip-composer,.pip-app-root.chat-open .composer-hint{flex:none}.pip-app-root.chat-open .hero{margin-bottom:8px}
 /* Geometry, typography, focus and two-zone controls mirror media/main.css's
    #cbox/.cinput/#cfooter. Pip-only limits live in the popup, not extra rows. */
-.pip-composer{position:relative;z-index:2;flex:none;display:flex;flex-direction:column;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,#3a3a3d));border-radius:16px;padding:0;background:var(--vscode-input-background,var(--vscode-dropdown-background,#29292b));margin-top:8px;box-shadow:0 7px 24px rgba(0,0,0,.18);--composer-faint:var(--vscode-disabledForeground,var(--muted,#96969b))}
+.pip-composer{position:relative;z-index:2;flex:none;display:flex;flex-direction:column;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,#3a3a3d));border-radius:var(--r-box,6px);padding:0;background:var(--vscode-input-background,var(--vscode-dropdown-background,#29292b));margin-top:8px;box-shadow:0 7px 24px rgba(0,0,0,.18);--composer-faint:var(--vscode-disabledForeground,var(--muted,#96969b))}
 .pip-composer:focus-within{border-color:var(--vscode-input-border,var(--vscode-widget-border,#3a3a3d))}.composer-input{min-height:50px;display:flex;align-items:flex-start;gap:8px;padding:12px 12px 4px}.pip-composer textarea{display:block;flex:1;min-width:0;min-height:0;max-height:160px;border:0;outline:0;background:transparent;color:var(--vscode-foreground,#d7d7da);font:400 13px/1.6 var(--vscode-font-family,system-ui);padding:0;margin:0;resize:none;overflow-y:hidden}.pip-composer textarea::placeholder{color:var(--composer-faint)}.pip-composer textarea:focus-visible{outline:0}.pip-composer .mention-box{display:block;flex:1;min-width:0;min-height:0;max-height:160px;border:0;outline:0;background:transparent;color:var(--vscode-foreground,#d7d7da);font:400 13px/1.6 var(--vscode-font-family,system-ui);padding:0;margin:0}.pip-composer .mention-box.is-empty::before{color:var(--composer-faint)}
 /* What media/mentions.css and the rest read of Work's tokens (--link, --text, --sp-*, …) comes from
    media/shared/tokens.css: the side bar's Pips inherit it from Work's page, a Pip's own tab has it in this bundle. */
@@ -59,7 +59,7 @@
 .pip-composer .chat-send{height:28px;width:28px;min-height:28px;margin-left:4px;border:0;border-radius:9999px;padding:0;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--composer-faint);background:transparent;transition:background .12s,color .12s}.pip-composer .chat-send.ready{background:var(--accent-fill);color:#fff}.pip-composer .chat-send.ready:hover{background:var(--accent-hover)}.pip-composer .chat-send:not(.ready):hover{background:var(--vscode-panel-border,#303032);color:var(--vscode-foreground)}.pip-composer .chat-send:disabled{opacity:1;cursor:default}.pip-composer #chat-stop{flex:none}.composer-hint{font-size:11px;line-height:1.45;margin:4px 2px 0;color:var(--muted,#96969b)}
 .composer-model-menu{position:absolute;bottom:calc(100% + 8px);right:0;z-index:20;display:flex;flex-direction:column;width:min(300px,100%);max-height:min(440px,62vh);overflow-y:auto}.composer-model-menu>.section-head{flex:none;margin:0 0 4px}.composer-model-menu>.section-head strong{font-size:12px}.composer-model-menu>.section-head button{font-size:11px;min-height:24px;padding:0 4px;background:transparent}.composer-model-menu>p,.composer-model-heading p{font-size:11px;line-height:1.45;flex:none}.composer-model-heading{flex:none;border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.composer-model-heading strong{font-size:12px}.composer-model-menu>input{font-size:12px;flex:none;margin:4px 0}.composer-model-options{overflow-y:auto;min-height:32px;flex:1 1 auto}.composer-model-options small{display:block;font-size:11px;color:inherit;opacity:.8}.composer-model-menu>#chat-refresh-models{flex:none;margin-top:4px;font-size:11px;align-self:flex-start;background:transparent}
 /* The face rides a slimmer track: at Work's thick one its purple sank into the filled part (the contact sheet, r2-e). The box stays the face's height, so the place to grab is as big as it was. */
-.composer-effort-control{--effort-track:14px;--effort-face:26px;--effort-fill:calc(var(--effort-face)/2 + (100% - var(--effort-face))*var(--effort-t,0));flex:none;padding:8px 4px 0}.composer-effort-control[data-step="0"]{--effort-fill:0%}.composer-effort-control[data-step="4"]{--effort-fill:100%}.composer-effort-slider{appearance:none;display:block;width:100%;height:var(--effort-face);min-height:0;padding:0;border:0;margin:0;background:transparent;cursor:pointer}.composer-effort-slider::-webkit-slider-runnable-track{height:var(--effort-track);border-radius:9999px;background:linear-gradient(to right,var(--accent) var(--effort-fill),color-mix(in srgb,var(--vscode-foreground) 14%,transparent) var(--effort-fill))}.composer-effort-slider::-webkit-slider-thumb{appearance:none;width:var(--effort-face);height:var(--effort-face);margin-top:calc((var(--effort-track) - var(--effort-face))/2);border-radius:9999px;background:var(--vscode-editor-foreground,var(--vscode-foreground,#f5f5f6));border:1px solid var(--line);box-shadow:0 1px 4px rgba(0,0,0,.18)}.composer-effort-labels{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--muted)}.composer-effort-labels output{color:var(--vscode-foreground)}.composer-scope,.composer-unavailable{font-size:11px;line-height:1.45;color:var(--muted)}.composer-context-menu{left:0;right:auto;padding:12px}.composer-context-size{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.composer-context-size label{margin:0;font-size:11px}.composer-context-size select{width:auto;height:24px;padding:0 8px;font:600 11px/1 var(--vscode-editor-font-family,monospace);border:1px solid var(--line);border-radius:6px}.composer-context-menu p{margin:8px 0 0}
+.composer-effort-control{--effort-track:14px;--effort-face:26px;--effort-fill:calc(var(--effort-face)/2 + (100% - var(--effort-face))*var(--effort-t,0));flex:none;padding:8px 4px 0}.composer-effort-control[data-step="0"]{--effort-fill:0%}.composer-effort-control[data-full="1"]{--effort-fill:100%}.composer-effort-slider{appearance:none;display:block;width:100%;height:var(--effort-face);min-height:0;padding:0;border:0;margin:0;background:transparent;cursor:pointer}.composer-effort-slider::-webkit-slider-runnable-track{height:var(--effort-track);border-radius:9999px;background:linear-gradient(to right,var(--accent) var(--effort-fill),color-mix(in srgb,var(--vscode-foreground) 14%,transparent) var(--effort-fill))}.composer-effort-slider::-webkit-slider-thumb{appearance:none;width:var(--effort-face);height:var(--effort-face);margin-top:calc((var(--effort-track) - var(--effort-face))/2);border-radius:9999px;background:var(--vscode-editor-foreground,var(--vscode-foreground,#f5f5f6));border:1px solid var(--line);box-shadow:0 1px 4px rgba(0,0,0,.18)}.composer-effort-labels{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--muted)}.composer-effort-labels output{color:var(--vscode-foreground)}.composer-scope,.composer-unavailable{font-size:11px;line-height:1.45;color:var(--muted)}.composer-context-menu{left:0;right:auto;padding:12px}.composer-context-size{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.composer-context-size label{margin:0;font-size:11px}.composer-context-size select{width:auto;height:24px;padding:0 8px;font:600 11px/1 var(--vscode-editor-font-family,monospace);border:1px solid var(--line);border-radius:6px}.composer-context-menu p{margin:8px 0 0}
 @media(prefers-reduced-motion:reduce){.pip-composer .chat-send{transition:none}}
 .pip-composer-shell{position:relative;flex:none;min-width:0}
 /* What its computer holds waits just above its box, one at a time (pipsClient.js computerWaitingCards, ui-04). */
@@ -330,7 +330,7 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 @media(hover:none){.chat-style .pip-message:not(:hover):not(:focus-within) .response-actions>:not(.msg-time){opacity:1}}
 .chat-style .pip-message .chat-activity-toggle{display:none}
 .pip-conversation.chat-style .composer-hint{display:none}
-.pip-conversation.chat-style .pip-composer{border-radius:22px}
+.pip-conversation.chat-style .pip-composer{border-radius:var(--r-box,6px)}
 .simple-pips .simple-bar .runner-status{font-size:0;gap:0}
 .simple-pips .simple-bar .runner-status .status-dot{width:8px;height:8px}
 .pip-message.typing{display:inline-flex;padding:13px 16px;border-radius:18px;background:var(--pip-bubble);margin-bottom:18px}
@@ -957,7 +957,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
    open in the popover above. */
 .pip-composer-shell .rail-line.has-chips{margin:8px calc(-1 * var(--shell-pad)) 0}
 .pip-composer-shell .rail-line.has-chips~.pip-composer{margin-top:0}
-.pip-conversation:not(.chat-style) .rail-line{--tray-r:16px}
+.pip-conversation:not(.chat-style) .rail-line{--tray-r:var(--r-box,6px)}
 .pip-composer{--tray-lift:0 7px 24px rgba(0,0,0,.18)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer{--tray-lift:var(--lift-box)}
 .rail-pop .chat-queue-box{margin:0;padding:0 8px 8px;border-radius:0;background:transparent}
@@ -1160,6 +1160,10 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
   .pip-composer .composer-chip,.pip-composer .model-control,.pip-composer .composer-chip.composer-level,.pip-composer #chat-context-toggle.with-text{min-width:24px;width:24px;max-width:24px}
   .pip-composer .composer-routines{padding:0 3px}
 }
+/* The narrowest side bar (14 Nov): the faces in the list and on a waiting card are a size smaller, so the names beside
+   them keep a column to be read in. (Here, before the chat's design pass, which never styles a face.) */
+@container(max-width:260px){.pip-app-root .core-offer .avatar,.pip-app-root .pip-row .avatar{width:34px;height:32px}}
+@container(max-width:200px){.pip-app-root .attention-row .avatar,.pip-app-root .attention-row .pip-avatar{width:26px;height:26px}}
 /* ==== Pip chat design pass (0.52, asked 5 Nov): a Personal and a Project Pip's chat, calm, clear and physical. ====
    What it holds to, each measured in test/pip-chat-design-browser.test.mjs:
    - One column. Everything the Pip says starts at one left edge and is at most one measure wide (a reply, its choices);
@@ -1312,16 +1316,47 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
    keys, the corner and the greys are the shared menu's (media/shared/menu.css); the buttons are the shared button at its
    dense size. The only accent here is the unread dot. ==== */
 .pip-topbar{position:relative}
-.pip-pill .pip-convs{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%;height:26px;min-height:0;margin:0 -4px 0 -6px;padding:0 6px;border:0;border-radius:var(--r-row,8px);background:transparent;color:inherit;font:inherit;font-weight:600;cursor:pointer;transition:background-color var(--dur-hover,120ms) ease}
-.pip-pill .pip-convs:hover,.pip-pill .pip-convs[aria-expanded="true"]{background:var(--wash)}
-.pip-pill .pip-convs:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
-/* In a narrow side bar the Pip's name keeps its room: the conversation's name gives way first, then goes. */
-@container(max-width:340px){.pip-pill small.pip-conv-title{display:none}}
-.pip-convs-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A Pip's chat header (his call of 14 Nov): back, its face and its name at the left, fixed; the thread selector in the
+   middle, always centred, in a capped width, a long name ending in "…"; the switch, its computer and the menu at the
+   right. The two sides are the same width (the selector's box carries Back's width on its right as the left side
+   carries Back itself), and the selector's width comes from the page's width, never from the name it shows: so nothing
+   moves when the thread changes. */
+.pip-topbar.pip-topbar-chat{--thread-cap:220px;--back-w:36px;grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr)}
+.pip-topbar-chat>.pip-pill{grid-column:2;justify-self:start;padding-right:4px}
+.pip-topbar-chat>.pip-thread{grid-column:3;box-sizing:content-box;display:flex;justify-content:center;min-width:0;width:clamp(72px,100cqi - 330px,var(--thread-cap));padding-right:var(--back-w)}
+.pip-topbar-chat>.topbar-actions{grid-column:4;justify-self:end}
+.pip-thread .pip-convs{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%;height:26px;min-height:0;margin:0;padding:0 6px;border:0;border-radius:var(--btn-r,6px);background:transparent;color:inherit;font:inherit;font-weight:600;cursor:pointer;transition:background-color var(--dur-hover,120ms) ease}
+.pip-thread .pip-convs:hover,.pip-thread .pip-convs[aria-expanded="true"]{background:var(--wash)}
+.pip-thread .pip-convs:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
+.pip-conv-title{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pip-convs-chevron{flex:none;color:var(--muted);transition:transform var(--dur-hover,120ms) ease}
 .pip-convs[aria-expanded="true"] .pip-convs-chevron{transform:rotate(180deg)}
-.pip-pill small.pip-conv-title{min-width:0;flex:0 1000 auto;overflow:hidden;text-overflow:ellipsis;font-size:var(--t-sm,12px);line-height:26px}
-.pip-pill small.pip-conv-title::before{content:"· "}
+/* The narrow side bar. Several conversations: the selector keeps the middle of the room between the two sides and the
+   Pip's name gives way to its face (pointed at, the face says the name). One conversation: there is nothing to tell
+   apart, so its name stays and the selector is its chevron alone. */
+@container(max-width:380px){
+ .pip-topbar.pip-topbar-chat{grid-template-columns:auto auto minmax(0,1fr) auto}
+ .pip-topbar-chat>.pip-thread{width:auto;padding-right:0}
+ .pip-topbar-chat>.pip-pill{padding-right:0}
+ .pip-topbar-chat>.pip-pill small{display:none}
+ .pip-topbar-chat.has-threads .pip-name{display:none}
+ .pip-topbar.pip-topbar-chat.one-thread{grid-template-columns:auto minmax(0,auto) minmax(0,1fr) auto}
+ .pip-topbar-chat.one-thread>.pip-thread{justify-content:flex-start}
+ .pip-topbar-chat.one-thread .pip-conv-title{display:none}
+}
+/* Narrower still (220 px, then VS Code's narrowest side bar): the selector is its chevron alone (pointed at, it says
+   the conversation), and at the very narrowest the on/off switch gives way too: it is on the Pip's row in the list and
+   on its page. Nothing ever lies on anything else. */
+@container(max-width:260px){
+ .pip-topbar-chat .pip-conv-title,.pip-topbar-chat.one-thread .pip-name{display:none}
+ .pip-topbar-chat>.pip-thread,.pip-topbar-chat.one-thread>.pip-thread{justify-content:center}
+ .pip-topbar.pip-topbar-chat,.pip-topbar.pip-topbar-chat.one-thread{grid-template-columns:auto auto minmax(0,1fr) auto}
+}
+@container(max-width:200px){
+ .simple-pips.chat-open .pip-topbar.pip-topbar-chat{gap:2px;padding-left:6px;padding-right:6px}
+ .pip-topbar-chat .pip-switch{display:none}
+ .pip-topbar-chat .pip-thread .pip-convs{padding:0 3px}
+}
 .conv-mark{flex:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;color:var(--muted)}
 .conv-mark.unread::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
 .conv-mark.replying::before{content:"";box-sizing:border-box;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--muted)}
@@ -1828,3 +1863,93 @@ body.vscode-light .error,body.vscode-high-contrast-light .error,:host-context(bo
 .pip-page-group>:is(button,a):focus-visible,.pip-page-group .routine-open:focus-visible,.pip-page-group .pip-page-row:focus-visible{outline-offset:-2px}
 /* Pointed at, a row's ground is washed: its quiet second line steps up with it (it read 4.2 to 4.4:1 on the lit row). */
 .pip-row-slot:hover .pip-row-copy small,.pip-row:hover .pip-row-copy small,.attention-row:hover .attention-copy small{color:var(--muted-firm,var(--muted))}
+
+/* At an end of the thinking slider the end's own word says it: never "Off … Off … Ultra" (14 Nov). */
+.composer-effort-labels[data-at]:not([data-at=""]) output{visibility:hidden}
+
+/* ==== The narrowest side bar (live round 1, finding 28, 14 Nov). The rule on every page: a heading never breaks
+   inside a word. When room runs out the buttons beside it become icons first (New Pip is "+"), then the heading ends
+   in "…". Text beside a card's buttons keeps a column it can be read in: the buttons go under it. Measured on every
+   page at 170, 220 and 300 px by test/narrowest-words-browser.test.mjs. ==== */
+.simple-home-head h2,.pip-flow-head h2,.attention-title,.section-head :is(h2,h3),.conv-column-head h2{overflow-wrap:normal;word-break:normal}
+.simple-home-head h2,.pip-flow-head h2{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.simple-home-head .simple-home-actions{flex:none}
+.pip-flow-head>div{flex:1 1 auto;min-width:0}
+.pip-flow-head>button{flex:none}
+.attention-title{white-space:nowrap}
+.attention-title>:not(.attention-count){min-width:0;overflow:hidden;text-overflow:ellipsis}
+@container(max-width:260px){
+ /* A worded button beside a heading is its icon: the plus. Its words stay its name for a screen reader and its tip. */
+ .simple-home-head button#simple-new,.simple-home-head button#projects-new,.pip-flow-head button#flow-new{width:var(--btn-h,28px);padding:0;font-size:0;line-height:0;display:inline-grid;place-items:center}
+ .simple-home-head button#simple-new::before,.simple-home-head button#projects-new::before,.pip-flow-head button#flow-new::before{content:"";width:12px;height:12px;background:linear-gradient(currentColor,currentColor) center/12px 1.5px no-repeat,linear-gradient(currentColor,currentColor) center/1.5px 12px no-repeat}
+ .simple-home-head{gap:6px}.simple-home-actions{gap:4px}
+ /* Needs attention: its name and count on one line, View all and Hide on the next. */
+ .attention-head{flex-wrap:wrap;row-gap:0}
+ .attention-head .attention-title{flex:1 1 100%;margin-bottom:0}
+ /* A card's words take the card's width; what you press goes under them. */
+ .attention-item.attention-answers .attention-row,.attention-item.attention-held .attention-row{padding-right:10px;padding-bottom:38px}
+ .attention-item>.dgc-ia,.attention-item>button.attention-undo{top:auto;bottom:8px;margin-top:0}
+ .attention-row{gap:8px}
+ .attention-copy :is(strong,small){overflow-wrap:break-word}
+}
+@container(max-width:260px){
+ /* (A row's pin, which a hover shows, would take its name's whole room in a side bar this narrow: a Pip is pinned
+    from 261 px up, and from its page.) */
+ .pip-row-slot>.job-pin{display:none}
+ .pip-row-slot .pip-row-copy,.pip-row-slot.is-pinned .pip-row-copy,.pip-row-slot:is(:hover,:focus-within) .pip-row-copy,.pip-row-slot:has(.pip-row-marks-live) .pip-row-copy,.pip-row-slot:has(.pip-row-marks-live):is(.is-pinned,:hover,:focus-within) .pip-row-copy{padding-right:0}
+ .pip-row-line>.pip-switch{margin:0 4px 0 2px}
+ .pip-search{flex-wrap:wrap;row-gap:4px}.pip-search input{flex:1 1 100%}
+}
+@container(max-width:260px){
+ /* A chooser with a face (New Pip's character): the face over the field, which then has the dialog's whole width. */
+ .pip-picker,.pip-picker.large{grid-template-columns:minmax(0,1fr);gap:6px;justify-items:start}
+ .pip-picker-field{width:100%}
+ .pip-picker-value,.pip-picker-label{overflow-wrap:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}
+/* VS Code's narrowest side bar: a Pip's row is its face and its name. Its on/off switch is on its page. */
+@container(max-width:200px){
+ .simple-content{padding-left:10px;padding-right:10px}
+ .simple-home-head h2{font-size:13px}
+ .simple-home-head .topbar-icon,.simple-home-head .pip-menu>summary{width:26px;height:26px;min-height:26px}
+ .simple-home-head button#simple-new,.simple-home-head button#projects-new{width:26px;height:26px}
+ .pip-row-line>.pip-switch{display:none}
+}
+/* A Pip's page and its chat's box in the narrowest side bar (14 Nov). The page's tabs take a second line rather than
+   losing their ends off both sides; a routine's name and time take the row's width, its switch under them; Edit sits
+   under the face; the box's row of controls keeps its last button on the page. */
+@container(max-width:260px){
+ .pip-page-tabs{flex-wrap:wrap;justify-content:center;max-width:100%}
+ .pip-page-tabs button.seg,.pip-page-tabs[aria-label="Pips settings"] button.seg{flex:1 1 auto;padding:5px 8px;overflow:visible}
+ .routine-row{flex-wrap:wrap}
+ .routine-open{flex:1 1 100%;gap:8px;padding-left:10px}
+ .routine-open>:first-child:not(.routine-words){display:none}
+ .routine-words strong{overflow-wrap:break-word}
+ .routine-row>.switch,.routine-row>label.switch,.routine-row>button[role=switch]{margin:0 0 8px 10px}
+ .pip-face-edit{left:50%;transform:translateX(-50%);bottom:-14px}
+ .pip-composer .composer-controls{gap:2px;padding-left:6px;padding-right:6px}
+ .pip-page-body .link,.pip-page-group>button.link{white-space:normal;height:auto;text-align:left}
+}
+@container(max-width:200px){
+ /* The box's row of controls stays one line (his call of 14 Nov: nothing wraps there). At VS Code's narrowest side
+    bar seven buttons do not fit it: the routines chip (they are on its page) and dictation (voice mode is beside
+    it) give way, so the last button is never cut. */
+ .pip-composer .composer-controls,.pip-composer .composer-left,.pip-composer .composer-right{gap:0}
+ .pip-composer .composer-controls{padding-left:4px;padding-right:4px}
+ .pip-composer #chat-routines,.pip-composer #chat-mic{display:none}
+ /* A reply's bubble uses the chat's whole width, and its lists stand closer in: an ordinary word fits a line. */
+ .chat-style .pip-message .message-body{max-width:100%;padding-left:9px;padding-right:9px}
+ .chat-style .pip-message .message-body :is(ul,ol){padding-left:15px}
+ .chat-style .pip-message .answer.split{max-width:100%}
+}
+
+/* The two tabs of a Pip's model menu, under its model row and its slider: Work's own (media/main.css #modelmenu
+   .model-tabs), so the menu is one shape on every surface. The Sub-agents tab says what its sub-agents run on. */
+.composer-model-menu .model-tabs{flex:none;display:flex;gap:2px;margin:8px 0 4px;padding:2px;border:1px solid var(--hair,var(--line));border-radius:var(--btn-r,6px)}
+.composer-model-menu .model-tab{appearance:none;flex:1 1 0;min-width:0;box-sizing:border-box;height:26px;min-height:0;margin:0;padding:0 6px;border:0;border-radius:max(3px,calc(var(--btn-r,6px) - 2px));background:transparent;color:var(--muted);font:var(--w-med,500) var(--t-sm,12px)/1 var(--vscode-font-family,system-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;box-shadow:none;transition:background-color var(--dur-hover,120ms) ease,color var(--dur-hover,120ms) ease}
+.composer-model-menu .model-tab:hover{color:var(--vscode-foreground)}
+.composer-model-menu .model-tab[aria-selected="true"]{background:var(--wash,var(--pip-wash));color:var(--text-strong,var(--vscode-foreground))}
+.composer-model-menu .model-tab:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
+.composer-agents{display:flex;flex-direction:column;min-height:0}
+.composer-agents .composer-agents-own{cursor:default}
+.composer-agents .composer-agents-note{margin:6px 4px 2px}
+@container(max-width:230px){.composer-model-menu .model-tab{flex:1 1 auto;padding:0 1px;font-size:11px;letter-spacing:-.02em}.composer-model-menu .model-tabs{gap:0;padding:1px;margin-left:-6px;margin-right:-6px}.composer-model-menu{width:100%}}

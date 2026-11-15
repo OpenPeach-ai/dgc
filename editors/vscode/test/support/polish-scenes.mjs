@@ -67,7 +67,7 @@ export const SCENES = {
   "home-notes": async (b, { width, theme, touch }, visit) => {
     const OPEN = ".hc-open .hc-card";
     let x = await openGrid(b, { width: 300, theme: modern(theme), layout: ["note", "clock"], seed: sample(), notesOptions: { iterations: 1500 }, touch });
-    try { await x.page.click(card("note")); await x.rest(300); if (width !== 300) await x.resize(width, 900);
+    try { await x.page.click(`${card("note")} .nt-openapp`); await x.rest(300); if (width !== 300) await x.resize(width, 900);
       await visit("list", x.page, { scope: "#home-hub" });
       await x.page.click(`${OPEN} .hc-note-row[data-note="ferry1"]`); await x.rest(400); await visit("a-note", x.page, { scope: "#home-hub" });
       await x.page.click(`${OPEN} .nt-more`).catch(() => {}); await x.rest(250); await visit("a-note-menu", x.page, { focus: false, hover: false }); await x.page.keyboard.press("Escape"); await x.rest(150);
@@ -135,8 +135,8 @@ export const SCENES = {
     const scene = await openMapScene(b, { width, height: 760, theme: modern(theme), open: false, capabilities: { agents_model: 1, model_fallback: 1 } });
     const { page, post } = scene;
     try {
-      await page.click("#btn-model"); await post(models); await page.waitForSelector("#modelmenu [data-agents-open]"); await page.waitForTimeout(200); await visit("menu", page);
-      await page.click("#modelmenu [data-agents-open]"); await page.waitForSelector("#modelmenu [data-agents-same]"); await page.waitForTimeout(200); await visit("sub-agents", page);
+      await page.click("#btn-model"); await post(models); await page.waitForSelector("#modelmenu .model-tabs"); await page.waitForTimeout(200); await visit("menu", page);
+      await page.click("#modelmenu [data-model-tab='agents']"); await page.waitForSelector("#modelmenu [data-agents-same]"); await page.waitForTimeout(200); await visit("sub-agents", page);
       await page.click('#modelmenu [data-agents-provider="1"]'); await post({ type: "providerModels", id: SPARE, ids: ["gpt-oss:120b", "own-coder", "qwen3-coder:30b", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"] });
       await page.waitForSelector("#modelmenu [data-agents-model]"); await page.waitForTimeout(200); await visit("sub-agents-models", page);
       await page.keyboard.press("Escape"); await page.waitForTimeout(150); await page.keyboard.press("Escape");
@@ -183,6 +183,11 @@ export const SCENES = {
     for (const fix of ["ask", "ready"]) { const x = await openOnePips(b, { ...opts, scene: { fix } });
       try { await x.openPip(GST); await x.waitIn(fix === "ask" ? ".pip-found-ask" : "[data-project-change]"); await x.page.waitForTimeout(200); await visit(`chat-${fix}`, x.page);
         if (fix === "ask") { await x.click("#chat-level"); await x.waitIn(".composer-level-menu"); await x.page.waitForTimeout(200); await visit("level-menu", x.page, { focus: false, hover: false }); }
+      } finally { await x.close(); } }
+    // Its model menu with the two tabs (14 Nov): a DGC that runs sub-agents for a Pip (Pips API 97).
+    { const x = await openOnePips(b, { ...opts, api: 97, scene: { sub: true, waiting: false, fix: "none" } });
+      try { await x.openPip(GST); await x.page.waitForTimeout(300); await x.click("#chat-model"); await x.waitIn(".composer-model-menu .model-tabs"); await x.page.waitForTimeout(250); await visit("model-menu", x.page, { focus: false, hover: false });
+        await x.click('[data-model-tab="agents"]'); await x.waitIn(".composer-agents"); await x.page.waitForTimeout(200); await visit("model-menu-sub-agents", x.page, { focus: false, hover: false });
       } finally { await x.close(); } }
     // Its page (every section with something in it), from the older scene that fills each; and the pages under it.
     for (const sub of ["", "schedule", "runs", "revisions"]) {

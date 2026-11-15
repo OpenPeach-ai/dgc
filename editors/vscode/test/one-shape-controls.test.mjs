@@ -136,20 +136,23 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [640, 3
       // Library is one control on Work and on Chat (13 Nov): the same box, hugging its icon and word, lit the same way.
       // (Its highlight is read where it ends, with fades held off for the reading: on a busy machine a fade outlasts
       // any fixed wait.)
-      const library = async (id) => { await p.mouse.move(2, 2);
+      // (Library left Work and Chat on 14 Nov. Each tab's header row has ⋯ instead: one control on both, the icon
+      // button's shape, lit by itself when pointed at.)
+      const more = async (id) => { await p.mouse.move(2, 2);
         await p.evaluate(() => { const s = document.createElement("style"); s.id = "no-fades"; s.textContent = "*, *::before, *::after { transition: none !important; }"; document.head.append(s); });
         await settle(p, 60); await p.hover(`#${id}`); await settle(p, 60);
-        return p.evaluate((i) => { const n = document.getElementById(i), s = getComputedStyle(n), r = n.getBoundingClientRect(), words = document.createRange(); words.selectNodeContents(n); const w = words.getBoundingClientRect(), row = document.getElementById("sessions-host").getBoundingClientRect();
-          return { size: [Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10], radius: s.borderTopLeftRadius, fill: s.backgroundColor, font: s.font, pad: [s.paddingLeft, s.paddingRight], hugs: r.width - w.width <= 24, line: r.width > row.width * 0.6, left: Math.round((r.left - row.left) * 10) / 10 }; }, id).finally(() => p.evaluate(() => document.getElementById("no-fades")?.remove())); };
-      const workLibrary = await library("work-library");
+        return p.evaluate((i) => { const n = document.getElementById(i), s = getComputedStyle(n), r = n.getBoundingClientRect(), row = document.getElementById("sessions-host").getBoundingClientRect(), head = n.closest(".home-head").getBoundingClientRect();
+          return { size: [Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10], radius: s.borderTopLeftRadius, fill: s.backgroundColor, line: r.width > row.width * 0.6, right: Math.round((head.right - r.right) * 10) / 10 }; }, id).finally(() => p.evaluate(() => document.getElementById("no-fades")?.remove())); };
+      assert.equal(await p.locator("#work-library, #chats-library").count(), 0, "no Library button on Work or Chat");
+      const workMore = await more("work-more");
       await p.hover("#sessions-list .session-row"); await settle(p);
       held(await walk(p, ROUND), "Work, a row pointed at (its buttons)");
       await p.click("#side-tab-chat"); await settle(p);
       held(await walk(p, ROUND), "Chat");
       hoverHeld(await hoverWalk(p, "#chats-home button, #chats-home input", ROUND), "Chat");
-      const chatLibrary = await library("chats-library");
-      assert.deepEqual(chatLibrary, workLibrary, "Library is the same control on Work and on Chat: its size, its corner, its highlight, its place");
-      assert.deepEqual([workLibrary.radius, workLibrary.size[1], workLibrary.hugs, workLibrary.line, /^rgba?\(0, 0, 0, 0\)$/.test(workLibrary.fill)], ["6px", 28, true, false, false], `Library pointed at: a lit box in the button's shape and height, hugging its icon and word, never the whole line (${JSON.stringify(workLibrary)})`);
+      const chatMore = await more("chats-more-menu");
+      assert.deepEqual(chatMore, workMore, "⋯ is the same control on Work and on Chat: its size, its corner, its highlight, its place");
+      assert.deepEqual([workMore.radius, workMore.size, workMore.line, /^rgba?\(0, 0, 0, 0\)$/.test(workMore.fill)], ["6px", [28, 28], false, false], `⋯ pointed at: a lit box in the button's shape, never the whole line (${JSON.stringify(workMore)})`);
       await p.click("#side-tab-pips"); await settle(p, 500);
       held(await walk(p, ROUND), "the Pips view");
       none();

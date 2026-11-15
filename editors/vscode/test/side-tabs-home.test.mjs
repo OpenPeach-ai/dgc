@@ -180,7 +180,7 @@ test("the keyboard: Left and Right move between the tabs and choose, Home and En
     assert.deepEqual(bar.tabs.map((x) => x.tab), [-1, -1, 0, -1], "the tab stop moved with the choice");
     // Tab leaves the bar for what the tab shows; Shift+Tab comes back to the chosen tab.
     await x.page.keyboard.press("Tab");
-    assert.equal(await x.page.evaluate(() => document.activeElement.id), "chats-search", "Tab goes on into the tab's own page");
+    assert.equal(await x.page.evaluate(() => document.activeElement.id), "chats-more-menu", "Tab goes on into the tab's own page: its header row's ⋯ comes first (14 Nov), then its search box");
     await x.page.keyboard.press("Shift+Tab");
     assert.equal((await x.tabs()).focus, "chat", "and back to the tab you are on, not the first");
     // A click chooses as well.
@@ -478,8 +478,8 @@ test("Chat lists your chats the same way: their Motes, the dot while one answers
     const work = await x.page.evaluate(() => document.getElementById("sessions-list").checkVisibility());
     assert.equal(work, false, "this project's sessions are on their own tab");
     const bar = await x.page.evaluate(() => ({ search: document.getElementById("chats-search").checkVisibility(), placeholder: document.getElementById("chats-search").placeholder, word: document.getElementById("chats-new").textContent.trim(),
-      library: document.getElementById("chats-library").checkVisibility(), projects: [...document.querySelectorAll("#projects-list .project-name")].map((n) => n.textContent), nested: [...document.querySelectorAll("#projects-list .chat-row-nested .session-name")].map((n) => n.textContent) }));
-    assert.deepEqual(bar, { search: true, placeholder: "Search chats", word: "New", library: true, projects: ["Goa trip", "House hunt"], nested: ["Packing list", "Flights and the ferry"] });
+      library: !!document.getElementById("chats-library"), projects: [...document.querySelectorAll("#projects-list .project-name")].map((n) => n.textContent), nested: [...document.querySelectorAll("#projects-list .chat-row-nested .session-name")].map((n) => n.textContent) }));
+    assert.deepEqual(bar, { search: true, placeholder: "Search chats", word: "New", library: false, projects: ["Goa trip", "House hunt"], nested: ["Packing list", "Flights and the ferry"] });
     await x.page.click("#chats-new");
     assert.equal((await x.posted("chatdgcNew")).length, 1, "New starts a chat");
     await x.page.fill("#chats-search", "goa"); await settle(x.page, 400);

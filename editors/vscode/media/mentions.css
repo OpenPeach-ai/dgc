@@ -171,6 +171,7 @@ body:is(.vscode-light, .vscode-high-contrast-light) .pip-message.user .bubble .p
    textarea gave it for free. The placeholder is out of flow, as #input's is: as an in-flow inline box it is the first
    thing in the editing host's line, so the caret sat AFTER it. */
 .mention-box { white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; }
+.mention-box.is-empty { overflow-x: hidden; }      /* an empty box never scrolls sideways under its grey words (14 Nov) */
 .mention-box.is-empty::before { content: attr(data-placeholder); display: inline-block; width: 0;
   white-space: nowrap; overflow: visible; pointer-events: none; }
 .mention-box[contenteditable="false"] { cursor: not-allowed; }

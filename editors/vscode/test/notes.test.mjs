@@ -26,7 +26,7 @@ const ids = async (p, where) => (await rows(p, where)).map((r) => r.id);
 const menu = (p) => p.evaluate(() => { const m = document.querySelector(".nt-menu"); if (!m) return null; const r = m.getBoundingClientRect(), c = m.closest(".hc-card").getBoundingClientRect();
   return { rows: [...m.querySelectorAll(".dgc-menu-row")].map((b) => [b.querySelector(".dgc-menu-label").textContent, b.querySelector(".dgc-menu-hint")?.textContent || "", b.getAttribute("aria-checked") || ""]), inside: r.left >= c.left - 0.5 && r.right <= c.right + 0.5, focus: document.activeElement?.closest(".nt-menu") ? document.activeElement.textContent : "" }; });
 const pick = async (x, label) => { await x.page.locator(".nt-menu .dgc-menu-row", { hasText: label }).first().click(); await x.rest(150); };
-const opened = async (width, more = {}) => { const x = await openGrid(browser, { width: 300, layout: ["note", "clock"], seed: sample(), ...more }); await x.page.click(CARD); await x.rest(200); if (width !== 300) await x.resize(width, more.height || 900); return x; };
+const opened = async (width, more = {}) => { const x = await openGrid(browser, { width: 300, layout: ["note", "clock"], seed: sample(), ...more }); await x.page.click(`${CARD} .nt-openapp`); await x.rest(200); if (width !== 300) await x.resize(width, more.height || 900); return x; };
 
 test("folders, in a narrow side bar: the folder button lists them with how many notes each has; a folder shows its notes only, and is remembered", async (t) => {
   if (skipOrFail(t)) return;
@@ -106,7 +106,7 @@ test("search: as you type, in the folder you are in, the found words marked on t
   if (skipOrFail(t)) return;
   const x = await opened(300), p = x.page;
   try {
-    await p.keyboard.press("Escape"); await x.rest(100); await p.click(CARD); await x.rest(200);
+    await p.keyboard.press("Escape"); await x.rest(100); await p.click(`${CARD} .nt-openapp`); await x.rest(200);
     await p.locator(`${OPEN} .hc-note-row`).first().focus(); await p.keyboard.press("/"); await x.rest(60);
     assert.equal(await p.evaluate(() => document.activeElement?.matches("input.hc-note-find")), true, "/ goes to search");
     await p.keyboard.type("FERRY"); await x.rest(400);
@@ -155,16 +155,6 @@ test("the list scrolls inside the card (the page does not grow) and keeps its pl
     assert.match(await p.locator(`${OPEN} .hc-note-undo`).innerText(), /Note deleted/);
     await p.locator(`${OPEN} .hc-note-row[data-note="gift01"]`).focus(); await p.keyboard.press("Enter"); await x.rest(250);
     assert.match(await p.locator(`${OPEN} .nt-doc`).innerText(), /Gift ideas/);
-  } finally { await x.close(); }
-});
-
-test("a Medium card shows about five rows and scrolls the rest inside itself", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await openGrid(browser, { width: 460, layout: ["note", "token"], seed: sample() }), p = x.page;
-  try {
-    const m = await p.evaluate((sel) => { const c = document.querySelector(sel), b = c.querySelector(".nt-listbox"), r = [...b.querySelectorAll(".hc-note-row")], br = b.getBoundingClientRect();
-      return { form: c.dataset.form, rows: r.length, seen: r.filter((x) => { const q = x.getBoundingClientRect(); return q.top >= br.top - 1 && q.bottom <= br.bottom + 1; }).length, scrolls: b.scrollHeight > b.clientHeight + 20, height: c.getBoundingClientRect().height }; }, CARD);
-    assert.equal(m.form, "m"); assert.equal(m.rows, 14); assert.ok(m.seen >= 4 && m.seen <= 5, `about five rows show (${m.seen})`); assert.equal(m.scrolls, true); assert.ok(m.height < 380, `the card does not grow with the notes (${m.height})`);
   } finally { await x.close(); }
 });
 

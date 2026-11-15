@@ -41,6 +41,20 @@ async function readJson(url: string, apiKey: string): Promise<unknown> {
 }
 
 /** Model ids the host lists: Ollama's `models[].name`, or OpenAI's `data[].id`. Sorted, unique. */
+/** An address as it is compared: lower-case scheme and host, this computer by one name (127.0.0.1 and [::1] are
+ *  localhost), no slash at its end and no /v1 there. "" for what is no http(s) address. */
+function hostKey(address: string): string {
+  let url: URL;
+  try { url = new URL(String(address || "").trim()); } catch { return ""; }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+  const host = ["127.0.0.1", "[::1]", "0.0.0.0"].includes(url.hostname) ? "localhost" : url.hostname.toLowerCase();
+  const path = url.pathname.replace(/\/+$/, "").replace(/\/v1$/i, "");
+  return `${url.protocol}//${host}${url.port ? `:${url.port}` : ""}${path}`;
+}
+/** Whether two addresses are the same host and API root, however each is written (found live, 14 Nov: Ollama at
+ *  http://127.0.0.1:11434 was "Custom host" beside the list's http://localhost:11434/v1). */
+export function sameHost(a: string, b: string): boolean { const key = hostKey(a); return !!key && key === hostKey(b); }
+
 export function modelIds(payload: unknown): string[] {
   const body = payload as { models?: unknown; data?: unknown };
   const rows = Array.isArray(body?.models) ? body.models : Array.isArray(body?.data) ? body.data : [];

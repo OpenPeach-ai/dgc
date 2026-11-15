@@ -1,5 +1,5 @@
 // ChatDGC in the 0.52 look, in real Chromium on the real chat page: your prompt is a quiet raised grey with no light or
-// grain, the prompt box has the 22 px corner on a ground a step off the page with its own soft edge, the answer's link
+// grain, the prompt box has the buttons' 6 px corner (14 Nov; it was 22 px) on a ground a step off the page with its own soft edge, the answer's link
 // keeps the purple, and the button where Send is stays the one purple fill. Dark and light, 700 and 300 px.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -23,7 +23,7 @@ after(async () => { await browser?.close(); });
 import { openChatDgc } from "./support/codex-look-scene.mjs";
 
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300]) {
-  test(`a chat: grey bubbles, a 22px prompt box, purple only on the link and where Send is (${theme}, ${width}px)`, async (t) => {
+  test(`a chat: grey bubbles, a prompt box with the 6px corner, purple only on the link and where Send is (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openChatDgc(browser, { theme, width });
     try {
@@ -33,7 +33,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
       assert.equal(isPurple(bubble.fill), false);
       assert.deepEqual([bubble.image, bubble.grain], ["none", "none"], "no light and no grain on it");
       const box = await look(x.page, "#cd-box");
-      assert.equal(box.corner, "22px");
+      assert.equal(box.corner, "6px");
       assert.equal(box.fill, token["--box"], "the prompt box's own ground");
       assert.notEqual(box.shadow, "none", "with its soft edge");
       assert.equal(isPurple(box.line), false);

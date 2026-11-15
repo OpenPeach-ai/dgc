@@ -171,10 +171,13 @@
       for (const chip of nodes.values()) if (chip.hidden) chip.hidden = false;
       more.remove();
       delete line.dataset.squeeze;
-      const fits = () => chips.scrollWidth <= chips.clientWidth + 1;
+      // (One kind alone stretches along the line and clips itself: its own words must fit inside it too.)
+      const fits = () => chips.scrollWidth <= chips.clientWidth + 1 && (!solo || [...nodes.values()].every((chip) => chip.hidden || chip.scrollWidth <= chip.clientWidth + 1));
       // One kind alone keeps its words at any width. A wide bar short of room first folds what shares the line with the
       // pills to its icon ("roomy"): the pills keep their words.
-      for (const step of width >= wide ? ["full", "roomy"] : solo ? ["solo"] : FITS) {
+      // (At the narrowest side bar even one kind's word may not fit beside what shares its line ("2 qu" was cut at
+      // 170 px, 14 Nov): then it is its icon and its count, like the others.)
+      for (const step of width >= wide ? ["full", "roomy"] : solo ? ["solo", "compact"] : FITS) {
         line.dataset.fit = step;
         if (fits()) break;
       }

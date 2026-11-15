@@ -56,7 +56,7 @@ for (const theme of ["dark", "light"]) {
     try { const ROUTES = [{ key: `provider_${"a".repeat(32)}`, label: "Ollama", kind: "native", base_url: "http://127.0.0.1:11434/v1", model: "qwen3.8:27b" }];
       await scene.page.click("#btn-model"); await scene.post({ type: "models", ids: ["qwen3.8:27b", "qwen3-coder"], current: "qwen3.8:27b", routes: ROUTES, currentRouteKey: ROUTES[0].key, supportsEffort: true, fallback: { offered: true, model: "", base_url: "", engine: "", route_base: "http://127.0.0.1:11434/v1" },
         agents: { offered: true, own: false, model: "qwen3-coder", base_url: "", settings_model: "qwen3-coder", settings_base_url: "", router: false } });
-      await scene.page.waitForSelector("#modelmenu [data-agents-open]"); await scene.page.waitForTimeout(250); await shot(scene.page, `work-model-menu-quiet-lines-${theme}`, await boxOf(scene.page, "#modelmenu", 6));
+      await scene.page.waitForSelector("#modelmenu .model-tabs"); await scene.page.waitForTimeout(250); await shot(scene.page, `work-model-menu-quiet-lines-${theme}`, await boxOf(scene.page, "#modelmenu", 6));
       await scene.page.keyboard.press("Escape"); await scene.page.waitForTimeout(200);
       const card = scene.page.locator(".artifact .abtns").first(); if (await card.count()) { await card.scrollIntoViewIfNeeded(); await shot(scene.page, `work-open-in-browser-${theme}`, await boxOf(scene.page, ".artifact", 6)); }
     } finally { await scene.page.close(); }

@@ -17,7 +17,7 @@ import {took, AGENT_API, AGENT_LIVE, FIX_LIVE, agentsPage} from './pipFlow.js';
 
 export {agentsPage};
 export const CHAT_API = AGENT_API;
-export const AGENT_COMMANDS = ['list_pip_agents', 'stop_pip_agent', 'retry_pip_fix'];
+export const AGENT_COMMANDS = ['list_pip_agents', 'stop_pip_agent', 'set_pip_agents', 'retry_pip_fix'];
 const plural = (n, word) => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
 const where = f => f.path ? `${f.path.split('/').pop()}${f.line ? `:${f.line}` : ''}` : '';
 const VERDICT_WORDS = {fixed: 'fixed', already_fixed: 'already fixed', not_a_defect: 'not a problem', needs_you: 'your call'};

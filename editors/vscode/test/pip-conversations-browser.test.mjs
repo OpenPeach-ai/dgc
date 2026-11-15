@@ -1,5 +1,6 @@
 // Several conversations per Pip, in the editor (pips-17; Pips API 79), in real Chromium with the real client and its
-// CSS (test/support/pip-chat-scene.mjs, opts.convs). The Pip's name in its chat's top bar opens its conversations: New
+// CSS (test/support/pip-chat-scene.mjs, opts.convs). The selector in the middle of its chat's top bar (the conversation
+// shown, by its name; it was the Pip's name until 14 Nov) opens its conversations: New
 // conversation, then each one, the newest first, with a dot for something unread, a ring while it answers there and how
 // long ago it was written in; a row's "…" renames or archives (the first can't be archived); Archived lists those with
 // Restore. A wide chat (900 px and up) shows the same list as a column, which folds away. The chat shows one
@@ -74,7 +75,10 @@ test("the Pip's name opens its conversations: New conversation, then the newest 
     await x.p.waitForSelector("#pip-convs");
     assert.equal(await x.p.locator("#conv-menu").count(), 0, "closed until asked for");
     assert.equal(await x.p.getAttribute("#pip-convs", "aria-expanded"), "false");
-    assert.match(await x.p.locator("#pip-convs").textContent(), /^Mornings/);
+    // (14 Nov: the selector in the middle of the header names the conversation shown; the Pip's own name stands at the
+    // left, beside its face, and no longer moves with the conversation: test/pip-chat-header-browser.test.mjs.)
+    assert.match(await x.p.locator("#pip-convs").textContent(), /^Chat/);
+    assert.equal(await inPage(x.p, (root) => root.querySelector(".pip-topbar .pip-name")?.textContent), "Mornings");
     await x.p.click("#pip-convs");
     await x.p.waitForSelector("#conv-menu");
     assert.equal(await x.p.getAttribute("#pip-convs", "aria-expanded"), "true");
@@ -273,7 +277,7 @@ test("a wide chat shows the list as a column beside it; narrower, only the menu;
       assert.equal(await inPage(y.p, (root) => root.querySelector("#conv-column").getClientRects().length), 0, `no column at ${width}px`);
       await y.p.click("#pip-convs");
       await y.p.waitForSelector("#conv-menu");
-      const fit = await inPage(y.p, (root) => { const m = root.querySelector("#conv-menu").getBoundingClientRect(), name = root.querySelector(".pip-convs-name"); return [m.left >= 0 && m.right <= window.innerWidth, name.getBoundingClientRect().width >= 40, document.documentElement.scrollWidth > document.documentElement.clientWidth]; });
+      const fit = await inPage(y.p, (root) => { const m = root.querySelector("#conv-menu").getBoundingClientRect(), name = root.querySelector(".pip-conv-title"); return [m.left >= 0 && m.right <= window.innerWidth, name.getBoundingClientRect().width >= 24, document.documentElement.scrollWidth > document.documentElement.clientWidth]; });
       assert.deepEqual(fit, [true, true, false], `the menu fits at ${width}px`);
     } finally { await y.close(); }
   }

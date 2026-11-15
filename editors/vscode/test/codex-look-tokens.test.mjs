@@ -36,7 +36,7 @@ test("the home's count ink and quiet tone are shared tokens now, not the home's 
 });
 
 test("one corner scale, one row height, and one filled pill in the text colour", () => {
-  assert.deepEqual(["--r-sm", "--r-md", "--r-lg", "--r-xl", "--r-2xl", "--r-box"].map(value), ["7.5px", "10px", "12.5px", "15px", "20px", "22px"]);
+  assert.deepEqual(["--r-sm", "--r-md", "--r-lg", "--r-xl", "--r-2xl", "--r-box"].map(value), ["7.5px", "10px", "12.5px", "15px", "20px", "6px"]);   // (the prompt box took the buttons' corner on 14 Nov; it was 22px)
   assert.equal(value("--row"), "29px");
   assert.equal(value("--solid"), "var(--text)");
   assert.equal(value("--accent-soft"), "color-mix(in srgb, var(--text) 8%, transparent)", "a count's soft pill is neutral");

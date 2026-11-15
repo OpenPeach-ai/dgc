@@ -67,13 +67,14 @@ test("the Output chip shows only for a CLI that offers artifacts", async (t) => 
   } finally { await s.page.close(); }
 });
 
-test("Work home opens the saved Output Library", async (t) => {
+// (14 Nov: the Library left Work and Chat. It gets a header tab of its own; until then Home opens it.)
+test("Work home has no Library button: it is not on the tab and not in its ⋯", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openWork();
   try {
-    assert.equal(await s.page.locator("#work-library").evaluate((n) => n.hidden), false);
-    await s.page.locator("#work-library").evaluate((n) => n.click());
-    assert.deepEqual(await s.posted("workLibrary"), [{ type: "workLibrary" }]);
+    assert.equal(await s.page.locator("#work-library, #chats-library").count(), 0);
+    assert.equal(await s.page.evaluate(() => [...document.querySelectorAll("#work-home *, #chats-home *")].some((n) => /library/i.test(n.textContent || "") && !n.children.length)), false, "nothing in Work or Chat says Library");
+    assert.deepEqual(await s.posted("workLibrary"), []);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

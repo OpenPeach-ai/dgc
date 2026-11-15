@@ -1,7 +1,8 @@
 // Notes: the notes app on Home (approved 14 Nov: "a full notes app"). The Notes card of media/shared/homecards.js is this
-// file's: a Small card (the top note and a + for a quick one), a Medium card (the list, with search and folders), a Large
-// card (the list beside the open note) and, opened, the whole app: one thing at a time in a narrow side bar (the list,
-// then the note with Back), three columns from 560 px (folders, the list, the note).
+// file's. On Home, at every size, the card is only a field that saves as it is typed, a new-note icon (a fresh note:
+// the typed one stays in Notes) and "Open Notes" (his call, 14 Nov night); opened, it is the whole app: one thing at a
+// time in a narrow side bar (the list, then the note with Back), three columns from 560 px (folders, the list, the
+// note). Nothing here says Save or Done: typing saves.
 //
 // The host keeps the notes (src/notes.ts): files in DGC's own storage folder on this computer. This page holds the list
 // (titles, row lines, folders) and the words of the one note that is open; it asks for those words when a note is
@@ -19,7 +20,7 @@
   const I = { lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', unlocked: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', all: '<path d="M4 6h16M4 12h16M4 18h10"/>', bin: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
     plus: '<path d="M12 5v14M5 12h14"/>', back: '<path d="M15 18l-6-6 6-6"/>', more: '<circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/>',
-    find: '<circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/>', chev: '<path d="M6 9l6 6 6-6"/>', sort: '<path d="M7 5v14M4 16l3 3 3-3M14 7h6M14 12h4M14 17h2"/>',
+    find: '<circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/>', compose: '<path d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5"/><path d="M17.6 3.6a1.9 1.9 0 0 1 2.8 2.8L12 14.8l-3.6.8.8-3.6z"/>', chev: '<path d="M6 9l6 6 6-6"/>', sort: '<path d="M7 5v14M4 16l3 3 3-3M14 7h6M14 12h4M14 17h2"/>',
     move: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM10 13h5M13 10.5l2.5 2.5-2.5 2.5"/>', pen: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>',
     del: '<path d="M21 5H9l-6 7 6 7h12zM12 9l6 6M18 9l-6 6"/>', tab: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M9 5v4"/>', dup: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
     down: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>', copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/>', bold: '<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/>', ital: '<path d="M10 5h7M7 19h7M14 5l-4 14"/>', head: '<path d="M5 5v14M13 5v14M5 12h8M17 10l2-1v10"/>',
@@ -408,7 +409,7 @@
    *   redraw()        Home draws again (it calls fill for each Notes card it shows)
    *   openCard()      the Notes card opens whole; isOpen() whether it is
    *   tab             the one note a note's own editor tab shows (media/shared/notestab.js); "" on Home
-   * small() is the Small card's inside; fill(section, form) draws a Medium ("m"), Large ("l") or opened ("full") card in
+   * fill(section, form) draws the card on Home ("s", "m", "l": the same field at every size) or the opened app ("full") in
    * place; heard(message) takes the host's messages.
    */
   function create({ doc = root.document, post, say = () => {}, width = () => 0, redraw = () => {}, openCard = () => {}, isOpen = () => false, tab = "" } = {}) {
@@ -416,7 +417,10 @@
     let S = { notes: [], folders: [], sort: "edited", shown: "", most: 2000, longest: 100000, binDays: 30, lock: { state: "none", left: 5, until: 0, digits: 0 } }, heard = false;
     // What is open, what is searched for (and what the host found for it), the menu and the question that are showing,
     // the note just deleted (for Undo), the new note not yet kept.
-    const ui = { open: "", q: "", all: false, found: null, seq: 0, menu: null, ask: null, undo: "", fresh: "", listTop: 0 };
+    const ui = { open: "", q: "", all: false, found: null, seq: 0, menu: null, ask: null, undo: "", fresh: "", listTop: 0, card: "", cardBlank: false };
+    // The locked notes that are open on this page now: each was opened with the PIN here, and is shut again by its own
+    // lock button, by Lock now, or when the host drops the key (ten minutes with nothing done, another window's Lock now).
+    const opened = new Set();
     // The words of the notes opened here; the ones asked for and not yet answered; the ones that could not be read (why).
     const texts = new Map(), asked = new Set(), unread = new Map();
     // One editor for the card on Home and one for the opened card (a card drawn afresh takes its own again).
@@ -426,7 +430,9 @@
     const draw = () => redraw();
 
     // ---- what there is ------------------------------------------------------------------------------------------------
-    const live = () => S.notes.filter((n) => !n.deleted), binned = () => S.notes.filter((n) => n.deleted).sort((a, b) => b.deleted - a.deleted);
+    // (The card on Home's fresh note is no note until it has words: it is in no list and no count.)
+    const blankCard = (n) => !!n.fresh && n.id === ui.card && n.id !== ui.fresh && !texts.get(n.id)?.text.trim();
+    const live = () => S.notes.filter((n) => !n.deleted && !blankCard(n)), binned = () => S.notes.filter((n) => n.deleted).sort((a, b) => b.deleted - a.deleted);
     const noteOf = (id) => S.notes.find((n) => n.id === id) || null, folderOf = (id) => S.folders.find((f) => f.id === id) || null;
     /** The folder shown: "" (All notes), a folder, or "bin" (Recently deleted; a card on Home shows All notes then). */
     const shownNow = (grid) => (S.shown === "bin" ? (grid ? "" : "bin") : folderOf(S.shown) ? S.shown : "");
@@ -441,6 +447,8 @@
       if (searching) rows = found ? rows.filter((n) => found.rows.has(n.id)) : [];
       return { rows: ordered(rows), folder, searching, waiting: searching && !found };
     }
+    /** A locked note whose words are out of sight here: notes are locked, or this one was not opened on this page. */
+    const shut = (n) => !!n?.locked && !(S.lock.state === "unlocked" && opened.has(n.id));
     const need = (id) => { if (texts.has(id) || asked.has(id) || unread.has(id)) return; asked.add(id); send("open", { id }); };
     const full = () => live().length >= S.most;
 
@@ -456,12 +464,12 @@
     const sortBtn = () => `<button type="button" class="hc-btn hc-icon nt-sort" data-fk="sort" aria-haspopup="menu" aria-expanded="${ui.menu?.kind === "sort"}" title="Sort: ${SORT[S.sort].toLowerCase()}" aria-label="Sort: ${SORT[S.sort].toLowerCase()}">${svg(I.sort, 13)}</button>`;
     const whenOf = (n) => (S.sort === "created" ? day(n.created) : ago(n.edited));
     function row(n, on, o = {}) {
-      const hit = o.q ? ui.found?.rows.get(n.id) : null; let line = n.locked ? (hit?.inside ? "Locked · found inside" : "Locked") : hit?.line || n.line;
+      const hit = o.q ? ui.found?.rows.get(n.id) : null, isOpen = n.locked && !shut(n); let line = n.locked ? (isOpen ? "Locked · open now" : hit?.inside ? "Locked · found inside" : "Locked") : hit?.line || n.line;
       // (The line the words were found in starts near them, so they show in a narrow column too.)
       if (hit?.line && !n.locked) { const at = line.toLowerCase().indexOf(String(o.q).trim().toLowerCase()); if (at > 14) line = `…${line.slice(at - 10)}`; }
       return `<button type="button" class="hc-li hc-note-row${on ? " on" : ""}" data-note="${esc(n.id)}" draggable="true" title="Open this note"${on ? ' aria-current="true"' : ""}><span class="hc-tx"><span class="hc-nm">${mark(n.title, o.q)}</span>`
         + `${o.bare ? "" : `<span class="hc-meta">${esc(whenOf(n))}${line ? ` · ${n.locked ? esc(line) : mark(line, o.q)}` : ""}</span>`}</span>`
-        + `${n.locked ? `<span class="hc-note-pinmark" title="Locked">${svg(I.lock, 11)}</span>` : ""}${n.pinned ? `<span class="hc-note-pinmark" title="Pinned to the top">${pinSvg(true, 10)}</span>` : ""}</button>`;
+        + `${n.locked ? `<span class="hc-note-pinmark nt-lockmark-row" data-open="${isOpen ? 1 : 0}" title="${isOpen ? "Locked · open now" : "Locked"}">${svg(isOpen ? I.unlocked : I.lock, 11)}</span>` : ""}${n.pinned ? `<span class="hc-note-pinmark" title="Pinned to the top">${pinSvg(true, 10)}</span>` : ""}</button>`;
     }
     const SHOWN_MOST = 300;
     function listHtml(l, on, o = {}) {
@@ -497,7 +505,7 @@
       const a = ui.ask; if (!a) return "";
       const cancel = '<button type="button" class="hc-btn" data-ask="cancel">Cancel</button>', err = a.error ? `<p class="nt-warn" role="alert">${esc(a.error)}</p>` : "";
       if (a.kind === "folderNew" || a.kind === "folderRename") return `<form class="nt-ask" data-kind="${a.kind}"><label class="nt-asklbl" for="nt-name">${a.kind === "folderNew" ? "New folder" : `Rename ${esc(folderLabel(a.id))}`}</label><div class="nt-askrow"><input id="nt-name" class="hc-field nt-name" data-fk="ask-name" maxlength="60" placeholder="Folder name" autocomplete="off"><button type="submit" class="hc-btn hc-solid" data-fk="ask-ok">${a.kind === "folderNew" ? "Create" : "Rename"}</button>${cancel}</div>${err}</form>`;
-      if (a.kind === "folders") return `<div class="nt-ask" data-kind="folders"><span class="nt-asklbl">Folders</span>${S.folders.map((f) => `<div class="nt-askrow"><span class="hc-cut nt-askname">${esc(f.name)}</span><span class="hc-sp"></span><button type="button" class="hc-btn" data-ask="rename" data-id="${esc(f.id)}" data-fk="ren:${esc(f.id)}">Rename</button><button type="button" class="hc-btn" data-ask="delete" data-id="${esc(f.id)}" data-fk="del:${esc(f.id)}">Delete…</button></div>`).join("")}<div class="nt-askrow"><span class="hc-sp"></span><button type="button" class="hc-btn" data-ask="cancel" data-fk="ask-done">Done</button></div></div>`;
+      if (a.kind === "folders") return `<div class="nt-ask" data-kind="folders"><span class="nt-asklbl">Folders</span>${S.folders.map((f) => `<div class="nt-askrow"><span class="hc-cut nt-askname">${esc(f.name)}</span><span class="hc-sp"></span><button type="button" class="hc-btn" data-ask="rename" data-id="${esc(f.id)}" data-fk="ren:${esc(f.id)}">Rename</button><button type="button" class="hc-btn" data-ask="delete" data-id="${esc(f.id)}" data-fk="del:${esc(f.id)}">Delete…</button></div>`).join("")}<div class="nt-askrow"><span class="hc-sp"></span><button type="button" class="hc-btn" data-ask="cancel" data-fk="ask-done">Close</button></div></div>`;
       if (a.kind === "folderDelete") { const n = countIn(a.id);
         return `<div class="nt-ask" data-kind="folderDelete" role="group" aria-label="Delete this folder"><span class="nt-asklbl">Delete the folder ${esc(folderLabel(a.id))}?</span>${n ? `<p class="hc-fine">It has ${plural(n, "note")}. They can stay with you in All notes, or go to Recently deleted.</p>` : ""}<div class="nt-askrow nt-wrap">`
           + (n ? `<button type="button" class="hc-btn hc-solid" data-ask="folder-keep" data-fk="ask-ok">Move ${n === 1 ? "its note" : "its notes"} to All notes</button><button type="button" class="hc-btn nt-danger" data-ask="folder-bin">Delete ${n === 1 ? "it" : "them"} too</button>` : '<button type="button" class="hc-btn hc-solid" data-ask="folder-keep" data-fk="ask-ok">Delete folder</button>') + `${cancel}</div></div>`; }
@@ -521,27 +529,29 @@
     }
     /** A note's ⋯ menu. */
     function moreRows(note) {
-      const lk = S.lock.state, lock = (lk === "unlocked" ? mrow("lock-now", I.lock, "Lock now", { hint: "Ctrl+Alt+L" }) : "") + (lk === "unlocked" || lk === "locked" ? mrow("pin-change", I.pen, "Change PIN…") : "");
+      const lk = S.lock.state, lock = (lk === "unlocked" ? mrow("lock-now", I.lock, "Lock now", { hint: "Ctrl+Alt+L" }) : "") + (note.locked && (lk === "unlocked" || lk === "locked") ? mrow("lock-remove", I.unlocked, "Remove lock…") : "") + (lk === "unlocked" || lk === "locked" ? mrow("pin-change", I.pen, "Change PIN…") : "");
       return mrow("move", I.move, "Move to a folder…") + moreOpen(note) + (lock ? DIV + lock : "") + DIV + mrow("delete", I.bin, "Delete", { danger: true, hint: `kept ${S.binDays} days` });
     }
     /** Out of the card: a copy, the note's own editor tab, a .md file, the clipboard. A locked note must be open for them. */
     function moreOpen(note) {
-      const off = note.fresh || (note.locked && S.lock.state !== "unlocked"), o = (more = {}) => ({ off, ...(off && !note.fresh ? { hint: "locked" } : more) });
+      const off = note.fresh || shut(note), o = (more = {}) => ({ off, ...(off && !note.fresh ? { hint: "locked" } : more) });
       return mrow("duplicate", I.dup, "Duplicate", o({ hint: "Ctrl+D" })) + (tab ? "" : mrow("tab", I.tab, "Open in an editor tab", o())) + mrow("export", I.down, "Export as Markdown…", o()) + mrow("copy-plain", I.copy, "Copy text", o()) + mrow("copy-md", I.copy, "Copy as Markdown", o());
     }
-    /** The open note's tools: Back (in a narrow side bar), when it was edited, Done, pin, ⋯. */
+    /** The open note's tools: Back (in a narrow side bar), when it was edited, pin, its lock, ⋯. (No Done: typing saves.) */
     function toolsHtml(note, o) {
       return `<div class="hc-note-tools">${o.back !== undefined ? `<button type="button" class="hc-lnk hc-note-all" data-fk="back" title="Back to ${esc(o.back)}">${svg(I.back, 12, 2.4)}${esc(o.back)}</button>` : ""}<span class="hc-cap hc-cut">${o.cap ? `Edited ${esc(ago(note.edited).toLowerCase())}` : ""}</span><span class="hc-sp"></span>`
-        + `${o.done ? '<button type="button" class="hc-btn nt-done" data-fk="done" title="Finish: back to the list (Escape)">Done</button>' : ""}`
         + `<button type="button" class="hc-btn hc-icon hc-note-pin" data-fk="pin" aria-pressed="${note.pinned}" title="${note.pinned ? "Unpin: let it fall back among the others" : "Pin to the top of your notes"}" aria-label="${note.pinned ? "Unpin this note" : "Pin this note to the top"}">${pinSvg(note.pinned)}</button>`
         + toolsMore(note)
         + `<button type="button" class="hc-btn hc-icon nt-more" data-fk="more" aria-haspopup="menu" aria-expanded="${ui.menu?.kind === "more"}" title="More: move, delete" aria-label="More for this note">${svg(I.more, 13)}</button></div>`;
     }
-    /** The lock on the open note: pressed when it is locked. A new note with no words yet has none. */
+    /** The lock on the open note. A note with no lock: lock it. A locked note that is open: lock it again (its words go
+     *  out of sight at once). A locked note that is shut: pressed, its pad is what opens it. (Remove lock is in ⋯.) A new
+     *  note with no words yet has none. */
     function toolsMore(note) {
       if (note.fresh) return "";
-      const words = note.locked ? "Locked. Take the lock off this note (it asks for your PIN)" : S.lock.state === "nokeychain" ? "This computer has no keychain, so notes cannot be locked here" : "Lock this note with your PIN";
-      return `<button type="button" class="hc-btn hc-icon nt-lock" data-fk="lock" aria-pressed="${note.locked}" title="${words}" aria-label="${words}">${svg(note.locked ? I.lock : I.unlocked, 13)}</button>`;
+      const closed = shut(note);
+      const words = closed ? "Locked. Type your PIN to open it" : note.locked ? "Lock it again: its words go out of sight until your PIN opens it" : S.lock.state === "nokeychain" ? "This computer has no keychain, so notes cannot be locked here" : "Lock this note with your PIN";
+      return `<button type="button" class="hc-btn hc-icon nt-lock" data-fk="lock" aria-pressed="${closed}" title="${words}" aria-label="${words}">${svg(closed || !note.locked ? I.lock : I.unlocked, 13)}</button>`;
     }
     // The format bar over a note: each button says whether it is on where the caret is. A Large card has the four used most.
     const FMT = { bold: [I.bold, "Bold (Ctrl+B)"], italic: [I.ital, "Italic (Ctrl+I)"], heading: [I.head, "Heading (Ctrl+Alt+1; a smaller one, Ctrl+Alt+2)"], ul: [I.ul, "Bulleted list (Ctrl+Shift+8)"], ol: [I.ol, "Numbered list (Ctrl+Shift+7)"],
@@ -554,7 +564,7 @@
     }
     const linkHtml = () => { const k = ui.link; return `<form class="nt-ask nt-linkform"><label class="nt-asklbl" for="nt-url">${k.had ? "Change the link" : k.words ? "Link the chosen words to" : "Add a link"}</label><div class="nt-askrow nt-wrap"><input id="nt-url" class="hc-field nt-url" data-fk="url" maxlength="2000" placeholder="An address, like example.org/page" autocomplete="off" spellcheck="false"><button type="submit" class="hc-btn hc-solid" data-fk="url-ok">${k.had ? "Change" : "Add"}</button>${k.had ? '<button type="button" class="hc-btn" data-link="remove">Remove link</button>' : ""}<button type="button" class="hc-btn" data-link="cancel">Cancel</button></div></form>`; };
     /** The format bar (or, while a link is being added, its address field) of a card's open note. */
-    function fmtDraw(st) { if (!st.r.fmt) return; set(st.r.fmt, st.body !== "doc" ? "" : ui.link?.st === st ? linkHtml() : fmtHtml(st.editor, st.compact)); }
+    function fmtDraw(st) { if (!st.r.fmt) return; set(st.r.fmt, st.body !== "doc" ? "" : ui.link?.st === st ? linkHtml() : st.mode === "card" ? "" : fmtHtml(st.editor, st.compact)); }
     function linkOpen(st) { const s = st.editor.state(); st.editor.hold(); ui.link = { st, had: s.link, words: s.words }; ui.menu = null; focusNext = "input.nt-url"; draw(); }
     function linkEnd(st, how, url) { ui.link = null; if (how === "add") st.editor.cmd("link", url); else if (how === "remove") st.editor.cmd("unlink"); else st.editor.resume(); draw(); }
     const limitHtml = () => (ui.limit ? `<p class="hc-fine nt-limit" role="status">A note holds ${S.longest.toLocaleString("en-US")} characters at most. What did not fit was not put in.</p>` : "");
@@ -575,7 +585,7 @@
       again.focus({ preventScroll: true });
       if (held) { try { again.setSelectionRange(held.s, held.e); } catch { /* a field with no caret to place */ } }
     }
-    const PARTS = { tab: "ask pane", m: "top ask undo list foot", l: "top ask undo main:list,pane foot", wide: "top ask undo main:rail,list,pane", list: "top ask undo list", note: "top undo pane", wbin: "top ask main:rail,bin", nbin: "top ask bin" };
+    const PARTS = { tab: "ask pane", card: "top pane foot", m: "top ask undo list foot", l: "top ask undo main:list,pane foot", wide: "top ask undo main:rail,list,pane", list: "top ask undo list", note: "top undo pane", wbin: "top ask main:rail,bin", nbin: "top ask bin" };
     const PART = { top: '<div class="nt-top"></div>', ask: '<div class="nt-askbox"></div>', undo: '<div class="nt-undobox"></div>', list: '<div class="nt-listbox hc-notes-list"></div>', foot: '<div class="nt-footbox"></div>', bin: '<div class="nt-binbox"></div>', rail: '<nav class="nt-rail" aria-label="Folders"></nav>',
       pane: '<div class="hc-note-pane nt-pane"><div class="nt-toolsbox"></div><div class="nt-fmtbox"></div><div class="nt-body"></div><div class="nt-under"></div></div>' };
     function build(section, st, mode) {
@@ -593,8 +603,8 @@
     /** The open note's own part: its tools, its words (typed in place), what is under them. */
     function pane(st, note, o) {
       const r = st.r;
-      if (!note) { set(r.tools, ""); set(r.under, ""); st.body = st.body === "doc" ? "" : st.body; set(r.fmt, ""); if (st.body !== "none") { st.body = "none"; r.body.__html = null; } set(r.body, `<p class="hc-quiet">${live().length ? "No note is open. Choose one, or start a new one." : ""}</p>`); return; }
-      set(r.tools, toolsHtml(note, o));
+      if (!note) { set(r.tools, ""); set(r.under, ""); if (o.card) { st.body = "none"; set(r.fmt, ""); r.body.__html = null; set(r.body, ""); return; } st.body = st.body === "doc" ? "" : st.body; set(r.fmt, ""); if (st.body !== "none") { st.body = "none"; r.body.__html = null; } set(r.body, `<p class="hc-quiet">${live().length ? "No note is open. Choose one, or start a new one." : ""}</p>`); return; }
+      set(r.tools, o.card ? "" : toolsHtml(note, o));
       set(r.under, limitHtml() + (o.under ? underHtml(note) : ""));
       st.compact = !!o.compact;
       if (!bodyFor(st, note, o)) { fmtDraw(st); return; }
@@ -628,8 +638,8 @@
     /** The PIN screen that stands in for this note: the one being answered, or (a locked note while notes are locked) the pad that opens it. */
     function pinFor(note) {
       const lk = S.lock.state;
-      if (ui.pin && ui.pin.note === note.id) { if (ui.pin.mode === "open" && (lk === "unlocked" || !note.locked)) ui.pin = null; else return ui.pin; }
-      if (note.locked && lk !== "unlocked") return (ui.pin = pinNew(lk === "locked" ? "open" : "nokey", note.id));
+      if (ui.pin && ui.pin.note === note.id) { if (ui.pin.mode === "open" && !shut(note)) ui.pin = null; else return ui.pin; }
+      if (shut(note)) return (ui.pin = pinNew(lk === "locked" || lk === "unlocked" ? "open" : "nokey", note.id));
       return null;
     }
     const waitLeft = () => Math.max(0, Math.ceil((S.lock.until - Date.now()) / 1000));
@@ -646,7 +656,7 @@
         + `<div class="nt-row"><button type="button" class="hc-btn nt-danger" data-pin="forgot-sure" data-fk="pin-sure">Delete ${plural(n, "locked note")}</button><button type="button" class="hc-btn" data-pin="${note.locked && lk.state === "nokey" ? "nokey" : "retry"}" data-fk="pin-retry">Cancel</button></div></div>`; }
       const asks = k.mode === "open" || k.mode === "lockfirst" || k.mode === "remove" || k.mode === "old", wait = asks ? waitLeft() : 0, setting = k.mode === "set1" || k.mode === "new1";
       const total = asks ? lk.digits || 4 : setting ? (k.long ? 8 : 4) : k.first.length, range = k.long ? "4 to 8 digits" : "4 digits";
-      const T = { open: [title, `Type your ${lk.digits}-digit PIN to open it.`], lockfirst: ["Lock this note", `Type your ${lk.digits}-digit PIN to lock “${title}”.`], remove: ["Take the lock off?", `Type your PIN to take the lock off “${title}”. It will be kept as plain words again.`],
+      const T = { open: [title, `Type your ${lk.digits}-digit PIN to open it.`], lockfirst: ["Lock this note", `Type your ${lk.digits}-digit PIN to lock “${title}”.`], remove: ["Remove lock", `Type your PIN to remove the lock from “${title}”. It will be an ordinary note again, kept unencrypted.`],
         old: ["Change your PIN", "Type the PIN you have now."], new1: ["Change your PIN", `Choose a new PIN: ${range}.`], new2: ["Change your PIN", "Type the new PIN again."], set1: ["Choose a PIN", `One PIN locks every note you lock: ${range}.`], set2: ["Choose a PIN", "Type it again."] }[k.mode];
       const warn = wait ? `<p class="nt-warn" role="alert">Too many wrong tries. Try again in <b>${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, "0")}</b>.</p>` : k.msg ? `<p class="nt-warn" role="alert">${esc(k.msg)}</p>` : "";
       const dots = `<div class="nt-dots${k.msg && !k.typed ? " nt-bad" : ""}" role="img" aria-label="${k.typed.length} of ${setting && k.long ? "up to 8" : total} digits typed">${Array.from({ length: total }, (_, i) => `<i${i < k.typed.length ? ' class="on"' : ""}></i>`).join("")}</div>`;
@@ -654,7 +664,7 @@
       const pad = `<div class="nt-pad" tabindex="0" role="group" data-fk="pad" aria-label="PIN pad. The number keys type, Backspace takes one back."${wait ? ' data-off="1"' : ""}>${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(key).join("")}<span></span>${key(0)}<button type="button" class="hc-btn" data-digit="back" tabindex="-1" aria-label="Take the last digit back"${off}>${svg(I.del, 15)}</button></div>`;
       const next = setting && k.long ? `<div class="nt-row"><button type="button" class="hc-btn hc-solid" data-pin="next" data-fk="pin-next"${k.typed.length >= 4 ? "" : " disabled"}>Next</button></div>` : "";
       const cancel = '<button type="button" class="hc-btn" data-pin="cancel" data-fk="pin-cancel">Cancel</button>';
-      const under = k.mode === "open" ? '<button type="button" class="hc-lnk" data-pin="forgot" data-fk="pin-forgot">Forgot PIN?</button><p class="hc-fine">Locked notes are encrypted on this computer. Opening one opens them all until you lock them again.</p>'
+      const under = k.mode === "open" ? '<button type="button" class="hc-lnk" data-pin="forgot" data-fk="pin-forgot">Forgot PIN?</button><p class="hc-fine">Locked notes are encrypted on this computer. An opened note stays open until you lock it again, or ten minutes pass with nothing done in Notes.</p>'
         : setting ? `<div class="nt-row"><button type="button" class="hc-lnk" data-pin="longer" data-fk="pin-longer">${k.long ? "Use a 4-digit PIN" : "Use a longer PIN"}</button>${cancel}</div>`
           + (k.mode === "set1" ? '<p class="hc-fine">A forgotten PIN cannot be reset: DGC cannot open a locked note without it, and neither can anyone else.</p><p class="hc-fine">A locked note’s title stays readable: don’t put the secret in the first line.</p><details class="nt-help"><summary>What a PIN holds against</summary><p class="hc-fine">A locked note is encrypted on this computer, and its key is kept in the system keychain, wrapped by your PIN. That keeps the note from people near you and from files that leave this computer (a backup, a copied folder): they get ciphertext.</p><p class="hc-fine">It is not a safe against someone signed in as you on this computer: a program with your keychain could try every short PIN quickly. A longer PIN is slower to try.</p></details>' : "")
         : `<div class="nt-row">${k.mode === "remove" || k.mode === "lockfirst" ? '<button type="button" class="hc-lnk" data-pin="forgot" data-fk="pin-forgot">Forgot PIN?</button>' : ""}${cancel}</div>`;
@@ -689,45 +699,50 @@
       if (what === "cancel") { ui.pin = null; focusNext = '[data-fk="lock"]'; }
       else if (what === "forgot") { k.mode = "forgot"; k.typed = ""; focusNext = '[data-fk="pin-retry"]'; }
       else if (what === "forgot-next") { k.mode = "forgot2"; focusNext = '[data-fk="pin-retry"]'; }
-      else if (what === "retry") { if (noteOf(k.note)?.locked) { k.mode = S.lock.state === "locked" ? "open" : "remove"; focusNext = ".nt-pad"; } else ui.pin = null; }
+      else if (what === "retry") { if (shut(noteOf(k.note))) { k.mode = "open"; focusNext = ".nt-pad"; } else ui.pin = null; }
       else if (what === "nokey") k.mode = "nokey";
       else if (what === "forgot-sure") { k.busy = true; send("lockForgot", { sure: true }); }
       else if (what === "longer") { k.long = !k.long; k.typed = ""; focusNext = ".nt-pad"; }
       else if (what === "next") { pinGo(); return; }
       draw();
     }
-    /** The lock button on a note: lock it (choosing a PIN the first time), or take its lock off (always with the PIN). */
+    /** A locked note that is open here is shut: its words leave this page; with none left open, the host drops the key. */
+    function relock(id) {
+      opened.delete(id); texts.delete(id); asked.delete(id);
+      if (!opened.size) send("lockNow");
+    }
+    /** The lock button on a note: lock it (choosing a PIN the first time); an open locked note is locked again, at once. */
     function lockPress(note) {
       const lk = S.lock.state; flush();
-      if (note.locked) ui.pin = pinNew("remove", note.id);
+      if (note.locked) { if (!shut(note)) { relock(note.id); say("Locked."); } ui.menu = null; ui.link = null; focusNext = ".nt-pad, [data-fk='pin-cancel']"; draw(); return; }
       else if (lk === "nokeychain" || lk === "nokey") ui.pin = pinNew("msg", note.id, { why: lk });
       else if (lk === "none") ui.pin = pinNew("set1", note.id);
-      else if (lk === "unlocked") { send("lockNote", { id: note.id, by: me }); say("Locked."); return; }
+      else if (lk === "unlocked") { send("lockNote", { id: note.id, by: me }); say("Locked."); focusNext = ".nt-pad"; return; }
       else ui.pin = pinNew("lockfirst", note.id);
       ui.menu = null; ui.link = null; focusNext = ".nt-pad, [data-fk='pin-cancel']"; draw();
     }
     /** Out of the card: Duplicate, Open in an editor tab, Export, Copy. What was typed is kept first. */
     function out(act, note) {
-      if (note.fresh || (note.locked && S.lock.state !== "unlocked")) return;
+      if (note.fresh || shut(note)) return;
       flush();
       if (act === "duplicate") { if (full()) { say(`${S.most} notes is the most. Delete one to add another.`); return; } send("duplicate", { id: note.id, newId: newId(), by: me }); }
       else if (act === "tab") send("tab", { id: note.id });
       else if (act === "export") send("export", { id: note.id });
       else send("copy", { id: note.id, as: act === "copy-md" ? "md" : "plain" });
     }
-    function lockNow() { if (S.lock.state !== "unlocked") return; flush(); if (noteOf(ui.open)?.locked) focusNext = ".nt-pad"; send("lockNow"); say("Locked."); }
+    function lockNow() { if (S.lock.state !== "unlocked") return; flush(); if (noteOf(ui.open)?.locked) focusNext = ".nt-pad"; for (const id of [...opened]) { texts.delete(id); asked.delete(id); } opened.clear(); send("lockNow"); say("Locked."); draw(); }
     function fill(section, form) {
       const st = section.__nt || (section.__nt = { mode: "", r: {}, editor: null, body: "", key: form === "tab" ? "tab" : form === "full" ? "open" : "grid" });
       wire(section);
       if (form === "tab") { fillTab(section, st); return; }
-      const grid = form !== "full", wide = form === "l" || (form === "full" && width() >= 560), folder = shownNow(grid), l = listNow(grid);
-      const cur = noteOf(ui.open), open = form === "m" ? null : cur && !cur.deleted ? cur : wide && folder !== "bin" ? l.rows[0] || null : null;
-      const mode = form === "m" ? "m" : form === "l" ? "l" : folder === "bin" ? (wide ? "wbin" : "nbin") : wide ? "wide" : open ? "note" : "list";
+      if (form !== "full") { fillCard(section, st); return; }
+      const grid = false, wide = width() >= 560, folder = shownNow(grid), l = listNow(grid);
+      const cur = noteOf(ui.open), open = cur && !cur.deleted ? cur : wide && folder !== "bin" ? l.rows[0] || null : null;
+      const mode = folder === "bin" ? (wide ? "wbin" : "nbin") : wide ? "wide" : open ? "note" : "list";
       if (st.mode !== mode) build(section, st, mode);
-      const r = st.r, count = live().length, counts = `${plural(count, "note")}${S.folders.length ? ` · ${plural(S.folders.length, "folder")}` : ""}`;
+      const r = st.r, count = live().length;
       // The top: the card's name, the folder button, New, search and sort (which of them, and where, is the layout's).
-      const top = mode === "m" || mode === "l" ? `${headOf("Notes", "", `${lockNowBtn(false)}${folderBtn(folder)}${newBtn("New")}`)}<div class="hc-notes-bar">${searchBox()}</div>`
-        : mode === "wide" || mode === "wbin" ? `${headOf("Notes", `${plural(count, "note")} · kept on this computer`, lockNowBtn(true))}<div class="hc-notes-bar">${searchBox()}${sortBtn()}${newBtn("New note")}</div>`
+      const top = mode === "wide" || mode === "wbin" ? `${headOf("Notes", `${plural(count, "note")} · kept on this computer`, lockNowBtn(true))}<div class="hc-notes-bar">${searchBox()}${sortBtn()}${newBtn("New note")}</div>`
         : mode === "list" ? `${headOf("Notes", S.lock.state === "unlocked" ? plural(count, "note") : `${plural(count, "note")} · kept on this computer`, lockNowBtn(true))}<div class="hc-notes-bar">${folderBtn(folder)}<span class="hc-sp"></span>${newBtn("New note")}</div><div class="hc-notes-bar">${searchBox()}${sortBtn()}</div>`
         : mode === "note" ? headOf("Notes", esc(folderLabel(open.folder)), lockNowBtn(true))
         : headOf("Notes", "", `<button type="button" class="hc-lnk hc-note-all" data-fk="back" title="Back to all your notes">${svg(I.back, 12, 2.4)}All notes</button>`);
@@ -735,12 +750,48 @@
       const find = r.top.querySelector("input.hc-note-find"); if (find && doc.activeElement !== find && find.value !== ui.q) find.value = ui.q;
       set(r.ask, askHtml()); set(r.undo, undoHtml());
       if (r.rail) set(r.rail, railHtml(folder));
-      if (r.list) { set(r.list, listHtml(l, open?.id || "", { bare: mode === "l" })); if (mode === "list" && ui.listTop) { r.list.scrollTop = ui.listTop; ui.listTop = 0; } }
+      if (r.list) { set(r.list, listHtml(l, open?.id || "")); if (mode === "list" && ui.listTop) { r.list.scrollTop = ui.listTop; ui.listTop = 0; } }
       if (r.bin) set(r.bin, binHtml(wide));
-      if (r.foot) set(r.foot, `<span class="hc-sub">${l.searching ? `${l.rows.length} of ${plural(count, "note")}${live().some((n) => n.locked) ? " · locked notes are searched by title" : ""}` : counts}</span><span class="hc-sp"></span><button type="button" class="hc-lnk nt-openapp" data-fk="openapp" title="Open Notes whole: every note, folders, and the note you open">Open Notes</button>`);
-      if (r.pane) pane(st, open, { back: mode === "note" ? folderLabel(folder) : undefined, cap: mode === "wide", done: form === "full", under: form === "full", compact: mode === "l" });
+      if (r.pane) pane(st, open, { back: mode === "note" ? folderLabel(folder) : undefined, cap: mode === "wide", under: true });
       menuDraw(section, st, grid);
       if (ui.ask && !r.ask) ui.ask = null;
+      focusAfter(section, st);
+    }
+    // ---- the card on Home: only a field, a new-note icon and Open Notes ----------------------------------------------------
+    /** The note the card's field holds: the one last typed there; at first, the note edited last (never a locked one,
+     *  whose words stay behind its PIN in the app); a fresh one when there is none, or after the new-note icon. */
+    function cardNote() {
+      const cur = noteOf(ui.card);
+      if (cur && !cur.deleted && !cur.locked) return cur;
+      if (!heard) return null;
+      ui.card = "";
+      const last = ui.cardBlank ? null : live().filter((n) => !n.locked && !n.fresh).sort((a, b) => b.edited - a.edited)[0];
+      if (last) { ui.card = last.id; return last; }
+      if (full()) return null;
+      const id = newId(), now = Date.now(), made = { id, title: "New note", line: "", folder: "", created: now, edited: now, pinned: false, locked: false, deleted: 0, fresh: true };
+      S.notes.unshift(made); texts.set(id, { text: "" }); ui.card = id; ui.cardBlank = false;
+      return made;
+    }
+    /** The new-note icon: what was typed is kept, and the field is a fresh note's. */
+    function cardStart() {
+      flush();
+      const cur = noteOf(ui.card);
+      if (!(cur && cur.fresh && !texts.get(cur.id)?.text.trim())) {
+        if (full()) { say(`${S.most} notes is the most. Delete one to add another.`); return; }
+        ui.card = ""; ui.cardBlank = true; say("A new note.");
+      }
+      focusNext = "doc"; draw();
+    }
+    function fillCard(section, st) {
+      if (st.mode !== "card") build(section, st, "card");
+      const r = st.r, note = cardNote();
+      set(r.top, headOf("Notes", "", `<button type="button" class="hc-btn hc-icon hc-note-new" data-fk="new"${full() ? ` disabled title="${S.most} notes is the most. Delete one to add another."` : ' title="New note: what you typed stays in Notes"'} aria-label="New note">${svg(I.compose, 13)}</button>`));
+      set(r.foot, '<span class="hc-sp"></span><button type="button" class="hc-lnk nt-openapp" data-fk="openapp" title="Open Notes: every note, folders, search and locks">Open Notes</button>');
+      pane(st, note, { card: true });
+      const empty = !!note && st.body === "doc" && !st.editor.text();
+      if (r.body.dataset.empty !== (empty ? "1" : "0")) r.body.dataset.empty = empty ? "1" : "0";
+      if (st.body === "doc" && st.editor.el.getAttribute("aria-label") !== "Note: saved as you type") st.editor.el.setAttribute("aria-label", "Note: saved as you type");
+      menuDraw(section, st, true);
       focusAfter(section, st);
     }
     /** A note's own editor tab: the note alone, at the tab's width. Deleted meanwhile, it says so and offers it back. */
@@ -802,7 +853,7 @@
       view.clearTimeout(saveTimer); saveTimer = 0;
       const id = dirty, n = noteOf(id), t = texts.get(id); dirty = "";
       if (!n || !t) return;
-      if (ui.fresh === id) { if (!t.text.trim()) return; ui.fresh = ""; delete n.fresh; send("save", { id, text: t.text, by: me, folder: n.folder }); }
+      if (n.fresh) { if (!t.text.trim()) return; if (ui.fresh === id) ui.fresh = ""; delete n.fresh; send("save", { id, text: t.text, by: me, folder: n.folder }); }
       else send("save", { id, text: t.text, by: me });
     }
     /** A new note left with no words is not a note. */
@@ -820,12 +871,12 @@
       texts.set(id, { text: "" });
       Object.assign(ui, { fresh: id, open: id, q: "", found: null, all: false, menu: null, ask: null }); focusNext = "doc";
       // (Opening the card puts the keyboard on Back: the new note takes it again, to be typed in at once.)
-      if (section?.dataset.form === "l" || isOpen()) draw(); else { openCard(); focusNext = "doc"; draw(); }
+      if (isOpen()) draw(); else { openCard(); focusNext = "doc"; draw(); }
     }
     function show(id, section) {
       if (ui.open !== id) { flush(); dropFresh(); }
-      ui.open = id; need(id);
-      if (section.dataset.form === "m") openCard(); else draw();
+      ui.open = id; if (!shut(noteOf(id))) need(id);
+      draw();
     }
     function remove(id) {
       const n = noteOf(id); if (!n || n.deleted) return;
@@ -876,6 +927,7 @@
     }
     function choose(act, id, note) {
       if (act === "lock-now") { ui.menu = null; lockNow(); draw(); return; }
+      if (act === "lock-remove" && note?.locked) { ui.menu = null; flush(); ui.pin = pinNew("remove", note.id); focusNext = ".nt-pad"; draw(); return; }
       if (act === "folder-export") { send("exportFolder", { folder: id }); menuClose(true); return; }
       if (note && ["duplicate", "tab", "export", "copy-plain", "copy-md"].includes(act)) { out(act, note); menuClose(true); return; }
       if (act === "pin-change" && note) { ui.menu = null; flush(); ui.pin = pinNew("old", note.id); focusNext = ".nt-pad"; draw(); return; }
@@ -911,7 +963,7 @@
         const mrow = t.closest(".nt-menu .dgc-menu-row"), rowEl = t.closest(".hc-note-row"), ask = t.closest("[data-ask]"), paneNote = noteOf(st.editor && st.body === "doc" ? st.editor.note : ui.open);
         if (mrow) { chosen(mrow.dataset.act, mrow.dataset.id ?? "", section); return; }
         if (ask) { answered(ask.dataset.ask, ask.dataset.id || "", section); return; }
-        if (t.closest(".hc-note-new")) { start(section); return; }
+        if (t.closest(".hc-note-new")) { if (st.mode === "card") cardStart(); else start(section); return; }
         if (rowEl) { show(rowEl.dataset.note, section); return; }
         if (t.closest(".nt-folder")) { menuOpen(section, "folders", "folder"); return; }
         if (t.closest(".nt-sort")) { menuOpen(section, "sort", "sort"); return; }
@@ -927,7 +979,6 @@
         if (t.closest(".nt-locknow")) { lockNow(); return; }
         if (t.closest(".nt-tab-restore")) { if (full()) { say(`${S.most} notes is the most. Delete one to restore this.`); return; } const n = noteOf(tab); if (n) { n.deleted = 0; n.folder = folderOf(n.was) ? n.was : ""; } send("restore", { id: tab }); say("Restored."); focusNext = "doc"; draw(); return; }
         if (t.closest(".hc-note-all")) { if (st.mode === "nbin") { setShown(""); focusNext = '[data-fk="folder"]'; draw(); } else done(section); return; }
-        if (t.closest(".nt-done")) { done(section); return; }
         if (!paneNote) return;
         if (t.closest(".hc-note-pin")) { paneNote.pinned = !paneNote.pinned; if (!paneNote.fresh) send("pin", { id: paneNote.id, on: paneNote.pinned }); say(paneNote.pinned ? "Pinned to the top." : "Unpinned."); draw(); return; }
         if (t.closest(".nt-more")) { menuOpen(section, "more", "more", { note: paneNote.id }); return; }
@@ -951,6 +1002,7 @@
           else if (ui.link && t.closest(".nt-linkform")) { e.preventDefault(); e.stopPropagation(); linkEnd(st); }
           else if (ui.ask && t.closest(".nt-ask")) { e.preventDefault(); e.stopPropagation(); answered("cancel"); }
           else if (t.matches?.("input.hc-note-find") && t.value) { e.preventDefault(); e.stopPropagation(); t.value = ""; ui.q = ""; ui.found = null; ui.all = false; draw(); }
+          else if (st.mode === "card") { if (t.classList?.contains("nt-doc")) { e.preventDefault(); e.stopPropagation(); flush(); t.blur(); } }
           else if (t.classList?.contains("nt-doc") || st.mode === "note") { e.preventDefault(); e.stopPropagation(); done(section); }
           else if (st.mode === "nbin") { e.preventDefault(); e.stopPropagation(); setShown(""); focusNext = '[data-fk="folder"]'; draw(); }
           return;
@@ -987,29 +1039,23 @@
         if (e.key === "Enter" && t.closest(".nt-pad")) { e.preventDefault(); pinGo(); return true; }
       }
       if (t.classList?.contains("nt-doc") && mod && !e.altKey && !e.shiftKey && key === "k") { e.preventDefault(); linkOpen(st); return true; }
-      if (t.classList?.contains("nt-doc") && mod && !e.altKey && !e.shiftKey && key === "d") { e.preventDefault(); const n = noteOf(st.editor.note); if (n) out("duplicate", n); return true; }
+      if (t.classList?.contains("nt-doc") && mod && !e.altKey && !e.shiftKey && key === "d" && st.mode !== "card") { e.preventDefault(); const n = noteOf(st.editor.note); if (n) out("duplicate", n); return true; }
       return false;
     }
 
     return {
       fill,
-      /** The Small card's inside. */
-      /** The top note (a pinned one first, else the last edited): its title and up to two of its lines; how many notes
-       *  and folders; a small + for a quick note. A locked note shows its title and a lock, never its words. */
-      small() {
-        const top = ordered(live())[0], count = live().length, counts = `${plural(count, "note")}${S.folders.length ? ` · ${plural(S.folders.length, "folder")}` : ""}`;
-        const quick = `<button type="button" class="hc-btn hc-icon nt-quick" title="New note" aria-label="New note"${full() ? " disabled" : ""}>${svg(I.plus, 11, 2.6)}</button>`;
-        if (!top) return `<span class="hc-lbl">Notes${quick}</span><span class="hc-grow"></span><span class="hc-sub">${heard ? "No notes yet. The + starts one." : ""}</span>`;
-        return `<span class="hc-lbl">Notes${quick}</span><span class="hc-mid hc-note-line">${esc(top.title)}</span>${top.locked ? `<span class="hc-sub nt-small-lock">${svg(I.lock, 11)}Locked</span>` : top.line ? `<span class="hc-sub nt-two">${esc(top.line)}</span>` : ""}<span class="hc-grow"></span><span class="hc-sub hc-cut">${counts}</span>`;
-      },
       /** The host's messages: the list, one note's words, what a search found, a note changed elsewhere. */
       heard(m) {
         if (m?.type === "homeNotes") {
-          const mine = ui.fresh ? noteOf(ui.fresh) : null, typing = dirty && saveTimer ? noteOf(dirty) : null;
+          const mine = S.notes.filter((n) => n.fresh), typing = dirty && saveTimer ? noteOf(dirty) : null;
           const notes = (Array.isArray(m.notes) ? m.notes : []).filter((n) => n && typeof n.id === "string").map((n) => ({ id: n.id, title: String(n.title || "New note"), line: String(n.line || ""), folder: String(n.folder || ""), created: Number(n.created) || 0, edited: Number(n.edited) || 0, pinned: n.pinned === true, locked: n.locked === true, deleted: Number(n.deleted) || 0, was: String(n.was || "") }));
           S = { notes, folders: (Array.isArray(m.folders) ? m.folders : []).filter((f) => f && typeof f.id === "string").map((f) => ({ id: f.id, name: String(f.name || "") })), sort: SORT[m.sort] ? m.sort : "edited", shown: typeof m.shown === "string" ? m.shown : "", most: Number(m.most) || 2000, longest: Number(m.longest) || 100000, binDays: Number(m.binDays) || 30,
             lock: { state: ["none", "locked", "unlocked", "nokey", "nokeychain"].includes(m.lock?.state) ? m.lock.state : "none", left: Number(m.lock?.left) || 0, until: Number(m.lock?.until) || 0, digits: Number(m.lock?.digits) || 4 } };
-          if (mine && !noteOf(mine.id)) S.notes.unshift(mine);
+          for (const n of mine) if (!noteOf(n.id)) S.notes.unshift(n);
+          // (A note's own tab was opened from the open note: it is open here too, the first time the host says so.)
+          if (tab && !heard && S.lock.state === "unlocked" && noteOf(tab)?.locked) opened.add(tab);
+          for (const id of [...opened]) if (!noteOf(id)?.locked) opened.delete(id);
           if (typing) { const n = noteOf(typing.id); if (n) Object.assign(n, { title: typing.title, line: typing.line, edited: typing.edited }); }
           heard = true;
           if (ui.open && (!noteOf(ui.open) || noteOf(ui.open).deleted)) ui.open = "";
@@ -1046,7 +1092,7 @@
         if (mode === "nbin") { setShown(""); focusNext = '[data-fk="folder"]'; draw(); return true; }
         return false;
       },
-      start, closed() { flush(); dropFresh(); Object.assign(ui, { open: "", q: "", found: null, all: false, menu: null, ask: null }); },
+      start, closed() { flush(); dropFresh(); Object.assign(ui, { open: "", q: "", found: null, all: false, menu: null, ask: null, pin: null, link: null }); },
       count: () => live().length, top: () => ordered(live())[0] || null, heardYet: () => heard,
       flush, dispose() { flush(); view.clearTimeout(undoTimer); view.clearTimeout(findTimer); view.clearInterval(waitTick); doc.removeEventListener("pointerdown", onDown, true); },
     };
@@ -1062,13 +1108,26 @@
         else if (m.op === "copy") say("Copied.");
         draw(); return;
       }
-      const k = ui.pin; if (!k || !["unlock", "unlockNote", "lockSet", "lockChange", "lockForgot", "lockNote"].includes(m.op)) return;
+      // A note locked (with the PIN already set): locked at once. Its words leave this page; the key is dropped when no
+      // locked note is open here.
+      if (m.op === "lockNote") {
+        if (!m.ok) { say("That did not work."); return; }
+        const id = String(m.id || ""); opened.delete(id); texts.delete(id); asked.delete(id);
+        if (!opened.size) send("lockNow");
+        if (ui.open === id || tab === id) focusNext = ".nt-pad";
+        draw(); return;
+      }
+      const k = ui.pin; if (!k || !["unlock", "unlockNote", "lockSet", "lockChange", "lockForgot"].includes(m.op)) return;
       k.busy = false;
       if (m.ok) {
         const mode = k.mode; ui.pin = null; texts.delete(k.note); asked.delete(k.note);
         if (m.op === "unlock" && mode === "lockfirst") send("lockNote", { id: k.note, by: me });
-        say(m.op === "lockForgot" ? `${plural(Number(m.deleted) || 0, "locked note")} deleted.` : m.op === "lockChange" ? "Your PIN is changed." : m.op === "unlockNote" ? "The lock is off this note." : m.op === "lockSet" ? "Locked. Notes are open until they lock again." : "Open.");
-        focusNext = '[data-fk="lock"]';
+        else if (m.op === "unlock") opened.add(k.note);                 // this note is open here now, and only this one
+        if (m.op === "unlockNote") opened.delete(k.note);               // (no longer a locked note)
+        // A PIN just set (or changed), a lock removed: the host holds the key for it; with nothing open here, it lets go.
+        if (m.op !== "unlock" && m.op !== "lockForgot" && !opened.size) send("lockNow");
+        say(m.op === "lockForgot" ? `${plural(Number(m.deleted) || 0, "locked note")} deleted.` : m.op === "lockChange" ? "Your PIN is changed." : m.op === "unlockNote" ? "The lock is removed from this note." : m.op === "lockSet" ? "Locked." : m.op === "unlock" && mode === "lockfirst" ? "Locked." : "Open.");
+        focusNext = m.op === "lockSet" || (m.op === "unlock" && mode === "lockfirst") || (noteOf(k.note)?.locked && !opened.has(k.note)) ? ".nt-pad" : '[data-fk="lock"]';
       } else if (m.why === "nokeychain" || m.why === "nokey") { ui.pin = pinNew(k.mode === "open" ? "nokey" : "msg", k.note, { why: m.why }); focusNext = "[data-fk='pin-cancel']"; }
       else {
         // A wrong PIN (the wait, when there is one, is the state's): the pad is ready for another try.
@@ -1080,6 +1139,8 @@
     }
     /** The lock as the host says it is now: locked notes' words leave this page when notes lock; a wait counts down. */
     function lockHeard() {
+      if (S.lock.state !== "unlocked") opened.clear();
+      for (const id of [...texts.keys()]) if (shut(noteOf(id))) { texts.delete(id); asked.delete(id); }
       if (S.lock.state !== "unlocked") {
         for (const id of [...texts.keys()]) if (noteOf(id)?.locked) { texts.delete(id); asked.delete(id); if (dirty === id) { dirty = ""; view.clearTimeout(saveTimer); saveTimer = 0; } }
         for (const card of doc.querySelectorAll(".hc-card.hc-note")) { const st = card.__nt; if (st?.editor && noteOf(st.editor.note)?.locked) { if (doc.activeElement === st.editor.el) focusNext = ".nt-pad"; st.editor.set(""); st.editor.note = ""; if (st.body === "doc") st.body = ""; } }

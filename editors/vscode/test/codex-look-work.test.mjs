@@ -1,7 +1,7 @@
 // Work in the 0.52 look, in real Chromium on the real session page (test/support/codex-look-scene.mjs): the greys are the
 // editor's, and purple is left for Send and live marks. A sent prompt's bubble is a quiet raised grey with no light or
 // grain on it; the one main button on a card is a fill of the text colour; a running step's label is plain shimmering
-// text while the live verb beside it keeps the purple; the prompt box has the 22 px corner and its own soft edge; and
+// text while the live verb beside it keeps the purple; the prompt box has the buttons' 6 px corner (14 Nov; it was 22 px) and its own soft edge; and
 // the model menu is a raised grey with a half-pixel ring. Dark and light, 700 and 300 px.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -44,7 +44,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
       assert.ok(label, "a step is running");
       assert.equal(isPurple(label.words) || /167, ?139, ?250|109, ?73, ?232/.test(label.image), false, `a running step's label is not purple: ${label.words} ${label.image.slice(0, 120)}`);
       const box = await look(x.page, "#cbox");
-      assert.equal(box.corner, "22px", "the prompt box's corner");
+      assert.equal(box.corner, "6px", "the prompt box's corner");
       assert.equal(isPurple(box.line), false);
       // Everything filled purple on the page: Send, and small live marks. Nothing wider than a button.
       const filled = await x.page.evaluate(() => [...document.querySelectorAll("body *")].filter((n) => n.checkVisibility()).map((n) => { const s = getComputedStyle(n), r = n.getBoundingClientRect(); return { n: n.id || n.className, c: s.backgroundColor, w: r.width, h: r.height }; }).filter((m) => m.w > 40 && m.h > 16));

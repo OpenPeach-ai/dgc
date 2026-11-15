@@ -1,7 +1,8 @@
 // The Project Folder dropdown on a row that is already there (0.52, his calls on 12 Nov night), in real Chromium with
 // the real pages (test/support/home-scene.mjs, test/support/project-folder-pips-scene.mjs), at 700 and 300 px, dark and
-// light. Over the Work sessions it is on the Library row, at its right end (View all lists in place, with no dropdown of its own, since 13 Nov).
-// (On the Pips view's Project tab it has a line of its own since 13 Nov: test/pips-folder-line-browser.test.mjs.)
+// light. Over the Work sessions it has a line of its own under the search row, at the LEFT, as on the Pips tab (the
+// Library button whose row it shared left Work on 14 Nov; View all lists in place, with no dropdown of its own).
+// (The Pips view's Project tab: test/pips-folder-line-browser.test.mjs.)
 // One line always: when the row is too narrow for it the button drops
 // its "Project Folder" word (measured, never a breakpoint), then a long folder name ends in an ellipsis. No line names
 // one folder's path any more: the button's tooltip has it. And a long path is cut in the middle with its folder's own
@@ -31,40 +32,39 @@ const LONG = FOLDERS[2].folder, WORDY = FOLDERS[4].folder;
 const low = (marks) => marks.filter((m) => m.ratio < (m.kind === "words" || !m.kind ? 4.5 : 3));
 const settle = (page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 
-/** The Library row as it is on screen. */
+/** The dropdown's line as it is on screen. */
 const rowNow = (page) => page.evaluate(() => {
-  const box = (e) => e.getBoundingClientRect(), pick = document.getElementById("sessions-folder-pick"), lib = document.getElementById("work-library"), list = document.getElementById("sessions-list");
+  const box = (e) => e.getBoundingClientRect(), pick = document.getElementById("sessions-folder-pick"), list = document.getElementById("sessions-list"), search = document.getElementById("sessions-search");
   const word = pick?.querySelector(".dgc-folder-k"), value = pick?.querySelector(".dgc-folder-v"), host = document.getElementById("sessions-host");
   const whole = (e) => { const r = document.createRange(); r.selectNodeContents(e); return r.getBoundingClientRect().width <= box(e).width + 0.01; };
-  const mid = (e) => (box(e).top + box(e).bottom) / 2, words = lib.querySelector("span:last-child");
-  return { pick: !!pick?.checkVisibility(), lib: lib.checkVisibility() ? { left: box(lib.querySelector(".codicon")).left, wordsLeft: box(words).left, wordsWidth: box(words).width, whole: whole(words), text: words.textContent } : null,
+  return { pick: !!pick?.checkVisibility(), library: document.querySelectorAll("#work-library, #chats-library, .home-library").length,
     word: !!word?.checkVisibility(), value: value?.textContent || "", valueWhole: value ? whole(value) : false, ellipsis: value ? getComputedStyle(value).textOverflow : "",
     label: pick?.getAttribute("aria-label") || "", title: pick?.title || "", pickHeight: pick ? box(pick).height : 0,
-    sameLine: pick && lib.checkVisibility() ? Math.abs(mid(pick) - mid(lib)) : 0, apart: pick && lib.checkVisibility() ? box(pick).left - box(words).right : 99,
-    rightEnd: pick ? Math.abs(box(pick).right - box(document.getElementById("sessions-new")).right) : 99,
-    // Nothing between the search row and the list but this one row: the list starts where it did with no dropdown at all.
-    listTop: box(list).top - box(document.getElementById("sessions-search")).bottom,
+    // At the left, under the search box's own left edge; never past New's right edge.
+    leftEnd: pick ? Math.abs(box(pick).left - box(search).left) : 99, pastRight: pick ? box(pick).right - box(document.getElementById("sessions-new")).right : 0,
+    under: pick ? box(pick).top - box(search).bottom : 0,
+    // What the line takes: the list starts this far under the search row.
+    listTop: box(list).top - box(search).bottom,
     pathLine: [...document.querySelectorAll("#sessions-folder, .sessions-folder, .sessions-folder-path")].filter((e) => e.checkVisibility()).length,
     bar: [...document.querySelectorAll("#sessions-folderbar")].filter((e) => e.checkVisibility()).length, sideways: host.scrollWidth > host.clientWidth + 1 };
 });
 
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 700]) {
-  test(`Work sessions: the dropdown is on the Library row, at its right end, on one line; Library stays where it was (${theme}, ${width}px)`, async (t) => {
+  test(`Work sessions: the dropdown has a line of its own under the search row, at the left, on one line; no Library button (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openHome(browser, { theme, width, tab: "work", motion: "reduce" });
     try {
-      const before = await rowNow(x.page);                       // a DGC that lists no folders: Library alone
-      assert.equal(before.pick, false);
+      const before = await rowNow(x.page);                       // a DGC that lists no folders: no line at all
+      assert.deepEqual([before.pick, before.library], [false, 0]);
       await x.send(listOf(""));
       await settle(x.page);
       const all = await rowNow(x.page);
       assert.equal(all.pick, true);
-      assert.deepEqual([all.bar, all.pathLine], [0, 0], "no row of its own, no path line");
-      assert.ok(all.sameLine <= 1, `centred on Library's line: ${all.sameLine}`);
-      assert.ok(all.rightEnd <= 0.5, `at the row's right end, under New's edge: ${all.rightEnd}`);
-      assert.ok(all.apart >= 8, `clear of Library's word: ${all.apart}`);
-      assert.deepEqual([all.lib.left, all.lib.wordsLeft, all.lib.wordsWidth, all.lib.whole], [before.lib.left, before.lib.wordsLeft, before.lib.wordsWidth, true], "Library is where it was, whole");
-      assert.ok(Math.abs(all.listTop - before.listTop) <= 0.5, `the list starts where it did with no dropdown: ${all.listTop} against ${before.listTop}`);
+      assert.deepEqual([all.bar, all.pathLine, all.library], [0, 0, 0], "no second bar, no path line, no Library button");
+      assert.ok(all.leftEnd <= 0.5, `at the left, under the search box's edge: ${all.leftEnd}`);
+      assert.ok(all.under >= 4 && all.under <= 16, `just under the search row: ${all.under}`);
+      assert.ok(all.pastRight <= 0.5, "inside the page");
+      assert.ok(all.listTop - before.listTop <= 44, `the line is one row high: the list starts ${all.listTop - before.listTop}px lower than with no dropdown`);
       assert.ok(all.pickHeight <= 30, "one line");
       assert.deepEqual([all.word, all.value, all.valueWhole, all.label, all.title], [true, "All projects", true, "Project Folder: All projects", "Project Folder: All projects"], "room for all of it: the word stays");
       assert.equal(all.sideways, false);
@@ -77,19 +77,17 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       assert.deepEqual([one.bar, one.pathLine], [0, 0]);
       assert.deepEqual([one.value, one.valueWhole, one.label], ["checkout-service", true, "Project Folder: checkout-service"]);
       assert.equal(one.title, `Project Folder: checkout-service\n${LONG}`, "the tooltip says the choice and the whole path");
-      assert.equal(one.word, width !== 300, "at 300 px the row is too narrow for the word and this name: the word goes, the name is whole");
-      assert.ok(one.sameLine <= 1 && one.rightEnd <= 0.5 && one.pickHeight <= 30 && one.apart >= 8, JSON.stringify(one));
-      assert.deepEqual([one.lib.left, one.lib.wordsLeft, one.lib.wordsWidth, one.lib.whole], [before.lib.left, before.lib.wordsLeft, before.lib.wordsWidth, true]);
-      assert.ok(Math.abs(one.listTop - before.listTop) <= 0.5);
+      assert.equal(one.word, true, "the line is its own now: the word and this name both fit, at 300 px too");
+      assert.ok(one.leftEnd <= 0.5 && one.pastRight <= 0.5 && one.pickHeight <= 30, JSON.stringify(one));
+      assert.ok(Math.abs(one.listTop - all.listTop) <= 0.5, "the list does not move with the choice");
       assert.deepEqual(low(await homeContrast(x.page)), []);
 
-      // A folder whose own name is longer than the row: the word goes first, then the name ends in an ellipsis.
+      // A folder whose own name is longer than the line: the word goes first, then the name ends in an ellipsis.
       await x.send(listOf(WORDY));
       await settle(x.page);
       const wordy = await rowNow(x.page);
       if (width === 300) assert.deepEqual([wordy.word, wordy.valueWhole, wordy.ellipsis], [false, false, "ellipsis"], "the word gone, the name cut with an ellipsis");
-      assert.ok(wordy.sameLine <= 1 && wordy.rightEnd <= 0.5 && wordy.pickHeight <= 30 && wordy.apart >= 8, JSON.stringify(wordy));
-      assert.deepEqual([wordy.lib.left, wordy.lib.wordsLeft, wordy.lib.wordsWidth, wordy.lib.whole, wordy.sideways], [before.lib.left, before.lib.wordsLeft, before.lib.wordsWidth, true, false], "Library never shrinks or moves");
+      assert.ok(wordy.leftEnd <= 0.5 && wordy.pastRight <= 0.5 && wordy.pickHeight <= 30 && !wordy.sideways, JSON.stringify(wordy));
       assert.equal(wordy.label, "Project Folder: storefront-redesign-checkout-service-next-generation");
       // The menu still opens from it, under it and inside the view.
       await x.page.click("#sessions-folder-pick");
@@ -120,42 +118,27 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
   });
 }
 
-test("the word goes only when the row has no room for it, and comes back when it has: every width from 300 to 700 px", async (t) => {
+test("the word goes only when the line has no room for it, and comes back when it has: every width from 170 to 700 px", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openHome(browser, { width: 700, tab: "work", motion: "reduce" });
   try {
-    await x.send(listOf(LONG));
+    await x.send(listOf(WORDY));
     const seen = [];
     const at = async (width) => { await x.page.setViewportSize({ width, height: 760 }); await settle(x.page); const m = await rowNow(x.page); seen.push([width, m.word]);
       assert.ok(m.valueWhole || !m.word, `${width}px: the name is never cut while the word still shows`);
-      assert.ok(m.sameLine <= 1 && m.rightEnd <= 0.5 && m.pickHeight <= 30 && m.apart >= 8 && m.lib.whole && !m.sideways, `${width}px: one line, Library whole: ${JSON.stringify(m)}`);
-      // The word is gone only where it would not fit: with it, the button would be wider than the room Library leaves.
+      assert.ok(m.leftEnd <= 0.5 && m.pastRight <= 0.5 && m.pickHeight <= 30 && !m.sideways, `${width}px: one line, at the left, inside the page: ${JSON.stringify(m)}`);
+      // The word is gone only where it would not fit: with it, the button would be wider than the line.
       const fits = await x.page.evaluate(() => { const pick = document.getElementById("sessions-folder-pick"), copy = pick.cloneNode(true); copy.removeAttribute("id"); copy.style.cssText = "position:absolute;visibility:hidden;max-width:none;left:0;top:0";
         copy.querySelector(".dgc-folder-k").style.display = "inline"; document.getElementById("work-home").append(copy); const need = copy.getBoundingClientRect().width; copy.remove();
-        const words = document.querySelector("#work-library span:last-child").getBoundingClientRect(); return need <= document.getElementById("sessions-new").getBoundingClientRect().right - words.right - 8; });
+        return need <= document.getElementById("work-folder-line").getBoundingClientRect().width + 0.5; });
       assert.equal(m.word, fits, `${width}px: the word shows exactly when there is room for it`);
       return m; };
-    for (let width = 700; width >= 300; width -= 25) await at(width);
-    assert.equal(seen.at(-1)[1], false, "gone at 300 px");
-    for (let width = 300; width <= 700; width += 50) await at(width);
+    for (let width = 700; width >= 170; width -= 25) await at(width);
+    await at(170);
+    assert.equal(seen.at(-1)[1], false, "gone at the narrowest side bar");
+    for (let width = 200; width <= 700; width += 50) await at(width);
     assert.equal(seen.at(-1)[1], true, "back at 700 px");
     assert.deepEqual(x.errors, []);
-  } finally { await x.close(); }
-});
-
-test("with no Library yet, the dropdown is still at the right end of that one row", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await openHome(browser, { width: 300, tab: "work", motion: "reduce", library: false });
-  try {
-    await x.send(listOf(""));
-    await settle(x.page);
-    const m = await rowNow(x.page);
-    assert.deepEqual([m.pick, m.lib, m.bar, m.pathLine, m.word], [true, null, 0, 0, true]);
-    assert.ok(m.rightEnd <= 0.5 && m.pickHeight <= 30, JSON.stringify(m));
-    await x.page.evaluate(() => { document.getElementById("work-library").hidden = false; });
-    await settle(x.page);
-    const after = await rowNow(x.page);
-    assert.ok(Math.abs(after.listTop - m.listTop) <= 0.5 && after.rightEnd <= 0.5 && after.sameLine <= 1, `Library arriving moves nothing down: ${after.listTop} against ${m.listTop}`);
   } finally { await x.close(); }
 });
 

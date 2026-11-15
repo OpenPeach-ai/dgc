@@ -1084,3 +1084,12 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
   .cd-card-actions button, .cd-wbtn, .cd-send-failed .cd-retry { border-color: CanvasText; }
   .cd-continue, .cd-card-actions button.primary { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; }
 }
+/* The narrowest side bar (live round 1, finding 28, 14 Nov): the line under an answer (its time, its buttons, its
+   model) takes a second line rather than running off the page; the Library's kinds take a second line too. */
+@media (max-width: 260px) {
+  .cd-actions { flex-wrap: wrap; }
+  .cd-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lib-views { flex-wrap: wrap; column-gap: var(--sp-2); row-gap: 0; }
+  .lib { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+  .lib-row { flex-wrap: wrap; gap: var(--sp-2); }
+}

@@ -94,7 +94,7 @@ test("in the card: ⋯ has Duplicate, Open in an editor tab, Export and Copy; Ct
   const calls = { clip: [], save: [], folder: [], tab: [] }, env = { clipboard: (text) => { calls.clip.push(text); }, saveFile: async (f) => { calls.save.push(f); return true; }, saveFolder: async (f) => { calls.folder.push(f); return f.name; }, openTab: (id) => { calls.tab.push(id); } };
   const x = await openGrid(browser, { width: 300, layout: ["note", "clock"], seed: sample(), notesOptions: { env } }), p = x.page;
   try {
-    await p.click(CARD); await x.rest(200); await p.click(`${OPEN} .hc-note-row[data-note="seeds1"]`); await x.rest(300);
+    await p.click(`${CARD} .nt-openapp`); await x.rest(200); await p.click(`${OPEN} .hc-note-row[data-note="seeds1"]`); await x.rest(300);
     await p.click(`${OPEN} .nt-more`); await x.rest(150);
     assert.deepEqual(await p.locator(".nt-menu .dgc-menu-label").allInnerTexts(), ["Move to a folder…", "Duplicate", "Open in an editor tab", "Export as Markdown…", "Copy text", "Copy as Markdown", "Delete"]);
     const pick = async (label) => { if (!(await p.locator(".nt-menu").count())) { await p.click(`${OPEN} .nt-more`); await x.rest(150); } await p.locator(".nt-menu .dgc-menu-row", { hasText: label }).first().click(); await x.rest(300); };

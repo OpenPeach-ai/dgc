@@ -21,7 +21,7 @@ before(async () => { if (!chromium) return; try { browser = await chromium.launc
 after(async () => { await browser?.close(); cleanup(); });
 
 const CARD = '.hc-grid .hc-card[data-card="note"]', OPEN = ".hc-open .hc-card", DOC = `${OPEN} .nt-doc`;
-const opened = async (width, more = {}) => { const x = await openGrid(browser, { width: 300, layout: ["note", "clock"], seed: sample(), ...more }); await x.page.click(CARD); await x.rest(200); if (width !== 300) await x.resize(width, more.height || 900); return x; };
+const opened = async (width, more = {}) => { const x = await openGrid(browser, { width: 300, layout: ["note", "clock"], seed: sample(), ...more }); await x.page.click(`${CARD} .nt-openapp`); await x.rest(200); if (width !== 300) await x.resize(width, more.height || 900); return x; };
 const lines = (p, doc = DOC) => p.evaluate((sel) => [...document.querySelectorAll(`${sel} > .nt-l`)].map((l) => [l.dataset.k, l.textContent, ...(l.dataset.in ? [`in${l.dataset.in}`] : []), ...(l.dataset.k === "ck" ? [l.dataset.done === "1"] : []), ...(l.dataset.k === "ol" ? [l.dataset.n] : [])]), doc);
 const fresh = async (x) => { await x.page.click(`${OPEN} .hc-note-new`); await x.rest(200); };
 /** The words of the note with this title, as its file has them, once the typing has rested. */
@@ -216,18 +216,5 @@ test("pasted words come in as plain lines (a list as a list), never as a page's 
     assert.equal((await lines(p)).at(-1)[1], "", "what does not fit is not put in");
     await paste("y".repeat(500)); await x.rest(900);
     assert.equal((await saved(x, "Pasted")).length, "Pasted\n- boots\n- the red flask\nand **two** maps!\n".length + 500);
-  } finally { await x.close(); }
-});
-
-test("the Large card's note has the four formats used most; Escape in a note is Done: the keyboard goes back to its row", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await openGrid(browser, { width: 700, layout: ["note", "clock"], seed: sample() }), p = x.page;
-  try {
-    assert.deepEqual(await p.evaluate((sel) => [...document.querySelectorAll(`${sel} .nt-format button[data-cmd]`)].map((b) => b.dataset.cmd), CARD), ["bold", "italic", "ul", "ck"]);
-    await p.click(`${CARD} .nt-doc`); await p.keyboard.press("Control+End"); await p.keyboard.press("Enter"); await p.keyboard.type("Bring coins"); await x.rest(900);
-    assert.match(await x.notes.text("ferry1"), /\n- Cabin 214, deck 5\n- Bring coins$/, "typed in place on the card, and kept");
-    await p.keyboard.press("Escape"); await x.rest(150);
-    assert.equal(await p.evaluate(() => document.activeElement?.dataset.note), "ferry1");
-    assert.equal((await x.grid()).open, null);
   } finally { await x.close(); }
 });

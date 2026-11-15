@@ -42,116 +42,11 @@ const flaws = (page, where) => page.evaluate((sel) => {
   return out;
 }, where);
 
-test("the Small card: the top note (a pinned one first) with up to two of its lines, how many notes and folders, and a small + for a quick note", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await grid(300), p = x.page;
-  try {
-    await x.rest(500);      // (the cards have come to rest: a card still gliding in is measured smaller than it is)
-    const s = await p.evaluate((sel) => { const c = document.querySelector(sel), r = c.getBoundingClientRect(), q = c.querySelector(".nt-quick"), qr = q.getBoundingClientRect(), two = c.querySelector(".nt-two");
-      return { form: c.dataset.form, text: c.innerText.replace(/\s+/g, " ").trim(), square: Math.abs(c.offsetWidth - c.offsetHeight) < 1.5, plus: { name: q.getAttribute("aria-label"), inside: qr.right <= r.right && qr.top >= r.top, size: [q.offsetWidth, q.offsetHeight], corner: parseFloat(getComputedStyle(q).borderTopLeftRadius) }, lines: Math.round(two.getBoundingClientRect().height / parseFloat(getComputedStyle(two).lineHeight)), fits: c.scrollHeight <= c.clientHeight + 1 }; }, CARD);
-    assert.equal(s.form, "s"); assert.equal(s.square, true, "still one cube");
-    assert.match(s.text, /^Notes Ferry to Porto Leaves from the north quay/); assert.match(s.text, /14 notes · 3 folders$/);
-    assert.ok(s.lines <= 2, `up to two lines of it (${s.lines})`); assert.equal(s.fits, true, "nothing is cut by the card");
-    assert.deepEqual([s.plus.name, s.plus.inside], ["New note", true]); assert.ok(s.plus.size[0] >= 20 && s.plus.size[0] <= 24 && s.plus.corner <= 6, "a small button of the 6 px family");
-    assert.deepEqual(await flaws(p, CARD), []);
-    // Anywhere but the +: the app opens, on its list.
-    await p.click(CARD, { position: { x: 30, y: 90 } }); await x.rest(250);
-    assert.equal((await x.grid()).open?.id, "note"); assert.equal(await p.locator(`${OPEN} .hc-note-row`).count(), 14); assert.equal(await p.locator(`${OPEN} .nt-doc`).count(), 0);
-    await p.keyboard.press("Escape"); await x.rest(200);
-    // The +: a new note, with the app open on it, ready to type.
-    await p.click(`${CARD} .nt-quick`); await x.rest(300);
-    assert.equal((await x.grid()).open?.id, "note"); assert.equal(await p.evaluate(() => document.activeElement?.classList.contains("nt-doc")), true);
-    await p.keyboard.type("Milk, on the way home"); await x.rest(900);
-    assert.equal((await x.notes.list()).some((n) => n.title === "Milk, on the way home"), true);
-  } finally { await x.close(); }
-});
-
-test("the Small card never shows a locked note's words: its title and a lock; with no notes it says so and still offers the +", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await grid(300), p = x.page;
-  try {
-    // Lock the top note (Ferry to Porto) from the opened app, then go back to Home.
-    await p.click(CARD, { position: { x: 30, y: 90 } }); await x.rest(250); await p.click(`${OPEN} .hc-note-row[data-note="ferry1"]`); await x.rest(300);
-    await p.click(`${OPEN} .nt-lock`); await x.rest(200); await type(x, "4821", 150); await type(x, "4821", 600);
-    await p.keyboard.press("Escape"); await x.rest(150); await p.keyboard.press("Escape"); await x.rest(250);
-    const s = await p.evaluate((sel) => { const c = document.querySelector(sel); return { text: c.innerText.replace(/\s+/g, " ").trim(), lock: !!c.querySelector(".nt-small-lock svg") }; }, CARD);
-    assert.match(s.text, /^Notes Ferry to Porto Locked 14 notes · 3 folders$/, "even while notes are unlocked"); assert.equal(s.lock, true);
-    assert.equal((await x.notes.state()).lock.state, "unlocked");
-  } finally { await x.close(); }
-  const y = await openGrid(browser, { width: 300, layout: ["note", "clock"] });
-  try {
-    assert.match(await y.page.locator(CARD).innerText(), /No notes yet/); assert.equal(await y.page.locator(`${CARD} .nt-quick`).count(), 1);
-  } finally { await y.close(); }
-});
-
-test("the Medium card: Notes, the folder button and New; search; the list with its lock and pin marks; the count and Open Notes; folders and search work in place, a row opens the app on that note", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await grid(460), p = x.page;
-  try {
-    const parts = await p.evaluate((sel) => { const c = document.querySelector(sel), y = (s) => c.querySelector(s).getBoundingClientRect().top; return { form: c.dataset.form, order: y(".hc-ch") < y(".hc-note-find") && y(".hc-note-find") < y(".nt-listbox") && y(".nt-listbox") < y(".nt-footbox"), head: c.querySelector(".hc-ch").innerText.replace(/\s+/g, " ").trim(), foot: c.querySelector(".nt-footbox").innerText.replace(/\s+/g, " ").trim(), pane: c.querySelectorAll(".nt-doc, .nt-rail").length }; }, CARD);
-    assert.deepEqual(parts, { form: "m", order: true, head: "Notes All notes New", foot: "14 notes · 3 folders Open Notes", pane: 0 });
-    assert.deepEqual(await flaws(p, CARD), []);
-    // A folder chosen in place: the card stays a card.
-    await p.click(`${CARD} .nt-folder`); await x.rest(150); await p.locator(".nt-menu .dgc-menu-row", { hasText: "Trips" }).click(); await x.rest(250);
-    assert.equal((await x.grid()).open, null); assert.equal(await p.locator(`${CARD} .hc-note-row`).count(), 4);
-    assert.equal(await p.locator(`${CARD} .nt-folder`).innerText(), "Trips");
-    await p.fill(`${CARD} input.hc-note-find`, "tide"); await x.rest(450);
-    assert.deepEqual(await p.locator(`${CARD} .hc-note-row .hc-nm`).allInnerTexts(), ["Tide tables for the bay"]); assert.equal((await x.grid()).open, null, "search in place too");
-    await p.click(`${CARD} .hc-note-row`); await x.rest(300);
-    assert.equal((await x.grid()).open?.id, "note"); assert.match(await p.locator(`${OPEN} .nt-doc`).innerText(), /Tide tables for the bay/, "a row opens the app on that note");
-    await p.click(".hc-back"); await x.rest(250);
-    await p.click(`${CARD} .nt-openapp`); await x.rest(250);
-    assert.equal((await x.grid()).open?.id, "note");
-  } finally { await x.close(); }
-});
-
-test("the Large card: the folder's list (titles only) beside the open note with the short format bar, pin, lock and ⋯; both halves scroll on their own, inside a card that does not grow", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await grid(700), p = x.page;
-  try {
-    const l = await p.evaluate((sel) => { const c = document.querySelector(sel), r = (s) => c.querySelector(s).getBoundingClientRect(), list = c.querySelector(".nt-listbox"), body = c.querySelector(".nt-body"), card = c.getBoundingClientRect(), clock = document.querySelector('.hc-grid .hc-card[data-card="clock"]')?.getBoundingClientRect();
-      return { form: c.dataset.form, beside: r(".nt-pane").left >= r(".nt-listbox").right - 1, inside: r(".nt-pane").bottom <= card.bottom + 0.5 && r(".nt-pane").right <= card.right + 0.5 && r(".nt-listbox").bottom <= card.bottom + 0.5,
-        metas: [...c.querySelectorAll(".hc-note-row .hc-meta")].filter((m) => m.checkVisibility()).length, rows: c.querySelectorAll(".hc-note-row").length, bar: [...c.querySelectorAll(".nt-format button")].map((b) => b.dataset.cmd), tools: [...c.querySelectorAll(".hc-note-tools button")].map((b) => b.className.replace(/hc-btn|hc-icon/g, "").trim()),
-        listScrolls: getComputedStyle(list).overflowY === "auto" && list.scrollHeight > list.clientHeight, bodyScrolls: getComputedStyle(body).overflowY === "auto" && body.scrollHeight > body.clientHeight, height: card.height, cardCut: c.scrollHeight > c.clientHeight + 1 }; }, CARD);
-    assert.equal(l.form, "l"); assert.equal(l.beside, true); assert.equal(l.inside, true); assert.equal(l.metas, 0, "titles only"); assert.equal(l.rows, 14);
-    assert.deepEqual(l.bar, ["bold", "italic", "ul", "ck"]); assert.deepEqual(l.tools, ["hc-note-pin", "nt-lock", "nt-more"]);
-    assert.equal(l.listScrolls, true); assert.equal(l.bodyScrolls, true, "a long note scrolls in its own half"); assert.ok(l.height < 340, `a 2×2 block, whatever the notes (${l.height})`); assert.equal(l.cardCut, false);
-    assert.deepEqual(await flaws(p, CARD), []);
-    await p.click(`${CARD} .nt-more`); await x.rest(150);
-    assert.ok((await p.locator(".nt-menu .dgc-menu-label").allInnerTexts()).includes("Open in an editor tab"), "for room");
-    await p.keyboard.press("Escape"); await x.rest(150);
-    // And the way to the whole app (folders in a rail, Recently deleted) is on the card.
-    assert.equal(await p.locator(`${CARD} .nt-footbox`).innerText().then((w) => w.replace(/\s+/g, " ")), "14 notes · 3 folders Open Notes");
-    await p.click(`${CARD} .nt-more`); await x.rest(150);
-    assert.deepEqual(await flaws(p, CARD), [], "with its menu open");
-    await p.keyboard.press("Escape"); await x.rest(150); await p.click(`${CARD} .nt-openapp`); await x.rest(300);
-    assert.equal((await x.grid()).open?.id, "note"); assert.equal(await p.evaluate((sel) => document.querySelector(sel).dataset.notes, OPEN), "wide");
-  } finally { await x.close(); }
-});
-
-test("the Large card with a locked note: the whole PIN pad shows in its half (nothing of it cut), and the number keys open the note in place", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await grid(300), p = x.page;
-  try {
-    await p.click(CARD, { position: { x: 30, y: 90 } }); await x.rest(250); await p.click(`${OPEN} .hc-note-row[data-note="wifi01"]`); await x.rest(300);
-    await p.click(`${OPEN} .nt-lock`); await x.rest(200); await type(x, "4821", 150); await type(x, "4821", 600);
-    await p.keyboard.press("Control+Alt+l"); await x.rest(300); await p.keyboard.press("Escape"); await x.rest(150); await p.keyboard.press("Escape"); await x.rest(250);
-    await x.resize(700); await p.click(`${CARD} .hc-note-row[data-note="wifi01"]`); await x.rest(300);
-    const fit = await p.evaluate((sel) => { const c = document.querySelector(sel), body = c.querySelector(".nt-body").getBoundingClientRect(), keys = [...c.querySelectorAll(".nt-pad button")].map((b) => b.getBoundingClientRect()), forgot = c.querySelector('[data-pin="forgot"]').getBoundingClientRect();
-      return { keys: keys.length, inside: keys.every((k) => k.bottom <= body.bottom + 0.5 && k.top >= body.top - 0.5 && k.height >= 18), forgot: forgot.bottom <= body.bottom + 0.5, words: c.querySelector(".nt-lockbox").innerText.replace(/\s+/g, " ") }; }, CARD);
-    assert.equal(fit.keys, 11); assert.equal(fit.inside, true, "every key of the pad is in sight"); assert.equal(fit.forgot, true, "and Forgot PIN? under it");
-    assert.match(fit.words, /^Type your 4-digit PIN to open it\./); assert.equal(await p.getAttribute(`${CARD} .hc-note-row.on`, "data-note"), "wifi01", "its name is on the lit row beside the pad");
-    assert.deepEqual(await flaws(p, CARD), []);
-    await p.click(`${CARD} .nt-pad`); await type(x, "4821", 600);
-    assert.match(await p.locator(`${CARD} .nt-doc`).innerText(), /The router is under the stairs/);
-  } finally { await x.close(); }
-});
-
 test("opened: one thing at a time under about 560 px, three columns from there; dragging the side bar's edge with a note being typed in keeps the note, its words and the keyboard", async (t) => {
   if (skipOrFail(t)) return;
   const x = await grid(300), p = x.page;
   try {
-    await p.click(CARD, { position: { x: 30, y: 90 } }); await x.rest(250);
+    await p.click(`${CARD} .nt-openapp`); await x.rest(250);
     const mode = () => p.evaluate((sel) => document.querySelector(sel).dataset.notes, OPEN);
     // (560 px of Home itself: the side bar is a little wider than what it holds.)
     const home = () => p.evaluate(() => document.getElementById("home-hub").clientWidth);
@@ -196,7 +91,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     const x = await grid(300, { theme, height: 820 }), p = x.page, wide = width >= 560;
     const check = async (scene) => assert.deepEqual(await flaws(p, OPEN), [], scene);
     try {
-      await p.click(CARD, { position: { x: 30, y: 90 } }); await x.rest(250); if (wide) await x.resize(width, 820);
+      await p.click(`${CARD} .nt-openapp`); await x.rest(250); if (wide) await x.resize(width, 820);
       await check("the list");
       if (wide) { await p.click(`${OPEN} .nt-sort`); await x.rest(200); await check("the sort menu"); await p.keyboard.press("Escape"); await x.rest(150); await p.click(`${OPEN} .nt-newfold`); }
       else { await p.click(`${OPEN} .nt-folder`); await x.rest(200); await check("the folder menu"); await p.locator(".nt-menu .dgc-menu-row", { hasText: "New folder…" }).click(); }

@@ -1,7 +1,7 @@
 // Pips in the 0.52 look, in real Chromium with the real Pips bundle (test/support/pip-chat-scene.mjs). The list: New Pip
 // is the one filled button and it is the text colour, Create is an outline, New workflow is quiet text, the search box
 // is a borderless field, and a row is pointed at on a 12.5 px corner. A Pip's chat: your message is the shared grey
-// bubble in the page's own text colour, Undo and Details are quiet, and the prompt box has the 22 px corner. The Pips
+// bubble in the page's own text colour, Undo and Details are quiet, and the prompt box has the buttons' 6 px corner (14 Nov; it was 22 px). The Pips
 // wordmark and the faces keep their colours. Dark and light, in a tab (700 px) and in the side bar (300 px).
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -51,7 +51,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     } finally { await x.close(); }
   });
 
-  test(`a Pip's chat: a grey bubble in the page's text colour, quiet Undo and Details, a 22px prompt box (${theme}, ${width}px)`, async (t) => {
+  test(`a Pip's chat: a grey bubble in the page's text colour, quiet Undo and Details, a prompt box with the 6px corner (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openPips(browser, { theme, width });
     try {
@@ -62,9 +62,11 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       assert.equal((await look(x.p, ".own-change-undo")).words, token["--text-2"], "Undo is quiet");
       assert.equal((await look(x.p, ".own-change-more")).words, token["--text-2"], "Details is quiet");
       const box = await look(x.p, "#chat-form");
-      assert.deepEqual([box.corner, box.fill], ["22px", token["--box"]], "the prompt box");
+      assert.deepEqual([box.corner, box.fill], ["6px", token["--box"]], "the prompt box");
       assert.notEqual(box.shadow, "none");
-      assert.deepEqual((await purpleFills(x.p)).filter((m) => isPurple(m.c)).map((m) => m.n), [], "nothing filled purple while there is nothing to send");
+      // (Where Send is, the voice button stands while the box is empty: it keeps its purple circle, as ChatDGC's does.
+      // It used to lose it a moment after every redraw, which is the flicker of live round 1, finding 17.)
+      assert.deepEqual((await purpleFills(x.p)).filter((m) => isPurple(m.c)).map((m) => m.n).filter((n) => n !== "chat-voicemode"), [], "nothing filled purple while there is nothing to send, but the voice button where Send is");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });

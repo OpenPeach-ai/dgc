@@ -76,9 +76,11 @@
 }
 /* It fades in, and goes at once: the row's room for it goes at once too, so a fade-out let the row's word slide under it
    for a moment (seen 9 Nov). */
-.dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-more, .dgc-menu .dgc-menu-more[aria-expanded="true"] {
+/* (Seen by the keyboard's focus, not by any focus: a row just made the fallback kept the focus on its ⋯, so the
+   Fallback row showed its ⋯ always while every other row showed it on hover: live round 1, 14 Nov.) */
+.dgc-menu .dgc-menu-item:is(:hover, :has(:focus-visible)) > .dgc-menu-more, .dgc-menu .dgc-menu-more[aria-expanded="true"] {
   opacity: 1; transition: opacity var(--dur-hover) ease, background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
-.dgc-menu .dgc-menu-item:is(:hover, :focus-within) > .dgc-menu-row,
+.dgc-menu .dgc-menu-item:is(:hover, :has(:focus-visible)) > .dgc-menu-row,
 .dgc-menu .dgc-menu-item:has(> .dgc-menu-more[aria-expanded="true"]) > .dgc-menu-row { padding-right: 34px; }
 .dgc-menu .dgc-menu-more:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--wash); color: var(--text); }
 .dgc-menu .dgc-menu-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }

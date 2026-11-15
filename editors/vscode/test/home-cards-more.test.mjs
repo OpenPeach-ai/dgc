@@ -389,7 +389,7 @@ test("the new cards in every form, dark and light: nothing spills out of the sid
       const spill = await x.page.evaluate(() => [...document.querySelectorAll(".hc-grid > .hc-card")].flatMap((c) => { const box = c.getBoundingClientRect();
         return [...c.querySelectorAll("button, input, textarea, .hc-ct, .hc-tile-t, .hc-nm, .hc-model")].filter((n) => n.checkVisibility() && (n.getBoundingClientRect().right > box.right + 0.5 || n.getBoundingClientRect().left < box.left - 0.5)).map((n) => `${c.dataset.card}: ${n.className}`); }));
       assert.deepEqual(spill, [], `${width}px ${theme}: nothing reaches past its card's sides`);
-      if (width === 300) for (const c of g.cards) assert.ok(Math.abs(c.width - c.height) <= 1, `${c.id} is a square at 300 px`);
+      if (width === 300) for (const c of g.cards) if (c.id !== "note") assert.ok(Math.abs(c.width - c.height) <= 1, `${c.id} is a square at 300 px`);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   }

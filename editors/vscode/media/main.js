@@ -744,7 +744,7 @@
   // The Project Folder dropdown (0.52, media/shared/folderpick.js): "All projects" or one folder, one choice the host
   // keeps for every window (it also filters the Pips view's Project tab and Needs attention). The host says what is
   // chosen and the folders to choose from with each list; a DGC that lists none has no dropdown (projectFolders null).
-  // It is on the Library row, at its right end (and in View all, on the search field's row): no row of its own.
+  // It has a line of its own under the search row, at the left, as on the Pips tab (the Library row it sat on is gone).
   // On All projects each session says its folder under its name; one folder's path is in the button's tooltip.
   // Another folder's session opens in a tab here that runs there, and offers only Open.
   let projectFolders = null, folderChoiceSeen = null;
@@ -788,11 +788,12 @@
     tail.textContent = String(shown || ""); line.append(tail); line.title = String(full || shown || "");
     return line;
   }
-  /** The dropdown at the right end of the Library row (asked 12 Nov night: no row of its own). Made when a DGC first lists folders. */
+  /** The dropdown on its line under the search row, at the left, as on the Pips tab (the Library button it shared a row
+   *  with left Work on 14 Nov). Made when a DGC first lists folders. */
   function paintFolderBar() {
     let slot = $("sessions-folder-slot");
     if (!projectFolders || !window.DgcFolderPick) { if (slot) { slot.hidden = true; window.DgcFolderPick?.close(); } return; }
-    if (!slot) { slot = folderSlot("sessions-folder-slot"); slot.id = "sessions-folder-slot"; const row = $("work-library-row"); if (row) row.append(slot); else $("sessions-status").before(slot); }
+    if (!slot) { slot = folderSlot("sessions-folder-slot"); slot.id = "sessions-folder-slot"; const row = $("work-folder-line"); if (row) row.append(slot); else $("sessions-status").before(slot); }
     slot.hidden = false;
     paintFolderSlot(slot, "sessions-folder-pick");
   }
@@ -1549,7 +1550,6 @@
     if (!box || !list) return;
     box.hidden = !chatsAvailable || !!homeQuery;
     $("chats-sub").hidden = box.hidden || !projects.length;
-    if ($("chats-library")) $("chats-library").hidden = box.hidden;
     if (box.hidden) return;
     // Drawn again only when something changed: the home refreshes after every turn, and a redraw replaces the
     // buttons under a pointer, so a click that lands mid-redraw would be lost.
@@ -1629,8 +1629,44 @@
     if (node) dropTarget(node, (types) => types.includes(CHAT_IN_PROJECT), (chat) => vscode.postMessage({ type: "chatdgcMove", id: chat, project: "" }));
   }
   $("projects-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcProjectNew" }));
-  $("chats-library")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcLibrary" }));
-  $("work-library")?.addEventListener("click", () => vscode.postMessage({ type: "workLibrary" }));
+  // A right-click on a session's or a chat's row: the row's own menu (its ⋯), never the browser's Cut, Copy and Paste
+  // (live round 1, 14 Nov). A field keeps the editor's own menu: its words can be cut and pasted.
+  $("sessions-host")?.addEventListener("contextmenu", (event) => {
+    const row = event.target.closest?.(".session-row");
+    if (!row || event.target.closest("input, textarea, [contenteditable='true']")) return;
+    event.preventDefault();
+    row.querySelector(".session-more")?.click();
+  });
+  // The Work and Chat tabs' header row (live round 1, 14 Nov): the tab's name, and ⋯ with what was scattered: the
+  // archived ones and the settings (and, for Chat, an incognito chat and what DGC remembers). No Library here: it gets
+  // a header tab of its own in a later pass (his call).
+  function showArchivedList(kind) {
+    const W = ARCHIVE_WORDS[kind], toggle = $(`${W.prefix}-archived-toggle`);
+    if (!toggle || toggle.hidden) {
+      const list = $(kind === "work" ? "sessions-list" : "chats-list"), id = `${W.prefix}-note`;
+      let note = $(id);
+      if (!note && list) { note = el("p", "sessions-note"); note.id = id; note.setAttribute("role", "status"); list.before(note); }
+      if (!note) return;
+      clearTimeout(note._timer);
+      note.textContent = kind === "work" ? "No archived sessions here. A session’s ⋯ archives it." : "No archived chats. A chat’s ⋯ archives it.";
+      note.hidden = false; note._timer = setTimeout(() => { note.hidden = true; note.replaceChildren(); }, 6000);
+      return;
+    }
+    if (!archivedOpen[kind]) toggle.click();
+    toggle.scrollIntoView({ block: "nearest" }); toggle.focus({ preventScroll: true });
+  }
+  function homeMoreMenu(button, label, rows, pick) {
+    if (button.getAttribute("aria-expanded") === "true") { window.DgcBlob?.close(true); return; }
+    button.setAttribute("aria-expanded", "true");
+    window.DgcBlob?.popup(button, { keyboard: true, label, place: "below", rows, onPick: pick, onClose: () => button.setAttribute("aria-expanded", "false") });
+  }
+  $("work-more")?.addEventListener("click", (event) => { event.stopPropagation(); homeMoreMenu($("work-more"), "Work",
+    [{ id: "archived", label: "Archived sessions", icon: "archive" }, { id: "agents", label: "Sub-agent settings", icon: "settings" }, { id: "settings", label: "Work settings", icon: "settings" }],
+    (what) => { if (what === "archived") showArchivedList("work"); else vscode.postMessage({ type: "openSettings", section: what === "agents" ? "models" : "general" }); }); });
+  $("chats-more-menu")?.addEventListener("click", (event) => { event.stopPropagation(); homeMoreMenu($("chats-more-menu"), "Chat",
+    [{ id: "incognito", label: "New incognito chat", icon: "chat" }, { id: "memory", label: "What DGC remembers", icon: "open" }, { id: "archived", label: "Archived chats", icon: "archive" }, { id: "settings", label: "Chat settings", icon: "settings" }],
+    (what) => { if (what === "incognito") vscode.postMessage({ type: "chatdgcNew", temporary: true }); else if (what === "archived") showArchivedList("chat");
+      else vscode.postMessage({ type: "openSettings", section: what === "memory" ? "memory" : "chatdgc" }); }); });
   // ---- the side bar's tabs: Home, Work, Chat, Pips (media/shared/tabs.css) ----------------------------------------------
   // One bar at the top of the side bar, over every screen of it. Home is the hub (below); Work lists this project's
   // sessions and Chat your ChatDGC chats, each with its own search and New; Pips is the Pips view, as it is. The tab is
@@ -2057,7 +2093,7 @@
   // ready.capabilities.pip_runs_running: which of this chat's Pips are running now, as the backend says (the chip).
   let pipRunsLive = false;
   // Pips API 96: no session owns a Pip; the agent map says which Pips are related to this one (list_related_pips).
-  let pipsRelatedLive = false;
+
   const pipRunning = new Map();          // run_id -> {run_id, pip_id, name, pip_type, started_at, trigger, at (ms)}
   let steerQueuedLive = false;           // ready.capabilities.steer_queued: a queued message can be steered in now
   let queueEditLive = false;             // ready.capabilities.queue_edit: a queued message can be removed or moved
@@ -2279,7 +2315,6 @@
   function artifactsOffered(capability) {
     outputOffered = capability && typeof capability === "object" && Number(capability.version) >= 1 ? capability : null;
     $("output-picker").hidden = !outputOffered;
-    if ($("work-library")) $("work-library").hidden = !outputOffered;
     if (!outputOffered) { hideOutputMenu(); setOutput("auto"); }
   }
   function setOutput(value) {
@@ -2701,7 +2736,7 @@
     const profiles = [...levels, "ultra"];
     const selected = curUltra ? "ultra" : profiles.includes(curThink) ? curThink : profiles[0];
     const index = Math.max(0, profiles.indexOf(selected));
-    return agentsRowHtml(`<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow dgc-menu-row model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`);
+    return modelTabsHtml(`<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow dgc-menu-row model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels" data-at="${index === 0 ? "start" : index === profiles.length - 1 ? "end" : ""}"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`);
   }
   // The note under the slider is three lines at most, with Show more when there is more to read: a
   // long one (Ollama's levels) took over the menu. Measured once the menu is on screen.
@@ -2728,7 +2763,7 @@
     bindNote(card);
     const options = el("div", "model-options"); options.hidden = true;
     const list = el("div", "model-list-scroll");
-    [...mm.children].filter(node => node !== card && !node.classList.contains("agents-row")).forEach(node => {
+    [...mm.children].filter(node => node !== card && !node.classList.contains("model-tabs")).forEach(node => {
       if (node.classList.contains("mhead")) options.appendChild(node);
       else list.appendChild(node);
     });
@@ -2752,6 +2787,8 @@
       slider.parentElement.style.setProperty("--effort", `${Number(slider.value) / (profiles.length - 1) * 100}%`);
       slider.setAttribute("aria-valuetext", effortLabel(value));
       card.querySelector("output").textContent = effortLabel(value);
+      // (At either end the end's own word says it: the middle word is not said twice, "Off … Off … Ultra".)
+      card.querySelector(".effort-labels").dataset.at = Number(slider.value) === 0 ? "start" : Number(slider.value) === profiles.length - 1 ? "end" : "";
       // Acknowledge the step. Restarting the class is what replays the keyframe.
       const control = slider.parentElement;
       control.classList.remove("bumped");
@@ -2775,23 +2812,37 @@
                       cliDefaultModel, cliDefaultListed, currentRouteKey,
                       fallback: fallback && typeof fallback === "object" ? fallback : { offered: false } };
     fbOpen = "";
-    agentsStep = null;
+    // (An open menu on its Sub-agents tab stays there when DGC's list arrives again.)
+    const onAgents = !!agentsStep && !$("modelmenu").hidden && agentsModel.offered;
+    agentsStep = null; if (!onAgents) agentsDrop = "";
     renderProviderModels(lastModelMenu);
+    if (onAgents) renderAgentsChoices();
   }
   // ---- this session's agents model (0.52) ----
   // What this session's agents use, as DGC said it (agents_model, through the extension): Settings' agents model, or
   // the session's own. The Agents row of the model menu says which, and opens the same list the main model uses
   // (every provider and its models) to choose for agents. A subscription CLI is shown greyed with its reason: it runs
   // its own tools, and DGC's agents need an address, a key and a model.
-  let agentsModel = { offered: false, own: false, model: "", base_url: "", settings_model: "", settings_base_url: "", router: false };
-  let agentsStep = null;          // null: the session's own models; {provider: null}: the agents list; {provider: row}: its models
+  // Since live round 1 (14 Nov): under the model row and the main slider the menu has two tabs, Main model and
+  // Sub-agents. The Sub-agents tab holds how the sub-agents think and how big their window is (two dropdowns: DGC's
+  // subagent_thinking and subagent_context_size, "Same as the chat" when unset; shown only when this DGC can set them)
+  // and then its own list, Settings' choice first.
+  const AGENTS_NONE = { offered: false, own: false, model: "", base_url: "", settings_model: "", settings_base_url: "", router: false, thinking: "", thinking_settable: false, context_size: 0, context_settable: false };
+  let agentsModel = { ...AGENTS_NONE };
+  let agentsStep = null;          // null: the Main model tab; {provider: null}: the Sub-agents tab's list; {provider: row}: its models
+  let agentsDrop = "";            // the Sub-agents tab's open dropdown: "thinking" | "context" | ""
+  const AGENTS_THINK = [["", "Same as the chat"], ["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]];
+  const AGENTS_SIZES = [4096, 8192, 16384, 32768, 65536, 131072, 262144];       // the sizes Settings offers (src/contextCombo.js)
+  const agentsSizeWords = (n) => (n > 0 && n % 1024 === 0 ? `${n / 1024}K` : n > 0 ? n.toLocaleString("en-US") : "Same as the chat");
   const AGENTS_CLI_REASON = "Runs its own tools, so it can’t run DGC’s agents";
   function setAgentsModel(view) {
     const text = (value) => (typeof value === "string" ? value.slice(0, 2048) : "");
     agentsModel = view && typeof view === "object" && view.offered === true
       ? { offered: true, own: view.own === true, model: text(view.model).slice(0, 256), base_url: text(view.base_url),
-          settings_model: text(view.settings_model).slice(0, 256), settings_base_url: text(view.settings_base_url), router: view.router === true }
-      : { offered: false, own: false, model: "", base_url: "", settings_model: "", settings_base_url: "", router: false };
+          settings_model: text(view.settings_model).slice(0, 256), settings_base_url: text(view.settings_base_url), router: view.router === true,
+          thinking: AGENTS_THINK.some(([level]) => level === view.thinking) ? view.thinking : "", thinking_settable: view.thinking_settable === true,
+          context_size: Number.isSafeInteger(view.context_size) && view.context_size > 0 ? view.context_size : 0, context_settable: view.context_settable === true }
+      : { ...AGENTS_NONE };
   }
   const agentsRoutes = () => (Array.isArray(lastModelMenu?.routes) ? lastModelMenu.routes : []).filter((row) => row && row.key);
   const agentsHostLabel = (row) => String(row?.label || row?.key || "").replace(/^Current host · /, "");
@@ -2816,33 +2867,74 @@
   /** "Same as settings · qwen3-coder" with each part kept whole: a narrow menu breaks the line at a " · ", never inside
    *  a model's name ("qwen3-" / "coder"); a part wider than the row ends in "…" (its whole text is the row's title). */
   const agentsParts = (words) => String(words).split(" · ").map((part) => `<span class="agents-part">${esc(part)}</span>`).join(" · ");
-  function agentsRowHtml(card) {
+  /** The tabs under the model row and the main slider. None on a DGC with no sub-agents model of a session's own. */
+  function modelTabsHtml(card) {
     if (!agentsModel.offered) return card;
-    const words = agentsWords();
-    return card + `<button type="button" role="menuitem" class="mrow dgc-menu-row dgc-menu-row-sub agents-row" data-agents-open="1" aria-expanded="${agentsStep ? "true" : "false"}" title="${esc(`Sub-agents: ${words}`)}"><span class="mi dgc-menu-icon codicon codicon-organization" aria-hidden="true"></span><span class="dgc-menu-words"><span class="agents-row-name dgc-menu-label">Sub-agents</span><span class="agents-row-value dgc-menu-sub">${agentsParts(words)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+    const tab = (id, label, on, title) => `<button type="button" role="tab" class="model-tab" data-model-tab="${id}" aria-selected="${on}" title="${esc(title)}">${label}</button>`;
+    return card + `<div class="model-tabs" role="tablist" aria-label="Main model, or sub-agents">${tab("main", "Main model", !agentsStep, "This session’s model and its fallback")}${tab("agents", "Sub-agents", !!agentsStep, `Sub-agents: ${agentsWords()}`)}</div>`;
   }
   function paintAgentsRow() {
-    const row = $("modelmenu").querySelector("[data-agents-open]");
-    if (!row) return;
-    const words = agentsWords();
-    row.querySelector(".agents-row-value").innerHTML = agentsParts(words);      // each part escaped (esc)
-    row.title = `Sub-agents: ${words}`;
-    row.setAttribute("aria-expanded", agentsStep ? "true" : "false");
+    const mm = $("modelmenu"), tabs = mm.querySelector(".model-tabs");
+    if (!tabs) return;
+    mm.dataset.tab = agentsStep ? "agents" : "main";
+    for (const tab of tabs.querySelectorAll("[data-model-tab]")) tab.setAttribute("aria-selected", String((tab.dataset.modelTab === "agents") === !!agentsStep));
+    tabs.querySelector('[data-model-tab="agents"]').title = `Sub-agents: ${agentsWords()}`;
   }
   function bindAgentsRow(mm) {
-    const row = mm.querySelector("[data-agents-open]");
-    if (!row) return;
-    row.onclick = (event) => {
-      event.stopPropagation();
-      if (agentsStep) { leaveAgents(); return; }
-      vscode.postMessage({ type: "getAgentsModel" });       // as the list opens: what DGC has now
-      renderAgentsChoices();
-    };
+    mm.dataset.tab = agentsStep ? "agents" : "main";
+    mm.querySelectorAll(".model-tabs [data-model-tab]").forEach((tab) => {
+      tab.onclick = (event) => {
+        event.stopPropagation();
+        if (tab.dataset.modelTab === "main") { if (agentsStep) leaveAgents(); return; }
+        if (agentsStep) return;
+        agentsDrop = "";
+        vscode.postMessage({ type: "getAgentsModel" });       // as the tab opens: what DGC has now
+        renderAgentsChoices('.model-tabs [data-model-tab="agents"]');
+      };
+      // Left and Right move between the two tabs, as tabs do.
+      tab.addEventListener("keydown", (event) => { if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return; event.preventDefault(); event.stopPropagation(); mm.querySelector(`.model-tabs [data-model-tab="${tab.dataset.modelTab === "main" ? "agents" : "main"}"]`)?.click(); });
+    });
   }
   function leaveAgents() {
-    agentsStep = null;
+    agentsStep = null; agentsDrop = "";
     if (lastModelMenu) renderProviderModels(lastModelMenu);
-    $("modelmenu").querySelector("[data-agents-open]")?.focus();
+    $("modelmenu").querySelector('.model-tabs [data-model-tab="main"]')?.focus();
+  }
+  /** The Sub-agents tab's two dropdowns: Thinking and Context window, each a button that opens its choices under it. */
+  function agentsSetHtml() {
+    const drop = (kind, label, value, choices) => {
+      const open = agentsDrop === kind;
+      return `<div class="agents-set-row"><span class="agents-set-name" id="agents-set-${kind}">${label}</span><button type="button" class="agents-drop" data-agents-drop="${kind}" aria-haspopup="listbox" aria-expanded="${open}" aria-labelledby="agents-set-${kind} agents-drop-${kind}"><span id="agents-drop-${kind}" class="agents-drop-value">${esc(value)}</span><span class="codicon codicon-chevron-${open ? "up" : "down"}" aria-hidden="true"></span></button></div>`
+        + (open ? `<div class="agents-drop-list" role="listbox" aria-labelledby="agents-set-${kind}">${choices.map(([v, words, on]) => `<button type="button" role="option" aria-selected="${on}" class="mrow dgc-menu-row${on ? " sel" : ""}" data-value="${esc(v)}"><span class="mi dgc-menu-icon ${on ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label">${esc(words)}</span></button>`).join("")}</div>` : "");
+    };
+    const rows = [];
+    if (agentsModel.thinking_settable) {
+      const now = agentsModel.thinking;
+      rows.push(drop("thinking", "Thinking", AGENTS_THINK.find(([level]) => level === now)[1], AGENTS_THINK.map(([level, words]) => [level, words, level === now])));
+    }
+    if (agentsModel.context_settable) {
+      const now = agentsModel.context_size, sizes = [...new Set([...AGENTS_SIZES, ...(now > 0 ? [now] : [])])].sort((a, b) => a - b);
+      rows.push(drop("context", "Context window", agentsSizeWords(now), [["0", "Same as the chat", !(now > 0)], ...sizes.map((n) => [String(n), agentsSizeWords(n), n === now]), ["typed", "Another size…", false]]));
+    }
+    return rows.length ? `<div class="agents-set">${rows.join("")}</div>` : "";
+  }
+  function bindAgentsSet(options) {
+    options.querySelectorAll("[data-agents-drop]").forEach((button) => button.onclick = (event) => {
+      event.stopPropagation();
+      const kind = button.dataset.agentsDrop;
+      agentsDrop = agentsDrop === kind ? "" : kind;
+      renderAgentsChoices(agentsDrop ? ".agents-drop-list .sel" : `[data-agents-drop="${kind}"]`);
+    });
+    options.querySelectorAll(".agents-drop-list [data-value]").forEach((row) => row.onclick = (event) => {
+      event.stopPropagation();
+      const kind = agentsDrop, value = row.dataset.value;
+      agentsDrop = "";
+      if (kind === "context" && value === "typed") { vscode.postMessage({ type: "agentsContextTyped" }); hideModelMenu(); return; }
+      // Shown at once; DGC's answer (agentsModel) is what it says from then on.
+      if (kind === "thinking") { vscode.postMessage({ type: "setAgentsThinking", level: value }); agentsModel = { ...agentsModel, thinking: value }; }
+      else { const size = Number(value) || 0; vscode.postMessage({ type: "setAgentsContext", size }); agentsModel = { ...agentsModel, context_size: size }; }
+      renderAgentsChoices(`[data-agents-drop="${kind}"]`);
+    });
   }
   /** Whether a provider row is where the session's own agents model runs. */
   function agentsOn(row) {
@@ -2851,7 +2943,7 @@
     if (!agentsModel.base_url) return row.key === lastModelMenu?.currentRouteKey;
     return !!row.base_url && row.base_url === agentsModel.base_url;
   }
-  // The agents list: Same as settings first, then every provider the main model's list has.
+  // The Sub-agents tab: its two dropdowns, then its list: Settings' choice first, then every provider the main model's list has.
   function renderAgentsChoices(focus = "") {
     const mm = $("modelmenu"), options = mm.querySelector(".model-options");
     if (!options || !lastModelMenu) return;
@@ -2861,11 +2953,10 @@
     const check = (on) => `<span class="mi dgc-menu-icon ${on ? "codicon codicon-check" : ""}" aria-hidden="true"></span>`;
     // Two lines, never cut: "Same as settings", and under it what that is now (Settings' model, DGC Router, or this
     // chat's own model when Settings names none). Found live 14 Nov: one line read "Same as settings · this chat's …".
-    const sameWhat = agentsModel.router ? "DGC Router: it picks a free worker for each sub-agent" : settings || "This chat’s model";
-    const sameRow = `<button type="button" role="menuitemradio" aria-checked="${same}" class="mrow dgc-menu-row dgc-menu-row-sub${same ? " sel" : ""}" data-agents-same="1" title="${esc(`Same as settings: ${sameWhat}`)}">${check(same)}`
-      + `<span class="dgc-menu-words"><span class="dgc-menu-label">Same as settings</span><span class="dgc-menu-sub agents-same-what">${esc(sameWhat)}</span></span></button>`;
-    options.innerHTML = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-agents-back="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Models</span></button>`
-      + `<div class="mhead dgc-menu-head"><span>Model for this session’s sub-agents</span></div><div class="model-list-scroll">` + sameRow
+    const sameWhat = agentsModel.router ? "Now: DGC Router, which picks a free worker for each sub-agent" : settings ? `Now: ${settings}` : "Now: same as this chat’s model";
+    const sameRow = `<button type="button" role="menuitemradio" aria-checked="${same}" class="mrow dgc-menu-row dgc-menu-row-sub${same ? " sel" : ""}" data-agents-same="1" title="${esc(`Settings’ choice. ${sameWhat}`)}">${check(same)}`
+      + `<span class="dgc-menu-words"><span class="dgc-menu-label">Settings’ choice</span><span class="dgc-menu-sub agents-same-what">${esc(sameWhat)}</span></span></button>`;
+    options.innerHTML = agentsSetHtml() + `<div class="model-list-scroll" role="group" aria-label="Model for this session’s sub-agents">` + sameRow
       + routes.map((row, i) => {
         const label = String(row.label || row.key);
         if (row.kind === "subscription") {
@@ -2878,7 +2969,7 @@
       + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-manage-providers="1"><span class="mi dgc-menu-icon codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
     options.hidden = false;
     paintAgentsRow();
-    options.querySelector("[data-agents-back]").onclick = (event) => { event.stopPropagation(); leaveAgents(); };
+    bindAgentsSet(options);
     options.querySelector("[data-agents-same]").onclick = (event) => {
       event.stopPropagation();
       if (agentsModel.own) {
@@ -2894,16 +2985,19 @@
       showAgentsModels(routes[Number(button.dataset.agentsProvider)]);
     });
     options.querySelector("[data-manage-providers]").onclick = () => { vscode.postMessage({ type: "openSettings", section: "models" }); hideModelMenu(); };
-    (options.querySelector(focus || ".sel") || options.querySelector("button"))?.focus();
+    (focus.startsWith(".model-tabs") ? mm.querySelector(focus) : options.querySelector(focus || ".model-list-scroll .sel") || options.querySelector(".model-list-scroll button"))?.focus();
   }
-  // One provider's models, to choose for agents: this chat's own host from the list the menu already has, any other
+  // One provider's models, to choose for agents (the list has the menu's height here: the two dropdowns are a step back).
+  // Room kept for the sub-agents' own fallback (finding 13c; its backend is not built): each model row here becomes
+  // fbItem's shape, a ⋯ with "Use as fallback" and a Fallback word at the row's end, as on the Main model tab.
+  // this chat's own host from the list the menu already has, any other
   // from its host (providerModels, as an All models provider's are listed).
   function showAgentsModels(row, listed = null) {
     const mm = $("modelmenu"), options = mm.querySelector(".model-options");
     if (!options || !row) return;
     const own = row.key === "native";
     if (own && !listed) listed = { ids: lastModelMenu.subscription || lastModelMenu.err ? [] : (lastModelMenu.ids || []), error: !!lastModelMenu.err };
-    agentsStep = { provider: row, listed };
+    agentsStep = { provider: row, listed }; agentsDrop = "";
     if (!listed) vscode.postMessage({ type: "providerModels", id: row.key });
     const ids = listed?.ids || [], on = agentsOn(row);
     const wait = !listed ? `<div class="mhead dgc-menu-head"><span>Listing its models…</span></div>`
@@ -3156,7 +3250,7 @@
   DgcMenu.keys($("addmenu"), { close: hideAddMenu, trigger: $("btn-add"), rows: ROWS });
   DgcMenu.keys($("modemenu"), { close: hideModeMenu, trigger: $("btn-mode"), rows: ROWS });
   DgcMenu.keys($("outputmenu"), { close: hideOutputMenu, trigger: $("btn-output"), rows: ROWS });
-  DgcMenu.keys($("modelmenu"), { close: hideModelMenu, trigger: $("btn-model"), rows: ROWS });
+  DgcMenu.keys($("modelmenu"), { close: hideModelMenu, trigger: $("btn-model"), rows: `${ROWS}, button[role='tab'], button.agents-drop, button[role='option']` });
   DgcMenu.slide($("modelmenu"));     // a long model or provider name slides while its row is pointed at (9 Nov)
 
   // animated DGC mark — the three stripes light up one-by-one, hold all three,
@@ -7738,6 +7832,7 @@ function permissionChoices(ev) {
         labels: {}, edit: null };
     }
     if (canonicalTool(name) === "task") return helpersPermission(a);
+    if (name === "dgc_settings") { const asked = settingsPermission(a); if (asked) return asked; }
     const pip = pipToolPermission(name, a);
     if (pip) return pip;
     const mcp = /^mcp__([a-z0-9_-]+)__(.+)$/.exec(String(name || ""));
@@ -7757,16 +7852,42 @@ function permissionChoices(ev) {
       const facts = [typeof t.agent === "string" && t.agent && t.agent !== "worker" ? `${plainWords(t.agent, 40)} agent` : "",
         where ? `on ${where}` : typeof t.size === "string" && t.size ? `a ${t.size} model` : "",
         typeof t.effort === "string" && t.effort ? `thinking ${t.effort}` : ""].filter(Boolean).join(" · ");
-      return { label: plainWords(t.description, 120) || "A helper", facts, brief: typeof t.prompt === "string" ? t.prompt.slice(0, 4000) : "" };
+      return { label: plainWords(t.description, 120) || "A sub-agent", facts, brief: typeof t.prompt === "string" ? t.prompt.slice(0, 4000) : "" };
     });
     const n = helpers.length;
     const items = helpers.map((h) => `<li><b>${esc(h.label)}</b>${h.facts ? ` <span class="muted">· ${esc(h.facts)}</span>` : ""}`
       + (h.brief ? `<details class="perm-brief"><summary>What it's asked</summary><p>${esc(h.brief)}</p></details>` : "") + "</li>").join("");
-    return { name: n === 1 ? `Helper · ${helpers[0].label}` : `${n} helpers`,
-      title: n === 1 ? "Start a helper?" : `Start ${n} helpers?`,
+    // (Sub-agents everywhere, his call: the card and its receipt said "helper" until live round 1, 14 Nov.)
+    return { name: n === 1 ? `Sub-agent · ${helpers[0].label}` : `${n} sub-agents`,
+      title: n === 1 ? "Start a sub-agent?" : `Start ${n} sub-agents?`,
       detail: `<ul class="perm-helpers">${items}</ul>`
         + (a.background === true ? `<p class="muted perm-facts">In the background: the reply goes on without waiting for ${n === 1 ? "it" : "them"}.</p>` : ""),
-      labels: { once: n === 1 ? "Start it" : "Start them" }, edit: null, note: true };
+      labels: { once: n === 1 ? "Start sub-agent" : "Start sub-agents" }, edit: null, note: true };
+  }
+  // DGC changing one of its own settings (dgc_settings) asks in plain words, like a Pip tool's card: what (the
+  // setting by its label), from what to what, and why. Never the call. `setting_label` and `before` are DGC's, on the
+  // card's args when it sends them; without them the setting is its name in words and only the new value is said.
+  const settingValue = (v) => (v === true ? "On" : v === false ? "Off" : v === null || v === undefined || v === "" ? "nothing" : typeof v === "object" ? plainWords(JSON.stringify(v), 200) : plainWords(v, 200));
+  function settingsPermission(a) {
+    const row = (label, value) => (value ? `<dt>${esc(label)}</dt><dd>${esc(String(value).slice(0, 2000))}</dd>` : "");
+    const card = (shown, title, rows, note) => ({ name: shown, title, labels: {}, edit: null, note: true, rule: false,
+      detail: `${rows ? `<dl class="pip-permission">${rows}</dl>` : ""}<div class="muted pip-permission-note">${esc(note)}</div>` });
+    const why = row("Why", plainWords(a.reason, 300));
+    const undoable = settingsUndoLive ? " The line it leaves in the chat has Undo." : "";
+    if (a.action === "setting" || a.action === "dev_limit") {
+      const key = plainWords(a.key, 80), label = plainWords(a.setting_label, 160) || (key.replace(/[_-]+/g, " ").replace(/^./, (c) => c.toUpperCase()) || "A setting");
+      const change = "before" in a ? `${settingValue(a.before)} → ${settingValue(a.value)}` : `to ${settingValue(a.value)}`;
+      const dev = a.action === "dev_limit";
+      return card(`${dev ? "Dev Mode limit" : "Setting"} · ${label}: ${change}`, dev ? "Change a Dev Mode limit?" : "Change a setting?", row("Setting", label) + row("Change", change) + why,
+        `${dev ? "A limit DGC keeps for safety, raised or lowered for you." : "One of DGC’s own settings, changed for you."}${undoable}`);
+    }
+    if (a.action === "rule") {
+      const does = { allow: "Always allow", ask: "Always ask", deny: "Never allow" }[a.rule_action] || "Always allow", text = plainWords(a.rule, 500);
+      return a.remove === true ? card(`Remove the rule ${text}`, "Remove a permission rule?", row("Rule", text) + why, `DGC stops following this rule.${undoable}`)
+        : card(`Permission rule · ${does} ${text}`, "Add a permission rule?", row("Rule", text) + row("It will", does) + why, `DGC follows this rule in every chat from now on.${undoable}`);
+    }
+    if (a.action === "undo") return card("Put a setting back", "Put a setting back?", why, "A change DGC made earlier goes back to what it was.");
+    return null;
   }
   // A Pip's own tools on the main chat's Allow card: what it does, to which Pip by its name (the backend reads it from DGC's
   // records: args.pip_name), and why. It read "Run resume_pip {"pip_id":"pip_96…","expected_version":3,…}" (final check,
@@ -9228,10 +9349,7 @@ function permissionChoices(ev) {
         if (pipFixLive) vscode.postMessage({ type: "listPipFixes" });
         // ...and which of its Pips are running now: the chip above the box (an older CLI says nothing, so no chip).
         pipRunsLive = ev.capabilities?.pip_runs_running === 1;
-        pipsRelatedLive = ev.capabilities?.pips_supported === true && ev.capabilities?.pips_enabled === true
-          && Number(ev.capabilities?.pips_api_version) >= 96;
         setPipRunning([]);
-        amPipsReset();
         if (pipRunsLive) vscode.postMessage({ type: "pipRunsWatch" });
         agentMapCapabilities();
         imageSpool = ev.capabilities?.image_spool === true;
@@ -9652,7 +9770,7 @@ function permissionChoices(ev) {
         const helperIds = String(ev.call_id || "").match(/sub-[0-9a-f]{12}/g) || [];
         const helper = helperIds.reverse().map(id => agentRecords.get(id)).find(Boolean);
         const helperName = helper?.description ? String(helper.description).replace(/\s+/g, " ").trim().slice(0, 120) : "";
-        const helperHeading = helperName ? `<div class="muted">Helper: ${esc(helperName)}</div>` : "";
+        const helperHeading = helperName ? `<div class="muted">Sub-agent: ${esc(helperName)}</div>` : "";
         if (!fixAsk) ensureTurn();
         if (!replaying) {
           imageViewerAttention("permission_request");
@@ -12854,9 +12972,8 @@ function permissionChoices(ev) {
     if (railOpenNow()?.kind === "piprunning" && pipRunning.size < 2) closeRailPop({ restore: false });
     syncComposerRail();
     if (railOpenNow()?.kind === "piprunning") paintPipRunningPanel();
-    // The agent map: its button's live mark, its Pips section's first rows, and the rest read again (a run that
-    // started or ended changed which Pips are running).
-    if (amPipsLive()) { renderAgents(); amPipsChanged(); }
+    // The agent map's task list leaves out a run this chip shows: drawn again when the runs change.
+    if (pipRunsLive) renderAgents();
   }
   function openRunningPip(run) {
     if (railOpenNow()) closeRailPop({ restore: false });
@@ -13461,8 +13578,6 @@ function permissionChoices(ev) {
     }
     if (msg.type === "chat_tab") { rememberTab(msg.session); wearTabSession(msg.session); return; }
     // The agent map's Pips section: DGC's list of the Pips related to this session, and how a Stop went.
-    if (msg.type === "agentMapPips") { amPipsAnswer(msg); return; }
-    if (msg.type === "agentMapPipStopped") { amPipStopped(msg); return; }
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
     // pipsProjectFolder: the Project Folder choice changed; pipsFolderPicked: the folder the editor's picker gave (Add a folder…).
@@ -13761,7 +13876,6 @@ function permissionChoices(ev) {
     resetGoalRuns();                            // the incoming chat's goals are its own
     if (kind !== "rewound") {                   // the incoming chat's own running Pips, asked for again
       setPipRunning([]);
-      amPipsReset();
       if (pipRunsLive) vscode.postMessage({ type: "pipRunsWatch" });
     }
     railReset();                       // the prompt rail: the incoming chat's snapshot and outline say its own
@@ -15048,28 +15162,25 @@ function permissionChoices(ev) {
     const c = agentCounts(), active = amRunningTasks();
     const tasks = active.filter((task) => task.kind !== "preview").length;
     const previews = active.length - tasks;
-    // Pips working on a job from this session (the map's Pips section): the button's usual live mark, and "1 Pip".
-    const pips = amSessionPipRuns().length;
-    if (c.total <= 0 && tasks <= 0 && previews <= 0 && pips <= 0) {
+    if (c.total <= 0 && tasks <= 0 && previews <= 0) {
       hoverTip.hide();
       picker.hidden = true;
       return;
     }
     picker.hidden = false;
     const n = c.active;
-    const state = c.waiting > 0 ? "waiting" : n > 0 || tasks > 0 || pips > 0 ? "running" : "idle";
-    const label = [n > 0 || !tasks && !previews && !pips ? agentPlural(n, "sub-agent") : "",
-      tasks ? agentPlural(tasks, "task") : "", previews ? agentPlural(previews, "preview") : "", pips ? agentPlural(pips, "Pip") : ""].filter(Boolean).join(" · ");
+    const state = c.waiting > 0 ? "waiting" : n > 0 || tasks > 0 ? "running" : "idle";
+    const label = [n > 0 || !tasks && !previews ? agentPlural(n, "sub-agent") : "",
+      tasks ? agentPlural(tasks, "task") : "", previews ? agentPlural(previews, "preview") : ""].filter(Boolean).join(" · ");
     const inBackground = tasks > 0 ? `${agentPlural(tasks, "background task")} running` : "";
-    const forSession = pips > 0 ? `${agentPlural(pips, "Pip")} working for this session` : "";
     const said = state === "waiting"
-      ? [c.waitingPermission > 0 ? "A sub-agent is waiting for your permission" : "A sub-agent is waiting for your answer", inBackground, forSession]
+      ? [c.waitingPermission > 0 ? "A sub-agent is waiting for your permission" : "A sub-agent is waiting for your answer", inBackground]
       : state === "idle" ? ["No sub-agents working"]
-      : [n > 0 ? (tasks > 0 ? `${agentPlural(n, "sub-agent")} working and ${inBackground}` : "Sub-agents are working") : inBackground, forSession];
+      : [n > 0 ? (tasks > 0 ? `${agentPlural(n, "sub-agent")} working and ${inBackground}` : "Sub-agents are working") : inBackground];
     const title = [...said.filter(Boolean), previews ? `${agentPlural(previews, "live preview")} serving a page` : "", "Click to open the agent map"].filter(Boolean).join(" · ");
     pill.dataset.state = state;
     agentsSetText(pill.querySelector(".agents-text"), label);
-    agentsSetText(pill.querySelector(".agents-short"), String(n + tasks + previews + pips));
+    agentsSetText(pill.querySelector(".agents-short"), String(n + tasks + previews));
     pill.querySelector(".agents-need").hidden = state !== "waiting";
     hoverTip.retitle(pill, title);
     pill.setAttribute("aria-label", `${label} · ${title}`);
@@ -15500,8 +15611,8 @@ function permissionChoices(ev) {
   // Every task this chat knows, running or not: monitors, background shells, troupes, the Pip runs it
   // started and its artifact previews, in that order.
   function amAllTasks() {
-    // (A Pip run the map's Pips section lists as working "for this session" is listed there, not here as well.)
-    const inSection = amPipsLive() ? pipRunning : null;
+    // (A Pip working on a job this chat gave it is on the chip above the box, never in the map: no Pips in the map.)
+    const inSection = pipRunsLive ? pipRunning : null;
     return [...monitorItems.map(amMonitorTask), ...shellItems.map(amShellTask),
       ...[...troupeRuns.values()].map(amTroupeTask), ...amPipRuns().filter((run) => !inSection?.has(run.id)).map(amPipTask),
       ...[...previews.values()].map(amPreviewTask)];
@@ -15536,194 +15647,8 @@ function permissionChoices(ev) {
     amLabel(entry, [task.name, task.word, ...task.meta].join(", "), task.name);
   }
 
-  // ---- the Pips section (0.52, pips-flow-design Q2, picture 9) ----
-  // No session owns a Pip. Under the session's own helpers and tasks the map says which Pips are related to it and
-  // what they are doing, and nothing more: first the Pips working on a job this session gave them ("for this
-  // session", with Stop: the runs pip_runs_running lists), then the related Pips that are running or need you (Open:
-  // their chat in the Pips view), then one quiet line counting the rest. No report card, Allow or Apply here: those are
-  // in the Pip's chat, on Home and on the Pips page. The list is DGC's (list_related_pips, Pips API 96), read when the
-  // map opens, again when this chat's Pips change (never faster than every two seconds) and every half minute while
-  // the map stays open, for what no event of this chat says. An older DGC is never asked and has no section.
-  // (The design's "a running Pip opens to its own helpers, read-only" is left out: a Pip has no helpers yet.)
-  const AM_PIPS_GAP_MS = 2000, AM_PIPS_SLOW_MS = 30000;
-  const amPips = { seq: 0, askedAt: -Infinity, timer: 0, known: false, failed: false, pips: [], elsewhere: 0, hidden: false };
-  const amPipStops = new Map();                 // run id -> "stopping" | a sentence saying why it could not be stopped
-  const amPipRows = new Map();                  // row key -> its nodes
-  function amPipsLive() { return pipRunsLive && pipsRelatedLive; }
-  // The runs this chat started, oldest first: what "for this session" lists, and what the button's live mark follows.
-  function amSessionPipRuns() { return amPipsLive() ? pipRunningList() : []; }
-  function amPipsReset() {
-    clearTimeout(amPips.timer);
-    Object.assign(amPips, { seq: amPips.seq + 1, askedAt: -Infinity, timer: 0, known: false, failed: false, pips: [], elsewhere: 0 });
-    amPipStops.clear();
-    paintAmPips();                              // open or not: the chat before's Pips are never left drawn
-    amPipsAsk();                                // a map left open over the new chat reads that chat's
-  }
-  function amPipsAsk() {
-    clearTimeout(amPips.timer); amPips.timer = 0;
-    if (!amOpen || !amPipsLive()) return;
-    amPips.askedAt = performance.now();
-    vscode.postMessage({ type: "agentMapPips", seq: ++amPips.seq });
-    amPipsLater(AM_PIPS_SLOW_MS);
-  }
-  function amPipsLater(ms) {
-    clearTimeout(amPips.timer);
-    amPips.timer = setTimeout(() => { amPips.timer = 0; amPipsAsk(); }, ms);
-    if (typeof amPips.timer?.unref === "function") amPips.timer.unref();
-  }
-  // Something about this chat's Pips changed: read again, at once or two seconds after the last read.
-  function amPipsChanged() {
-    if (!amOpen || !amPipsLive()) return;
-    const wait = AM_PIPS_GAP_MS - (performance.now() - amPips.askedAt);
-    if (wait <= 0) amPipsAsk(); else amPipsLater(wait);
-  }
-  function amPipsAnswer(msg) {
-    if (!amPipsLive() || msg.seq !== amPips.seq) return;      // an older question's answer, or another chat's
-    amPips.known = true;
-    amPips.failed = msg.failed === true;
-    amPips.hidden = msg.hidden === true;
-    amPips.pips = amPips.failed ? [] : (Array.isArray(msg.pips) ? msg.pips : []).slice(0, 100)
-      .filter((pip) => pip && typeof pip === "object" && /^pip_[0-9a-f]{32}$/.test(String(pip.id || "")))
-      .map((pip) => ({ id: pip.id, name: String(pip.name || "Pip").slice(0, 120), pip_type: String(pip.pip_type || ""),
-        folder: Array.isArray(pip.why) && pip.why.includes("folder"), running: pip.running === true,
-        needs: Number.isSafeInteger(pip.needs_you) && pip.needs_you > 0 ? pip.needs_you : 0 }));
-    amPips.elsewhere = !amPips.failed && Number.isSafeInteger(msg.elsewhere) && msg.elsewhere > 0 ? msg.elsewhere : 0;
-    agentMapChanged();
-  }
-  function amPipStopped(msg) {
-    const id = String(msg.run_id || "");
-    if (!amPipStops.has(id)) return;
-    if (msg.ok !== true) amPipStops.set(id, `Couldn’t stop it: ${String(msg.message || "try again.").slice(0, 200)}`);
-    else amPipsChanged();
-    agentMapChanged();
-  }
-  // What the section draws, from this chat's runs and DGC's list. Every Pip is counted once: a row, idle in this
-  // folder, or elsewhere (a related Pip of another folder that is idle is elsewhere too).
-  function amPipsPlan() {
-    const runs = amSessionPipRuns(), working = new Set(runs.map((run) => run.pip_id));
-    const rows = runs.map((run) => ({ key: `run:${run.run_id}`, session: true, run, id: run.pip_id, name: run.name, pip_type: run.pip_type }));
-    let idle = 0, away = 0;
-    for (const pip of amPips.pips) {
-      if (working.has(pip.id)) continue;
-      if (pip.running || pip.needs > 0) rows.push({ key: `pip:${pip.id}`, session: false, pip, id: pip.id, name: pip.name, pip_type: pip.pip_type });
-      else if (pip.folder) idle++; else away++;
-    }
-    return { rows, idle, elsewhere: amPips.elsewhere + away };
-  }
-  function amPipMeta(item) {
-    if (item.session) {
-      const stop = amPipStops.get(item.run.run_id);
-      if (stop === "stopping") return "Stopping…";
-      const time = amDuration(Date.now() - item.run.at);
-      return stop || ["Working", time].filter(Boolean).join(" · ");
-    }
-    const needs = item.pip.needs;
-    if (item.pip.running) return needs > 0 ? "Running now · needs you in its chat" : "Running now";
-    return `Needs you · ${needs === 1 ? "1 thing waits" : `${needs} things wait`} in its chat`;
-  }
-  function amPipEntry(item) {
-    let entry = amPipRows.get(item.key);
-    if (entry) return entry;
-    const row = el("li", "am-pip"), face = el("span", "am-pip-face"), text = el("span", "am-pip-text");
-    const line = el("span", "am-pip-line"), name = el("span", "am-pip-name"), tag = el("span", "am-pip-tag"), meta = el("span", "am-pip-meta");
-    const act = el("button", "link am-pip-act");
-    act.type = "button";
-    face.setAttribute("aria-hidden", "true");
-    tag.textContent = "for this session";
-    line.append(name, tag);
-    text.append(line, meta);
-    row.append(face, text, act);
-    const key = item.key;
-    act.addEventListener("click", () => amPipAct(key));
-    entry = { row, face, name, tag, meta, act, item };
-    amPipRows.set(key, entry);
-    return entry;
-  }
-  function amPipAct(key) {
-    const item = amPipRows.get(key)?.item;
-    if (!item) return;
-    if (!item.session) {
-      closeAgentMap({ restoreFocus: false });
-      openPipsAt({ pip: item.id, section: "chat" });
-      return;
-    }
-    const id = item.run.run_id;
-    if (amPipStops.get(id) === "stopping") return;
-    amPipStops.set(id, "stopping");
-    vscode.postMessage({ type: "agentMapPipStop", run_id: id });
-    renderAgentMap();
-  }
-  function amPaintPipRow(entry, item) {
-    entry.item = item;
-    const { row, face, name, tag, meta, act } = entry;
-    const working = item.session || item.pip.running;
-    row.dataset.kind = item.session ? "session" : "related";
-    row.dataset.pipId = item.id;
-    row.dataset.state = working ? "running" : "needs";
-    const plush = window.PipConcepts?.plush, type = PIP_REPORT_TYPES.indexOf(String(item.pip_type || ""));
-    const faceKey = `${plush ? type : "none"}:${working ? "working" : "idle"}:${item.name}`;
-    if (face.dataset.key !== faceKey) {
-      face.dataset.key = faceKey;
-      let markup = "";
-      try { markup = plush && type >= 0 ? plush.markup({ index: type, name: item.name }, working ? "working" : "idle",
-        `am-pip-${item.key.replace(/[^a-z0-9]/gi, "")}`, { includeStyles: false }) || "" : ""; } catch { markup = ""; }
-      if (markup) face.innerHTML = markup; else face.replaceChildren();
-      face.classList.toggle("am-pip-face-plain", !markup);
-    }
-    agentsSetText(name, item.name);
-    if (name.title !== item.name) name.title = item.name;
-    if (tag.hidden !== !item.session) tag.hidden = !item.session;
-    agentsSetText(meta, amPipMeta(item));
-    const stopping = item.session && amPipStops.get(item.run.run_id) === "stopping";
-    agentsSetText(act, item.session ? (stopping ? "Stopping…" : "Stop") : "Open");
-    if (act.disabled !== stopping) act.disabled = stopping;
-    const label = item.session ? `Stop ${item.name}` : `Open ${item.name}’s chat`;
-    if (act.getAttribute("aria-label") !== label) act.setAttribute("aria-label", label);
-    if (act.title !== label) act.title = label;
-  }
-  function paintAmPips() {
-    const section = $("agent-map-pips");
-    if (!section) return;
-    const live = amPipsLive(), plan = live ? amPipsPlan() : { rows: [], idle: 0, elsewhere: 0 };
-    // Until DGC has answered, only the runs of this session are known; with none of anything, no section.
-    const show = live && (plan.rows.length > 0 || (amPips.known && (plan.idle > 0 || plan.elsewhere > 0)));
-    if (section.hidden !== !show) section.hidden = !show;
-    const keys = new Set(plan.rows.map((item) => item.key));
-    for (const key of [...amPipRows.keys()]) if (!keys.has(key)) amPipRows.delete(key);
-    for (const id of [...amPipStops.keys()]) if (!keys.has(`run:${id}`)) amPipStops.delete(id);
-    if (!show) { $("agent-map-pip-list").replaceChildren(); return; }
-    const count = $("agent-map-pips-count"), toggle = $("agent-map-pips-toggle"), body = $("agent-map-pips-body");
-    agentsSetText(count, String(plan.rows.length));
-    if (count.hidden !== !plan.rows.length) count.hidden = !plan.rows.length;
-    agentsSetText(toggle, amPips.hidden ? "Show" : "Hide");
-    if (toggle.getAttribute("aria-expanded") !== String(!amPips.hidden)) toggle.setAttribute("aria-expanded", String(!amPips.hidden));
-    const title = amPips.hidden ? "Show the Pips related to this session" : "Hide the Pips related to this session";
-    if (toggle.getAttribute("aria-label") !== title) toggle.setAttribute("aria-label", title);
-    if (toggle.title !== title) toggle.title = title;
-    if (body.hidden !== amPips.hidden) body.hidden = amPips.hidden;
-    agentsPlace($("agent-map-pip-list"), plan.rows.map((item) => {
-      const entry = amPipEntry(item);
-      amPaintPipRow(entry, item);
-      return entry.row;
-    }));
-    const said = [plan.idle ? `${plan.idle}${plan.rows.length ? " more" : ""} ${plan.idle === 1 ? "Pip in this folder is" : "Pips in this folder are"} idle` : "",
-      plan.elsewhere ? `${agentPlural(plan.elsewhere, "Pip")} elsewhere` : ""].filter(Boolean).join(" · ");
-    const more = $("agent-map-pips-more");
-    if (!more._words) {
-      more._words = more.appendChild(el("span", "am-pips-words"));
-      const all = more.appendChild(el("button", "am-link am-pips-all"));
-      all.type = "button"; all.textContent = "All Pips";
-      all.setAttribute("aria-label", "All Pips: open the Pips view");
-      all.title = "Open the Pips view, with every Pip";
-      all.addEventListener("click", () => { closeAgentMap({ restoreFocus: false }); openPipsAt({ overview: true }); });
-    }
-    agentsSetText(more._words, said ? `${said} · ` : "");
-  }
-  $("agent-map-pips-toggle")?.addEventListener("click", () => {
-    amPips.hidden = !amPips.hidden;
-    vscode.postMessage({ type: "agentMapPipsHidden", hidden: amPips.hidden });
-    agentMapChanged();
-  });
+  // (14 Nov night: no Pips in a Work session's agent map. No session owns a Pip; they run their own chats in the
+  // background. The map is this session's own sub-agents and background tasks only. The Pips section of 0.52 is gone.)
 
   // ---- the three levels ----
   // The map; an agent's or a task's card over it; an agent's transcript (or a task's output) over that.
@@ -16080,7 +16005,6 @@ function permissionChoices(ev) {
     agentsSetText($("agent-map-tasks-title"), [running ? agentPlural(running, "background task") : "",
       livePreviews ? agentPlural(livePreviews, "live preview") : "",
       stoppedByRestart ? `${stoppedByRestart} stopped by a restart` : "", "click a task for details"].filter(Boolean).join(" · "));
-    paintAmPips();
     // One tab stop in the tree and one in the tasks; the arrow keys move within each.
     amRove($("agent-map-tree"), focusedKey);
     amRove($("agent-map-task-list"), focusedKey);
@@ -16138,7 +16062,6 @@ function permissionChoices(ev) {
     const measured = Math.round($("agent-map-tree").clientWidth || 0);
     if (measured > 0) amWidth = measured;
     if (backgroundTasksLive) vscode.postMessage({ type: "listBackgroundShells" });
-    amPipsAsk();                              // which Pips are related to this session, read as the map opens
     renderAgentMap();
     amFocusRow(amFirstRow());
   }
@@ -16148,7 +16071,6 @@ function permissionChoices(ev) {
     amReleasePlace();
     amDropLevels();
     clearTimeout(amTick); amTick = 0;
-    clearTimeout(amPips.timer); amPips.timer = 0;
     hoverTip.hide();
     amSyncLayers();
     $("agents-pill").setAttribute("aria-expanded", "false");

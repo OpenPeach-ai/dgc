@@ -85,14 +85,18 @@ async function openChatDgc({ width, theme = "dark-modern", height = 760 }) {
   };
   return { page: x.page, errors: x.errors, show, ids: CHAT.ids, scale: 2, close: () => x.page.close() };
 }
-const PIP = { name: "a Pip's chat", ids: { line: "chat-tray", box: "#chat-form", log: ".conversation-log" }, kinds: ["queue", "computer", "fix"] };
+const PIP = { name: "a Pip's chat", ids: { line: "chat-tray", box: "#chat-form", log: ".conversation-log" }, kinds: ["queue", "computer"] };
+// (14 Nov night: a fix DGC is making is no pill here any more. It shows in the chat as its sub-agent's row and in the
+// sub-agents count under the box, as in Work. The scenes still start one, to show the bar leaves it out.)
+const noFixPill = (page) => page.evaluate(() => (window.__pipsRoot || document).querySelectorAll('#chat-tray [data-kind="fix"]').length === 0);
 const BUSY = "Waiting for its computer: it's finishing 'Book the 9 am train'";
 // A Project Pip mid-reply. `start`: what is going on as the chat opens (its computer busy, a fix DGC is making).
 async function openPip({ width, theme = "dark", height = 760, start = [] }) {
   const x = await pips.openChat(browser, { width, height, theme, where: width > 400 ? "tab" : "side", project: true, running: true, api: 78,
     doing: start.includes("computer") ? BUSY : "", fixing: start.includes("fix") });
   const show = { queue: async () => { for (const text of ["Then check the refunds module too", "Keep it to five findings"]) { await x.p.fill("#chatText", text); await x.p.press("#chatText", "Alt+Enter"); } } };
-  if (start.length) await x.p.waitForFunction((n) => (window.__pipsRoot || document).querySelectorAll("#chat-tray .rail-chip").length >= n, start.length);
+  const pills = start.filter((kind) => kind !== "fix").length;
+  if (pills) await x.p.waitForFunction((n) => (window.__pipsRoot || document).querySelectorAll("#chat-tray .rail-chip").length >= n, pills);
   return { page: x.p, errors: x.errors, show, ids: PIP.ids, scale: 1, close: () => x.close() };
 }
 
@@ -173,15 +177,17 @@ for (const width of [220, 300, 700, 1200]) {
     try {
       await settle(b.page);
       const two = await bar(b.page, b.ids);
-      oneLine(two, null, `${width}px, 2 kinds`, ["computer", "fix"]);
+      oneLine(two, null, `${width}px, its computer busy while a fix runs`, ["computer"]);
+      assert.equal(await noFixPill(b.page), true, "a running fix is no pill in a Pip's chat");
       await b.show.queue();
       await settle(b.page);
       const three = await bar(b.page, b.ids);
-      oneLine(three, two, `${width}px, 3 kinds`, PIP.kinds);
+      oneLine(three, null, `${width}px, 2 kinds`, PIP.kinds);
+      assert.deepEqual([three.boxTop, three.boxLeft, three.boxWidth], [two.boxTop, two.boxLeft, two.boxWidth], "the box did not move");
       assert.equal(three.pills[0].kind, "queue", "the queue comes first");
       if (width <= 220) assert.deepEqual(three.pills.flatMap((p) => p.words), [], "220px: no words, icons with counts");
-      if (width >= 700) { assert.deepEqual(three.hiddenKinds, []); assert.match(three.text, /2 queued.*Computer busy.*Fixing/); }
-      assert.doesNotMatch(three.text, /(^|\s)running/, "one fix says Fixing at every width, never a bare 'running'");
+      if (width >= 700) { assert.deepEqual(three.hiddenKinds, []); assert.match(three.text, /2 queued.*Computer busy/); }
+      assert.doesNotMatch(three.text, /Fixing|(^|\s)running/, "the fix is not said on the bar");
       t.diagnostic(`a Pip's chat ${width}px: ${three.pills.length} pills ${three.more} (${three.fit})`);
       assert.deepEqual(b.errors, []);
     } finally { await b.close(); }
@@ -365,11 +371,10 @@ for (const width of [300, 700]) {
       assert.match(s.pop.text, /Waiting for its computer: it's finishing 'Book the 9 am train'\. It carries on with this by itself as soon as its computer is free\./);
       await x.page.keyboard.press("Escape");
       assert.equal((await bar(x.page, x.ids)).focus, "computer");
-      // A fix: what DGC is doing about what this Pip found.
-      await x.page.click(chip("fix"));
+      // A fix DGC is making has no pill: it is the sub-agent's row in the chat.
+      assert.equal(await noFixPill(x.page), true);
+      await x.page.click(chip("computer"));
       s = await bar(x.page, x.ids);
-      assert.deepEqual({ kind: s.pop.kind, title: s.pop.title }, { kind: "fix", title: "Fixes" });
-      assert.match(s.pop.text, /DGC is fixing what this Pip found/);
       await x.page.locator(".pip-topbar").click({ position: { x: 100, y: 10 } });
       assert.equal((await bar(x.page, x.ids)).pop.open, false, "a click elsewhere closes it");
       assert.deepEqual(x.errors, []);
@@ -414,13 +419,20 @@ for (const [name, openIt, fill, queuePill] of SURFACES) for (const theme of ["da
       const g = await bar(x.page, x.ids);
       assert.equal(g.on, true);
       const boxRight = g.boxLeft + g.boxWidth;
-      const [ground, box1, ...corners] = await pixels(x.page, [
+      const [ground, box1, page, ...corners] = await pixels(x.page, [
         [g.left + 3, g.top + g.height / 2],          // the bar's own ground, clear of its pills
         inBox[0],
-        [g.boxLeft - 3, g.boxTop + 3], [g.boxLeft + 1, g.boxTop + 1],
-        [boxRight + 2, g.boxTop + 3], [boxRight - 2, g.boxTop + 1]], x.scale);
+        [g.left - 3, g.top + g.height / 2],          // the page's own ground, beside the shell: what a bite would show
+        // (The box has the 6 px family's corner since 14 Nov: the points sit clear of its 1 px edge and of its own
+        // soft shadow, which the old 22 px corner kept far from them. Outside: in the ring beside the top corner.
+        // The corner: the pixel in the box's own square that its round corner leaves to the shell.)
+        [g.boxLeft - 5, g.boxTop + 1], [g.boxLeft + 0.25, g.boxTop + 0.25],
+        [boxRight + 4, g.boxTop + 1], [boxRight - 0.75, g.boxTop + 0.25]], x.scale);
+      // The corner's pixel also carries the box's own hairline shadow (a few levels at most): it is the shell's ground
+      // within that, and never the page's (where the page's ground is another colour: dark, the shell is the page's).
+      const far = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
       for (const [i, colour] of corners.entries())
-        assert.ok(near(colour, ground), `${["left, outside", "left, the corner", "right, outside", "right, the corner"][i]}: rgb(${colour}) is not the shell's rgb(${ground})`);
+        assert.ok(near(colour, ground, i % 2 ? 4 : 2) && (far(page, ground) <= 4 || far(colour, ground) < far(colour, page)), `${["left, outside", "left, the corner", "right, outside", "right, the corner"][i]}: rgb(${colour}) is not the shell's rgb(${ground}) (the page is rgb(${page}))`);
       assert.ok(near(box1, ground0), `the box's ground is its own with the bar on it: rgb(${box1}), was rgb(${ground0})`);
       assert.ok(!near(ground, ground0, 0) || theme === "dark", "the shell is a step off the box");
       await x.page.click(queuePill);

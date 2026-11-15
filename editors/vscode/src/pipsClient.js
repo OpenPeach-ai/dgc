@@ -695,7 +695,7 @@ function continuityMarkup(){
 // effort, its menu is the reasoning card (slider; the model list one click deeper), and the context
 // chip shows how full the window is, with the same meter in its menu.
 const EFFORT_NAME={off:'Off',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high'};
-S.modelListOpen=false;S.modelCustom='';S.modelProviderView=false;S.modelProviderChoice='';S.composerNoteOpen=false;S.chatContext=null;let chatContextSeq=0;
+S.modelListOpen=false;S.modelTab='main';S.modelCustom='';S.modelProviderView=false;S.modelProviderChoice='';S.composerNoteOpen=false;S.chatContext=null;let chatContextSeq=0;
 function composerNote(text){
  const long=text.length>160;
  return `<p class="composer-note${long&&!S.composerNoteOpen?' clamped':''}">${esc(text)}</p>${long?`<button type="button" class="composer-more" data-composer-more aria-expanded="${S.composerNoteOpen}">${S.composerNoteOpen?'Show less':'Show more'}</button>`:''}`;
@@ -771,12 +771,18 @@ function chatControlsMarkup(canSend,busy){
  // D14: its own model is out and its fallback answers: the chip names the fallback, in olive, until its own model is back.
  const onFallback=S.fallbackOn&&!S.noProvider&&S.apiVersion>=76?S.fallbackOn:null;
  const unavailable=`<p class="composer-unavailable">${S.apiVersion<24?'Update DGC to change these settings.':'These settings didn’t load. Refresh, then send.'}</p>`;
- const effortLabel=o?EFFORT_NAME[o.thinking]||o.thinking:'';
- const effortStep=Math.max(0,chatThinkingLevels.indexOf(o?.thinking));
- const effort=o?`<div class="composer-effort-control" data-step="${effortStep}" style="--effort-t:${effortStep/4}"><label class="sr-only" for="chat-thinking">Thinking</label><input id="chat-thinking" class="composer-effort-slider${effortByKeys?' by-keys':''}" type="range" min="0" max="4" step="1" value="${effortStep}" aria-valuetext="${esc(effortLabel)}" title="${esc(choiceScope())}"${locked?' disabled':''}><span class="composer-effort-face">${pipAvatar(S.pip,S.chatActiveRun?'working':'idle',`effort-${S.pip.id}`,pipType(S.pip,S.types)||characterType(S.pip.pip_type))}</span><div class="composer-effort-labels"><span>Off</span><output for="chat-thinking">${esc(effortLabel)}</output><span>Extra high</span></div></div>${composerNote(choiceScope()+' '+S.chatControls.reasoning_note)}`:unavailable;
+ const ultraOn=pipUltra(),effortMax=ultraOffered()?5:4;
+ const effortLabel=o?(ultraOn?'Ultra':EFFORT_NAME[o.thinking]||o.thinking):'';
+ const effortStep=ultraOn?5:Math.max(0,chatThinkingLevels.indexOf(o?.thinking));
+ const effort=o?`<div class="composer-effort-control" data-step="${effortStep}" data-full="${effortStep===effortMax?1:0}" style="--effort-t:${effortStep/effortMax}"><label class="sr-only" for="chat-thinking">Thinking</label><input id="chat-thinking" class="composer-effort-slider${effortByKeys?' by-keys':''}" type="range" min="0" max="${effortMax}" step="1" value="${effortStep}" aria-valuetext="${esc(ultraOn?'Ultra: up to 4 sub-agents at once':effortLabel)}" title="${esc(choiceScope())}"${locked?' disabled':''}><span class="composer-effort-face">${pipAvatar(S.pip,S.chatActiveRun?'working':'idle',`effort-${S.pip.id}`,pipType(S.pip,S.types)||characterType(S.pip.pip_type))}</span><div class="composer-effort-labels" data-at="${effortStep===0?'start':effortStep===effortMax?'end':''}"><span>Off</span><output for="chat-thinking">${esc(effortLabel)}</output><span>${effortMax===5?'Ultra':'Extra high'}</span></div></div>${composerNote(choiceScope()+' '+S.chatControls.reasoning_note)}`:unavailable;
  const reviewed=!personalPip();
+ // The two tabs under the model row and the slider, as in Work's menu (live round 1, 14 Nov): once DGC has said how
+ // many sub-agents this Pip runs (Pips API 97). An older DGC has no sub-agents for a Pip, so no tabs.
+ const tabbed=ultraOffered(),agentsTab=tabbed&&S.modelTab==='agents';
+ const modelTab=(id,label,on,tip)=>`<button type="button" class="model-tab" role="tab" id="chat-model-tab-${id}" data-model-tab="${id}" aria-selected="${on}" tabindex="${on?0:-1}" title="${esc(tip)}">${label}</button>`;
+ const modelTabs=tabbed?`<div class="model-tabs" role="tablist" aria-label="Main model, or sub-agents">${modelTab('main','Main model',!agentsTab,'This Pip’s model')}${modelTab('agents','Sub-agents',agentsTab,`Sub-agents: ${pipAgentsWords()}`)}</div>`:'';
  const list=chatModelListMarkup(selected,locked,reviewed,current,subs,usage);
- const modelMenu=S.composerPanel==='model'?`<div class="composer-model-menu composer-reasoning dgc-menu from-right" role="dialog" aria-label="Model and thinking"><button type="button" id="chat-model-summary" class="composer-model-summary" aria-expanded="${S.modelListOpen}">${composerIcon('zap')}<span class="composer-summary-label">${esc(shownModel)}${o?` <span class="muted">${esc(effortLabel)}</span>`:''}</span>${composerIcon('next')}</button>${effort}${S.modelListOpen?list:''}</div>`:'';
+ const modelMenu=S.composerPanel==='model'?`<div class="composer-model-menu composer-reasoning dgc-menu from-right" role="dialog" aria-label="Model and thinking"><button type="button" id="chat-model-summary" class="composer-model-summary" aria-expanded="${S.modelListOpen}">${composerIcon('zap')}<span class="composer-summary-label">${esc(shownModel)}${o?` <span class="muted">${esc(effortLabel)}</span>`:''}</span>${composerIcon('next')}</button>${effort}${modelTabs}${agentsTab?pipAgentsTabMarkup(shownModel):S.modelListOpen?list:''}</div>`:'';
  const sizes=o?[...new Set([2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576,o.context_size])].filter(n=>n<=S.chatControls.context_max).sort((a,b)=>a-b):[];
  // No provider: no model anyone chose, so no window to measure against, and no number.
  // On a subscription the CLI keeps its own window, whose size DGC doesn't know: no setter, and no percentage of a number it never uses.
@@ -801,7 +807,10 @@ function chatControlsMarkup(canSend,busy){
  const addMenu=S.composerPanel==='add'&&canAttachImages()?`<div class="composer-add-menu dgc-menu" role="menu" aria-label="Add">${globalThis.DgcMenu?.html([{name:'Add to the message',rows:[{id:'upload',label:'Pictures and files',hint:'From this computer'},{id:'mention',label:personalPip()?'A Pip or an app':'A file in this project',hint:'@'}]},...(goalsOn()?[{name:'This chat',rows:[{id:'goal',label:'Set a goal',hint:'It keeps going until it is done'}]}]:[])],{data:'pip-add'})||''}</div>`:'';
  return `${modelMenu}${contextMenu}${addMenu}${levelMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add pictures, files and more" aria-label="Add pictures, files and more" aria-haspopup="menu" aria-expanded="${S.composerPanel==='add'}"${S.busy||archived()?' disabled':''}>${composerIcon('add')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}${S.noProvider?'':`<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="${cliName?`${esc(cliName)} manages its own context window`:`Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}`}" aria-label="Context window${cliName?`: ${esc(cliName)} manages its own`:pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>`}${routineChip}${levelChip}</div><div class="composer-right">${convOn()?pillMarkup(agentsNow(),{esc,open:agentsUi.map}):''}<button type="button" id="chat-model" class="model-control${onFallback?' on-fallback':''}" aria-label="Change model and thinking${onFallback?`. ${esc(onFallback.model)}, its fallback, is answering`:''}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(onFallback?`${chip.text} didn’t answer, so its fallback ${onFallback.model} is answering. It tries ${chip.text} again with your next message.`:chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="composer-model-icon" aria-hidden="true">${composerIcon('zap')}</span><span class="model-copy"><span class="composer-model-name">${esc(onFallback?onFallback.model:shownModel)}</span>${onFallback?'<span class="composer-fallback-word">fallback</span>':''}${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
-function fitChatInput(){const input=$('chatText');if(!input)return;const sendButton=document.querySelector('.chat-send');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
+function fitChatInput(){const input=$('chatText');if(!input)return;
+ // (Send alone is lit by what there is to send. The voice button, drawn where Send is while the box is empty, keeps its
+ // circle: this pass took it away after every redraw, so it flickered when a menu opened: live round 1, 14 Nov.)
+ const sendButton=document.querySelector('.chat-send:not(#chat-voicemode)');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
 // What the prompt box's choices are for: since API 47 they are this Pip's own (its replies and the work it does on
 // its own, saved at once); before, only the next reply.
 function choiceScope(){return S.apiVersion>=47?'For this Pip: its replies and the work it does on its own.':'For the next reply.';}
@@ -1505,18 +1514,18 @@ function chatQueueSendText(text,marks){
 }
 // ---- the bar for what is going on (the tray, media/shared/tray.js: the same bar as Work's and ChatDGC's). One line
 // on the box, in a soft shell round both: the messages queued for this Pip, a routine of its running, its computer
-// busy with another request, and a fix DGC is making for it are each a pill; a pill opens its detail just above.
+// busy with another request and what a paste was cleaned of are each a pill; a pill opens its detail just above. A fix
+// DGC is making is no pill (his call, 14 Nov night): it is the sub-agent's row in the chat and the count under the box.
 // Nothing going on: no bar. What its computer holds for your okay stays a card above the bar: it asks you something.
 const TRAY_ICONS={queue:'<path d="M2.5 4h1M2.5 8h1M2.5 12h1M6 4h7.5M6 8h7.5M6 12h7.5"/>',routine:'<circle cx="8" cy="8" r="6"/><path d="M6.7 5.6v4.8L10.6 8Z"/>',
- computer:'<rect x="2" y="3" width="12" height="8" rx="1.2"/><path d="M6 13.5h4M8 11v2.5"/>',fix:'<path d="m9.5 2.5 4 4-7 7H2.5V9.5Z M8 4l4 4"/>',
+ computer:'<rect x="2" y="3" width="12" height="8" rx="1.2"/><path d="M6 13.5h4M8 11v2.5"/>',
  paste:'<path d="M1.8 8S4 4.2 8 4.2 14.2 8 14.2 8 12 11.8 8 11.8 1.8 8 1.8 8Z"/><circle cx="8" cy="8" r="1.7"/><path d="M3 13 13 3"/>',up:'<path d="m4 10 4-4 4 4"/>'};
 const trayIcon=name=>`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TRAY_ICONS[name]||''}</svg>`;
-const TRAY_TITLES={queue:'Queued messages',routine:'Routine running',computer:'Its computer',fix:'Fixes',paste:'Pasted text'};
+const TRAY_TITLES={queue:'Queued messages',routine:'Routine running',computer:'Its computer',paste:'Pasted text'};
 let chatTray=null,chatTrayParts=null,chatTrayHome=null,chatTrayNote=null,chatTraySig='',chatTrayPip='';
 function trayRoutine(){const live=S.live,run=S.chatActiveRun;return live?.routine&&live.pipId===S.selected&&run&&live.runId===run.id?{title:String(live.routine),run}:null;}
 // Its computer is busy with another request of yours: the run says so itself ("Waiting for its computer: it's finishing ...").
 function trayComputer(){const run=S.chatActiveRun,act=run&&S.stream?.runId===run.id?S.stream.activity:null,m=/^Waiting for its computer(?::\s*(.*))?$/.exec(String(act?.label||''));return m?{line:String(act.label),doing:m[1]||''}:null;}
-function trayFixes(){return fixesShown()&&S.fixesPip===S.selected?[...S.fixes.values()].filter(f=>FIX_ACTIVE.includes(f.state)):[];}
 function traySpec(kind){
  const name=S.pip?.name||'This Pip';
  if(kind==='queue'){const count=S.chatWaiting.length+chatQueue().length;
@@ -1526,8 +1535,6 @@ function traySpec(kind){
  if(kind==='computer'){const c=trayComputer();if(!c)return null;
   return {icon:'computer',num:'Computer busy',detail:c.doing?c.doing.replace(/^it.s /,''):'',label:c.line,tip:c.line};}
  if(kind==='paste'){const c=chatBox?.cleaned,said=c&&globalThis.DgcPasteClean?.pill(c.n,c.counts);return said?{icon:'paste',...said}:null;}
- if(kind==='fix'){const n=trayFixes().length;if(!n)return null;
-  return {icon:'fix',word:n===1?'':'Fixes',num:n===1?'Fixing':String(n),after:n===1?'':'running',live:true,detail:n===1?'DGC is fixing what this Pip found':'',label:n===1?'DGC is fixing what this Pip found':`DGC is making ${n} fixes for what this Pip found`,tip:n===1?'DGC is fixing what this Pip found':`${n} fixes running`};}
  return null;
 }
 // A kind's detail: the queue's own rows, or what it is in words with the one thing to do about it.
@@ -1540,9 +1547,6 @@ function trayDetail(kind){
   if(usable())acts.push(['Stop','Stop this run',()=>{const id=S.chatActiveRun?.id;chatTray.close();if(id)void mutate({type:'cancel_pip_run',run_id:id},()=>loadMessages());}]);
  }else if(kind==='computer'){const c=trayComputer();if(!c)return null;
   lines.push(`${c.line}.`,'It carries on with this by itself as soon as its computer is free.');
- }else if(kind==='fix'){const fixes=trayFixes();if(!fixes.length)return null;
-  lines.push(fixes.length===1?'DGC is fixing what this Pip found, in a Work chat of its own.':`DGC is making ${fixes.length} fixes for what this Pip found, each in a Work chat of its own.`,'Its post in the chat shows the result when it is done.');
-  if(typeof options.onOpenFix==='function'&&!remoteHost)for(const [i,f] of fixes.filter(f=>f.session_id).slice(0,3).entries())acts.push([fixes.length===1?'Open its Work chat':`Open Work chat ${i+1}`,'Watch or stop this fix in the Work chat it runs in',()=>{chatTray.close({restore:false});openFixChat(f.run_id);}]);
  }else return null;
  const doc=chatTrayNote.ownerDocument;chatTrayNote.replaceChildren(...lines.map((text,i)=>{const p=doc.createElement('p');if(i)p.className='tray-note-more';p.textContent=text;return p;}));
  if(acts.length){const row=doc.createElement('div');row.className='tray-note-acts';for(const [text,title,run] of acts){const b=doc.createElement('button');b.type='button';b.className='tray-note-act';b.textContent=text;b.title=title;b.dataset.trayFocus='';b.addEventListener('click',run);row.append(b);}chatTrayNote.append(row);}
@@ -1559,7 +1563,7 @@ function mountChatTray(){
   chatTrayHome.innerHTML='<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages" hidden><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list"></ol></section>';
   if(chatBox?.note)chatTrayHome.append(chatBox.note);   // what a paste was cleaned of waits here until its pill opens it
   chatTrayNote=doc.createElement('div');chatTrayNote.className='tray-note';
-  chatTray=globalThis.DgcTray.create({...chatTrayParts,moreId:'chat-tray-more',keep:['queue','computer','routine','fix','paste'],spec:traySpec,
+  chatTray=globalThis.DgcTray.create({...chatTrayParts,moreId:'chat-tray-more',keep:['queue','computer','routine','paste'],spec:traySpec,
    solo:kind=>kind==='paste'?['Dismiss','Stop showing this notice',()=>chatBox?.note?.querySelector('button')?.click()]:null,detail:trayDetail,title:kind=>TRAY_TITLES[kind]||'',
    icon:spec=>`<span class="codicon" aria-hidden="true">${trayIcon(spec.icon)}</span>`,caret:`<span class="chip-caret codicon" aria-hidden="true">${trayIcon('up')}</span>`,
    popFocus:(kind,node)=>node.querySelector('[data-tray-focus], .dgc-queue-handle, button:not(:disabled)'),
@@ -1575,7 +1579,6 @@ function drawChatTray(){
  if(S.chatWaiting.length+chatQueue().length)kinds.push('queue');
  if(trayRoutine())kinds.push('routine');
  if(trayComputer())kinds.push('computer');
- if(trayFixes().length)kinds.push('fix');
  if(chatBox?.cleaned.n)kinds.push('paste');
  const sig=JSON.stringify([S.selected,kinds.map(kind=>[kind,traySpec(kind)])]);
  if(sig===chatTraySig&&chatTray.kinds.join()===kinds.join())return;
@@ -4425,19 +4428,40 @@ function agentCheckReply(m){
 // Focus the map moves by itself after a click is quiet (no ring); the keyboard's always shows.
 let agentsByPointer=false;
 const amFocus=el=>{if(!el)return;el.classList.toggle('quiet-focus',agentsByPointer);el.focus({preventScroll:true});};
-const agentsUi={pip:'',list:[],seq:0,doing:new Map(),steps:new Map(),stepsOpen:new Set(),map:false,card:'',earlier:false,stopping:'',timer:0,drawn:''};
+const agentsUi={pip:'',list:[],slots:1,seq:0,doing:new Map(),steps:new Map(),stepsOpen:new Set(),map:false,card:'',earlier:false,stopping:'',timer:0,drawn:''};
 const changeUi={folded:new Set(),menu:''};const askedWords=new Map();
-function resetAgents(){window.clearTimeout(agentsUi.timer);Object.assign(agentsUi,{pip:'',list:[],seq:agentsUi.seq+1,map:false,card:'',earlier:false,stopping:'',timer:0});agentsUi.doing.clear();agentsUi.steps.clear();agentsUi.stepsOpen.clear();changeUi.folded.clear();changeUi.menu='';renderAgentMap();}
+function resetAgents(){window.clearTimeout(agentsUi.timer);Object.assign(agentsUi,{pip:'',list:[],slots:1,seq:agentsUi.seq+1,map:false,card:'',earlier:false,stopping:'',timer:0});agentsUi.doing.clear();agentsUi.steps.clear();agentsUi.stepsOpen.clear();changeUi.folded.clear();changeUi.menu='';renderAgentMap();}
 const agentsNow=()=>convOn()&&agentsUi.pip===S.selected?agentsUi.list:[];
 const fixAgents=()=>convOn()?(flowNow()?.fixes||[]).map(f=>f.agent).filter(Boolean):[];
 const agentOf=id=>agentsNow().find(a=>a.id===id)||fixAgents().find(a=>a.id===id)||null;
+// Ultra on the Pip's thinking slider (live round 1, 14 Nov): up to 4 sub-agents at once for this Pip (set_pip_agents,
+// Pips API 97: 1 is a Pip's usual, 4 is Ultra). Offered once DGC has said how many this Pip runs.
+const ULTRA_SLOTS=4;let ultraBusy=false;
+// The Sub-agents tab of a Pip's model menu. What is true today: a Pip's sub-agents run on the Pip's own model, at its
+// thinking, one at a time or up to `slots` at once (Ultra is 4). DGC cannot yet give a Pip's sub-agents a model, a
+// thinking level, a context window or a fallback of their own (set_pip_agents takes only `slots`), so the tab offers
+// none: when it can, their list goes under the row here, with "This Pip's model" first, and each row's menu.
+const pipAgentsWords=()=>agentsUi.slots>=ULTRA_SLOTS?`Up to ${agentsUi.slots} at once (Ultra).`:agentsUi.slots>1?`Up to ${agentsUi.slots} at once.`:'One at a time.';
+function pipAgentsTabMarkup(model){
+ return `<div class="composer-agents" role="tabpanel" aria-labelledby="chat-model-tab-agents"><div class="composer-model-options" role="listbox" aria-label="What its sub-agents run on"><div class="composer-model-option dgc-menu-row composer-agents-own" role="option" aria-selected="true"><span class="composer-model-check dgc-menu-icon">${composerIcon('check')}</span><span class="composer-model-row">This Pip’s model<small>Now: ${esc(model||'not chosen yet')}</small></span></div></div><p class="composer-scope composer-agents-note">${esc(pipAgentsWords())}${agentsUi.slots>=ULTRA_SLOTS?'':' Ultra on the slider lets up to 4 work at once.'} They think as hard as this Pip does.</p></div>`;
+}
+const ultraOffered=()=>convOn()&&agentsUi.pip===S.selected;
+const pipUltra=()=>ultraOffered()&&agentsUi.slots>=ULTRA_SLOTS;
+async function setPipUltra(on){
+ if(!ultraOffered()||!usable()||pipUltra()===on)return;
+ const pip=S.selected,token=scope(),was=agentsUi.slots;
+ agentsUi.slots=on?ULTRA_SLOTS:1;ultraBusy=true;render();
+ try{const said=await send('set_pip_agents',{pip_id:pip,slots:on?ULTRA_SLOTS:1});if(token===scope()&&agentsUi.pip===pip&&Number.isSafeInteger(said?.slots)&&said.slots>0)agentsUi.slots=said.slots;}
+ catch(error){if(token===scope()&&agentsUi.pip===pip){agentsUi.slots=was;setError(error);}}
+ finally{ultraBusy=false;if(token===scope())render();}
+}
 async function loadAgents(){
  if(!convOn()||!usable())return;
  const token=scope(),sequence=++agentsUi.seq,pip=S.selected;
  try{const page=agentsPage(await send('list_pip_agents',{pip_id:pip}),pip);if(token!==scope()||sequence!==agentsUi.seq)return;
-  const before=agentsUi.pip===pip?JSON.stringify(agentsUi.list):'';agentsUi.pip=pip;agentsUi.list=page.agents;
+  const before=agentsUi.pip===pip?JSON.stringify(agentsUi.list):'';const slotsBefore=agentsUi.slots;agentsUi.pip=pip;agentsUi.list=page.agents;if(!ultraBusy)agentsUi.slots=page.slots;
   for(const a of page.agents)if(a.run_id&&(AGENT_LIVE.includes(a.state)||agentsUi.stepsOpen.has(a.id)||agentsUi.card===a.id))void loadAgentSteps(a);
-  if(JSON.stringify(page.agents)!==before)render();else renderAgentMap();}
+  if(JSON.stringify(page.agents)!==before||agentsUi.slots!==slotsBefore)render();else renderAgentMap();}
  catch{/* the pill and the map keep what they had */}
  finally{if(token===scope())agentsTick();}
 }
@@ -4920,12 +4944,17 @@ function convListMarkup(place){
   newStep:ui.newStep&&computers?newConversationMarkup({esc,computers:computers.have,limit:computers.limit,choice:ui.newChoice,busy:ui.busy,error:ui.error}):''});
 }
 // The Pip's name in its chat's top bar: with conversations, a button that opens them.
-function convNameMarkup(p){
- const list=convList();if(!list)return `<span>${esc(p.name)}</span>`;
- const ui=convUi(),shown=shownConversation(),several=list.filter(c=>!c.archived).length>1||!!S.conv;
+// The thread selector, in the middle of a Pip's chat header (his call of 14 Nov): the conversation shown, by its name,
+// with the chevron that opens the list. The Pip's face and name stay at the left whatever is shown here, so nothing in
+// the header moves when the thread changes. A long name ends in "…" (the stylesheet caps its width).
+function convThreadMarkup(p){
+ const list=convList();if(!list)return '';
+ const ui=convUi(),shown=shownConversation(),title=shown?conversationTitle(shown):'Chat';
  const unread=list.some(c=>!c.archived&&c.unread&&c!==shown);
- return `<button type="button" id="pip-convs" class="pip-convs" aria-haspopup="menu" aria-expanded="${ui.menu}" aria-controls="conv-menu" title="${esc(`Conversations with ${p.name}`)}"><span class="pip-convs-name">${esc(p.name)}</span>${unread?'<span class="conv-mark unread" title="Something new in another conversation" aria-hidden="true"></span>':''}<svg class="pip-convs-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>${unread?'<span class="sr-only">, something new in another conversation</span>':''}</button>${several&&shown?`<small class="pip-conv-title" title="${esc(conversationTitle(shown))}">${esc(conversationTitle(shown))}</small>`:''}`;
+ return `<div class="pip-thread"><button type="button" id="pip-convs" class="pip-convs" aria-haspopup="menu" aria-expanded="${ui.menu}" aria-controls="conv-menu" aria-label="${esc(`${title}: conversations with ${p.name}`)}" title="${esc(title.length>24?`${title} · conversations with ${p.name}`:`Conversations with ${p.name}`)}"><span class="pip-conv-title">${esc(title)}</span>${unread?'<span class="conv-mark unread" aria-hidden="true"></span>':''}<svg class="pip-convs-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>${unread?'<span class="sr-only">, something new in another conversation</span>':''}</button></div>`;
 }
+/** Whether this Pip has more than one conversation to choose from (or shows one that is not its first). */
+function convSeveral(){const list=convList();return !!list&&(list.filter(c=>!c.archived).length>1||!!S.conv);}
 function convMenuMarkup(){
  const ui=convUi();if(!ui.menu||!convList())return '';
  return `<div id="conv-menu" class="conv-menu conv-list dgc-menu" role="menu" aria-label="${esc(`Conversations with ${S.pip.name}`)}">${convListMarkup('menu')}</div>`;
@@ -5133,7 +5162,17 @@ function simplePipHeader(){
   const sub=['instructions','character'].includes(S.pipPage),share=S.apiVersion>=41&&['scout','lens','rook','lock','quill'].includes(p.pip_type)&&!archived();
   return `<header class="pip-topbar"><button type="button" id="${sub?'pip-page-back':'simple-to-chat'}" class="topbar-icon" aria-label="${sub?'Back':'Back to the chat'}" title="${sub?'Back':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${sub?(S.pipPage==='character'?'Face':'Instructions'):'Settings'}${pipOff(p)?' · Off':''}</small></div><div class="topbar-actions">${pipSwitchMarkup(p)}${share?`<button type="button" class="topbar-icon" data-pip-share aria-label="Share as template" title="Share as template"${S.busy||!usable()?' disabled':''}>${simpleIcon('share')}</button>`:''}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${pipPageMenu()}</div></details></div></header>`;
  }
- return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}${onChat?convNameMarkup(p):`<span>${esc(p.name)}</span>`}${onChat?(project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:folderPip?folderWhereMarkup(p):''):`<small>${esc(project||folderPip?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${pipSwitchMarkup(p)}${project||folderPip&&activeOwnRun()?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${folderPip?runNowMenuRow():''}${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>${onChat?convMenuMarkup():''}${computerMenuMarkup()}</header>`;
+ const actions=`<div class="topbar-actions">${pipSwitchMarkup(p)}${project||folderPip&&activeOwnRun()?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${folderPip?runNowMenuRow():''}${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>`;
+ // Its chat: back, its face and name at the left, fixed; the thread selector in the middle, always centred; the switch,
+ // its computer and the menu at the right (live round 1, 14 Nov). What a Project Pip last did, or its folder, follows
+ // its name where there is room.
+ if(onChat){
+  // (Pointed at, its face says who it is: a Project Pip's character and role as before, any other Pip's name, which
+  // the narrow side bar leaves to its face.)
+  const thread=convThreadMarkup(p),pillTitle=project&&pipType(p,S.types)?`${type.name} · ${type.role}`:p.name;
+  return `<header class="pip-topbar pip-topbar-chat${thread?(convSeveral()?' has-threads':' one-thread'):''}"><button type="button" id="simple-back" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}" title="${esc(pillTitle)}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span class="pip-name">${esc(p.name)}</span>${project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:folderPip?folderWhereMarkup(p):''}</div>${thread}${actions}${convMenuMarkup()}${computerMenuMarkup()}</header>`;
+ }
+ return `<header class="pip-topbar"><button type="button" id="simple-to-chat" class="topbar-icon" aria-label="Back to the chat" title="Back to the chat">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}"${project&&pipType(p,S.types)?` title="${esc(`${type.name} · ${type.role}`)}"`:''}>${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${esc(project||folderPip?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small></div>${actions}${computerMenuMarkup()}</header>`;
 }
 function simpleMarkup(){
  const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup(true)}</header>${scopeTabsMarkup()}`;
@@ -6622,7 +6661,7 @@ const dropOverlay=on=>{const o=document.querySelector('#chat-form > .dgc-drop');
 document.addEventListener('dragenter',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form')||![...(event.dataTransfer?.types||[])].includes('Files'))return;dropDepth++;dropOverlay(true);});
 document.addEventListener('dragleave',event=>{if(!event.target?.closest?.('#chat-form'))return;dropDepth=Math.max(0,dropDepth-1);if(!dropDepth)dropOverlay(false);});
 document.addEventListener('drop',event=>{dropDepth=0;dropOverlay(false);if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='hook-network'){const on=event.target.checked;void reachCall({local_network:on},'network',on?'Devices on your home network can call your routines’ addresses.':'Your home network can no longer call your routines’ addresses.');return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipKnowsYou'){void setKnowsYou(event.target.checked);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){const picked=event.target.value;if(picked==='full'&&onePips()&&levelState.value?.level!=='full')event.target.value=levelState.value?.level||'ask';chooseLevel(picked,{refocus:'pipLevel'});return;}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.dataset?.pipAppSwitch){void setAppUse(event.target.dataset.pipAppSwitch,event.target.checked);return;}if(event.target.dataset?.pipSkillSwitch){void setSkillUse(event.target.dataset.pipSkillSwitch,event.target.checked);return;}if(event.target.dataset?.teamPip){teamTicked(event.target);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='hook-network'){const on=event.target.checked;void reachCall({local_network:on},'network',on?'Devices on your home network can call your routines’ addresses.':'Your home network can no longer call your routines’ addresses.');return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipKnowsYou'){void setKnowsYou(event.target.checked);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){const picked=event.target.value;if(picked==='full'&&onePips()&&levelState.value?.level!=='full')event.target.value=levelState.value?.level||'ask';chooseLevel(picked,{refocus:'pipLevel'});return;}if(event.target.id==='pipPaying'){void setPaying(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.dataset?.pipAppSwitch){void setAppUse(event.target.dataset.pipAppSwitch,event.target.checked);return;}if(event.target.dataset?.pipSkillSwitch){void setSkillUse(event.target.dataset.pipSkillSwitch,event.target.checked);return;}if(event.target.dataset?.teamPip){teamTicked(event.target);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){const step=Number(event.target.value);if(step>=5){void setPipUltra(true);return;}if(pipUltra())void setPipUltra(false);updateChatPreference('thinking',chatThinkingLevels[step]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='pip-flow-form'){event.preventDefault();reviewFlow();return;}
   if(event.target.id==='pip-folder-form'){event.preventDefault();addPipFolder();return;}
@@ -6760,6 +6799,7 @@ document.addEventListener('click',event=>{
   if(folderUi.open&&!event.target.closest?.('.pip-folder-set'))closeFolderMenu();
   if(S.composerPanel&&!event.target.closest?.('.composer-model-menu,.pip-routines-popover,.composer-add-menu,.composer-level-menu,#chat-model,#chat-context-toggle,#chat-routines,#chat-attach,#chat-level')){S.composerPanel='';render();}
   if(event.target.closest?.('#pip-sent-toggle')){toggleSent();return;}
+  {const tab=event.target.closest?.('.composer-model-menu [data-model-tab]');if(tab){const to=tab.dataset.modelTab==='agents'?'agents':'main';if(S.modelTab!==to){S.modelTab=to;if(to==='main')S.modelListOpen=true;render();}$(`chat-model-tab-${to}`)?.focus();return;}}
   if(event.target.closest?.('#chat-voicemode')){S.error='';voiceMode?.start();return;}
   const talkAction=event.target.closest?.('[data-voicebar="pips-talk"] [data-voice-action]')?.dataset.voiceAction;
   if(talkAction){voiceMode?.action(talkAction);return;}
@@ -7156,8 +7196,8 @@ document.addEventListener('click',event=>{
     case 'back-pips':chatDrafts.set(S.selected,draft.chatText);if(!S.selected)S.tab='chat';S.overview=true;rememberView();render();break;
     case 'return-main':options.close?.();break;
     case 'pip-to-latest':chatFollow.latest();break;
-    case 'chat-model':S.composerPanel=S.composerPanel==='model'?'':'model';S.modelListOpen=true;S.modelCustom='';S.fallbackMenu='';if(S.composerPanel)void loadPipBackup();S.modelProviderView=false;S.modelProviderChoice=currentChatProvider(modelValue(S.pip?.model_choice));S.composerNoteOpen=false;render();if(S.composerPanel){if(!S.models.length)void loadModels();$('chat-model-summary')?.focus();const chosen=document.querySelector('.composer-model-options [aria-selected="true"]'),list=chosen?.closest('.composer-model-options');if(list)list.scrollTop=Math.max(0,chosen.offsetTop-list.offsetTop-list.clientHeight/2);}break;
-    case 'chat-model-summary':S.modelListOpen=!S.modelListOpen;S.modelProviderView=false;render();(S.modelListOpen?$('chat-model-providers'):$('chat-model-summary'))?.focus();break;
+    case 'chat-model':S.composerPanel=S.composerPanel==='model'?'':'model';S.modelListOpen=true;S.modelTab='main';S.modelCustom='';S.fallbackMenu='';if(S.composerPanel)void loadPipBackup();S.modelProviderView=false;S.modelProviderChoice=currentChatProvider(modelValue(S.pip?.model_choice));S.composerNoteOpen=false;render();if(S.composerPanel){if(!S.models.length)void loadModels();$('chat-model-summary')?.focus();const chosen=document.querySelector('.composer-model-options [aria-selected="true"]'),list=chosen?.closest('.composer-model-options');if(list)list.scrollTop=Math.max(0,chosen.offsetTop-list.offsetTop-list.clientHeight/2);}break;
+    case 'chat-model-summary':if(S.modelTab==='agents'){S.modelTab='main';S.modelListOpen=true;S.modelProviderView=false;render();$('chat-model-providers')?.focus();break;}S.modelListOpen=!S.modelListOpen;S.modelProviderView=false;render();(S.modelListOpen?$('chat-model-providers'):$('chat-model-summary'))?.focus();break;
     case 'chat-model-providers':S.modelProviderView=true;render();[...document.querySelectorAll('[data-chat-provider]')].find(node=>node.dataset.chatProvider===S.modelProviderChoice)?.focus();break;
     case 'chat-model-close':S.composerPanel='';render();$('chat-model')?.focus();break;
     case 'chat-context-toggle':S.composerPanel=S.composerPanel==='context'?'':'context';S.composerNoteOpen=false;render();if(S.composerPanel){void loadChatContext();$('chat-context')?.focus();}break;
@@ -7374,10 +7414,11 @@ document.addEventListener('mousemove',event=>picker.hover(event));
 const markEffortInput=byKeys=>{effortByKeys=byKeys;for(const node of [document,...[document.querySelector('#pips-host')?.shadowRoot].filter(Boolean)])node.getElementById?.('chat-thinking')?.classList.toggle('by-keys',byKeys);};
 // The slider follows the pointer while it's held: its face, fill and word move with it, and the choice is saved on release.
 const pathTarget=event=>event.composedPath?.()[0]||event.target;
-const followEffort=input=>{const step=Math.max(0,Math.min(4,Number(input.value)||0)),control=input.closest?.('.composer-effort-control');
- if(!control)return;control.dataset.step=String(step);control.style.setProperty('--effort-t',String(step/4));
- const word=EFFORT_NAME[chatThinkingLevels[step]]||chatThinkingLevels[step];input.setAttribute('aria-valuetext',word);
- const out=control.querySelector('output');if(out)out.textContent=word;};
+const followEffort=input=>{const most=Number(input.max)===5?5:4,step=Math.max(0,Math.min(most,Number(input.value)||0)),control=input.closest?.('.composer-effort-control');
+ if(!control)return;control.dataset.step=String(step);control.style.setProperty('--effort-t',String(step/most));
+ const word=step===5?'Ultra':EFFORT_NAME[chatThinkingLevels[step]]||chatThinkingLevels[step];input.setAttribute('aria-valuetext',step===5?'Ultra: up to 4 sub-agents at once':word);
+ const out=control.querySelector('output');if(out)out.textContent=word;
+ const labels=control.querySelector('.composer-effort-labels');if(labels)labels.dataset.at=step===0?'start':step===most?'end':'';control.dataset.full=step===most?'1':'0';};
 const releaseEffort=()=>{if(!effortHeld)return;effortHeld=false;if(effortRedraw){effortRedraw=false;render();}};
 if(typeof document!=='undefined'){document.addEventListener('pointerdown',event=>{if(pathTarget(event)?.id==='chat-thinking')effortHeld=true;},true);
  document.addEventListener('pointerup',releaseEffort,true);document.addEventListener('pointercancel',releaseEffort,true);
@@ -7401,6 +7442,8 @@ if(typeof document!=='undefined'){document.addEventListener('pointerdown',()=>ma
  root.addEventListener('wheel',onWheel,{passive:true});disposers.push(()=>root.removeEventListener('wheel',onWheel));}
 document.addEventListener('keydown',event=>{
   if(picker.keydown(event))return;
+  // The model menu's two tabs: Left and Right move between them, and choose (as Work's do).
+  {const tab=event.target.closest?.('.composer-model-menu [data-model-tab]');if(tab&&(event.key==='ArrowLeft'||event.key==='ArrowRight')){event.preventDefault();event.stopPropagation();const to=tab.dataset.modelTab==='main'?'agents':'main';S.modelTab=to;if(to==='main')S.modelListOpen=true;render();$(`chat-model-tab-${to}`)?.focus();return;}}
   if(!S.review&&allowFromOpen){const row=event.target.closest?.('.allow-from'),menu=row?.querySelector('.allow-from-menu');
    if(menu&&menu.contains(event.target)){if(globalThis.DgcMenu?.handle(menu,event,{rows:'.dgc-menu-row',close:()=>{allowFromOpen='';render();},trigger:()=>document.querySelector(`[data-allow-from="${menu.dataset.allowFromMenu}"]`)}))return;}
    else if(row&&event.key==='Escape'){event.preventDefault();event.stopPropagation();closeAllowFrom(true);return;}

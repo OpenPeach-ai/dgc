@@ -399,7 +399,7 @@
       return (form === "s" ? `<span class="hc-lbl">${name}<span class="hc-cnt">${rows.length}${said.more ? "+" : ""}</span></span>` : headOf(name, "", link)) + stack + pager;
     }
     const render = (id, form, d, tight) => (id === "token" ? tokenCard(form) : id === "recent" ? recentCard(form, d, tight) : id === "needs" ? needsCard(form, d) : id === "running" ? runningCard(form, d, tight)
-      : id === "quick" ? quickCard(form, d) : id === "folders" ? foldersCard(form, d) : id === "clock" ? clockCard(form) : id === "weather" ? weatherCard(form, tight) : id === "note" ? (notesApp ? notesApp.small() : "")
+      : id === "quick" ? quickCard(form, d) : id === "folders" ? foldersCard(form, d) : id === "clock" ? clockCard(form) : id === "weather" ? weatherCard(form, tight) : id === "note" ? ""
       : id === "widgets" || id === "artifacts" ? stackCard(id, form, d) : listCard(id, form, d, tight));
     /** A card's one line while Home is arranged, and its small preview in the library. */
     function caption(id, d) {
@@ -430,13 +430,14 @@
     function fill(section, id, form, d, tight) {
       const arranging = ui.arranging && section.parentNode === grid;
       const html = arranging ? `${GRIP}<span class="hc-tx"><span class="hc-ct">${esc(CARDS[id].name)}</span><span class="hc-cap">${esc(ui.lifted === id ? "Being moved · Space drops it here" : caption(id, d))}</span></span><button type="button" class="hc-x" aria-label="Remove ${esc(CARDS[id].name)}" title="Take ${esc(CARDS[id].name)} off Home">${CROSS}</button>` : render(id, form, d, tight);
-      const small = form === "s" && !arranging && id !== "quick";
+      const small = form === "s" && !arranging && id !== "quick" && id !== "note";      // (Notes is a field at every size)
       section.dataset.form = form;
       section.classList.toggle("hc-lifted", arranging && ui.lifted === id);
       if (small || arranging) { section.tabIndex = 0; section.setAttribute("role", arranging ? "listitem" : "button"); } else { section.removeAttribute("tabindex"); section.setAttribute("role", "group"); }
       section.setAttribute("aria-label", arranging ? `${CARDS[id].name}. Space lifts it to move it, Delete takes it off Home.` : small ? `${CARDS[id].name}: open` : CARDS[id].name);
-      // Notes draws its Medium, Large and opened cards itself, part by part: a note being typed in is never drawn over.
-      if (id === "note" && notesApp && !arranging && form !== "s") { section.__html = null; notesApp.fill(section, form); return; }
+      // Notes draws its card (a field, at every size) and its opened app itself, part by part: a note being typed in is
+      // never drawn over.
+      if (id === "note" && notesApp && !arranging) { section.__html = null; notesApp.fill(section, form); return; }
       if (id === "note" && section.__nt) { section.__nt.mode = ""; }
       if (section.__html === html) { after(section, id, form); return; }
       // (The keyboard may be inside a hub's own element, which is moved, not redrawn: the same button takes it back.)
@@ -907,8 +908,8 @@
         if (t.closest("[data-library]")) { act?.("library", id); return; }
         if (tile) { const row = rowsOf(id).find((r) => r.id === tile.dataset.tile); if (row) act?.(id === "widgets" ? "widget" : "artifact", row); return; }
       }
-      // Notes: a Medium, Large or opened card answers its own presses (media/shared/notes.js); a Small one has its + here.
-      if (id === "note") { if (t.closest(".nt-quick")) { notesApp?.start(card); return; } if (card.dataset.form !== "s") return; }
+      // Notes answers its own presses, on Home and opened (media/shared/notes.js).
+      if (id === "note") return;
       if (t.closest(".hc-viewall")) { open(id); return; }
       if (t.closest("[data-new]")) { act?.("new", t.closest("[data-new]").dataset.new); return; }
       if (t.closest("[data-quick]")) { act?.("new", t.closest("[data-quick]").dataset.quick); return; }
@@ -975,7 +976,7 @@
         else if ((e.key === "Delete" || e.key === "Backspace") && !ui.lifted) { e.preventDefault(); remove(id); }
         return;
       }
-      if ((e.key === "Enter" || e.key === " ") && card.dataset.form === "s" && card.parentNode === grid) { e.preventDefault(); open(id); }
+      if ((e.key === "Enter" || e.key === " ") && card.dataset.form === "s" && card.parentNode === grid && e.target === card) { e.preventDefault(); open(id); }
     });
     // Escape, wherever the keyboard is on Home: a lifted card goes back, Arrange Home ends, an opened card closes.
     const onKey = (e) => {

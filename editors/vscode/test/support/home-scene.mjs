@@ -153,7 +153,8 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
     await send({ type: "chatdgc_project_chats", project: PROJECT, items: PROJECT_CHATS });
   }
   // Work's Library row shows once the backend offers outputs; the row itself is what the pictures and the edge need.
-  if (library) await page.evaluate(() => { document.getElementById("work-library").hidden = false; });
+  // (Work's Library button is gone since 14 Nov: Library gets a header tab of its own. Kept for a scene that still asks.)
+  if (library) await page.evaluate(() => { const button = document.getElementById("work-library"); if (button) button.hidden = false; });
   /** Until the home's Pips have been asked for and answered, whole, and the page has drawn what came. */
   const polled = async (from = 0) => {
     await page.waitForFunction((n) => window.__answered.slice(n).includes("get_pip_digest") && window.__asking === 0, from, { timeout: Number(process.env.DGC_HOME_WAIT_MS) || 30000 });

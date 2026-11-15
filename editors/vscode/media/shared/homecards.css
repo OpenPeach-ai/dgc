@@ -131,7 +131,9 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-grid .hc-card .dgc-hub-cards { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .hc-grid .hc-card .dgc-hub-empty { margin: 0; }
 .hc-grid .hc-card .dgc-hub-link { color: var(--hc-quiet); font-size: var(--t-xs); }
-.hc-grid[data-form="l"] > .hc-needs { gap: 0; padding: 11px 12px; overflow-y: auto; }
+/* (It never scrolls by itself: it was one pixel short for one row and "Show 1 more" and drew a scrollbar of its own,
+   live round 1. "Show more" opens the card, so what it shows always fits it.) */
+.hc-grid[data-form="l"] > .hc-needs { gap: 0; padding: 10px 12px; overflow: hidden; }
 [data-slot]:empty { display: none; }
 
 /* ---- Token usage: columns of cells, a day inked under the pointer, tabs underneath ----------------------------------- */
@@ -458,3 +460,22 @@ dialog.hc-library:not([open]) { display: none; }
 
 @media (prefers-reduced-motion: reduce) { .hc-zone-x, .hc-col, .hc-li, .hc-btn, .hc-qb, .hc-kb, .hc-here, .hc-pin, .hc-mtile, .hc-dot::before, .hc-card { transition: none !important; } }
 @media (forced-colors: active) { .hc-card, .hc-lib-item, .hc-zone-x, .hc-btn, .hc-qb, .hc-field, .hc-mtile, .dgc-menu.hc-suggest, .hc-note-undo { border-color: CanvasText; } .hc-dot[aria-current="true"]::before { background: Highlight; } .dgc-menu.hc-suggest .hc-opt[aria-selected="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; } .hc-cell.on, .hc-cell.cap, .hc-fill { background: CanvasText; } .hc-col.hot :is(.hc-cell.on, .hc-cell.cap) { background: Highlight; } }
+/* The narrowest side bar (live round 1, findings 6 and 28; 14 Nov): two Small cards side by side cut their own words
+   ("Running no", "1.24", "03:1") under about 200 px, so there they stand one to a row; and a card never scrolls by
+   itself: what does not fit is behind its "Show more". */
+@media (max-width: 200px) {
+  .hc-grid:not([data-form="l"]) { grid-template-columns: minmax(0, 1fr); }
+}
+/* Two Small cards a row in a narrow side bar: the label keeps its words, and the change beside "Tokens today" (it is on
+   the opened card) gives way rather than being cut in half. */
+@media (min-width: 201px) and (max-width: 260px) {
+  .hc-grid:not([data-form="l"]) > .hc-card[data-form="s"] .hc-lbl > .hc-good { display: none; }
+}
+/* The Cards dialog in the narrowest side bar: one card to a row, and a row's words over its buttons. */
+@media (max-width: 260px) {
+  dialog.hc-library { width: calc(100vw - 12px); padding: 10px; }
+  .hc-lib-list { margin: 0 -10px; padding: 0 10px; overflow-x: hidden; }
+  .hc-lib-grid { grid-template-columns: minmax(0, 1fr); }
+  .hc-lib-act, .hc-lib-head, dialog.hc-library > :last-child { flex-wrap: wrap; }
+  .hc-lib-act > *, dialog.hc-library .hc-btn { max-width: 100%; min-width: 0; }
+}

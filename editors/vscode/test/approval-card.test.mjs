@@ -256,7 +256,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
       await s.send({ type: "permission_request", id: "req-batch", call_id: "t1", name: "task", args: { tasks },
         summary: "3 helpers · Describe plants.py, Describe rota.py, Describe notes.md", suggested_rule: "Task", choices: ["once", "always", "deny"] });
       const batch = s.card("batch");
-      assert.equal((await batch.locator(".q").innerText()).trim(), "Start 3 helpers?");
+      assert.equal((await batch.locator(".q").innerText()).trim(), "Start 3 sub-agents?");
       assert.deepEqual((await batch.locator(".perm-helpers > li > b").allInnerTexts()), ["Describe plants.py", "Describe rota.py", "Describe notes.md"]);
       const words = await batch.innerText();
       assert.match(words, /explorer agent · on Workstation · glm-5\.3:cloud/);
@@ -266,15 +266,15 @@ for (const theme of ["dark-modern", "light-modern"]) {
       assert.equal(await batch.locator(".perm-brief p").first().isVisible(), false, "each brief is one click away");
       await batch.locator(".perm-brief summary").first().click();
       assert.equal((await batch.locator(".perm-brief p").first().innerText()).trim(), tasks[0].prompt);
-      assert.deepEqual(await batch.locator(".btns button").allInnerTexts(), ["Always allow", "Deny", "Start them"]);
+      assert.deepEqual(await batch.locator(".btns button").allInnerTexts(), ["Always allow", "Deny", "Start sub-agents"]);
       assert.equal(await batch.locator(".deny-note").count(), 1, "a note for the model if you deny");
       if (process.env.DGC_SHOTS) await batch.screenshot({ path: `${process.env.DGC_SHOTS}/helpers-card-${theme}.png` });
       await s.send({ type: "permission_request", id: "req-one", call_id: "t2", name: "task",
         args: { description: "Map the auth module", prompt: "List every auth entry point.", background: true }, summary: "", suggested_rule: "Task" });
       const one = s.card("one");
-      assert.equal((await one.locator(".q").innerText()).trim(), "Start a helper?");
+      assert.equal((await one.locator(".q").innerText()).trim(), "Start a sub-agent?");
       assert.match(await one.innerText(), /Map the auth module[\s\S]*In the background/);
-      assert.equal(await one.locator(".btns button").last().innerText(), "Start it", "the filled button, at the right end");
+      assert.equal(await one.locator(".btns button").last().innerText(), "Start sub-agent", "the filled button, at the right end");
 
       await s.send({ type: "permission_request", id: "req-mcp", call_id: "m1", name: "mcp__example__get-time", args: {},
         summary: "", suggested_rule: "mcp__example__get-time", choices: ["once", "always", "deny"] });

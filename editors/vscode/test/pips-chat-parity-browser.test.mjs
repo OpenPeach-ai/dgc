@@ -115,7 +115,7 @@ test("a Project Pip’s chat paints as a Personal Pip’s, in the same page", as
   assert.equal(project.buttons, 0, "the buttons wait for the pointer");
   assert.equal(project.time, 1, "the time shows without it");
   assert.equal(project.whatItDid.display, "none", "What it did is one click away, in the reply's details");
-  assert.equal(project.box.borderTopLeftRadius, "22px", "the box's corner is the shared prompt box's (22 in the 0.52 look; it was 19, then 16)");
+  assert.equal(project.box.borderTopLeftRadius, "6px", "the box's corner is the shared prompt box's (the buttons' 6 px since 14 Nov; it was 22, 19, then 16)");
   assert.equal(project.hint.display, "none");
 });
 

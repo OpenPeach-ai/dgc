@@ -30,13 +30,13 @@ const purple = (c) => { const m = String(c).match(/-?[\d.]+(e-?\d+)?/g)?.map(Num
 const settle = (page) => page.waitForTimeout(260);
 
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 700]) {
-  test(`Work: the search box and New on top, then the Library and the sessions; a row is a blob and 12px words (${theme}, ${width}px)`, async (t) => {
+  test(`Work: its header row, the search box and New, then the sessions (no Library row: 14 Nov); a row is a blob and 12px words (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openHome(browser, { theme, width, tab: "work", sessions: manySessions(20), motion: "reduce" });
     try {
       await x.page.waitForSelector("#sessions-list .session-row");
-      const order = await tops(x.page, ["#side-tabs", "#sessions-search", "#work-library", "#sessions-list", "#sessions-all"]);
-      assert.deepEqual(order, [...order].sort((a, b) => a - b), `top to bottom: the tabs, the search box, the Library, the list, View all: ${order}`);
+      const order = await tops(x.page, ["#side-tabs", "#work-home .home-head", "#sessions-search", "#sessions-list", "#sessions-all"]);
+      assert.deepEqual(order, [...order].sort((a, b) => a - b), `top to bottom: the tabs, the header row, the search box, the list, View all: ${order}`);
       const look = await x.page.evaluate(() => {
         const css = (s) => getComputedStyle(document.querySelector(s)), probe = document.createElement("i"); document.body.append(probe);
         probe.style.color = "var(--text-2)"; const quiet = getComputedStyle(probe).color; probe.remove();

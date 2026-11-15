@@ -11,10 +11,11 @@ async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
 /** `api`: the Pips API the DGC says; `saved`: the view's saved state; `scene`: makeBackend's options;
  *  `host`: extra mount options (onAskDgc and the like). */
-export function setup({api=94,saved,scene={},host={}}={}){
+export function setup({api=94,saved,scene={},host={},pre=[]}={}){
  const dom=new JSDOM('<!doctype html><html><body><div id="pips-host"></div></body></html>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
  const sent=[],answered=new Set(),listeners=new Set(),states=[],backend=makeBackend(scene);
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.CSS={escape:s=>s};
+ for(const script of pre)w.eval(script);   // (scripts the page loads before the Pips view: the voice bar, read aloud, voice mode)
  w.eval(client);
  const shadow=w.document.getElementById('pips-host').attachShadow({mode:'open'});
  const app=w.DgcPips.mount({root:shadow,postMessage:m=>sent.push(m),onMessage:l=>{listeners.add(l);return()=>listeners.delete(l);},getState:()=>saved,setState(s){states.push(s);},...host});

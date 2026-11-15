@@ -35,39 +35,12 @@ const fit = (p) => p.evaluate((sel) => {
 }, CARD);
 const type = async (x, digits) => { for (const d of digits) { await x.page.keyboard.press(d); await x.rest(120); } };
 
-for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 1000]) {
-  test(`a Large card: every PIN screen with a pad fits without a scroll (${theme}, ${width}px)`, async (t) => {
-    if (skipOrFail(t)) return;
-    const x = await large(theme, width), p = x.page;
-    try {
-      const whole = async (name, title) => { await x.rest(350); const s = await fit(p);
-        assert.ok(s, `${name}: its screen is up`); assert.equal(s.form, "l", "the card is Large");
-        if (title) assert.equal(s.title, title);
-        assert.ok(s.scroll <= 0.5, `${name}: nothing to scroll in the card (${s.scroll}px more than it shows)`);
-        assert.deepEqual(s.cut, [], `${name}: nothing of it is cut`);
-        if (s.keys) { assert.equal(s.keys, 11, `${name}: the whole pad`); assert.ok(s.key >= 15, `${name}: a key is at least 15px tall (${s.key})`); } };
-      await p.click(`${CARD} .hc-note-row[data-note="wifi01"]`); await x.rest(350);
-      await p.click(`${CARD} .nt-lock`);
-      await whole("Choose a PIN", "Choose a PIN");
-      await p.click(`${CARD} .nt-lockbox [data-pin="longer"]`); await whole("Choose a PIN, a longer one (with Next)", "Choose a PIN");
-      await p.click(`${CARD} .nt-lockbox [data-pin="longer"]`); await x.rest(150);
-      await type(x, "4821"); await whole("Type it again", "Choose a PIN");
-      await type(x, "4821"); await x.rest(700);
-      // Locked again: the PIN is asked to open it; a wrong one says so.
-      await p.keyboard.press("Control+Alt+l"); await whole("a locked note");
-      await type(x, "1111"); await x.rest(500); await whole("a wrong PIN");
-      // Another note, locked while the notes are locked: the PIN is asked first.
-      await p.click(`${CARD} .hc-note-row[data-note="seeds1"]`); await x.rest(350); await p.click(`${CARD} .nt-lock`);
-      await whole("Lock this note", "Lock this note");
-    } finally { await x.close(); }
-  });
-}
-
 for (const theme of ["dark-modern", "light-modern"]) {
   test(`the PIN pad's focus ring is a quiet grey that still reads at 3:1, never the editor's blue (${theme})`, async (t) => {
     if (skipOrFail(t)) return;
-    const x = await large(theme), p = x.page;
+    const x = await large(theme), p = x.page, CARD = ".hc-open .hc-card";
     try {
+      await p.click('.hc-grid .hc-card[data-card="note"] .nt-openapp'); await x.rest(350);
       await p.click(`${CARD} .hc-note-row[data-note="wifi01"]`); await x.rest(350); await p.click(`${CARD} .nt-lock`); await x.rest(350);
       await p.keyboard.press("4"); await x.rest(150);                       // the keyboard is in use: the ring shows
       const ring = await p.evaluate((sel) => { const pad = document.querySelector(`${sel} .nt-pad`), s = getComputedStyle(pad);
@@ -89,7 +62,7 @@ test("a tick box has a real checked state: a checkbox by role, checked or not, t
   if (skipOrFail(t)) return;
   const x = await openGrid(browser, { width: 300, layout: ["note", "clock"], seed: sample(), notesOptions: { iterations: 1500 } }), p = x.page;
   try {
-    await p.click(CARD); await x.rest(250); await p.click('.hc-open .hc-card .hc-note-row[data-note="ferry1"]'); await x.rest(400);
+    await p.click(`${CARD} .nt-openapp`); await x.rest(250); await p.click('.hc-open .hc-card .hc-note-row[data-note="ferry1"]'); await x.rest(400);
     const boxes = () => p.evaluate(() => [...document.querySelectorAll(".hc-open .nt-doc .nt-l")].filter((l) => l.dataset.k === "ck" || l.getAttribute("role") === "checkbox").map((l) => ({ text: l.textContent.trim(), done: l.dataset.done, role: l.getAttribute("role"), checked: l.getAttribute("aria-checked") })));
     const first = await boxes();
     assert.ok(first.length >= 4, "the note's tick boxes are drawn");
@@ -111,16 +84,3 @@ test("a tick box has a real checked state: a checkbox by role, checked or not, t
   } finally { await x.close(); }
 });
 
-for (const theme of ["dark-modern", "light-modern"]) {
-  test(`a Large card: a note's row in the list shows its whole focus ring (${theme})`, async (t) => {
-    if (skipOrFail(t)) return;
-    const x = await large(theme), p = x.page;
-    try {
-      await p.click(`${CARD} .hc-note-row[data-note="wifi01"]`); await x.rest(350); await p.keyboard.press("Shift");
-      const rings = await p.evaluate(focusAudit, { scope: `${CARD} .nt-listbox` });
-      assert.ok(rings.walked >= 5, `the list's rows were walked (${rings.walked})`);
-      assert.deepEqual(rings.cut.map((c) => `${c.text.slice(0, 24)}: ${c.lost}px of its ring is cut by ${c.by}`), []);
-      assert.deepEqual(rings.missing.map((c) => c.text.slice(0, 24)), [], "and every row has one");
-    } finally { await x.close(); }
-  });
-}

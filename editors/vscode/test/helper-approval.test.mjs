@@ -15,7 +15,7 @@ test("a helper's live approval names it and the exact command", () => {
     choices: ["once", "always", "deny"], suggested_rule: "Bash" });
   const card = h.doc.querySelector(".card:has(.deny-note)");
   assert.ok(card);
-  assert.match(card.textContent, /Helper: Count invoice TODOs/);
+  assert.match(card.textContent, /Sub-agent: Count invoice TODOs/);
   assert.match(card.textContent, /rg TODO invoices/);
   assert.deepEqual(h.errors, []);
 });

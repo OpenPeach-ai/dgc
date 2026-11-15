@@ -28,6 +28,7 @@ import { routerCommand } from "./routerCommands";
 import { imagesCommand, MAX_WORKFLOW_CHARS } from "./imagesCommands";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
 import { PipsEditor, openEngineSignIn, workSessionTitles, type ProjectWork, type WorkSessionTitle } from "./pipsView";
+import { sameHost } from "./endpointmodels";
 import { mcpAppsHost } from "./mcpApps";
 import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from "./pluginLogos";
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
@@ -114,11 +115,10 @@ const PIPS_ATTENTION_KEY = "dgc.pipsAttention.v1";
  *  backend has started (seconds, with the user's MCP servers and plugins starting first). */
 const CHATDGC_SEEN_KEY = "dgc.chatdgcSeen.v1";
 /** The agent map's Pips section, Hide / Show: one word, remembered for the editor (not for one chat). */
-const AGENT_MAP_PIPS_HIDDEN_KEY = "dgc.agentMapPipsHidden.v1";
 /** What a Work chat's page may not do while its session is open in another window (session_elsewhere): anything that
  *  changes the session, its turn or its settings. */
 const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel", "setMode", "setModel", "setReasoningProfile",
-  "setContextSize", "pickModel", "compact", "rateResponse", "branchChat", "resumeTurn", "permission_response", "plan_response",
+  "setContextSize", "setAgentsThinking", "setAgentsContext", "agentsContextTyped", "pickModel", "compact", "rateResponse", "branchChat", "resumeTurn", "permission_response", "plan_response",
   "options_response", "mcp_input_response", "askSkip", "steerQueued", "queueRemove", "queueReorder", "rerunTask", "learnSave", "clear_todos", "undoTurn",
   "startGoal", "updateGoal", "clearGoal", "resumeGoal", "drop_uris", "stopAgent", "stopMonitor", "restartMonitor",
   "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix", "backgroundNow", "continueAgent"]);
@@ -730,6 +730,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private budgetSettable = false;
   /** The CLI takes the sub-agents' context window from Settings (its config answered subagent_context_size). */
   private subagentWindowSettable = false;
+  /** This chat's sub-agents' context window as its config last said it (0: the main chat's). */
+  private subagentWindow = 0;
   /** Settings -> Models: the prompt-cache lifetime and Ollama's keep-loaded time, from a CLI that answers
    *  get_config's "cache_settings" with an event of that name (0.48). Undefined: an older CLI, which would
    *  refuse a save that carried them. */
@@ -1339,7 +1341,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const defaultProfile = saved.find(row => row.id === defaultId);
     // The default isn't a saved provider (an upgrade on a host with a key): it stays in the list, as in Work's menu.
     if (!defaultProfile && saved.length && !this.noProvider() && !this.routeState.subscriptionEngine) {
-      const label = Object.values(PROVIDERS).find(p => p.url === this.state.baseUrl)?.label || "Custom host";
+      const label = Object.values(PROVIDERS).find(p => sameHost(p.url, this.state.baseUrl))?.label || "Custom host";
       profiles.unshift({ id: "", name: `Current host · ${label}`, kind: "native", model: String(this.state.model || "") });
     }
     const current = defaultProfile
@@ -5100,7 +5102,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         if ("chatdgc_personality" in ev) { this.chatdgcSettable = true; }
         if ("turn_token_budget" in ev) { this.budgetSettable = true; }
-        if ("subagent_context_size" in ev) { this.subagentWindowSettable = true; }
+        if ("subagent_context_size" in ev) { this.subagentWindowSettable = true; this.subagentWindow = Math.max(0, Math.floor(Number((ev as any).subagent_context_size) || 0)); }
         this.routeState.nativeModel = String(ev.model || "");
         this.routeState.nativeThink = String(ev.think || "off");
         this.routeState.subscriptionEngine = String(ev.subscription_engine || "");
@@ -6543,6 +6545,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           if (typed?.trim()) await this.setSessionAgentsModel(msg.id, typed.trim());
         }
         break;
+      case "setAgentsThinking":
+        if (this.subagentThinkingSettable() && typeof msg.level === "string" && SUBAGENT_THINKING.includes(msg.level)) await this.setSessionAgentsSetting({ subagent_thinking: msg.level });
+        break;
+      case "setAgentsContext":
+        if (this.subagentWindowSettable && Number.isSafeInteger(msg.size) && msg.size >= 0) await this.setSessionAgentsSetting({ subagent_context_size: subagentWindow(msg.size) });
+        break;
+      case "agentsContextTyped":
+        if (this.subagentWindowSettable) {
+          const typed = await vscode.window.showInputBox({ prompt: "Context window for this session’s sub-agents", placeHolder: "A size like 24K or 24576; nothing for the same as the chat",
+            validateInput: (value) => (!value.trim() || subagentWindow(value) > 0 ? undefined : "Type a size like 24K or 24576.") });
+          if (typed !== undefined) await this.setSessionAgentsSetting({ subagent_context_size: subagentWindow(typed) });
+        }
+        break;
       case "setFallback":
         await this.setSessionFallback(String(msg.provider || ""), typeof msg.model === "string" ? msg.model.trim().slice(0, 256) : "");
         break;
@@ -6810,38 +6825,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipRunsWatch":
         // The chip above the box (ready.capabilities.pip_runs_running): which of this chat's Pips are running.
         if ((this.lastReadyEvent?.capabilities as any)?.pip_runs_running === 1) { be.send({ type: "watch_pip_runs" }); }
-        break;
-      case "agentMapPips": {
-        // The agent map's Pips section (Pips API 96, pips-flow-design Q2): the Pips related to the session this panel
-        // shows, and how many are elsewhere. The session is the panel's own, never the page's word. It shows; it
-        // never routes. An older DGC is never asked.
-        const seq = Number.isSafeInteger(msg.seq) ? msg.seq : 0;
-        const hidden = this.context.globalState.get<boolean>(AGENT_MAP_PIPS_HIDDEN_KEY) === true;
-        const nothing = () => this.post({ type: "agentMapPips", seq, failed: true, hidden });
-        const caps = this.lastReadyEvent?.capabilities as any, sessionId = this.currentSessionId;
-        if (!this.sessionReady || !sessionId || caps?.pips_enabled !== true || !(Number(caps?.pips_api_version) >= 96)) { nothing(); break; }
-        void (async () => {
-          try {
-            const found = await this.ensurePipsBridge().relatedPips(sessionId);
-            if (sessionId !== this.currentSessionId) return;           // the panel moved to another chat meanwhile
-            if (!found) { nothing(); return; }
-            this.post({ type: "agentMapPips", seq, pips: found.pips, elsewhere: found.elsewhere, hidden });
-          } catch { if (sessionId === this.currentSessionId) nothing(); }
-        })();
-        break;
-      }
-      case "agentMapPipStop": {
-        // Stop on a Pip working for this session: the existing cancel_pip_run for that run.
-        const runId = String(msg.run_id || ""), caps = this.lastReadyEvent?.capabilities as any;
-        if (!/^run_[0-9a-f]{32}$/.test(runId) || caps?.pips_enabled !== true || !(Number(caps?.pips_api_version) >= 96)) break;
-        void this.ensurePipsBridge().stopPipRun(runId).then(
-          () => this.post({ type: "agentMapPipStopped", run_id: runId, ok: true }),
-          (error) => this.post({ type: "agentMapPipStopped", run_id: runId, ok: false,
-            message: error instanceof Error && error.message ? error.message.slice(0, 200) : "DGC couldn’t stop it." }));
-        break;
-      }
-      case "agentMapPipsHidden":
-        if (typeof msg.hidden === "boolean") await this.context.globalState.update(AGENT_MAP_PIPS_HIDDEN_KEY, msg.hidden);
         break;
       case "steerQueued": {
         // "Steer now" / "Steer all" on queued messages (ready.capabilities.steer_queued): they move into the running
@@ -8672,7 +8655,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // slider always belong to the same provider that will run the next prompt.
     try {
       const ev: any = await this.requestState(this.ensureBackend(), "models-route",
-        { type: "get_config", fields: configEventFields(this.lastReadyEvent?.capabilities) }, "config", 10000);
+        // (With helpers' Thinking, for the menu's Sub-agents tab: subagent_settings comes just before config.)
+        { type: "get_config", fields: [...configEventFields(this.lastReadyEvent?.capabilities), ...(Number((this.lastReadyEvent?.capabilities as any)?.subagent_thinking) >= 1 ? ["subagent_settings"] : [])] }, "config", 10000);
       this.routeState.nativeModel = String(ev.model || this.routeState.nativeModel);
       if (typeof ev.fallback_engine === "string") this.routeState.fallbackEngine = ev.fallback_engine;
       this.routeState.nativeThink = String(ev.think || this.routeState.nativeThink);
@@ -8689,7 +8673,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     await this.readAgentsModel();           // what this session's agents use, as the menu opens (0.52)
     const subscription = this.activeSubscription();
-    const nativeLabel = Object.values(PROVIDERS).find(p => p.url === this.state.baseUrl)?.label
+    const nativeLabel = Object.values(PROVIDERS).find(p => sameHost(p.url, this.state.baseUrl))?.label
       || "Custom host";
     // The engine catalogue describes what the backend could support. The Work picker is a list
     // of configured routes, so an uninstalled or never-added CLI does not appear here.
@@ -8797,7 +8781,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const host = this.tab?.host ?? this;
     return { offered: this.agentsModelOffered(), own: this.agentsModel.own, model: this.agentsModel.model,
              base_url: this.agentsModel.baseUrl, settings_model: this.agentsModel.settingsModel,
-             settings_base_url: this.agentsModel.settingsBaseUrl, router: host.routerStatus?.enabled === true };
+             settings_base_url: this.agentsModel.settingsBaseUrl, router: host.routerStatus?.enabled === true,
+             // The Sub-agents tab's two dropdowns: how they think and their window, where this DGC can set them.
+             thinking: this.subagentSettings?.thinking ?? "", thinking_settable: this.subagentThinkingSettable(),
+             context_size: this.subagentWindow, context_settable: this.subagentWindowSettable };
+  }
+  private subagentThinkingSettable(): boolean { return Number((this.lastReadyEvent?.capabilities as any)?.subagent_thinking) >= 1 && !!this.subagentSettings; }
+  /** The Sub-agents tab's Thinking and Context window: this chat's sub-agents, set as its own context window is
+   *  (set_config; both are keys every chat holds for itself, and what is chosen is what later chats start with). */
+  private async setSessionAgentsSetting(values: Record<string, string | number>): Promise<void> {
+    if (!this.agentsModelOffered()) return;
+    try {
+      await this.requestState(this.ensureBackend(), "agents-setting", { type: "set_config", values }, "config", 10000);
+    } catch (error) {
+      void vscode.window.showWarningMessage(error instanceof Error && error.message ? error.message : "DGC could not change that for this session’s sub-agents.");
+    }
+    this.postAgentsModel();            // what DGC has now, changed or not
   }
   private postAgentsModel(): void { this.post({ type: "agentsModel", ...this.agentsView() }); }
   /** DGC's answer. A reopened session with its own agents model has no key (a session file never holds one): the one
@@ -9567,7 +9566,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const caps = (this.lastReadyEvent?.capabilities as any) || {};
     const saved = caps.saved_route;
     const direct = !defaultId && caps.model_chosen === true && saved && !saved.builtin && !saved.subscription_engine && saved.model
-      ? { name: Object.values(PROVIDERS).find(p => p.url === saved.base_url)?.label || "Current host",
+      ? { name: Object.values(PROVIDERS).find(p => sameHost(p.url, saved.base_url))?.label || "Current host",
           model: String(saved.model), base_url: String(saved.base_url || "") }
       : undefined;
     // defaultModel: what the default row's dropdown shows, the All models default's own model included.
@@ -11041,7 +11040,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <header id="phead"><button type="button" id="btn-pips-back" class="pips-back" title="Back to DGC chat" aria-label="Back to DGC chat" hidden><span class="codicon codicon-chevron-left" aria-hidden="true"></span>Chat</button><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="btn-pips" class="pips-nav" title="Open Pips" aria-label="Open Pips" aria-pressed="false"><span class="pips-wordmark">Pips</span><span class="pips-nav-core" aria-hidden="true"></span></button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
 <nav id="side-tabs" class="dgc-tabs" aria-label="DGC" hidden><div class="dgc-tabs-bar" role="tablist" aria-label="Home, Work, Chat and Pips"><button type="button" role="tab" id="side-tab-home" class="dgc-tab" data-tab="home" aria-controls="home-hub" aria-selected="false" tabindex="-1" title="Home: everything that needs you or is new"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Home"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-home" aria-hidden="true"></span><span class="dgc-tab-word">Home</span></span></span><span id="side-tab-home-count" class="dgc-tab-count" aria-hidden="true" hidden></span></button><button type="button" role="tab" id="side-tab-work" class="dgc-tab" data-tab="work" aria-controls="work-home" aria-selected="false" tabindex="-1" title="Work: your Work sessions"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Work"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-briefcase" aria-hidden="true"></span><span class="dgc-tab-word">Work</span></span></span></button><button type="button" role="tab" id="side-tab-chat" class="dgc-tab" data-tab="chat" aria-controls="chats-home" aria-selected="false" tabindex="-1" title="Chat: your ChatDGC chats, the same in every folder"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Chat"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-comment-discussion" aria-hidden="true"></span><span class="dgc-tab-word">Chat</span></span></span></button><button type="button" role="tab" id="side-tab-pips" class="dgc-tab" data-tab="pips" aria-controls="pips-host" aria-selected="false" tabindex="-1" title="Pips: your Personal and Project Pips"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Pips"><span class="dgc-tab-front"><span class="dgc-tab-word">Pips</span></span></span><span class="dgc-tab-face" aria-hidden="true"></span></button></div></nav>
 <section id="pips-host" data-style-uri="${pipsStyle}" data-cards-style-uri="${mcpAppsCss}" aria-label="DGC Pips" hidden></section>
-<section id="sessions-host" class="sessions-home" aria-label="DGC" hidden><section id="home-hub" class="dgc-hub" role="tabpanel" aria-labelledby="side-tab-home"></section><section id="work-home" class="home-work" role="tabpanel" aria-labelledby="side-tab-work" hidden><div class="home-bar"><input id="sessions-search" class="sessions-search" type="search" placeholder="Search Work sessions" aria-label="Search this project's sessions: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="sessions-new" class="home-new" title="New session: it opens in an editor tab" aria-label="New session"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><div id="work-library-row" class="home-library-row"><button type="button" id="work-library" class="home-library" title="Library: reopen, export or remove Artifacts made in Work" hidden><span class="codicon codicon-library" aria-hidden="true"></span><span>Library</span></button></div><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul><button type="button" id="sessions-more" class="sessions-more" title="Show 200 more sessions" hidden>Load more</button></section><section id="chats-home" class="home-chats" role="tabpanel" aria-labelledby="side-tab-chat" hidden><div class="home-bar"><input id="chats-search" class="sessions-search" type="search" placeholder="Search chats" aria-label="Search your chats: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="chats-new" class="home-new" title="New chat: it opens in an editor tab" aria-label="New chat"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><button type="button" id="chats-library" class="home-library" title="Library: every file you attached or ChatDGC made, and every widget, in one place" hidden><span class="codicon codicon-library" aria-hidden="true"></span><span>Library</span></button><div id="projects-home" class="home-projects" hidden><div class="home-sub-head"><h3 id="projects-title" class="home-sub">Projects</h3><button type="button" id="projects-new" class="home-sub-add" title="New project: chats, files and instructions together" aria-label="New project"><span class="codicon codicon-new-folder" aria-hidden="true"></span></button></div><ul id="projects-list" class="projects-list" aria-labelledby="projects-title"></ul></div><h3 id="chats-sub" class="home-sub home-sub-chats" hidden>Chats</h3><p id="chats-status" class="sessions-status" role="status" hidden></p><ul id="chats-list" class="sessions-list" aria-label="Your chats"></ul><button type="button" id="chats-more" class="sessions-more" title="Show more of your chats" hidden>Show more</button></section></section>
+<section id="sessions-host" class="sessions-home" aria-label="DGC" hidden><section id="home-hub" class="dgc-hub" role="tabpanel" aria-labelledby="side-tab-home"></section><section id="work-home" class="home-work" role="tabpanel" aria-labelledby="side-tab-work" hidden><header class="home-head"><h2 class="home-title">Work</h2><button type="button" id="work-more" class="home-more" aria-haspopup="menu" aria-expanded="false" aria-label="More for Work" title="More: archived sessions and settings"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg></button></header><div class="home-bar"><input id="sessions-search" class="sessions-search" type="search" placeholder="Search Work sessions" aria-label="Search this project's sessions: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="sessions-new" class="home-new" title="New session: it opens in an editor tab" aria-label="New session"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><div id="work-folder-line" class="home-folder-line"></div><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul><button type="button" id="sessions-more" class="sessions-more" title="Show 200 more sessions" hidden>Load more</button></section><section id="chats-home" class="home-chats" role="tabpanel" aria-labelledby="side-tab-chat" hidden><header class="home-head"><h2 class="home-title">Chat</h2><button type="button" id="chats-more-menu" class="home-more" aria-haspopup="menu" aria-expanded="false" aria-label="More for Chat" title="More: an incognito chat, what DGC remembers, archived chats and settings"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg></button></header><div class="home-bar"><input id="chats-search" class="sessions-search" type="search" placeholder="Search chats" aria-label="Search your chats: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="chats-new" class="home-new" title="New chat: it opens in an editor tab" aria-label="New chat"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><div id="projects-home" class="home-projects" hidden><div class="home-sub-head"><h3 id="projects-title" class="home-sub">Projects</h3><button type="button" id="projects-new" class="home-sub-add" title="New project: chats, files and instructions together" aria-label="New project"><span class="codicon codicon-new-folder" aria-hidden="true"></span></button></div><ul id="projects-list" class="projects-list" aria-labelledby="projects-title"></ul></div><h3 id="chats-sub" class="home-sub home-sub-chats" hidden>Chats</h3><p id="chats-status" class="sessions-status" role="status" hidden></p><ul id="chats-list" class="sessions-list" aria-label="Your chats"></ul><button type="button" id="chats-more" class="sessions-more" title="Show more of your chats" hidden>Show more</button></section></section>
 <nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
 <aside id="pip-session-note" class="psn" role="note" aria-label="Pips report in their own chats now" hidden></aside>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
@@ -11107,13 +11106,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <section id="agent-map-tasks" class="am-tasks" aria-labelledby="agent-map-tasks-title" hidden>
         <h3 id="agent-map-tasks-title" class="agent-map-subtitle"></h3>
         <ul id="agent-map-task-list" class="am-task-list"></ul>
-      </section>
-      <section id="agent-map-pips" class="am-pips" aria-labelledby="agent-map-pips-title" hidden>
-        <div class="am-pips-head"><h3 id="agent-map-pips-title" class="am-pips-title">Pips</h3><span id="agent-map-pips-count" class="am-pips-count" hidden></span><button type="button" id="agent-map-pips-toggle" class="am-pips-toggle" title="Hide the Pips related to this session" aria-expanded="true" aria-controls="agent-map-pips-body">Hide</button></div>
-        <div id="agent-map-pips-body" class="am-pips-body">
-          <ul id="agent-map-pip-list" class="am-pip-list"></ul>
-          <p id="agent-map-pips-more" class="am-note am-pips-more"></p>
-        </div>
       </section>
       <button type="button" id="agent-map-settings" class="link am-settings" title="Open Settings ▸ Models ▸ Sub-agents to change the sub-agent model and host">Sub-agent settings</button>
     </div>

@@ -186,10 +186,45 @@ body.nt-tabpage { margin: 0; padding: 0; background: var(--vscode-editor-backgro
 .hc-note[data-notes="tab"] .nt-l[data-k="h3"] { font-size: 13.5px; }
 
 /* The Small card: the top note, and a small + for a quick one. */
-.hc-btn.hc-icon.nt-quick { flex: none; width: 20px; height: 20px; margin: -3px -2px -3px 0; }
-.hc-note[data-form="s"] .hc-note-line { -webkit-line-clamp: 1; color: var(--text-strong); font-weight: var(--w-med); }
-.nt-two { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
-.nt-small-lock { display: flex; align-items: center; gap: 4px; }
+/* The card on Home (14 Nov night): only a field that saves as it is typed, the new-note icon and Open Notes, at every
+   size. The field is a field: the house's line, the 6 px family. A Small card is a square; a Medium one gives the
+   field five lines; a Large one fills its two rows. */
+.hc-note[data-notes="card"] { gap: 6px; }
+.hc-note[data-notes="card"] > .nt-top .hc-ch { min-height: 22px; }
+.hc-note[data-notes="card"] .hc-note-new { width: 22px; height: 22px; margin: -2px -2px -2px 0; border-color: transparent; color: var(--hc-quiet); }
+.hc-note[data-notes="card"] .hc-note-new:hover { color: var(--text-strong); }
+.hc-note[data-notes="card"] > .nt-pane { flex: 1 1 auto; }
+.hc-note[data-notes="card"] .nt-body { position: relative; min-height: 44px; margin: 0; padding: 5px 8px; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: transparent; cursor: text; }
+.hc-note[data-notes="card"] .nt-body:has(.nt-doc:focus-visible) { box-shadow: none; outline: var(--btn-ring, 2px solid var(--vscode-focusBorder)); outline-offset: -1px; }
+.hc-note[data-notes="card"][data-form="m"] .nt-body { height: 116px; flex: none; }
+/* (A Small card is a square half the side bar wide: too narrow to type in. Notes takes the row, as a field does.) */
+.hc-grid[data-form="s"] > .hc-note[data-notes="card"] { grid-column: 1 / -1; aspect-ratio: auto; }
+.hc-note[data-notes="card"][data-form="s"] .nt-body { height: 88px; flex: none; }
+.hc-note[data-notes="card"] .nt-doc { min-height: 0; padding: 0 0 4px; }
+.hc-note[data-notes="card"] .nt-doc > .nt-l:first-child[data-k="p"] { font-size: 13px; margin-bottom: 2px; }
+.hc-note[data-notes="card"] .nt-body[data-empty="1"]::before { content: "Write a note…"; position: absolute; left: 8px; top: 5px; color: var(--muted-firm, var(--hc-quiet)); font: var(--w-reg) 13px/1.3 var(--sans); pointer-events: none; }
+.hc-note[data-notes="card"] .nt-footbox { min-height: 18px; }
 .hc-note[data-form="l"] .nt-footbox { min-height: 16px; margin-top: -2px; }
 /* (A locked note's name is on its lit row beside the pad: the pad's own copy gives its line to the pad.) */
 .hc-note[data-form="l"] .nt-lock-open h3 { display: none; }
+/* The narrowest side bar (live round 1, finding 28, 14 Nov): the row of formatting buttons takes a second line rather
+   than running off the page; a note's menu stays inside the page, its rows end in "…" and its key hints go. */
+@media (max-width: 260px) {
+  .nt-format { flex-wrap: wrap; row-gap: 2px; }
+  .nt-format > .nt-sep { display: none; }
+  .nt-menu { max-width: calc(100vw - 12px); }
+  .nt-menu .dgc-menu-hint { display: none; }
+  .nt-menu .dgc-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (max-width: 260px) {
+  /* The PIN's keypad fits the note's own width. */
+  .nt-pad { grid-template-columns: repeat(3, minmax(0, 40px)); gap: 3px; }
+  .nt-pad .hc-btn { width: auto; min-width: 0; height: 28px; font-size: 13px; }
+}
+@media (max-width: 200px) {
+  /* An open note's row of tools: "All notes" is its arrow alone (its words are its tip), so the three buttons after it
+     stay on the card. */
+  .hc-note-tools { gap: 4px; }
+  .hc-note-tools > .hc-note-all { flex: none; width: 22px; padding: 0; font-size: 0; justify-content: center; }
+  .hc-note-tools > .hc-cap { display: none; }
+}

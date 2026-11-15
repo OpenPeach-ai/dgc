@@ -23,14 +23,14 @@ before(async () => { if (!chromium) return; try { browser = await chromium.launc
 after(async () => { await browser?.close(); cleanup(); });
 
 const CARD = '.hc-grid .hc-card[data-card="note"]', OPEN = ".hc-open .hc-card", WORDS = "The router is under the stairs";
-const opened = async (width, more = {}) => { const x = await openGrid(browser, { width: 300, layout: ["note", "clock"], seed: sample(), notesOptions: { iterations: 1500 }, ...more }); await x.page.click(CARD); await x.rest(200); if (width !== 300) await x.resize(width, more.height || 900); return x; };
+const opened = async (width, more = {}) => { const x = await openGrid(browser, { width: 300, layout: ["note", "clock"], seed: sample(), notesOptions: { iterations: 1500 }, ...more }); await x.page.click(`${CARD} .nt-openapp`); await x.rest(200); if (width !== 300) await x.resize(width, more.height || 900); return x; };
 const note = async (x, id) => { await x.page.click(`${OPEN} .hc-note-row[data-note="${id}"]`); await x.rest(300); };
 const type = async (x, digits, rest = 450) => { for (const d of digits) await x.page.keyboard.press(d); await x.rest(rest); };
 const lockScreen = (p) => p.evaluate((sel) => { const l = document.querySelector(`${sel} .nt-lockbox`); if (!l) return null; return { title: l.querySelector("h3")?.textContent || "", text: l.innerText.replace(/\s+/g, " "), dots: l.querySelectorAll(".nt-dots i").length, on: l.querySelectorAll(".nt-dots i.on").length, pad: l.querySelectorAll(".nt-pad button").length, off: [...l.querySelectorAll(".nt-pad button")].every((b) => b.disabled) && l.querySelectorAll(".nt-pad button").length > 0, warn: l.querySelector(".nt-warn")?.textContent || "", focus: !!document.activeElement?.closest(".nt-pad") }; }, OPEN);
-const row = (p, id) => p.evaluate(({ sel, id }) => { const r = document.querySelector(`${sel} .hc-note-row[data-note="${id}"]`); return r ? { meta: r.querySelector(".hc-meta")?.textContent || "", lock: !!r.querySelector('.hc-note-pinmark[title="Locked"]') } : null; }, { sel: OPEN, id });
+const row = (p, id) => p.evaluate(({ sel, id }) => { const r = document.querySelector(`${sel} .hc-note-row[data-note="${id}"]`); return r ? { meta: r.querySelector(".hc-meta")?.textContent || "", lock: !!r.querySelector(".nt-lockmark-row") } : null; }, { sel: OPEN, id });
 const shown = (p) => p.evaluate(() => document.body.innerText);
-/** A PIN is set and wifi01 locked with it, from the note's own lock button. */
-const lockFirst = async (x, pin = "4821") => { await note(x, "wifi01"); await x.page.click(`${OPEN} .nt-lock`); await x.rest(200); await type(x, pin, 150); await type(x, pin, 600); };
+/** A PIN is set and wifi01 locked with it, from the note's own lock button (it locks at once), then opened with the PIN. */
+const lockFirst = async (x, pin = "4821") => { await note(x, "wifi01"); await x.page.click(`${OPEN} .nt-lock`); await x.rest(200); await type(x, pin, 150); await type(x, pin, 700); await x.page.click(`${OPEN} .nt-pad`); await type(x, pin, 700); };
 
 test("the first lock: choose a PIN and type it twice; it says plainly what a forgotten PIN means and that the title stays readable; then the note is encrypted", async (t) => {
   if (skipOrFail(t)) return;
@@ -51,11 +51,12 @@ test("the first lock: choose a PIN and type it twice; it says plainly what a for
     await type(x, "4822", 200);
     s = await lockScreen(p); assert.match(s.warn, /not the same/); assert.equal(s.title, "Choose a PIN"); assert.equal((await x.notes.state()).lock.state, "none");
     await type(x, "4821", 150); await type(x, "4821", 600);
-    assert.equal(await lockScreen(p), null, "locked, and open: notes are unlocked until they lock again");
-    assert.match(await p.locator(`${OPEN} .nt-doc`).innerText(), new RegExp(WORDS));
+    s = await lockScreen(p);
+    assert.equal(s.title, "House Wi-Fi and the alarm", "locked at once: its title and the keypad"); assert.match(s.text, /Type your 4-digit PIN to open it/);
+    assert.equal(await p.locator(`${OPEN} .nt-doc`).count(), 0);
     assert.equal(await p.getAttribute(`${OPEN} .nt-lock`, "aria-pressed"), "true");
     const st = await x.notes.state(), dir = join(x.notes.context.dir, "notes");
-    assert.deepEqual([st.lock.state, st.lock.digits, st.notes.find((n) => n.id === "wifi01").locked], ["unlocked", 4, true]);
+    assert.deepEqual([st.lock.state, st.lock.digits, st.notes.find((n) => n.id === "wifi01").locked], ["locked", 4, true]);
     assert.equal(existsSync(join(dir, "wifi01.md")), false); assert.equal(readFileSync(join(dir, "wifi01.lock"), "utf8").includes("router"), false);
     // The PIN is never drawn, and is sent only with the lock's own messages.
     assert.equal((await p.content()).includes("4821"), false);
@@ -76,7 +77,7 @@ test("Lock now (the button, and Ctrl+Alt+L): the words leave the page; the PIN p
     assert.equal((await x.notes.state()).lock.state, "locked");
     assert.equal((await shown(p)).includes(WORDS), false, "not on the page any more"); assert.equal((await p.content()).includes("under the stairs"), false, "nor anywhere in it");
     let s = await lockScreen(p);
-    assert.equal(s.title, "House Wi-Fi and the alarm"); assert.match(s.text, /Type your 4-digit PIN to open it/); assert.match(s.text, /Opening one opens them all until you lock them again/); assert.match(s.text, /Forgot PIN\?/);
+    assert.equal(s.title, "House Wi-Fi and the alarm"); assert.match(s.text, /Type your 4-digit PIN to open it/); assert.match(s.text, /An opened note stays open until you lock it again/); assert.match(s.text, /Forgot PIN\?/);
     assert.equal(await p.locator(`${OPEN} .nt-locknow`).count(), 0, "nothing to lock while notes are locked");
     for (const d of "4821") await p.click(`${OPEN} .nt-pad button[data-digit="${d}"]`); await x.rest(600);
     assert.equal(await lockScreen(p), null); assert.match(await p.locator(`${OPEN} .nt-doc`).innerText(), new RegExp(WORDS));
@@ -151,21 +152,23 @@ test("the lock comes off a note with the PIN; the PIN is changed with the old on
     await type(x, "193", 100); await p.keyboard.press("Enter"); await x.rest(200);
     assert.match((await lockScreen(p)).text, /Type it again/);
     await type(x, "482193", 700);
-    assert.equal((await x.notes.state()).lock.digits, 6); assert.equal(await lockScreen(p), null);
-    // Take the lock off: it asks for the PIN even while notes are unlocked.
-    await p.click(`${OPEN} .nt-lock`); await x.rest(200);
-    s = await lockScreen(p); assert.equal(s.title, "Take the lock off?"); assert.match(s.text, /Type your PIN/);
+    assert.equal((await x.notes.state()).lock.digits, 6); assert.match((await lockScreen(p)).text, /Type your 6-digit PIN to open it/);
+    await p.click(`${OPEN} .nt-pad`); await type(x, "482193", 700); assert.equal(await lockScreen(p), null);
+    // Remove lock (in the note's ⋯): it asks for the PIN even while the note is open.
+    await p.click(`${OPEN} .nt-more`); await x.rest(150); await p.locator(".nt-menu .dgc-menu-row", { hasText: "Remove lock…" }).click(); await x.rest(200);
+    s = await lockScreen(p); assert.equal(s.title, "Remove lock"); assert.match(s.text, /Type your PIN/);
     await type(x, "482193", 700);
     assert.equal((await x.notes.list()).find((n) => n.id === "wifi01").locked, false); assert.equal(existsSync(join(x.notes.context.dir, "notes", "wifi01.md")), true);
     assert.equal(await p.getAttribute(`${OPEN} .nt-lock`, "aria-pressed"), "false");
     // Change the PIN, from the note's ⋯ menu.
-    await p.click(`${OPEN} .nt-lock`); await x.rest(700);
+    await p.click(`${OPEN} .nt-lock`); await x.rest(200); assert.match((await lockScreen(p)).text, /Type your 6-digit PIN to lock/); await type(x, "482193", 800);
     await p.click(`${OPEN} .nt-more`); await x.rest(150); await p.locator(".nt-menu .dgc-menu-row", { hasText: "Change PIN…" }).click(); await x.rest(200);
     assert.match((await lockScreen(p)).text, /Type the PIN you have now/);
     await type(x, "482193", 200); assert.match((await lockScreen(p)).text, /Choose a new PIN/);
     await type(x, "7755", 200); await type(x, "7755", 700);
-    assert.equal(await lockScreen(p), null); assert.equal((await x.notes.state()).lock.digits, 4);
-    await p.keyboard.press("Control+Alt+l"); await x.rest(300); await type(x, "7755", 700);
+    assert.equal((await x.notes.state()).lock.digits, 4); assert.match((await lockScreen(p)).text, /Type your 4-digit PIN to open it/);
+    assert.equal(await p.evaluate(() => !!document.activeElement?.closest(".nt-pad")), true, "the pad has the keyboard");
+    await type(x, "7755", 700);
     assert.match(await p.locator(`${OPEN} .nt-doc`).innerText(), new RegExp(WORDS), "the new PIN opens what the old one locked");
   } finally { await x.close(); }
 });
@@ -191,18 +194,3 @@ test("notes lock again by themselves after a while with nothing done; a computer
   } finally { await y.close(); }
 });
 
-test("a locked note on Home's cards: the Medium card shows its title and a lock, never its words, even while notes are unlocked; search finds it by title", async (t) => {
-  if (skipOrFail(t)) return;
-  const x = await opened(300), p = x.page;
-  try {
-    await lockFirst(x);
-    await p.keyboard.press("Escape"); await x.rest(150); await p.keyboard.press("Escape"); await x.rest(200);
-    await x.resize(460); await x.rest(200);
-    const card = await p.locator(CARD).innerText();
-    assert.match(card, /House Wi-Fi and the alarm/); assert.match(card, /Locked/); assert.equal(card.includes("router"), false);
-    await p.fill(`${CARD} input.hc-note-find`, "router"); await x.rest(500);
-    assert.match(await p.locator(CARD).innerText(), /Locked · found inside/, "while unlocked its words are searched, and it says only that they are inside");
-    await p.fill(`${CARD} input.hc-note-find`, "wi-fi"); await x.rest(500);
-    assert.match(await p.locator(`${CARD} .nt-footbox`).innerText(), /1 of 14 notes/);
-  } finally { await x.close(); }
-});
