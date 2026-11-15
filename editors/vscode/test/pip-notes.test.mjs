@@ -93,6 +93,27 @@ test('a reply that kept a note says so under it, with Forget right there; nothin
  assert.equal(old.requests('list_pip_notes').length,0,'an older CLI is never asked');
 });
 
+test('Remembered stays under the reply that kept it, never below a newer message (his picture, 15 Nov)',async()=>{
+ // It was drawn at the conversation's end, under the latest reply: the next prompt and the Pip's "Thinking" row sat
+ // above it, and it read as the newest thing in the chat.
+ const RUN2='run_'+'b'.repeat(32),RUN3='run_'+'c'.repeat(32),later=new Date(Date.now()+1000).toISOString(),last=new Date(Date.now()+2000).toISOString();
+ const reply={id:'a1',pip_id:PIP,workspace_id:PW,role:'assistant',text:'Got it, no image models.',run_id:RUN,status:'succeeded',model:'m',created_at:now};
+ const asked={id:'u2',pip_id:PIP,workspace_id:PW,role:'user',text:'show me how it looks',run_id:RUN2,status:'succeeded',model:'m',created_at:later};
+ const answered={id:'a2',pip_id:PIP,workspace_id:PW,role:'assistant',text:'Here it is.',run_id:RUN2,status:'succeeded',model:'m',created_at:later};
+ const after=(a,b)=>!!(a.compareDocumentPosition(b)&4);          // b comes after a
+ const waiting=setup({notes:[note(N1,'Paint by hand, never an image model')],messages:[reply,asked]});await waiting.drain();waiting.click(`[data-job="${PIP}"]`);await waiting.drain();
+ const kept=[...waiting.d.querySelectorAll('.memory-kept')];assert.equal(kept.length,1);
+ assert.ok(after(waiting.d.querySelector('[data-message="a1"]'),kept[0]),'under the reply that kept it');
+ assert.ok(after(kept[0],waiting.d.querySelector('[data-message="u2"]')),'above the newer prompt, not below it');
+ const done=setup({notes:[note(N1,'Paint by hand, never an image model'),note(N2,'Works from home on Fridays',{run_id:RUN3})],
+  messages:[reply,asked,answered,{...asked,id:'u3',run_id:RUN3,created_at:last,text:'and on Fridays?'},{...answered,id:'a3',run_id:RUN3,created_at:last,text:'Noted.'}]});
+ await done.drain();done.click(`[data-job="${PIP}"]`);await done.drain();
+ const both=[...done.d.querySelectorAll('.memory-kept')];assert.equal(both.length,2,'every reply that kept a note keeps its line');
+ assert.match(both[0].textContent,/Paint by hand/);assert.match(both[1].textContent,/Fridays/);
+ assert.ok(after(done.d.querySelector('[data-message="a1"]'),both[0])&&after(both[0],done.d.querySelector('[data-message="u2"]')));
+ assert.ok(after(done.d.querySelector('[data-message="a3"]'),both[1]));
+});
+
 test('Pips API 46: what it keeps goes in your one memory; its page and the reply show it, marked everywhere, and Forget forgets it everywhere',async()=>{
  const M1='mem_'+'a'.repeat(12);
  const reply={id:'a1',pip_id:PIP,workspace_id:PW,role:'assistant',text:'Noted.',run_id:RUN,status:'succeeded',model:'m',created_at:now};
