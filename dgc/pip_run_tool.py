@@ -99,9 +99,12 @@ def personal_workspace(registry):
         raise RegistryError("not_found", "No personal Pips exist in this profile.")
     workspace = registry.get(saved[0])
     root = registry.directory / "personal"
-    if (root.is_symlink() or workspace["kind"] != "personal"
-            or registry.binding(workspace["id"])["canonical_root"] != str(canonical_directory(root))):
+    if root.is_symlink() or workspace["kind"] != "personal":
         raise RegistryError("unsafe_state", "The personal workspace binding changed.")
+    if registry.binding(workspace["id"])["canonical_root"] != str(canonical_directory(root)):
+        registry.personal()          # DGC's folder moved: its own storage follows it (one is saved: nothing is made)
+        if registry.binding(workspace["id"])["canonical_root"] != str(canonical_directory(root)):
+            raise RegistryError("unsafe_state", "The personal workspace binding changed.")
     return workspace
 
 

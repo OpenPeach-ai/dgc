@@ -531,8 +531,19 @@ class WorkspaceRegistry:
             if row:
                 result = self.get(row[0])
                 binding = self.binding(row[0])
-                if result['kind'] != 'personal' or binding['canonical_root'] != str(root):
+                if result['kind'] != 'personal':
                     raise RegistryError('unsafe_state', 'The personal workspace binding changed.')
+                if binding['canonical_root'] != str(root):
+                    # DGC's folder moved, was restored elsewhere or copied (user-test P1, 15 Nov: every Pip stopped for
+                    # good). This storage is always the registry's own folder, so its binding follows it, once.
+                    other = self.db.execute("SELECT workspace_id FROM bindings WHERE runner_id=? AND canonical_root=?",
+                                            (self.runner_id, str(root))).fetchone()
+                    if other is not None and other[0] != result['id']:
+                        raise RegistryError('conflict', "Pips' own folder is already in use by another workspace here. "
+                                            "Restore DGC's folder from a backup, or move that workspace elsewhere first.")
+                    self.db.execute("UPDATE bindings SET canonical_root=?,updated_at=? WHERE id=?",
+                                    (str(root), self.clock(), binding['id']))
+                    self.event(result['id'], "workspace_rebound", payload={"binding_id": binding['id']})
                 return result
             existing = self.lookup(root)
             if existing is not None:
