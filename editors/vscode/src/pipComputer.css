@@ -307,6 +307,19 @@ body.pc-screen-mode{padding:0}
 .pc-drawer .pc-card-clear:hover{background:var(--wash);color:var(--text)}
 .pc-card-clear svg{width:14px;height:14px}
 /* A card that still waits: one small live dot. */
+/* A code to type (the code card, Pips API 98): its field with Send and Not now, as on its card in the Pip's chat. The
+   field is the answers' own height and corner; where they don't fit one row it takes its own, the card's width. */
+.pc-code-form{flex-wrap:wrap}
+.pc-code-form .code-field{box-sizing:border-box;flex:1 1 96px;width:96px;min-width:0;max-width:150px;height:26px;margin:0;padding:0 8px;border:1px solid var(--vscode-input-border,var(--hair-strong));border-radius:var(--btn-r,6px);
+ background:var(--vscode-input-background,var(--pc-card));color:var(--vscode-input-foreground,var(--text));font:500 var(--t-sm)/1 var(--vscode-editor-font-family,ui-monospace,monospace);font-variant-numeric:tabular-nums;letter-spacing:.06em}
+.pc-code-form .code-field::placeholder{font-family:var(--vscode-font-family,system-ui);font-weight:400;letter-spacing:0;color:var(--muted-firm)}
+.pc-code-form .code-field:focus-visible{outline:var(--btn-ring);outline-offset:1px}
+.pc-code-form .code-field[readonly]{color:var(--muted-firm);cursor:progress}
+.pc-drawer .pc-pill:disabled{opacity:.55;cursor:default}
+.pc-card[data-kind="code"] .pc-card-line{white-space:normal;overflow:visible}
+.pc-card-error{position:relative;z-index:1;margin:6px 0 0;font-size:var(--t-sm);line-height:1.4;color:var(--err-text);overflow-wrap:anywhere}
+.pc-card-note{margin:8px 0 0;padding-right:8px;font-size:var(--t-sm);line-height:1.45;color:var(--text);overflow-wrap:anywhere}
+@media (forced-colors:active){.pc-code-form .code-field{border-color:CanvasText}}
 .pc-card-live{position:absolute;top:14px;right:14px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
 @media (prefers-reduced-motion:reduce){.pc-drawer,.pc-drawer *{transition:none!important}}
 @media (forced-colors:active){.pc-drawer.pc-fan,.pc-card{border-color:CanvasText}.pc-drawer.pc-fan{background:Canvas}}

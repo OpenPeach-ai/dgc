@@ -33,7 +33,7 @@ for (const width of [300, 440, 700]) {
     try {
       const bar = await x.tabs();
       assert.deepEqual(bar.tabs.filter((b) => b.shown).map((b) => b.name), ["Home", "Work", "Chat", "Library", "Pips"]);
-      for (const b of bar.tabs) { assert.equal(b.clipped, false, `${b.name} is whole`); assert.equal(b.icons, b.id === "pips" || b.id === "library" ? 1 : 0, `${b.name} is its word${b.id === "pips" ? " and the Core Pip's face" : b.id === "library" ? " and his Library books" : ""}`); }
+      for (const b of bar.tabs) { assert.equal(b.clipped, false, `${b.name} is whole`); assert.equal(b.icons, b.id === "pips" ? 1 : 0, `${b.name} is its word${b.id === "pips" ? " and the Core Pip's face" : " alone (only Pips has a picture: his call of 15 Nov)"}`); }
       const cut = await x.page.evaluate(() => [...document.querySelectorAll("#side-tabs .dgc-tab-word")].filter((w) => w.scrollWidth > w.clientWidth + 1 || w.getClientRects().length > 1).map((w) => w.textContent));
       assert.deepEqual(cut, [], "no name is cut or broken");
       assert.equal(bar.overflowX, false);

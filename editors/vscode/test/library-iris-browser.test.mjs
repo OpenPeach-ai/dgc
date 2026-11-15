@@ -2,9 +2,13 @@
 // saturation 87%, lightness 65%, used exactly as he made it: its stylesheet (namespaced .library-iris) and its PNGs are
 // copied into the extension byte for byte (media/icons/library-iris/), and its README's markup is what the page holds:
 // <span class="library-iris" aria-hidden="true"><i></i><i></i><i></i></span> beside the visible word "Library", and
-// role="img" + aria-label="Library" where it stands alone. Places: the header's Library tab (beside the word; alone in
-// icon mode), Home's Library button beside Cards, and the editor Library panel's tab icon (its PNG, light and dark).
-// Sizes from its --size (16, 20, 24). Under forced colours it falls back to CanvasText, so it never vanishes.
+// role="img" + aria-label="Library" where it stands alone. Places: Home's Library button beside Cards, and the editor
+// Library panel's tab icon (its PNG, light and dark). Sizes from its --size (16, 20, 24). Under forced colours it falls
+// back to CanvasText, so it never vanishes.
+// NOT on the side bar's header tab (his call of 15 Nov, after seeing it there: "the header tabs don't need to show icon
+// for library, only Pips tab shows Core's face, not any other tab"): with words showing, the Library tab is the word
+// alone; in the narrow icon mode it is a plain line icon of Home's, Work's and Chat's family, size and colour (the
+// codicon "library"), never the coloured books.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -54,9 +58,9 @@ test("his icon is in the extension exactly as he made it: library.css and every 
 test("its markup is the README's: three <i> in a .library-iris span, hidden beside the word “Library”", () => {
   const panel = read("src/panel.ts"), cards = read("media/shared/homecards.js");
   const tab = panel.slice(panel.indexOf('id="side-tab-library"'), panel.indexOf("</button>", panel.indexOf('id="side-tab-library"')));
-  assert.match(tab, MARKUP, "the header's Library tab holds it");
-  assert.match(tab, /class="library-iris[^"]*"[^>]*aria-hidden="true"/); assert.match(tab, /<span class="dgc-tab-word">Library<\/span>/);
-  assert.doesNotMatch(tab, /codicon-library/, "in place of the line icon");
+  assert.doesNotMatch(tab, /library-iris/, "the header's Library tab does not hold it: only Pips has a picture on its tab");
+  assert.match(tab, /<span class="dgc-tab-icon codicon codicon-library" aria-hidden="true"><\/span><span class="dgc-tab-word">Library<\/span>/, "the tab is the word, with the plain line icon for the narrow icon mode");
+  assert.doesNotMatch(read("media/shared/tabs.css"), /\.dgc-tab[^{}]*\.library-iris/, "and the tab bar's stylesheet has no rule for it on a tab");
   assert.match(cards, MARKUP, "Home's Library button holds it"); assert.doesNotMatch(cards, /LIBRARY_ICON = '<svg/, "in place of the drawn books");
   // The editor Library panel's tab icon: his PNG, light and dark.
   const chat = read("src/chatdgc.ts"), open = chat.slice(chat.indexOf("openLibrary(view"), chat.indexOf("libraryRef("));
@@ -74,25 +78,41 @@ const iris = (page, scope) => page.evaluate((s) => {
     name: n.closest("button").getAttribute("aria-label") || n.closest("button").textContent.trim() };
 }, scope);
 
-for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 292, 300, 440]) {
-  test(`${width} px (${theme}): the header's Library tab wears his books, at his hue, 16 px, ${width < 292 ? "alone (the word kept for a screen reader)" : "beside its word"}`, async (t) => {
+// The header's Library tab as it is drawn: what it shows, and Work's and Chat's icons beside it to compare.
+const tabNow = (page) => page.evaluate(() => {
+  const seen = (n) => !!n && n.checkVisibility({ opacityProperty: true, visibilityProperty: true }) && n.getBoundingClientRect().width > 1.5 && n.getBoundingClientRect().height > 1.5;
+  const of = (id) => { const t = document.getElementById(`side-tab-${id}`), icon = t.querySelector(".dgc-tab-icon"), word = t.querySelector(".dgc-tab-word"), r = icon.getBoundingClientRect(), s = getComputedStyle(icon);
+    return { iris: t.querySelectorAll(".library-iris").length, pictures: [...t.querySelectorAll("svg, img, .library-iris, .dgc-tab-face")].filter(seen).length, icon: seen(icon), cls: [...icon.classList].filter((c) => c.startsWith("codicon-")).join(" "),
+      w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10, colour: s.color, font: s.fontFamily, size: s.fontSize, glyph: getComputedStyle(icon, "::before").content, image: s.backgroundImage, hidden: icon.getAttribute("aria-hidden"),
+      word: seen(word), text: word.textContent, name: t.textContent.trim() }; };
+  return { library: of("library"), work: of("work"), chat: of("chat") };
+});
+for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 279, 280, 300, 440]) {
+  test(`${width} px (${theme}): the header's Library tab is ${width < 280 ? "a plain line icon like Work's and Chat's, never his coloured books" : "the word “Library” alone: no icon, no coloured mark"}`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openDock(browser, { tab: "home", width, theme });
     try {
-      const i = await iris(x.page, "#side-tab-library");
-      assert.ok(i?.seen, "his icon is on the tab");
-      assert.deepEqual([i.hue, i.sat, i.light], ["247", "87%", "65%"], "his colour, untouched");
-      assert.deepEqual([Math.round(i.w), Math.round(i.h), i.size], [16, 16, "16px"], "sized from its --size");
-      assert.equal(i.books, 3); assert.equal(i.bookSeen, true); assert.ok(i.paint.every((p) => p.startsWith("linear-gradient")), "drawn by his stylesheet");
-      assert.equal(i.filter, "none"); assert.equal(i.opacity, "1");
-      assert.equal(i.hidden, "true", "hidden from a screen reader: the tab says Library in words");
-      if (width < 292) assert.ok(i.word[0] <= 1.5 && i.word[1] <= 1.5, "icon mode: the word takes no room");
-      else { assert.ok(i.word[0] > 20, "the word is beside it"); assert.ok(i.right <= i.wordLeft - 3, "the icon before the word, with a gap"); assert.ok(Math.abs(i.mid - i.wordMid) <= 1.5, "centred on the word"); }
+      const { library: l, work, chat } = await tabNow(x.page);
+      assert.equal(l.iris, 0, "his Iris books are not on the tab");
+      assert.equal(l.pictures, 0, "no picture or coloured mark on it (only Pips has one)");
+      assert.equal(l.name, "Library"); assert.equal(l.cls, "codicon-library"); assert.equal(l.hidden, "true");
+      if (width >= 280) { assert.equal(l.word, true, "the word is drawn"); assert.equal(l.icon, false, "and no icon beside it"); assert.deepEqual([work.icon, chat.icon], [false, false], "as on Work and Chat"); }
+      else {
+        assert.equal(l.word, false, "icon mode: the word takes no room (it stays for a screen reader)"); assert.equal(l.text, "Library");
+        assert.equal(l.icon, true, "its line icon is drawn");
+        assert.match(l.font, /codicon/, "from the editor's icon font, as Home's, Work's and Chat's");
+        assert.ok(l.glyph && l.glyph !== "none" && l.glyph !== "normal", `it has its glyph (${l.glyph})`);
+        assert.equal(l.image, "none", "a glyph in the text's colour, not a drawing");
+        assert.deepEqual([l.w, l.h, l.size], [work.w, work.h, work.size], "the size of Work's icon"); assert.deepEqual([l.w, l.h], [chat.w, chat.h]);
+        assert.equal(l.colour, work.colour, "the colour of Work's icon"); assert.equal(l.colour, chat.colour, "and of Chat's");
+      }
       assert.equal((await x.tabs()).overflowX, false);
       const bar = await x.tabs();
       for (const b of bar.tabs) assert.equal(b.clipped, false, `${b.name} is whole`);
     } finally { await x.close(); }
   });
+}
+for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 292, 300, 440]) {
   test(`${width} px (${theme}): Home's Library button wears his books beside “Library” (alone when narrow)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openGrid(browser, { width, theme });
@@ -105,14 +125,13 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 2
     } finally { await x.close(); }
   });
 }
-test("forced colours: the books fall back to CanvasText, so the icon never vanishes (170 px)", async (t) => {
+test("forced colours: the books fall back to CanvasText, so the icon never vanishes (Home's Library button, 170 px)", async (t) => {
   if (skipOrFail(t)) return;
-  const x = await openDock(browser, { tab: "home", width: 170, forced: true });
+  const x = await openGrid(browser, { width: 170, forced: true });
   try {
-    const i = await iris(x.page, "#side-tab-library");
+    const i = await iris(x.page, "#home-hub .hc-library-btn");
     assert.ok(i?.seen && i.bookSeen);
     const canvasText = await x.page.evaluate(() => { const p = document.createElement("span"); p.style.color = "CanvasText"; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; });
-    // (The chosen tab is Highlight with HighlightText; any other is CanvasText.)
     assert.ok(i.ground.every((g) => g === canvasText), `each book is CanvasText (${i.ground[0]} vs ${canvasText})`);
   } finally { await x.close(); }
 });

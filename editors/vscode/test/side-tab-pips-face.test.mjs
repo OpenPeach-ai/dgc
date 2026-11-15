@@ -6,7 +6,7 @@
 //     holds the order, the gap and the centring), about the height of the word's line, never cut
 //   - it is alive (it breathes and blinks) and keeps still under reduced motion
 //   - the tab's name for a screen reader is still "Pips"; choosing tabs moves nothing; the keys work as before
-//   - the five tabs still fit at 292 px (four fitted at 240 before Library; five at 280 before Library wore his books, 15 Nov); at 170 px (icons: side-tabs-icons.test.mjs) Pips is the face alone
+//   - the five tabs still fit at 280 px (four fitted at 240 before Library; 292 while Library wore his books, 15 Nov); at 170 px (icons: side-tabs-icons.test.mjs) Pips is the face alone
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openDock } from "./support/dock-scene.mjs";
@@ -41,14 +41,14 @@ const tabsNow = (page) => page.evaluate(() => [...document.querySelectorAll('#si
     name: t.getAttribute("aria-label") || [...t.querySelectorAll("*")].filter((n) => !n.children.length && !n.closest('[aria-hidden="true"]')).map((n) => n.textContent).join("").trim() };
 }));
 
-for (const width of [292, 300, 700]) {
+for (const width of [280, 300, 700]) {
   test(`${width}px: only the Pips tab wears the Core Pip's face, beside its name, at the height of the word's line`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openDock(browser, { tab: "home", width, height: 600 });
     try {
       const tabs = await tabsNow(x.page), pips = tabs.find((tab) => tab.id === "pips");
       assert.deepEqual(tabs.map((tab) => [tab.id, !!tab.face]), [["home", false], ["work", false], ["chat", false], ["library", false], ["pips", true]], "Pips, and only Pips");
-      assert.deepEqual(tabs.filter((tab) => tab.id !== "pips").map((tab) => tab.pictures), [0, 0, 0, 0], "Home, Work, Chat and Library draw no line icon and no face (Library's own mark is his books: library-iris-browser.test.mjs)");
+      assert.deepEqual(tabs.filter((tab) => tab.id !== "pips").map((tab) => tab.pictures), [0, 0, 0, 0], "Home, Work, Chat and Library draw no line icon and no face (Library is a word like the rest: library-iris-browser.test.mjs)");
       const f = pips.face;
       assert.equal(f.hidden, "true", "the face is decoration");
       assert.equal(pips.name, "Pips", "the tab is still named Pips");
@@ -105,7 +105,7 @@ test("170px, the narrowest side bar: the tabs are icons, and Pips is the face al
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "home", width: 170, height: 600 });
   try {
-    // (Under 292 px the words are not drawn and each tab is an icon: side-tabs-icons.test.mjs.)
+    // (Under 280 px the words are not drawn and each tab is an icon: side-tabs-icons.test.mjs.)
     const tabs = await tabsNow(x.page);
     for (const tab of tabs) assert.ok(tab.word.width <= 1.5 && tab.word.height <= 1.5, `${tab.id}: its word is not drawn (${tab.word.width} x ${tab.word.height})`);
     assert.deepEqual(tabs.map((tab) => [tab.id, tab.name.replace(/:.*/, "")]), [["home", "Home"], ["work", "Work"], ["chat", "Chat"], ["library", "Library"], ["pips", "Pips"]], "each tab keeps its name");

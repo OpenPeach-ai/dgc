@@ -103,8 +103,14 @@
 .dgc-lib .lib-row-more { position: absolute; top: 50%; right: 3px; translate: 0 -50%; display: none; background: linear-gradient(var(--row-hover), var(--row-hover)), var(--lib-ground, var(--bg)); }
 .dgc-lib .lib-row-more:hover, .dgc-lib .lib-row-more[aria-expanded="true"] { background: linear-gradient(var(--wash), var(--wash)), linear-gradient(var(--row-hover), var(--row-hover)), var(--lib-ground, var(--bg)); }
 .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-more, .dgc-lib .lib-row-more[aria-expanded="true"] { display: inline-flex; }
+/* While the ⋯ shows, the row's words end before it (live round 1, finding 49: at 170 px it lay over a title, which
+   stopped mid-word with no "…"): the title and the line under it give up the ⋯'s room, so a title too long for what is
+   left ends in "…" before the button. Nothing else moves: a title that fits stays where it was. (The ⋯ is 28 px wide,
+   3 px from the row's end; the words stop 2 px before it.) */
+.dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-main, .dgc-lib .lib-row:has(.lib-row-more[aria-expanded="true"]) .lib-row-main { padding-right: calc(28px + 3px + 2px - (var(--lib-bleed, 8px) - 1px)); }
 @media (hover: none) {
   .dgc-lib .lib-row-more { position: static; translate: none; display: inline-flex; background: transparent; box-shadow: none; }
+  .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-main, .dgc-lib .lib-row:has(.lib-row-more[aria-expanded="true"]) .lib-row-main { padding-right: 0; }
 }
 /* A video playing in its row takes a line of its own under it. */
 .dgc-lib .lib-row > figure.made-video { flex: 1 0 100%; min-width: 0; margin: var(--sp-2) 0 var(--sp-1); cursor: auto; }
@@ -122,6 +128,7 @@
   .dgc-lib .lib-row-mark [data-mark] { --size: 36px; }
   .dgc-lib .lib-row-actions { display: inline-flex; }
   .dgc-lib .lib-row .lib-row-more, .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-more { display: none; }
+  .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-main, .dgc-lib .lib-row:has(.lib-row-more[aria-expanded="true"]) .lib-row-main { padding-right: 0; }
   .dgc-lib .lib-row-facts { display: block; }
   .dgc-lib .lib-row-name { font-weight: var(--w-med); }
 }

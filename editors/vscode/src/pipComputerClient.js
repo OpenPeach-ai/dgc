@@ -2,7 +2,7 @@
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
 import {DRAWER,cardWords,cardTitle,drawerMarkup,bellMarkup} from './pipComputerDrawer.js';
-import {reviewWords} from './pipCareful.js';
+import {reviewWords,isCode,codeWords,codeProblem,takeCode,tidyCodeField,pasteCode,keepCodeFields} from './pipCareful.js';
 import {loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {computerPortal} from './pipComputerNames.js';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
@@ -66,9 +66,17 @@ Object.assign(S,{more:false,tier:0});
 // `banner`: the card that arrived while it was collapsed, on show alone for a moment; `settled`: the answered cards
 // having their moment ({a, done}); `detail`: the cards whose detail is open.
 Object.assign(S,{drawer:'shown',fan:false,banner:'',settled:[],detail:new Set()});
+// The code cards on show: how each stands ({sending, error}), and the ones seen waiting (to say how one ended without
+// this page). Never what was typed: that is in its field alone, until the one request that carries it.
+Object.assign(S,{codes:new Map()});
+let codeSeen=new Map();
+const codeBox=id=>[...document.querySelectorAll('input[data-code-field]')].find(box=>box.dataset.codeField===id)||null;
 let seenWaiting=new Set(),cardOrder=[],bannerTimer=null,foldTimer=null,swipe=null,swipedCard=null;
 const settledCard=id=>S.settled.find(c=>c.a.id===id);
-const pending=()=>(S.computer?.actions||[]).filter(a=>a.status==='pending'&&!settledCard(a.id));
+// (A code to type, the code card of Pips API 98: an older DGC has none; and past its ten minutes it no longer waits.)
+const CODE_API=98,CODE_WAIT=100000,CODE_NOTE_STAYS=9000;
+const codeGone=a=>isCode(a.summary)&&(S.apiVersion<CODE_API||Date.parse(a.expires_at)<=Date.now());
+const pending=()=>(S.computer?.actions||[]).filter(a=>a.status==='pending'&&!settledCard(a.id)&&!codeGone(a));
 const CLIP_BYTES=1000000,TYPE_CHARS=5000;
 const tabTitle=()=>`${S.pip?.name||'Pip'} · ${computerName()}`;
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
@@ -171,6 +179,17 @@ const move=(el,frames,timing)=>!el?.animate||calm()?null:el.animate(frames,timin
 // banner under the bell for 6 seconds, then goes back into the bell.
 function noteWaiting(){
  const ids=pending().map(a=>a.id),fresh=ids.filter(id=>!seenWaiting.has(id));seenWaiting=new Set(ids);
+ // A code card that stopped waiting without this page says how it ended, in its place, for a moment: not typed in
+ // time, its page moved on, or answered somewhere else. Its field goes with it.
+ for(const a of pending())if(isCode(a.summary))codeSeen.set(a.id,a);
+ for(const [id,a] of codeSeen){
+  if(ids.includes(id)||S.codes.get(id)?.sending)continue;
+  codeSeen.delete(id);S.codes.delete(id);
+  if(settledCard(id))continue;
+  const now=(S.computer?.actions||[]).find(x=>x.id===id),say=codeWords(a.summary,S.pip?.name||'The Pip');
+  if(!now)continue;
+  settle(a,'',{note:now.status==='lost'?say.lost:now.status==='expired'||now.status==='pending'?say.expired:say.elsewhere,stay:CODE_NOTE_STAYS});
+ }
  if(fresh.length){if(tucked()){S.banner=fresh[0];armBanner();}else S.fan=true;}
  if(S.banner&&!ids.includes(S.banner)&&!settledCard(S.banner)){S.banner='';clearTimeout(bannerTimer);}
  if(!ids.length&&!S.settled.length)S.fan=false;
@@ -206,7 +225,8 @@ function leaveThen(el,how,done){
  setTimeout(done,ms);
 }
 // An answered card: the quiet word in place of its buttons for a moment, then it leaves. It can be cleared at once.
-function settle(a,done){S.settled=[...S.settled,{a,done}];setTimeout(()=>dismiss(a.id),DRAWER.stay);}
+// (`note`: a line in place of the quiet word, for a card that ended some other way; it stays a little longer to be read.)
+function settle(a,done,{note='',stay=DRAWER.stay}={}){S.settled=[...S.settled,{a,done,...(note?{note}:{})}];setTimeout(()=>dismiss(a.id),stay);}
 function dismiss(id,now=false){
  const card=settledCard(id);if(!card||card.leaving&&!now)return;card.leaving=true;
  const gone=()=>{
@@ -269,7 +289,8 @@ function collapseDrawer(focus=true){S.drawer='collapsed';S.fan=false;S.banner=''
 function drawDrawer(fresh){
  const cards=drawerCards();if(!tucked())cardOrder=cards.map(card=>card.a.id);
  const top=$('pc-drawer')?.querySelector('.pc-drawer-list')?.scrollTop||0;
- const changed=put('pc-wait',drawerMarkup({cards,waiting:pending().length,banner:tucked(),pipName:S.pip?.name||'The Pip',now:Date.now(),open:S.detail}));
+ // (A code being typed is carried across the redraw in its own field: keepCodeFields.)
+ const changed=keepCodeFields($('pc-wait'),()=>put('pc-wait',drawerMarkup({cards,waiting:pending().length,banner:tucked(),pipName:S.pip?.name||'The Pip',now:Date.now(),open:S.detail,codes:S.codes})));
  applyDrawer();
  if(changed&&top&&S.fan){const list=$('pc-drawer')?.querySelector('.pc-drawer-list');if(list)list.scrollTop=top;}
  if(!fresh.length)return;
@@ -667,8 +688,36 @@ async function runCommand(command){
  catch(error){S.terminal.error=errorText(error);S.terminal.draft=command;}
  finally{S.terminal.running=false;render();$('pc-command')?.focus();}
 }
+// ---- The code card's notification (Pips API 98): the field, Send and Not now, as on its card in the Pip's chat. What
+// is typed leaves its field for the one request that carries it (fill_pip_code, for this Pip and this card), and is let
+// go as that request is posted: nothing here keeps it, and the field is a new, empty one from then on.
+async function sendCode(id){
+ const a=pending().find(x=>x.id===id&&isCode(x.summary));if(!a||S.busy||!S.connected||settledCard(id)||S.codes.get(id)?.sending)return;
+ const state={sending:false,error:''};S.codes.set(id,state);
+ const taken=takeCode(codeBox(id)),problem=codeProblem(taken.code),name=S.pip?.name||'The Pip',say=codeWords(a.summary,name);
+ if(problem){taken.code='';state.error=problem;render();codeBox(id)?.focus({preventScroll:true});return;}
+ const request={type:'fill_pip_code',pip_id:S.pip.id,action_id:a.id,expected_digest:a.digest,code:taken.code};
+ taken.code='';++computerRefreshSerial;state.sending=true;S.error='';S.actionError=false;S.notice='';render();codeBox(id)?.focus({preventScroll:true});
+ // (The channel copies the request as it posts it: the one kept here while DGC answers has no code in it.)
+ const asked=broker.request(request,CODE_WAIT);request.code='';
+ let result=null,done=null,failed='';
+ try{result=await asked;if(!record(result)||typeof result.ok!=='boolean')throw Error('DGC’s answer about the code didn’t read. Refresh to see whether it was sent.');
+  done=pipComputerAction(result.action,S.pip.id);if(done.id!==a.id)throw Error('DGC’s answer was about another card. Refresh to see whether it was sent.');}
+ catch(error){failed=errorText(error);result=null;}
+ state.sending=false;
+ const ended=(word,options)=>{S.codes.delete(id);codeSeen.delete(id);settle(a,word,options);S.computer={...S.computer,actions:(S.computer?.actions||[]).filter(item=>item.id!==a.id)};};
+ if(result?.ok===true){ended(result.signed_in===true?`${say.sent} · ${say.signedIn}`:say.sent);S.notice=result.signed_in===true?`Sent. ${name} is signed in and carries on.`:`Sent. DGC filled the code in for ${name}.`;}
+ else if(result&&(done.status==='lost'||result.lost===true))ended('',{note:say.lost,stay:CODE_NOTE_STAYS});
+ else if(result&&done.status!=='pending')ended('',{note:done.status==='expired'?say.expired:say.elsewhere,stay:CODE_NOTE_STAYS});
+ else state.error=failed||(typeof result?.error==='string'&&result.error?result.error.slice(0,300):'The code was not sent. Type it again.');
+ ++computerRefreshSerial;render();
+ if(state.error)codeBox(id)?.focus({preventScroll:true});else $(`pc-open-${id}`)?.focus({preventScroll:true});
+ await loadComputer();
+}
 async function decide(id,how){
  const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy||settledCard(id))return;
+ // (Not now on a code card: whatever was typed is gone before anything else happens.)
+ if(isCode(a.summary)){if(how!=='reject'||S.codes.get(id)?.sending)return;const box=codeBox(id);if(box)takeCode(box);S.codes.delete(id);codeSeen.delete(id);}
  const within=!!cardEl(id)?.contains(document.activeElement);
  ++computerRefreshSerial; // A poll started before this decision must not restore its old card.
  S.busy=true;S.error='';S.actionError=false;S.notice='';render();
@@ -682,7 +731,7 @@ async function decide(id,how){
   }else{
    const d=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve:how==='send'})).action,S.pip.id);
    if(d.id!==a.id||d.status!==(how==='send'?'approved':'rejected'))throw Error('The saved decision differs from your choice. Refresh and try again.');
-   S.notice=a.summary?.kind==='site'?(d.status==='approved'?'Allowed. It opens the site and carries on.':'Not now. It won’t open it.'):a.summary?.kind==='text'?(d.status==='approved'?'Allowed once. It carries on.':'Not now. It won’t do that.'):d.status==='approved'?'Approved. It is sent within a few seconds, exactly as shown.':'Rejected. Nothing was sent.';
+   S.notice=isCode(a.summary)?codeWords(a.summary,S.pip?.name||'The Pip').rejected:a.summary?.kind==='site'?(d.status==='approved'?'Allowed. It opens the site and carries on.':'Not now. It won’t open it.'):a.summary?.kind==='text'?(d.status==='approved'?'Allowed once. It carries on.':'Not now. It won’t do that.'):d.status==='approved'?'Approved. It is sent within a few seconds, exactly as shown.':'Rejected. Nothing was sent.';
   }
   // Its card says so in place of its buttons for a moment, then leaves (the drawer).
   settle(a,cardWords(a,S.pip?.name||'The Pip').answers.find(b=>b.how===how||how==='send'&&b.how==='review')?.done||'Done');
@@ -887,7 +936,12 @@ document.addEventListener('submit',event=>{
  if(event.target.id==='pc-go'){const url=$('pc-url').value.trim();S.address=null;if(url)void frame('go',{url:/^[a-z]+:\/\//i.test(url)?url:/\s/.test(url)||!url.includes('.')?'https://duckduckgo.com/?q='+encodeURIComponent(url):'https://'+url});}
  if(event.target.id==='pc-run')void runCommand($('pc-command').value);
  if(event.target.id==='login-form')void saveCardLogin();
+ if(event.target.dataset?.codeForm)void sendCode(event.target.dataset.codeForm);
 });
+// A code's field: spaces go as it is typed or pasted, and what DGC said about the last try goes with the next one.
+document.addEventListener('input',event=>{const box=event.target;if(!box?.dataset?.codeField)return;tidyCodeField(box);
+ const state=S.codes.get(box.dataset.codeField);if(state?.error){state.error='';render();}});
+document.addEventListener('paste',event=>{const box=event.target;if(box?.dataset?.codeField&&!box.readOnly)pasteCode(box,event);});
 document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.terminal.draft=event.target.value;if(event.target.id==='pc-url')S.address=event.target.value;
  if(event.target.id==='pc-paste-text'){S.clip.draft=event.target.value;if(S.clip.note)clipSay('');}});
 // Escape leaves full screen. Not while the screen itself has the keys: the viewer keeps those for the computer, and the

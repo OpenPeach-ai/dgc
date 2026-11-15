@@ -147,6 +147,17 @@ class CodeCard(unittest.TestCase):
             if path.exists():
                 self.assertNotIn(CODE.encode(), path.read_bytes(), f"the code is never written to {path.name}")
 
+    def test_needs_attention_names_it_a_code(self):
+        # The code card pass found Needs attention titling it "Send this on login.northwind-bank.example?".
+        host, page, _, card = self.offer()
+        from dgc import pip_attention
+        from dgc.pip_computer import _now
+        found = pip_attention.collect(self.registry, _now())["items"]
+        items = [i for i in found if card["id"] in json.dumps(i)]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["title"], "Type the code for northwind-bank.example")
+        self.assertNotIn(CODE, json.dumps(items))
+
     def test_it_is_in_pips_api_98(self):
         from dgc.headless import PIPS_API_VERSION
         self.assertGreaterEqual(PIPS_API_VERSION, 98)

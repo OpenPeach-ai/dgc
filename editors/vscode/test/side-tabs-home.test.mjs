@@ -3,7 +3,7 @@
 //   - one centred tab bar at the top, under the header row: Home, Work, Chat, Pips, as names only; it replaces the header's Pips button and the Pips block
 //   - the tab you are on is lit in the accent; pointing at another only changes its name to the text colour (13 Nov)
 //   - the keyboard: Left and Right move and choose (wrapping), Home and End jump, and the bar is one tab stop
-//   - the five names fit at 292 px; under 292 px the tabs are icons (side-tabs-icons.test.mjs), down to 170 px
+//   - the five names fit at 280 px; under 280 px the tabs are icons (side-tabs-icons.test.mjs), down to 170 px
 //   - Home: everything that needs you or is new is one card of one size and style, from a session (its blob) or a Pip
 //     (its face), in two groups, "Needs you" then "New"; each card's answers work; an empty Home says so in one line
 //   - Show: All, Work, Chat, Personal Pips, Project Pips, each with its count; kept until changed; Home's number counts all
@@ -75,7 +75,7 @@ for (const width of [300, 700]) {
       assert.equal(bar.shown, true, "the side bar has a tab bar");
       assert.equal(bar.role, "tablist");
       assert.deepEqual(names(bar), ["Home", "Work", "Chat", "Library", "Pips"], "five tabs, in this order (Library before Pips since 15 Nov: Pips stays last)");
-      assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 1, 1], "names: no line icon in any tab; Library wears his books (library-iris-browser.test.mjs) and Pips the Core Pip's face (side-tab-pips-face.test.mjs)");
+      assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 0, 1], "names: no icon in any tab; only Pips has a picture, the Core Pip's face (side-tab-pips-face.test.mjs)");
       assert.deepEqual(chosen(bar), ["home"], "it opens on Home");
       assert.ok(Math.abs((bar.bar.left + bar.bar.right) / 2 - width / 2) < 0.6, `the bar is centred (${bar.bar.left} to ${bar.bar.right} of ${width})`);
       assert.ok(bar.bar.left >= 11.5 && bar.bar.right <= width - 11.5, "it keeps the side bar's 12 px gutter");
@@ -212,9 +212,9 @@ test("the tab you were on is kept: a reload comes back to it", async (t) => {
   } finally { await again.close(); }
 });
 
-test("a narrow side bar: the five names fit at 292 px; under 292 px the tabs are icons, down to 170 px", async (t) => {
+test("a narrow side bar: the five names fit at 280 px; under 280 px the tabs are icons, down to 170 px", async (t) => {
   if (skipOrFail(t)) return;
-  for (const width of [292, 199, 170]) {
+  for (const width of [280, 199, 170]) {
     const x = await openDock(browser, { tab: "home", width, height: 600 });
     try {
       const bar = await x.tabs();
@@ -222,8 +222,8 @@ test("a narrow side bar: the five names fit at 292 px; under 292 px the tabs are
       assert.ok(bar.bar.left >= 0 && bar.bar.right <= width, `${width}px: the bar is inside the side bar (${bar.bar.left} to ${bar.bar.right})`);
       assert.ok(tab(bar, "home").countBox, `${width}px: Home still says something waits`);
       const count = tab(bar, "home").countBox;
-      if (width >= 292) {
-        assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 1, 1], `${width}px: words, and no icon but his books on Library and the face on Pips`);
+      if (width >= 280) {
+        assert.deepEqual(bar.tabs.map((x) => x.icons), [0, 0, 0, 0, 1], `${width}px: words, and no icon but the face on Pips`);
         assert.ok(bar.tabs.every((x) => !x.clipped), `${width}px: no name is cut`);
         for (let i = 1; i < bar.tabs.length; i++) assert.ok(bar.tabs[i].words.left >= bar.tabs[i - 1].words.right + 3, `${width}px: ${bar.tabs[i].name} does not touch ${bar.tabs[i - 1].name}`);
         assert.ok(count.left >= tab(bar, "home").words.right + 2 && count.right <= tab(bar, "home").right, `${width}px: the number is beside Home's name, inside its tab`);

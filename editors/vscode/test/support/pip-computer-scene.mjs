@@ -27,7 +27,7 @@ function host(PIP, scene) {
   window.__scene = scene; window.__sent = []; window.__posted = []; window.__copied = [];
   const post = (m) => window.postMessage(m, "*");
   const answers = {
-    get_pip_computer: () => ({ computer: { pip_id: PIP.id, granted: true, available: true, reason: "", pending: (scene.actions || []).length, actions: scene.actions || [], ...(scene.screens ? { screen: scene.screen, screens: scene.screens } : {}) } }),
+    get_pip_computer: () => ({ computer: { pip_id: PIP.id, granted: true, available: true, reason: "", pending: (scene.actions || []).filter((a) => a.status === "pending").length, actions: scene.actions || [], ...(scene.screens ? { screen: scene.screen, screens: scene.screens } : {}) } }),
     get_pip_computer_desktop: () => ({ desktop: { pip_id: PIP.id, available: true, reason: "", install: "", using: scene.using, browser: "Chromium", chrome_install: "" } }),
     use_pip_computer_view: () => ({ view: { ok: false, error: "" } }),
     // Its Files (scene.files: the top folder), for the Files panel under the screen.
@@ -43,15 +43,28 @@ function host(PIP, scene) {
     save_pip_login: (r) => { const a = scene.actions.find((x) => x.id === r.action_id); scene.actions = scene.actions.filter((x) => x !== a);
       return { login: { id: "login_" + "1".repeat(32), site: a.summary.site, hosts: [a.summary.host], username: r.username, has_code: !!r.totp, pips: r.pips === "all" ? "all" : [PIP.id], source: "card",
         created_at: new Date().toISOString(), last_used_at: null }, action: { ...a, status: "approved" } }; },
+    // The code card (Pips API 98): fill_pip_code answers as scene.code says ("ok", "signed", "error", "lost"), after
+    // scene.codeAfter ms; a sent or lost card is listed that way from then on.
+    fill_pip_code: (r) => { const a = scene.actions.find((x) => x.id === r.action_id), mode = scene.code || "ok";
+      if (!a || a.status !== "pending" || a.summary.kind !== "code" || r.pip_id !== PIP.id) throw Error("That card is not a code to type.");
+      if (r.expected_digest !== a.digest) throw Error("The card changed. Look at it again.");
+      if (mode === "error") return { ok: false, error: "The Pip is using its computer right now. Try again when it stops.", action: { ...a } };
+      a.status = mode === "lost" ? "lost" : "sent"; a.resolved_at = new Date().toISOString(); a.resolved_by = mode === "lost" ? "page-moved" : "editor-user";
+      return mode === "lost" ? { ok: false, lost: true, error: "The page moved on before the code came: the Pip will ask again.", action: { ...a } } : { ok: true, ...(mode === "signed" ? { signed_in: true } : {}), action: { ...a } }; },
     // Stop: DGC says it is stopping, and the screen's stream closes a moment later.
     stop_pip_computer: () => { setTimeout(() => post({ type: "pipDesktopClosed", reason: "The computer's screen closed." }), 40); return { pip_id: PIP.id, stopping: true }; },
   };
   let chain = Promise.resolve();
-  window.acquireVsCodeApi = () => ({ getState: () => window.__state, setState(s) { window.__state = s; }, postMessage(m) {
+  window.__all = []; window.__states = [];
+  window.acquireVsCodeApi = () => ({ getState: () => window.__state, setState(s) { window.__state = s; window.__states.push(JSON.stringify(s ?? null)); }, postMessage(m) {
+    window.__all.push(JSON.stringify(m ?? null));   // (every message the page posts, word for word)
     if (m?.type === "pipsRequest") {
-      window.__sent.push(m.request);
+      window.__sent.push(m.request.type === "fill_pip_code" ? { ...m.request } : m.request);   // (as posted: the real channel copies a message as it is sent)
       const make = answers[m.request.type];
-      setTimeout(() => post(make ? { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } : { type: "pipsReply", id: m.id, ok: false, error: "Not in this scene." }), 5);
+      let reply;
+      try { reply = make ? { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } : { type: "pipsReply", id: m.id, ok: false, error: "Not in this scene." }; }
+      catch (error) { reply = { type: "pipsReply", id: m.id, ok: false, error: error.message }; }
+      setTimeout(() => post(reply), (m.request.type === "fill_pip_code" && scene.codeAfter) || 5);
       return;
     }
     if (m?.type === "pipDesktop") {
@@ -80,8 +93,8 @@ export async function openComputer(browser, opts = {}) {
   const { js, css } = await bundle();
   const t = THEMES[theme];
   const page = `<!DOCTYPE html><html><head><meta charset="utf-8">${VSCODE_WEBVIEW}<style>${t.css}</style><style>${css}</style></head><body class="${t.kind}"><main id="app"></main>`
-    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, using, screen, screens, files: opts.files || [], actions: opts.actions || [] })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
-  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, colorScheme: theme });
+    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, using, screen, screens, files: opts.files || [], actions: opts.actions || [], code: opts.code || "ok", codeAfter: opts.codeAfter || 0 })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
+  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, colorScheme: theme, hasTouch: !!opts.touch });   // (opts.touch: a finger, no pointer)
   const p = await context.newPage();
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e)));

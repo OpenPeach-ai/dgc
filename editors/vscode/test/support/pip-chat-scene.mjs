@@ -542,6 +542,47 @@ export const host = (opts) => `(${function (PIP, opts) {
         visitAction.status = r.approve ? "approved" : "rejected"; window.__attention.remove(`computer_action:${visitId}`); return { action: visitAction }; },
     });
   }
+  // opts.code: the code card (Pips API 98). What its computer holds is a code to type: {summary: over the card's own,
+  // mode: how fill_pip_code answers ("ok", "signed", "error", "busy", "lost", "refuse", "expired"), after: ms it takes,
+  // expiresIn: ms until the card's time is up, attention: it is in Needs attention too}. window.__code can be changed as
+  // the story goes; an answered card is listed as DGC lists it (sent, lost, rejected, expired).
+  if (opts.code) {
+    const say = typeof opts.code === "object" ? opts.code : {};
+    Object.assign(hold, { summary: { method: "CODE", host: "login.northwind-bank.example", path: "/verify", page: "https://login.northwind-bank.example/verify", fields: [], more_fields: 0, body_bytes: 0,
+      kind: "code", site: "northwind-bank.example", shown: "login.northwind-bank.example", login: "login_" + "1".repeat(32), filled: ["username", "password"], ...(say.summary || {}) },
+      expires_at: new Date(Date.now() + (say.expiresIn || 9 * 60000)).toISOString() });
+    window.__code = { mode: say.mode || "ok", after: say.after || 0, hold };
+    if (say.attention) attentionItems.unshift({ id: `computer_action:${hold.id}`, kind: "computer_action", card: hold.id, pip_id: PIP, pip_name: name, pip_type: "lens", workspace_id: W,
+      title: `Send this on ${hold.summary.host}?`, detail: hold.summary.page, created_at: new Date(Date.now() - 60000).toISOString(), expires_at: hold.expires_at });
+    const end = (status, by) => { Object.assign(hold, { status, resolved_at: new Date().toISOString(), resolved_by: by }); window.__attention.remove(`computer_action:${hold.id}`); };
+    Object.assign(answers, {
+      get_pip_computer: () => ({ computer: { pip_id: PIP, granted: true, available: true, reason: "", pending: hold.status === "pending" ? 1 : 0, actions: say.gone && hold.status !== "pending" ? [] : [{ ...hold }] } }),
+      list_pip_computer_actions: () => ({ actions: [{ ...hold }] }),
+      // As dgc/pip_computer.fill_code answers: {ok, error?, signed_in?, action}; a refusal of the request itself is an error.
+      fill_pip_code: (r) => {
+        const mode = window.__code.mode;
+        if (r.pip_id !== PIP || r.action_id !== hold.id) throw Error("That card is not a code to type.");
+        if (mode === "refuse" || hold.status !== "pending") throw Error(`That card was already answered (${hold.status === "pending" ? "sent" : hold.status}).`);
+        if (r.expected_digest !== hold.digest) throw Error("The card changed. Look at it again.");
+        if (typeof r.code !== "string" || !/^[A-Za-z0-9-]{1,12}$/.test(r.code.replace(/\s+/g, ""))) throw Error("Type the code as the site shows it: letters and numbers, up to 12.");
+        if (mode === "error") return { ok: false, error: "Its computer isn't open. Open it, then type the code again.", action: { ...hold } };
+        if (mode === "busy") return { ok: false, error: "The Pip is using its computer right now. Try again when it stops.", action: { ...hold } };
+        if (mode === "lost") { end("lost", "page-moved"); return { ok: false, error: "The page moved on before the code came: the Pip will ask again.", action: { ...hold } }; }
+        if (mode === "expired") { end("expired", "expired"); return { ok: false, error: "That card was already answered (expired).", action: { ...hold } }; }
+        end("sent", "editor-user");
+        return { ok: true, ...(mode === "signed" ? { signed_in: true } : {}), action: { ...hold } };
+      },
+      decide_pip_computer_action: (r) => {
+        if (r.action_id !== hold.id || r.expected_digest !== hold.digest || hold.status !== "pending") throw Error("That changed. Refresh.");
+        if (r.approve) throw Error("Type the code on its card, or choose Not now.");
+        end("rejected", "editor-user"); return { action: { ...hold } };
+      },
+    });
+    // (What a chat reads at this API beside it, each empty: an unanswered one draws an error line above the card.)
+    answers.list_pip_keys ||= () => ({ pip_id: PIP, keys: [] });
+    answers.list_pip_project_changes ||= () => ({ pip_id: PIP, changes: [] });
+    answers.list_pip_conversations ||= () => ({ pip_id: PIP, conversations: [{ id: "conv_" + "1".repeat(32), title: "", first: true, created_at: at(600), updated_at: at(1), archived: false, unread: 0 }] });
+  }
   if (opts.ticks || opts.details === "working") Object.assign(answers, { list_pip_keys: () => ({ pip_id: PIP, keys: [] }),
     list_pip_run_activity: ((base) => (r) => { const page = base(r); return { ...page, run_id: r.run_id, events: page.events.map((e) => ({ ...e, run_id: r.run_id })) }; })(answers.list_pip_run_activity) });
   // A Pip with named computers (api 86) and no key cards asked for has no keys waiting, as most Pips have.
@@ -681,7 +722,8 @@ export const host = (opts) => `(${function (PIP, opts) {
       list_work_session_titles: () => ({ sessions: titles }),
     });
   }
-  window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
+  window.acquireVsCodeApi = () => ({ getState: () => undefined, setState(v) { (window.__states ||= []).push(JSON.stringify(v ?? null)); }, postMessage(m) {
+    (window.__all ||= []).push(JSON.stringify(m ?? null));   // (every message the page posts, word for word, and above every state it saves)
     // (What the page tells its host besides a request, such as a photo to open or a file to download: window.__posted.)
     if (m?.type !== "pipsRequest") { (window.__posted ||= []).push(m);
       // A logo request (opts.logos): answered as the host does, a data: URI or "" for each id asked.
@@ -691,11 +733,11 @@ export const host = (opts) => `(${function (PIP, opts) {
       return; }
     const make = answers[m.request.type];
     if (!make) window.__unanswered.push(m.request.type);
-    (window.__sent ||= []).push(m.request);
+    (window.__sent ||= []).push(m.request.type === "fill_pip_code" ? { ...m.request } : m.request);   // (as posted: the real channel copies a message as it is sent)
     let reply;
     try { reply = make ? { type: "pipsReply", id: m.id, ok: true, result: make(m.request) } : { type: "pipsReply", id: m.id, ok: false, error: "not offered here" }; }
     catch (error) { reply = { type: "pipsReply", id: m.id, ok: false, error: error.message }; }
-    setTimeout(() => window.postMessage(reply, "*"), (m.request.tunnel === "tailscale" && window.__slow?.[m.request.type]) || opts.answerAfter || 1);   // (opts.answerAfter: a backend that takes a while, in ms)
+    setTimeout(() => window.postMessage(reply, "*"), (m.request.tunnel === "tailscale" && window.__slow?.[m.request.type]) || (m.request.type === "fill_pip_code" && window.__code?.after) || opts.answerAfter || 1);   // (opts.answerAfter: a backend that takes a while, in ms)
   } });
   // Called once the page has mounted the client (the side bar mounts it after its other scripts).
   window.__connect = () => window.postMessage({ type: "pipsConnection", apiVersion: opts.api || 78, generation: 1, connected: true, supported: true, enabled: true, ...(opts.projects ? { displayMentions: true } : {}) }, "*");   // (opts.projects: a DGC that keeps a message's marks)
@@ -738,7 +780,7 @@ html,body{height:100%;margin:0}body{display:flex;flex-direction:column;backgroun
 ${script(host(opts))}${script(markdown)}${script(js)}${script(`(${function (text) {
       const api = acquireVsCodeApi(), hostEl = document.getElementById("pips-host"), root = hostEl.attachShadow({ mode: "open" });
       window.__pipsRoot = root;
-      window.__pipsApp = window.DgcPips.mount({ root, stylesheetText: text, postMessage: (m) => api.postMessage(m), getState: () => undefined, setState() {},
+      window.__pipsApp = window.DgcPips.mount({ root, stylesheetText: text, postMessage: (m) => api.postMessage(m), getState: () => undefined, setState: (v) => api.setState(v),
         onMessage: (listener) => { const handle = (e) => listener(e.data); window.addEventListener("message", handle); return () => window.removeEventListener("message", handle); } });
     }})(${JSON.stringify(css)});`)}</body></html>`;
   // (opts.forced: Windows High Contrast; opts.touch: a finger, no pointer; opts.video: a folder to record the page into.)
@@ -763,6 +805,7 @@ ${script(host(opts))}${script(markdown)}${script(js)}${script(`(${function (text
   await p.waitForSelector("#chat-form");
   if (!opts.empty) await p.waitForSelector(".pip-message, .run-post");
   if (opts.hold) await p.waitForSelector("[data-computer-card]");
+  if (opts.code && opts.code.wait !== false) await p.waitForSelector("[data-code-card]");
   const root = await p.evaluateHandle(() => window.__pipsRoot || document);
   return { p, root, errors, close: () => context.close() };
 }

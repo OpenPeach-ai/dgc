@@ -71,11 +71,11 @@ import {TEAM_MAX,pipFolder,folderName,foldersInUse,pipsByFolder,folderMarkup,pip
 import {githubLink,grokReply,importPrompt,sourceImported,sourceImportedNotice,githubImportMarkup,grokImportMarkup} from './pipImports.js';
 import {pipKeysPage,pipKeyResult,waitingKeys,pipKeyCardMarkup,pipKeysPageMarkup,pipKeyRemovedNote} from './pipKeys.js';
 import {pluginsPage,pluginResult,keyRequests,keyCardMarkup,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
-import {attentionPage,waitingOn,needWords,attentionMarkup,attentionAllMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
+import {attentionPage,waitingOn,needWords,attentionMarkup,attentionAllMarkup,attentionCards,attentionSpot,setupCardMarkup,attentionNavigation,cardSelector,codeRow} from './pipAttention.js';
 import {answerFor,sendItemAnswer,readVisits} from './pipCardAnswers.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
-import {carefulPage,carefulMarkup,carefulWords,heldRequestAnswers,reviewWords,wordsHtml,addressHtml,settledWords,isPayment,asksEveryTime,offersAlways,limitWords,asksWords,coversWords,coversDetail} from './pipCareful.js';
+import {carefulPage,carefulMarkup,carefulWords,heldRequestAnswers,reviewWords,wordsHtml,addressHtml,settledWords,isPayment,asksEveryTime,offersAlways,limitWords,asksWords,coversWords,coversDetail,isCode,codeWords,codeProblem,codeFieldMarkup,takeCode,tidyCodeField,pasteCode} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {pipLogins,pipLogin,SLOW_READ} from './pipsModel.js';
 import {mergeChatPage} from './pipsModel.js';
@@ -2206,12 +2206,17 @@ function settledLines(shown){
 const waitingDock={pip:'',seen:new Set()};
 function computerWaitingCards(){
  const c=computerState.pip===S.selected?computerState.value:null;if(!c||S.apiVersion<43||remoteHost)return '';
- const waiting=(Array.isArray(c.actions)?c.actions:[]).filter(a=>a.status==='pending');
+ // (A code card exists from Pips API 98: an older DGC holds none, and one it somehow listed is never drawn as a form.)
+ const actions=(Array.isArray(c.actions)?c.actions:[]).filter(a=>!isCode(a.summary)||S.apiVersion>=CODE_API);
+ const waiting=actions.filter(a=>a.status==='pending'&&!codeOver(a));
+ // A code card says how it ended in its own place (sent, the page moved on, not typed in time), then goes.
+ const ended=codeEnded(c);
  if(waitingDock.pip!==S.selected||!waiting.length){waitingDock.pip=S.selected;waitingDock.seen=new Set();}
- if(!waiting.length)return '';
+ if(!waiting.length&&!ended)return '';
+ if(ended)return `<div class="pip-approval-dock" id="pip-approval-dock" role="region" aria-label="Waiting for your answer">${codeCard(ended.action,'')}</div>`;
  waiting.forEach(a=>waitingDock.seen.add(a.id));
  const total=waitingDock.seen.size,count=total>1?`<span class="perm-count">${total-waiting.length+1} of ${total}</span>`:'';
- return `<div class="pip-approval-dock" role="region" aria-label="Waiting for your answer">${waitingCard(waiting[0],count)}</div>`;
+ return `<div class="pip-approval-dock" id="pip-approval-dock" role="region" aria-label="Waiting for your answer">${waitingCard(waiting[0],count)}</div>`;
 }
 // A held request's buttons, from the one list of its answers (src/pipCareful.js heldRequestAnswers; the computer view's
 // notification draws the same list): the first is the solid one, and each is sent its own way.
@@ -2223,6 +2228,7 @@ function heldButtons(a,s,name,off){
 function waitingCard(a,count){
  const name=S.pip?.name||'The Pip',off=S.busy||!usable()||archived()?' disabled':'';
  const s=a.summary||{},words=carefulWords(s,name);
+ if(isCode(s))return codeCard(a,count);
  if(!words)return computerSubmitCard(a,name,off,count);
  return `<div class="dgc-card app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(words[0],s,esc)}</strong><small>${wordsHtml(words[1],s,esc)}</small></div>${count}</div><div class="dgc-card-actions app-link-actions">${heldButtons(a,s,name,off)}</div></div>`;
 }
@@ -2244,13 +2250,124 @@ function computerSubmitCard(a,name,off,count=''){
   +'</details>';
  return `<div class="dgc-card allow-card" data-state="waiting" data-computer-card="${id}" role="group" aria-label="${esc(title)}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">${pay?'!':'↗'}</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(title,s,esc)}</strong><small>${esc(line)}</small></div>${count}</div>${sends}${details}${limit?`<p class="app-link-note allow-limit">${esc(limit)}</p>`:''}<div class="dgc-card-actions app-link-actions">${heldButtons(a,s,name,off)}</div></div>`;
 }
+// ---- The code card (Pips API 98; agreed design, pips-sandbox-design §4). A site sent a one-time code and the saved
+// login has no authenticator key: the card has a field, the user types the code, DGC fills it into the Pip's page
+// (fill_pip_code) and the Pip is told only that it was filled.
+// The typed code is in that one field and in the one request that carries it, and nowhere else: `codeCards` keeps how
+// each card stands (never what was typed), the field has no draft, the view's saved state has nothing of it, and the
+// field is emptied and replaced by a new one the moment it is sent, refused, put off, or its card ends.
+const CODE_API=98,CODE_SENT_STAYS=4000,CODE_WAIT=100000;
+const codeCards=new Map();   // a card's id -> {pip, state: 'live'|'sending'|'sent'|'lost'|'expired'|'elsewhere', signedIn, error, action, timer, mine}
+const codeBox=id=>[...document.querySelectorAll('input[data-code-field]')].find(box=>box.dataset.codeField===id)||null;
+const codeState=a=>{let card=codeCards.get(a.id);if(!card){card={pip:a.pip_id,state:'live',signedIn:false,error:'',action:a,timer:0,mine:false};codeCards.set(a.id,card);}card.action=a;return card;};
+// A code lives ten minutes: past its time the card has no field, whatever DGC has noticed yet.
+const codePast=a=>Date.parse(a.expires_at)<=Date.now();
+// Still listed as waiting, but over here: this view ended it (sent, or the page moved on), or its time is up.
+function codeOver(a){
+ if(!isCode(a.summary))return false;
+ const card=codeCards.get(a.id);
+ return codePast(a)||!!card&&['sent','lost','expired','elsewhere'].includes(card.state);
+}
+// The card this chat showed that has ended, to say so in its place: the newest one. A card answered while this chat
+// wasn't showing it leaves only its line under the reply.
+function codeEnded(c){
+ const known=new Map((Array.isArray(c?.actions)?c.actions:[]).filter(a=>isCode(a.summary)).map(a=>[a.id,a]));
+ for(const [id,card] of codeCards){
+  if(card.pip!==S.selected){forgetCode(id);continue;}
+  if(card.state==='sending')continue;
+  // (DGC's short list of what its computer holds may have let go of it: the longer one, read for the settled lines, has it.)
+  const now=known.get(id)||(computerSettled.pip===S.selected?computerSettled.actions.find(a=>a.id===id):null)||(card.state==='live'?null:card.action);
+  if(!now){forgetCode(id);continue;}
+  card.action=now;
+  if(card.state==='live'){
+   if(now.status==='pending'&&!codePast(now))continue;
+   // It ended without this view: its time ran out, or it was answered on another screen.
+   wipeCodeBox(id);card.error='';
+   card.state=now.status==='lost'?'lost':now.status==='expired'||now.status==='pending'?'expired':'elsewhere';
+  }
+ }
+ // A new card for the same site takes the place of the one that said its page had moved on.
+ const live=[...known.values()].filter(a=>a.status==='pending'&&!codeOver(a));
+ for(const [id,card] of codeCards)if(card.state!=='live'&&card.state!=='sending'&&live.some(a=>a.id!==id&&a.summary.site===card.action.summary.site))forgetCode(id);
+ return [...codeCards.values()].filter(card=>!['live','sending'].includes(card.state)).at(-1)||null;
+}
+function forgetCode(id){const card=codeCards.get(id);if(card?.timer)window.clearTimeout(card.timer);codeCards.delete(id);}
+function wipeCodeBox(id){const box=codeBox(id);if(box&&box.value)takeCode(box);else if(box)box.value='';}
+function codeCard(a,count){
+ const name=S.pip?.name||'The Pip',s=a.summary||{},words=codeWords(s,name),id=esc(a.id),card=codeState(a);
+ const head=(sub)=>`<div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(words.title,s,esc)}</strong>${sub?`<small>${esc(sub)}</small>`:''}</div>${count}</div>`;
+ const box=(state,inner,label=words.title)=>`<div class="dgc-card app-link code-card" id="pip-code-card-${id}" data-state="${state==='live'||state==='sending'?'waiting':'settled'}" data-code-card="${id}" data-code-state="${state}"${state==='live'||state==='sending'?` data-computer-card="${id}"`:''} role="group" aria-label="${esc(label)}">${inner}</div>`;
+ if(card.state==='sent'){
+  const said=[words.sent,...(card.signedIn?[words.signedIn]:[])];
+  return box('sent',head('')+`<p class="code-card-said" data-code-said="sent" role="status"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3.5 8.5l3 3 6-6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${esc(said.join(' · '))}</span></p>`);
+ }
+ if(['lost','expired','elsewhere'].includes(card.state)){
+  return box(card.state,head('')+`<p class="code-card-said" data-code-said="${card.state}" role="status"><span>${esc(words[card.state])}</span></p>`
+   +`<div class="dgc-card-actions app-link-actions"><button type="button" class="quiet" id="pip-code-ok-${id}" data-code-dismiss="${id}">OK</button></div>`);
+ }
+ // (Something else being saved turns its buttons off for a moment, never the field under the caret.)
+ const sending=card.state==='sending',gone=!usable()||archived(),off=S.busy||gone;
+ // When its ten minutes are up the card says so by itself.
+ if(!card.timer){const left=Date.parse(a.expires_at)-Date.now();if(left>0&&left<3600000)card.timer=window.setTimeout(()=>{card.timer=0;render();},left+60);}
+ return box(card.state,head(words.line)
+  +`<form class="code-card-form" id="pip-code-form-${id}" data-code-form="${id}" autocomplete="off" novalidate>`
+  +`<div class="code-card-row">${codeFieldMarkup(s,{esc,id:`pip-code-field-${a.id}`,action:a.id,pipName:name,sending,off:gone&&!sending,describedBy:card.error?`pip-code-error-${a.id}`:''})}`
+  +`<div class="dgc-card-actions app-link-actions"><button type="submit" class="primary" id="pip-code-send-${id}"${sending||off?' disabled':''}>${sending?'Sending…':'Send'}</button>`
+  +`<button type="button" class="quiet" id="pip-code-not-now-${id}" data-computer-decide="${id}" data-approve="0"${sending||off?' disabled':''}>Not now</button></div></div>`
+  +(card.error?`<p class="dgc-card-error" id="pip-code-error-${id}" role="alert">${esc(card.error)}</p>`:'')
+  +'</form>');
+}
+// Send: what was typed leaves its field for the one request that carries it, and is let go as that request is posted.
+async function sendCode(id){
+ const pip=S.selected,a=computerState.pip===pip?computerState.value?.actions?.find(x=>x.id===id&&x.status==='pending'&&isCode(x.summary)):null;
+ if(!a||S.busy||!usable()||archived()||S.apiVersion<CODE_API||remoteHost)return;
+ const card=codeState(a);if(card.state!=='live')return;
+ const taken=takeCode(codeBox(id)),problem=codeProblem(taken.code);
+ if(problem){taken.code='';card.error=problem;render();$(`pip-code-error-${id}`)?.scrollIntoView?.({block:'nearest'});codeBox(id)?.focus({preventScroll:true});return;}
+ const token=scope(),request={type:'fill_pip_code',pip_id:pip,action_id:a.id,expected_digest:a.digest,code:taken.code};
+ taken.code='';card.state='sending';card.error='';card.mine=true;render();codeBox(id)?.focus({preventScroll:true});
+ // (The channel copies the request as it posts it: the one kept here while DGC answers has no code in it.)
+ const pending=broker.request(request,CODE_WAIT);request.code='';
+ let said='';
+ try{
+  const result=await pending;
+  if(token!==scope()||S.selected!==pip){forgetCode(id);return;}
+  if(!record(result)||typeof result.ok!=='boolean')throw Error('DGC’s answer about the code didn’t read. Refresh to see whether it was sent.');
+  const done=pipComputerAction(result.action,pip);if(done.id!==a.id)throw Error('DGC’s answer was about another card. Refresh to see whether it was sent.');
+  card.action=done;
+  if(computerState.pip===pip&&computerState.value)computerState.value={...computerState.value,actions:computerState.value.actions.map(x=>x.id===a.id?done:x)};
+  if(result.ok){
+   card.state='sent';card.signedIn=result.signed_in===true;
+   card.timer=window.setTimeout(()=>{if(codeCards.get(id)===card){forgetCode(id);render();}},CODE_SENT_STAYS);
+   void loadMessages();   // the Pip carries on by itself
+  }else if(done.status==='lost'||result.lost===true)card.state='lost';
+  else if(done.status!=='pending')card.state=done.status==='expired'?'expired':'elsewhere';
+  else{card.state='live';said=typeof result.error==='string'&&result.error?result.error.slice(0,300):'The code was not sent. Type it again.';}
+ }catch(error){if(token!==scope()||S.selected!==pip){forgetCode(id);return;}card.state='live';said=errorText(error);}
+ card.error=said;render();
+ // (In a short window the card scrolls inside its place above the box: what DGC said is brought into sight.)
+ if(said)$(`pip-code-error-${id}`)?.scrollIntoView?.({block:'nearest'});
+ if(card.state==='live')codeBox(id)?.focus({preventScroll:true});else($(`pip-code-ok-${id}`)||chatBox?.el||$('chatText'))?.focus?.({preventScroll:true});
+ void refreshComputer();
+}
+document.addEventListener('submit',event=>{const id=event.target?.dataset?.codeForm;if(!id)return;event.preventDefault();void sendCode(id);});
+document.addEventListener('input',event=>{const box=event.target;if(!box?.dataset?.codeField)return;tidyCodeField(box);
+ // What it said about the last try goes as the next one is typed (no redraw under the caret).
+ const card=codeCards.get(box.dataset.codeField);if(card?.error){card.error='';render();}});
+document.addEventListener('paste',event=>{const box=event.target;if(box?.dataset?.codeField&&!box.readOnly)pasteCode(box,event);});
+document.addEventListener('click',event=>{const id=event.target?.closest?.('[data-code-dismiss]')?.dataset.codeDismiss;if(!id)return;forgetCode(id);render();(chatBox?.el||$('chatText'))?.focus?.({preventScroll:true});});
+// From anywhere else on the Pip's page: its chat, at the card, with the keyboard in its field.
+async function showCodeCard(id){S.tab='chat';S.overview=false;rememberView();render();void loadMessages();await revealCard(cardSelector('code',id,v=>CSS.escape(v)));}
 async function decideInChat(id,approve){
  const pip=S.selected,a=computerState.pip===pip?computerState.value?.actions?.find(x=>x.id===id):null;if(!a||S.busy||!usable())return;
+ // (Not now on a code card: whatever was typed is gone before anything else happens.)
+ if(isCode(a.summary)){if(approve||codeCards.get(a.id)?.state==='sending')return;wipeCodeBox(a.id);const card=codeCards.get(a.id);if(card)card.error='';}
  const token=scope(),careful=Boolean(carefulWords(a.summary||{},''));S.busy=true;render();
  try{
   const done=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve})).action,pip);
   if(token!==scope())return;if(done.id!==a.id||done.status!==(approve?'approved':'rejected'))throw Error('The saved decision differs from your choice. Refresh to see it.');
-  S.notice=!approve?(a.summary?.kind==='login'?`Not now. ${S.pip?.name||'It'} won’t ask to save a login for ${a.summary.site||'that site'} again today.`:careful?'Not now. It won’t do that.':'Rejected. Nothing was sent.'):careful?'Allowed. It opens the site and carries on.':'Sent as shown. It carries on.';
+  if(isCode(a.summary))forgetCode(a.id);
+  S.notice=!approve?(isCode(a.summary)?codeWords(a.summary,S.pip?.name||'It').rejected:a.summary?.kind==='login'?`Not now. ${S.pip?.name||'It'} won’t ask to save a login for ${a.summary.site||'that site'} again today.`:careful?'Not now. It won’t do that.':'Rejected. Nothing was sent.'):careful?'Allowed. It opens the site and carries on.':'Sent as shown. It carries on.';
   computerState.value={...computerState.value,actions:computerState.value.actions.map(x=>x.id===a.id?done:x)};
  }catch(error){if(token===scope())setError(error);}
  finally{if(token===scope()){S.busy=false;render();void refreshComputer();}}
@@ -2299,8 +2416,8 @@ function computerInner(){
  const c=computerState.value,off=S.busy||!usable()||archived();
  if(!c)return `<h3>Computer</h3>${errorMarkup(computerState.error)||'<p class="muted">Loading…</p>'}`;
  if(!c.granted)return `<h3>Computer</h3><p class="muted">Give ${esc(S.pip.name)} its own computer, separate from yours: a browser, a Terminal and files, so it can look things up and fill in forms for you.</p>${c.available?button('give-computer','Give this Pip a computer…',off):`<p class="muted">${esc(c.reason)}</p>`}`;
- const waiting=c.actions.filter(a=>a.status==='pending');
- return `<h3>Computer</h3><p>${esc(S.pip.name)} has its own computer: ${S.apiVersion>=54?'a desktop with a browser, an image editor, documents, a PDF viewer, a Terminal and files, online to public websites':'a browser, a Terminal and files, online to public websites'}. Anything its browser would submit waits for you here.</p>${c.available?'':`<p class="notice">${esc(c.reason)}</p>`}<div class="actions">${button('open-computer',S.apiVersion>=43&&!remoteHost?'Open its computer':'Open browser',off||!c.available)}${button('stop-computer','Stop computer',off)}${button('remove-computer','Remove computer…',off)}</div>${waiting.length?`<h4>Waiting for you</h4>${waiting.map(a=>`<article class="computer-action"><div><strong>${carefulWords(a.summary,S.pip.name)?esc(carefulWords(a.summary,S.pip.name)[0]):`${esc(a.summary.method)} ${esc(a.summary.host)}${esc(a.summary.path)}`}</strong><span class="muted">from ${esc(a.summary.page)}</span></div>${`<button type="button" data-computer-action="${esc(a.id)}"${off?' disabled':''}>Review…</button>`}</article>`).join('')}`:''}`;
+ const waiting=c.actions.filter(a=>a.status==='pending'&&!codeOver(a)&&(!isCode(a.summary)||S.apiVersion>=CODE_API));
+ return `<h3>Computer</h3><p>${esc(S.pip.name)} has its own computer: ${S.apiVersion>=54?'a desktop with a browser, an image editor, documents, a PDF viewer, a Terminal and files, online to public websites':'a browser, a Terminal and files, online to public websites'}. Anything its browser would submit waits for you here.</p>${c.available?'':`<p class="notice">${esc(c.reason)}</p>`}<div class="actions">${button('open-computer',S.apiVersion>=43&&!remoteHost?'Open its computer':'Open browser',off||!c.available)}${button('stop-computer','Stop computer',off)}${button('remove-computer','Remove computer…',off)}</div>${waiting.length?`<h4>Waiting for you</h4>${waiting.map(a=>`<article class="computer-action"><div><strong>${isCode(a.summary)?esc(codeWords(a.summary,S.pip.name).attention):carefulWords(a.summary,S.pip.name)?esc(carefulWords(a.summary,S.pip.name)[0]):`${esc(a.summary.method)} ${esc(a.summary.host)}${esc(a.summary.path)}`}</strong><span class="muted">from ${esc(a.summary.page)}</span></div>${`<button type="button" data-computer-action="${esc(a.id)}"${off?' disabled':''}>${isCode(a.summary)?'Type it in the chat':'Review…'}</button>`}</article>`).join('')}`:''}`;
 }
 function grantComputer(give){
  const name=S.pip?.name||'this Pip';
@@ -2323,6 +2440,8 @@ async function applyComputerGrant(review){
 async function openComputerAction(id){
  const c=computerState.value,a=c?.actions.find(x=>x.id===id);if(!a||!usable())return;
  if(a.summary?.kind==='login'){openLoginForm(a);return;}
+ // A code is typed on its card in the chat, and nowhere else on this page: there is no review of it to open.
+ if(isCode(a.summary)){void showCodeCard(a.id);return;}
  let image='';
  if(a.frame&&a.run_id){try{image=pipComputerFrame(await send('get_pip_computer_frame',{run_id:a.run_id,frame:a.frame}),a.run_id,a.frame).image;}catch{image='';}}
  const s=a.summary,rows=s.fields.map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join(''),words=carefulWords(s,S.pip?.name||'The Pip');
@@ -3702,7 +3821,8 @@ function attentionScene(all=false){
  // A new Pip you just rejected (held a moment for Undo) is out of the cards, the dots and the count at once.
  // (So is a card whose answer was just sent, until the list read after it says what became of it.)
  const gone=id=>!all&&heldRejects.has(id);
- const held=page=>{if(!page)return page;const items=page.items.filter(i=>!(i.kind==='setup'&&gone(i.card))&&!sentAnswers.has(i.id));return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};};
+ // (A code to type says so, "Type the code for <site>": DGC's list calls every held step of a computer a form to send.)
+ const held=page=>{if(!page)return page;const items=page.items.filter(i=>!(i.kind==='setup'&&gone(i.card))&&!sentAnswers.has(i.id)).map(i=>codeRow(i,attentionVisits));return {...page,items,total:Math.max(items.length,page.total-(page.items.length-items.length))};};
  // (Over the page of All projects the new Pips read are those of whatever is loaded underneath: not this place's.)
  const page=held(attentionPart(S.attention)),setups=S.apiVersion>=23&&!(foldersOn()&&S.projectEmpty)?setupRows.filter(r=>!gone(r.id)):[];
  const mine=personalSpace()?.id;
@@ -4114,7 +4234,7 @@ async function revealCard(selector){
  const token=scope(),pip=S.selected;
  for(let i=0;i<30;i++){
   const el=document.querySelector(selector);
-  if(el){revealInChat(el);cardFlash.selector=selector;cardFlash.until=Date.now()+2400;el.classList.add('attention-flash');(el.querySelector('button:not([disabled])')||el).focus?.({preventScroll:true});return true;}
+  if(el){revealInChat(el);cardFlash.selector=selector;cardFlash.until=Date.now()+2400;el.classList.add('attention-flash');(el.querySelector('input[data-code-field]:not([disabled]):not([readonly])')||el.querySelector('button:not([disabled])')||el).focus?.({preventScroll:true});return true;}
   await new Promise(r=>window.setTimeout(r,150));if(token!==scope()||S.selected!==pip)return false;
  }
  return false;
@@ -6945,7 +7065,7 @@ document.addEventListener('click',event=>{
   // A card's icons: its answer (held a moment, with Undo), or Review, which opens it as the card itself does.
   if(target.dataset.attentionAnswer){answerSoon(target.dataset.attentionItem,target.dataset.attentionAnswer==='yes');return;}
   if(target.dataset.attentionUndo){undoAnswer(target.dataset.attentionUndo);return;}
-  if(target.dataset.attention||target.dataset.attentionOpen){const id=target.dataset.attention||target.dataset.attentionOpen,item=S.attention?.items.find(i=>i.id===id);if(item)void navigateFromHost(attentionNavigation(item)).catch(setError);return;}
+  if(target.dataset.attention||target.dataset.attentionOpen){const id=target.dataset.attention||target.dataset.attentionOpen,found=S.attention?.items.find(i=>i.id===id),item=found&&codeRow(found,attentionVisits);if(item)void navigateFromHost(attentionNavigation(item)).catch(setError);return;}
   if(target.dataset.attentionDismiss){
    const item=S.attention?.items.find(i=>i.id===target.dataset.attentionDismiss);
    if(item?.kind==='setup')rejectSoon(item.card,()=>dismissSetupFromAttention(item,{quiet:true}));

@@ -1073,6 +1073,31 @@ button.pip-tip-btn svg{display:block;width:14px;height:14px}
 .key-card-form>.app-link-note,.key-card-form>.dgc-card-error{margin:0}
 .dgc-card.key-card .key-card-form>.dgc-card-actions{margin:6px 0 0}
 @container(max-width:380px){.key-card-form{margin-left:0}}
+/* ---- The code card (Pips API 98; src/pipsClient.js codeCard): a site sent a one-time code, and its card has the field
+   to type it in. One row: the field, Send, Not now; where the card is narrow the field takes a row of its own, the
+   card's full width, and the answers the next. The field is the button family's: its corner and its height. What
+   DGC said about the last try is a line under the row. */
+.code-card-form{display:grid;gap:6px;min-width:0}
+.code-card-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.dgc-card.code-card .code-card-row>.dgc-card-actions{flex:0 1 auto;min-width:0;margin:0}
+.code-field{box-sizing:border-box;flex:1 1 120px;width:120px;min-width:0;max-width:200px;height:var(--btn-h,28px);min-height:0;margin:0;padding:0 9px;border:1px solid var(--vscode-input-border,var(--line));border-radius:var(--btn-r,6px);
+  background:var(--vscode-input-background);color:var(--vscode-input-foreground,var(--text));font:500 13px/1 var(--vscode-editor-font-family,ui-monospace,monospace);font-variant-numeric:tabular-nums;letter-spacing:.06em}
+.code-field::placeholder{font-family:var(--vscode-font-family,system-ui);font-weight:400;letter-spacing:0;color:var(--muted)}
+.code-field:focus-visible{outline:var(--btn-ring,2px solid var(--vscode-focusBorder));outline-offset:1px}
+.code-field[readonly]{color:var(--muted);cursor:progress}
+.code-field:disabled{opacity:.55}
+.dgc-card.code-card .code-card-form>.dgc-card-error{margin:0;overflow-wrap:anywhere}
+.code-card-said{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;min-width:0;color:var(--text);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.code-card-said>svg{flex:none}
+.code-card-said>span{min-width:0}
+.dgc-card.code-card>.dgc-card-actions{margin-top:0}
+@container(max-width:380px){
+  .code-card-row>.code-field{flex-basis:100%;width:100%;max-width:none}
+  .dgc-card.code-card .code-card-row>.dgc-card-actions{flex:1 1 100%}
+}
+/* (At the narrowest the card's mark gives its room to the words, in every state, as a waiting card's does.) */
+@container(max-width:190px){.dgc-card.code-card .dgc-card-icon.app-link-mark{display:none}}
+@media(forced-colors:active){.code-field{border-color:CanvasText}}
 /* ---- DGC's one button, on the Pips pages (the definition: media/shared/tokens.css, "The button"). A Pip's pages draw
    their buttons with a few words, and each is put on the shared button here: the main action of a form, a dialog or a
    card (button.primary) is the one filled button; every other button (a plain one, button.quiet, button.danger) is

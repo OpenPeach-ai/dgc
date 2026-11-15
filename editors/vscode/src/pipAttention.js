@@ -69,10 +69,21 @@ export function needWords(need, fresh) {
   return [need ? `${need.toLocaleString('en-US')} ${need === 1 ? 'needs' : 'need'} you` : '', fresh ? `${fresh.toLocaleString('en-US')} new` : ''].filter(Boolean).join(' · ');
 }
 
+/** A code to type (the code card, Pips API 98), as its row says it: "Type the code for <site>". DGC's list names every
+ *  held step of a Pip's computer the same way ("Send this on …?") and does not say which is a code, so the page reads
+ *  that from the Pip's computer (`held`: src/pipCardAnswers.js readVisits, by action id) and the row is this one.
+ *  Any other row is returned as it is. */
+export function codeRow(item, held) {
+  const code = item?.kind === 'computer_action' ? held?.get?.(item.card) : null;
+  return code?.code ? {...item, title: `Type the code for ${code.shown}`.slice(0, 160), detail: '', code: true} : item;
+}
+
 /** Where a row goes: the Pip's chat at its card, its computer, or the Pips home's setup reviews. */
 export function attentionNavigation(item) {
   if (item.kind === 'setup' && !item.pip_id) return {setup: item.card, workspace: item.workspace_id};
   const base = {pip: item.pip_id, workspace: item.workspace_id, attention: true};
+  // A code is typed on its card in the Pip's chat (never on the computer's own screen, which the Pip reads).
+  if (item.kind === 'computer_action' && item.code) return {...base, section: 'chat', card: item.card, cardKind: 'code'};
   if (item.kind === 'computer_action') return {...base, computer: true};
   if (item.kind === 'handoff') return {...base, section: 'handoffs', reviewKind: 'handoff', review: item.card};
   if (item.kind === 'approval') return {...base, section: 'revisions', reviewKind: item.review || 'job_update', review: item.card};
@@ -224,6 +235,7 @@ export function attentionAllMarkup(page, {esc, face, now = Date.now(), busy = fa
 export function cardSelector(kind, card, css = s => s) {
   const id = css(card);
   if (kind === 'computer_check') return '[data-state="needs"]';
+  if (kind === 'code') return `[data-code-card="${id}"]`;
   if (kind === 'plugin') return `[data-plugin-card="${id}"]`;
   if (kind === 'fix_ask') return `[data-flow-fix="${id}"]`;
   if (kind === 'fix_ready' || kind === 'fix_held') return `[data-project-change="${id}"]`;

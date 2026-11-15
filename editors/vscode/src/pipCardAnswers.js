@@ -44,7 +44,8 @@ export function answerFor(item, pip, {setups, visits} = {}) {
  if (item.kind === 'approval' && pip.version && item.detail && [...item.detail].length < 200) return {kind: 'change', token: item.id, yes: 'Apply', no: 'Not now', full: item.detail,
   said: {yes: `Applied. ${pip.name} is changed.`, no: `Not now. ${pip.name} stays as it was.`}};
  const v = item.kind === 'computer_action' ? visits?.get(item.card) : null;
- if (v) return {kind: 'site', token: item.id, yes: 'Allow', no: 'Not now', full: v.address,
+ // (A code to type is among them only so its row can say what it is: it has a field, never an answer here.)
+ if (v && !v.code) return {kind: 'site', token: item.id, yes: 'Allow', no: 'Not now', full: v.address,
   said: {yes: `Allowed. ${pip.name} opens ${v.site}.`, no: `Not now. ${pip.name} won’t open ${v.site}.`}};
  return null;
 }
@@ -86,10 +87,15 @@ export async function sendItemAnswer(request, {answer, item, pip, seen}, yes) {
  const done = (await request('decide_pip_computer_action', {action_id: now.id, expected_digest: now.digest, approve: yes})).action;
  if (done?.id !== now.id || done.status !== (yes ? 'approved' : 'rejected')) throw Error('The saved answer differs from your choice. Open Pips to see it.');
 }
-/** The held visits to a new site among a Pip's computer steps, by action id, for answerFor. */
+/** The held visits to a new site among a Pip's computer steps, by action id, for answerFor. And the codes to type
+ *  among them ({code: true, shown}: the code card, Pips API 98), so their rows can say what they are
+ *  (src/pipAttention.js codeRow); a code is never answered from a row. */
 export async function readVisits(request, pipIds, into = new Map()) {
  await Promise.all(pipIds.map(async pip => {
-  try { for (const a of pipComputer((await request('get_pip_computer', {pip_id: pip})).computer, pip).actions) { const v = visit(a); if (v) into.set(a.id, {digest: a.digest, ...v}); } } catch { /* it opens instead */ }
+  try { for (const a of pipComputer((await request('get_pip_computer', {pip_id: pip})).computer, pip).actions) {
+   const v = visit(a); if (v) into.set(a.id, {digest: a.digest, ...v});
+   else if (a.status === 'pending' && a.summary?.kind === 'code') into.set(a.id, {code: true, shown: String(a.summary.shown || a.summary.site || a.summary.host || 'a site').slice(0, 120)});
+  } } catch { /* it opens instead */ }
  }));
  return into;
 }

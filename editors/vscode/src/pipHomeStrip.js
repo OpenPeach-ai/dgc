@@ -16,7 +16,7 @@
 // (What can be answered and how it is sent is src/pipCardAnswers.js, shared with the Pips page's Needs attention.)
 import {pipDigest, pendingReviews, pipSetup} from './pipsModel.js';
 import {plainSetup, runsWhen, answerFor as cardAnswerFor, sendSetupAnswer, sendItemAnswer, readVisits} from './pipCardAnswers.js';
-import {attentionPage, attentionNavigation, waitingOn, kindLabel} from './pipAttention.js';
+import {attentionPage, attentionNavigation, waitingOn, kindLabel, codeRow} from './pipAttention.js';
 import {profile} from './pipProfile.js';
 
 const POLL_MS = 60000;
@@ -126,7 +126,7 @@ export function mountHomePips(options) {
   options.onPips({pips: list, complete: listedAll && !!pips, scopes: listedScopes});
  }
  // A Pip with cards waiting opens at the newest one (its chat, its computer), as Needs attention does.
- function open(pip) { const first = attention?.items.find(i => i.pip_id === pip.id); options.onOpen?.(first ? attentionNavigation(first) : {pip: pip.id}); }
+ function open(pip) { const first = attention?.items.find(i => i.pip_id === pip.id); options.onOpen?.(first ? attentionNavigation(codeRow(first, visits)) : {pip: pip.id}); }
  // Show all: the Pips view's home at Needs attention, open in full; your Pips are listed under it.
  function openAll() { options.onOpen?.(apiVersion >= 44 && personal ? {attention: true, all: true, workspace: personal} : {overview: true}); }
  async function dismiss(rows, seenUntil = digest?.until) {
@@ -217,7 +217,7 @@ export function mountHomePips(options) {
   const projectOf = space => (scopeOf(space) === 'project' && names.get(space) ? {project: names.get(space)} : {});
   const out = [];
   const card = (pip, row, unreadItem) => {
-   const waits = (attention?.items || []).filter(i => i.pip_id === pip.id), needs = !!row && (!!pip.waiting || !!pip.blocked);
+   const waits = (attention?.items || []).filter(i => i.pip_id === pip.id).map(i => codeRow(i, visits)), needs = !!row && (!!pip.waiting || !!pip.blocked);
    const one = needs && !pip.blocked && pip.waiting === 1 && waits.length === 1 ? waits[0] : null;
    const chips = [];
    if (one) { chips.push(kindLabel(one.kind)); if (one.detail) chips.push(one.detail); }
