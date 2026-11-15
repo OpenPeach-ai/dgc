@@ -12,6 +12,7 @@ import signal
 import sys
 import threading
 from datetime import datetime
+from pathlib import Path
 
 from .scheduler import named_process_lock
 from .workspace_registry import RegistryError, WorkspaceRegistry, identifier, state_directory, utc_now
@@ -119,6 +120,53 @@ def pause_if_idle(registry, actor) -> bool:
             return False
         _write_paused(registry, True, actor)
     return True
+
+
+# A newer install taking the runner over (pip_runtime._move_runner, 15 Nov): the runner of another install starts no
+# new reply, lets the ones running finish and stops once none runs, queued work left queued for the new runner. The
+# record names the install taking over. Waiting for a moment with nothing queued or running never came on a machine
+# where some Pip is always working: his runner ran a morning build for eight hours through two installs.
+HANDOVER_KEY = "pips_runtime_handover"
+HANDOVER_ACTOR = "dgc-update"
+
+
+def _this_install() -> str:
+    """This runner's install (pip_runtime.this_install: its package's folder)."""
+    return str(Path(__file__).resolve().parents[1])
+
+
+def ask_handover(registry, to: str) -> None:
+    _write(registry, HANDOVER_KEY, {"schema_version": 1, "to": str(to), "at": registry.clock()})
+
+
+def handover_to(registry) -> str | None:
+    value = _read(registry, HANDOVER_KEY)
+    return value["to"] if isinstance(value, dict) and isinstance(value.get("to"), str) and value["to"] else None
+
+
+def clear_handover(registry) -> None:
+    registry.db.execute("DELETE FROM metadata WHERE key=?", (HANDOVER_KEY,))
+
+
+def pause_if_drained(registry, actor) -> bool:
+    """The runtime stop, set only while no Pip run is running or being cancelled (queued work stays queued)."""
+    actor = _actor(actor)
+    with registry.transaction():
+        if registry.db.execute("SELECT 1 FROM pip_runs WHERE status IN ('running','cancelling') LIMIT 1").fetchone():
+            return False
+        _write_paused(registry, True, actor)
+    return True
+
+
+def claim_or_hand_over(registry, runtime_config, install: str) -> bool:
+    """One tick's claim: queued work starts here, unless another install is taking over; then nothing new starts, and
+    once none runs the runtime stops for it (True: this runner winds down)."""
+    leaving = handover_to(registry)
+    if leaving and leaving != install:
+        return pause_if_drained(registry, HANDOVER_ACTOR)
+    from . import pips
+    pips.start_queued(runtime_config)
+    return False
 
 
 def stop_all(config, actor):
@@ -389,7 +437,8 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
                     webhooks = _webhooks_tick(registry, directory, clock, webhooks)
                     _goals_tick(registry, runtime_config)
                     _app_approvals_tick(registry, runtime_config)
-                    pips.start_queued(runtime_config)
+                    if claim_or_hand_over(registry, runtime_config, _this_install()):
+                        break                    # another install takes over: none runs, queued work waits for it
                     if notifier is not None:
                         _notify(notifier, registry)
                     if awake is not None:

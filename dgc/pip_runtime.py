@@ -105,6 +105,41 @@ def _mismatch(status, kind) -> RegistryError:
     return RegistryError("runner_version_mismatch", text)
 
 
+def _handing_over(status, kind) -> RegistryError:
+    from . import __version__
+    which = (f"an older DGC ({status.get('version') or 'an earlier version'})" if kind == "older"
+             else f"another DGC install ({status.get('version') or 'an earlier version'})")
+    return RegistryError("runner_handing_over", f"The Pips runner from {which} finishes the replies it is running, "
+                         f"then this DGC's runner ({__version__}) takes over. Messages you send meanwhile wait in line.")
+
+
+def _handed_over_here(directory) -> bool:
+    """The runtime stop is a hand-over's (not the user's), to this install, and the old runner has gone."""
+    from .pip_daemon import CONTROL_KEY, HANDOVER_ACTOR, _read, handover_to
+    if not _lease_free(directory):
+        return False
+    with WorkspaceRegistry(directory) as registry:
+        control = _read(registry, CONTROL_KEY) or {}
+        return control.get("actor") == HANDOVER_ACTOR and handover_to(registry) == this_install()
+
+
+def _take_over_when_free(config, directory, *, every: float = 2.0, longest: float = 6 * 3600) -> None:
+    """In the background, start this install's runner as soon as the old one has handed over. If this process ends
+    first, the next start from this install does it (start_runtime, require_supervisor)."""
+    def watch():
+        deadline = time.monotonic() + longest
+        pause = threading.Event()
+        while time.monotonic() < deadline:
+            pause.wait(every)
+            try:
+                if _handed_over_here(directory):
+                    start_runtime(config)
+                    return
+            except Exception:                            # noqa: BLE001 -- the next start from this install tries again
+                return
+    threading.Thread(target=watch, name="dgc-pips-take-over", daemon=True).start()
+
+
 def _lease_free(directory) -> bool:
     lease = named_process_lock("pips-supervisor", str(directory))
     if lease.acquire(blocking=False):
@@ -118,10 +153,15 @@ def _move_runner(config, directory, status, kind):
     stops the way Stop does, with the runtime stop alone (no Pip is paused, nothing is cancelled), and the stop is
     cleared again once it is gone; this install's runner then starts. Busy, it is left to finish, and the error
     says so."""
-    from .pip_daemon import _set_paused, pause_if_idle
+    from .pip_daemon import _set_paused, ask_handover, pause_if_idle
     with WorkspaceRegistry(directory) as registry:
         if not pause_if_idle(registry, "dgc-update"):
-            raise _mismatch(status, kind)
+            # Busy (on a machine where some Pip is always working, it always is): it hands over instead. It starts no
+            # new reply, lets the ones running finish and stops; this install's runner then takes the queue.
+            with registry.transaction():
+                ask_handover(registry, this_install())
+            _take_over_when_free(config, directory)
+            raise _handing_over(status, kind)
     deadline = time.monotonic() + STOP_TIMEOUT
     wait = threading.Event()
     while True:
@@ -178,10 +218,17 @@ def require_supervisor(config):
     directory = state_directory()
     status, _ = _state(directory)
     if not supervisor_is_live(directory, status):
+        if status.get("paused") and _handed_over_here(directory):
+            return start_runtime(config)                 # the old runner handed over: this install's takes the queue
         raise RegistryError("runner_required", "Start the Pips runner before requesting work. Use Start runner in the editor or dgc pips serve in another terminal.")
     if _other_runner(status):
-        # Moved to this install when it is idle, or the error says why not yet.
-        return start_runtime(config)
+        # Moved to this install when it is idle; busy, it hands over, and the work waits in line for this one.
+        try:
+            return start_runtime(config)
+        except RegistryError as exc:
+            if exc.code != "runner_handing_over":
+                raise
+            return status
     return status
 
 
@@ -223,6 +270,13 @@ def start_runtime(config, *, resume=False):
         status, before = _state(directory)
         if resume:
             resume_runtime(config, "local-editor")
+            status, before = _state(directory)
+        if status["paused"] and _handed_over_here(directory):
+            # The old runner handed over and stopped: its stop is cleared (never one the user set), the record too.
+            resume_runtime(config, "dgc-update")
+            from .pip_daemon import clear_handover
+            with WorkspaceRegistry(directory) as registry, registry.transaction():
+                clear_handover(registry)
             status, before = _state(directory)
         if status["paused"]:
             raise RegistryError("runtime_paused", "Global stop is set. Review and explicitly resume the runner locally.")

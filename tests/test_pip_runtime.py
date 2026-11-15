@@ -50,22 +50,25 @@ class LocalStartupTests(unittest.TestCase):
              patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no duplicate")):
             self.assertEqual(runtime.start_runtime(self.config), self.online)
 
-    def test_a_busy_runner_from_an_older_install_is_left_to_finish_and_says_so(self):
+    def test_a_busy_runner_from_an_older_install_is_asked_to_hand_over_and_says_so(self):
+        # (15 Nov) It used to be left running until nothing was queued or running, which never came on his machine.
         for version, words in ((None, "an older DGC (an earlier version)"), ("0.0.1", "an older DGC (0.0.1)"),
                                (__version__ + "+other", f"another DGC install ({__version__}+other)")):
             old = {**self.online, "version": version}
             with self.subTest(version=version), patch.object(runtime, "_state", return_value=(old, "old")), \
                  patch.object(runtime, "supervisor_is_live", return_value=True), \
                  patch("dgc.pip_daemon.pause_if_idle", return_value=False) as pause, \
+                 patch("dgc.pip_daemon.ask_handover"), \
+                 patch.object(runtime, "_take_over_when_free", side_effect=lambda config, directory: None), \
                  patch.object(runtime, "resume_runtime", side_effect=AssertionError("never stopped")), \
                  patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no duplicate")):
-                for operation in (runtime.start_runtime, runtime.require_supervisor):
-                    with self.assertRaises(RegistryError) as caught:
-                        operation(self.config)
-                    self.assertEqual(caught.exception.code, "runner_version_mismatch")
-                    self.assertIn(f"is from {words} and is still working", str(caught.exception))
-                    self.assertIn(f"moves it to this one ({__version__})", str(caught.exception))
-                    self.assertNotIn("Keep Pips running", str(caught.exception))
+                with self.assertRaises(RegistryError) as caught:
+                    runtime.start_runtime(self.config)
+                self.assertEqual(caught.exception.code, "runner_handing_over")
+                self.assertIn(f"The Pips runner from {words} finishes the replies it is running", str(caught.exception))
+                self.assertIn(f"this DGC's runner ({__version__}) takes over", str(caught.exception))
+                self.assertNotIn("Keep Pips running", str(caught.exception))
+                self.assertEqual(runtime.require_supervisor(self.config), old, "work waits in line, never refused")
                 self.assertEqual(pause.call_count, 2)
 
     def test_a_runner_from_another_install_of_the_same_version_is_moved_too(self):
@@ -333,12 +336,15 @@ class MovingTheRunnerTests(unittest.TestCase):
                        "status,created_at) VALUES('run_'||hex(randomblob(16)),'pip_x','ws_x','b','k','device','{}',"
                        "'queued',?)", (self.registry.clock(),))
         db.execute("PRAGMA foreign_keys=ON")
-        with patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no second runner")):
-            for operation in (runtime.start_runtime, runtime.require_supervisor):
-                with self.assertRaisesRegex(RegistryError, "is still working"):
-                    operation(self.config)
+        # (15 Nov) Busy, it is asked to hand over rather than refused: work asked for meanwhile waits in line.
+        with patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no second runner")), \
+             patch.object(runtime, "_take_over_when_free", side_effect=lambda config, directory: None):
+            with self.assertRaisesRegex(RegistryError, "finishes the replies it is running"):
+                runtime.start_runtime(self.config)
+            self.assertTrue(runtime.require_supervisor(self.config)["online"], "queued, never refused")
         self.assertFalse(self.daemon.is_runtime_paused(self.registry), "never stopped")
         self.assertEqual(db.execute("SELECT status FROM pip_runs").fetchone()[0], "queued")
+        self.assertEqual(self.daemon.handover_to(self.registry), runtime.this_install(), "it was asked to hand over")
 
     def test_with_keep_pips_running_on_its_service_starts_this_installs_runner(self):
         stopped = self.old_runner()
