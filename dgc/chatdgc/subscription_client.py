@@ -210,6 +210,8 @@ class SubscriptionChatClient:
         errors: list[str] = []
         usage: dict = {}
         refused = False
+        # Which of its messages came in pieces: kept with its process, since one reply's calls share it.
+        pieces = state.setdefault("pieces", {})
         try:
             while True:
                 if cancel is not None and cancel.is_set():
@@ -252,7 +254,7 @@ class SubscriptionChatClient:
                 line = raw.decode("utf-8", errors="replace")
                 if not line.lstrip().startswith(("{", "[")) and pip_brain.refused_option(line):
                     refused = True
-                for event in parse_stream_events(pip_brain._engine(self.engine).stream, line):
+                for event in parse_stream_events(pip_brain._engine(self.engine).stream, line, pieces):
                     kind, value = event.get("kind"), event.get("text")
                     if kind == "text" and value:
                         said.append(str(value))

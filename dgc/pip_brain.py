@@ -203,31 +203,17 @@ def child_env(launch: dict, extra: dict | None = None) -> dict:
     return env
 
 
-_claude_restricted_seen: dict[tuple, bool] = {}
+def _claude_takes(binary: str, flag: str) -> bool:
+    """Whether this Claude Code has `flag` (subscriptions.claude_takes: asked once per installed file)."""
+    from . import subscriptions
+    return subscriptions.claude_takes(binary, flag)
 
 
 def _claude_takes_restricted(binary: str) -> bool:
     """Whether this Claude Code has ``--restricted``. An older one refuses the whole command for it, which stopped
     every ChatDGC reply and Pip run on it (seen with 2.1.220). The rest of claude_argv holds an older one to the same
-    limits: none of its own tools, none of the user's settings or hooks, only DGC's server, nothing that asks. Asked
-    once per installed file. If it can't be asked the flag stays, and a CLI that refuses it says so (refused_option)."""
-    try:
-        info = os.stat(binary)
-        key = (str(binary), info.st_mtime_ns, info.st_size)
-    except OSError:
-        return True
-    if key not in _claude_restricted_seen:
-        try:
-            done = subprocess.run([binary, "--help"], stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
-                                  cwd=str(Path(binary).parent), env={
-                                      "PATH": os.environ.get("PATH", ""), "HOME": str(Path.home()),
-                                      "DISABLE_AUTOUPDATER": "1"})
-        except (OSError, subprocess.SubprocessError):
-            return True
-        if done.returncode != 0:
-            return True
-        _claude_restricted_seen[key] = b"--restricted" in done.stdout
-    return _claude_restricted_seen[key]
+    limits: none of its own tools, none of the user's settings or hooks, only DGC's server, nothing that asks."""
+    return _claude_takes(binary, "--restricted")
 
 
 _REFUSED_OPTION = re.compile(r"\b(unknown option|unknown argument|unexpected argument|unrecognized (option|argument))\b",
@@ -247,6 +233,9 @@ def claude_argv(binary: str, *, mcp_config: Path, system_file: Path, model: str 
     argv = [binary, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
             "--tools", "",                              # none of Claude Code's own tools: no shell, files or web
             *(["--restricted"] if _claude_takes_restricted(binary) else []),
+            # Its words and thinking as they come (15 Nov: 13 minutes of "Waiting for Claude Code · 0 tok" while it
+            # streamed); an older one without the flag runs as before.
+            *(["--include-partial-messages"] if _claude_takes(binary, "--include-partial-messages") else []),
             "--setting-sources", "project",              # no user or local settings (their hooks); its folder has none
             "--strict-mcp-config", "--mcp-config", str(mcp_config),   # only DGC's server, not the user's
             "--allowedTools", f"mcp__{SERVER}",          # whose tools need no prompt,
@@ -535,6 +524,7 @@ class Turn:
         self.usage = None
         self.proc = None
         self.stopping = stopping
+        self.pieces = {}                 # which of its messages came in pieces (subscriptions.parse_stream_events)
 
     # The Agent's messages, as a native turn writes them.
     def _flush(self, call=None) -> None:
@@ -558,7 +548,9 @@ class Turn:
                 return                       # its message ended at its choices: nothing after them is shown
             if kind == "text" and event.get("text"):
                 text = str(event["text"])
-                if self.pending and not self.pending.endswith(("\n", " ")) and not text.startswith(("\n", " ")):
+                # A new message is set apart from the last; a piece of the same message joins it as written.
+                if (not event.get("delta") and self.pending and not self.pending.endswith(("\n", " "))
+                        and not text.startswith(("\n", " "))):
                     text = "\n\n" + text
                 if len("".join(self.said)) + len(text) > MAX_TEXT:
                     self.errors.append("it said more than one reply can hold")
@@ -704,7 +696,7 @@ class Turn:
                         raw = self.proc.stdout.readline(MAX_LINE + 1)
                     continue
                 line = raw.decode("utf-8", errors="replace")
-                events = parse_stream_events(self.engine.stream, line)
+                events = parse_stream_events(self.engine.stream, line, self.pieces)
                 if not events and line.strip() and not line.lstrip().startswith(("{", "[")) and len(diagnostics) < 4:
                     diagnostics.append(redact.feed(line.strip())[:500] + redact.flush())
                 for event in events:

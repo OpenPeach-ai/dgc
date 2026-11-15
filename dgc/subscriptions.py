@@ -16,6 +16,7 @@ it a shared interface (session, checkpoints, transcript).
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import subprocess
@@ -115,6 +116,10 @@ class SubEngine:
             else:
                 argv += list(self.resume)
         argv += list(self.flags)
+        if self.key == "claude":
+            # Its words as they come (15 Nov). Every Claude Code since mid-2025 has the flag, so it isn't asked first:
+            # asking ran the binary (`--help`) on the turn's path, and a broken one hung it.
+            argv += [PARTIAL_FLAG]
         if self.key == "claude" and sandboxed:
             # DGC's sandbox applies to it through its own (9 Nov, the user's call): its shell in Claude Code's sandbox
             # with no way out of it, and in auto mode edits in the project without a prompt rather than every check
@@ -538,8 +543,60 @@ def _claude_retry(obj: dict) -> list[dict]:
 # ---- end reconnecting ------------------------------------------------------------------------------
 
 
-def _events_claude(obj: dict) -> list[dict]:
+PARTIAL_FLAG = "--include-partial-messages"
+_claude_flags_seen: dict[tuple, bytes] = {}
+
+
+def claude_takes(binary: str, flag: str) -> bool:
+    """Whether this Claude Code has `flag`, asked once per installed file (`--help`). An older one refuses a whole
+    command for a flag it lacks. If it can't be asked, the flag stays and a CLI that refuses it says so."""
+    try:
+        info = os.stat(binary)
+        key = (str(binary), info.st_mtime_ns, info.st_size)
+    except OSError:
+        return True
+    if key not in _claude_flags_seen:
+        try:
+            done = subprocess.run([binary, "--help"], stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
+                                  cwd=str(Path(binary).parent), env={
+                                      "PATH": os.environ.get("PATH", ""), "HOME": str(Path.home()),
+                                      "DISABLE_AUTOUPDATER": "1"})
+        except (OSError, subprocess.SubprocessError):
+            return True
+        if done.returncode != 0:
+            return True
+        _claude_flags_seen[key] = done.stdout
+    return flag.encode() in _claude_flags_seen[key]
+
+
+# Claude Code's words as they come (--include-partial-messages, 15 Nov): a stream_event per piece of text or thinking,
+# then the whole message after them. A reader that passes `state` (one dict a turn) gets each piece once, the first of a
+# message without "delta" (so it may set the message apart from the last) and the rest with it, and the whole message's
+# text and thinking are then left out: they were already said. Its tool calls still come from the whole message.
+def _claude_piece(obj: dict, state: dict | None) -> list[dict]:
+    event = obj.get("event") if isinstance(obj.get("event"), dict) else {}
+    if event.get("type") != "content_block_delta":
+        return []
+    delta = event.get("delta") if isinstance(event.get("delta"), dict) else {}
+    kind = {"text_delta": "text", "thinking_delta": "thinking"}.get(str(delta.get("type") or ""))
+    piece = delta.get(kind) if kind else None
+    if not isinstance(piece, str) or not piece:
+        return []
+    out = {"kind": kind, "text": piece}
+    if state is None:
+        return [{**out, "delta": True}]
+    seen = state.setdefault("pieces", set())
+    key = (str(obj.get("api_message_id") or ""), kind)
+    if key in seen:
+        out["delta"] = True
+    seen.add(key)
+    return [out]
+
+
+def _events_claude(obj: dict, state: dict | None = None) -> list[dict]:
     t = obj.get("type")
+    if t == "stream_event":
+        return _claude_piece(obj, state)
     if t == "system":
         if obj.get("subtype") == "api_retry":
             return _claude_retry(obj)
@@ -550,14 +607,18 @@ def _events_claude(obj: dict) -> list[dict]:
         content = message.get("content", [])
         if isinstance(content, str):
             content = [{"type": "text", "text": content}]
+        said = (state or {}).get("pieces", set())
+        mid = str(message.get("id") or "")
         for b in content if isinstance(content, list) else []:
             if not isinstance(b, dict):
                 continue
             bt = b.get("type")
             if bt == "text" and b.get("text"):
-                out.append({"kind": "text", "text": b["text"]})
+                if (mid, "text") not in said:              # its pieces already said it
+                    out.append({"kind": "text", "text": b["text"]})
             elif bt == "thinking" and b.get("thinking"):
-                out.append({"kind": "thinking", "text": b["thinking"]})
+                if (mid, "thinking") not in said:
+                    out.append({"kind": "thinking", "text": b["thinking"]})
             elif bt == "tool_use":
                 out.append({"kind": "tool_call", "name": str(b.get("name") or "tool"),
                             "args": b.get("input") if isinstance(b.get("input"), dict) else {},
@@ -792,7 +853,7 @@ def _events_generic(obj: dict) -> list[dict]:
     return []
 
 
-def parse_stream_events(stream: str, line: str) -> list[dict]:
+def parse_stream_events(stream: str, line: str, state: dict | None = None) -> list[dict]:
     """Normalize one raw JSONL line into a list of rich DGC-neutral events."""
     line = line.strip()
     if not line:
@@ -804,7 +865,7 @@ def parse_stream_events(stream: str, line: str) -> list[dict]:
     if not isinstance(obj, dict):
         return []
     if stream == "claude":
-        return _events_claude(obj)
+        return _events_claude(obj, state)
     if stream == "codex":
         return _events_codex(obj)
     if stream == "qwen":
@@ -1317,6 +1378,7 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
             diagnostics.append(clean[:500])
 
     try:
+        pieces: dict = {}                   # which messages came in pieces (parse_stream_events)
         assert proc.stdout is not None
         while True:
             raw = proc.stdout.readline(_MAX_STREAM_LINE_BYTES + 1)
@@ -1328,7 +1390,7 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
                 _diagnostic("vendor emitted an oversized output line; it was discarded")
                 continue
             line = raw.decode("utf-8", errors="replace")
-            events = parse_stream_events(engine.stream, line)
+            events = parse_stream_events(engine.stream, line, pieces)
             if not events:
                 try:
                     is_json = isinstance(json.loads(line), (dict, list))
