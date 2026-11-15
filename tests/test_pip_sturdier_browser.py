@@ -189,8 +189,11 @@ class WordingTests(unittest.TestCase):
         # (text-only tool and notice; measured +335 prompt tokens a request, against 4 to 10 fewer requests an errand)
         # for the new steps. Growing them further needs a reason. 2026-11-12: +159 for background commands
         # (pc-background-commands: run's background, jobs, stop_job; about 40 tokens a request), the wording cut to fit.
+        # 2026-11-15: +948 (about 240 tokens a request) for his asks that day: "Better tools" (a Pip finds, judges and
+        # installs open-source programs and models itself, asks in the chat before a big one; cut from 1524 to fit)
+        # and the Terminal's no-limit wording (a long command carries on in the background).
         size = len(json.dumps(pip_computer.schema(None))) + len(pip_computer.NOTICE)
-        self.assertLessEqual(size, 4760, size)
+        self.assertLessEqual(size, 5710, size)
 
 
 @unittest.skipUnless(REAL_CHROME and box.capability().get("available"), "needs Linux, bubblewrap and a Chromium build")

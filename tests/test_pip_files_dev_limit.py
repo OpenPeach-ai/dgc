@@ -1,5 +1,5 @@
-"""A Pip computer's Files hold 1 GB, and one file can be as big. Dev Mode can raise it (asked 12 Nov: "yes, and can be
-increased in Dev mode settings?"): one more row in its Limits table, in whole GB. Off, it is 1 GB whatever is saved."""
+"""A Pip computer's Files have no quota of their own (his call, 15 Nov: "there should be no limit"); the disk floor keeps
+the user's disk from filling. Dev Mode can still set one (asked 12 Nov): one row in its Limits table, in whole GB."""
 import os
 import tempfile
 import unittest
@@ -34,20 +34,19 @@ class FilesLimit(unittest.TestCase):
         self.assertIn("GB", row["label"])
         self.assertTrue(row["cost"])
 
-    def test_off_it_is_one_gb_whatever_is_saved(self):
+    def test_off_there_is_no_quota_whatever_is_saved(self):
         with settings(False, 5):
-            self.assertEqual(files.folder_limit(), GB)
+            self.assertEqual(files.folder_limit(), 0)
         with settings(True):
-            self.assertEqual(files.folder_limit(), GB)
+            self.assertEqual(files.folder_limit(), 0)
 
     def test_on_a_nearly_full_folder_takes_more_and_the_words_say_the_size(self):
-        with patch.object(files, "folder_bytes", return_value=int(1.5 * GB)):
-            with settings(False), self.assertRaises(RegistryError) as caught:
+        with patch.object(files, "folder_bytes", return_value=int(2.5 * GB)):
+            with settings(True, 2), self.assertRaises(RegistryError) as caught:
                 files._write_new(self.root, [], "note.txt", b"hello")
-            self.assertIn("(1 GB)", str(caught.exception))
-            with settings(True, 2):
-                self.assertEqual(files.folder_limit(), 2 * GB)
-                files._write_new(self.root, [], "note.txt", b"hello")
+            self.assertIn("(2 GB)", str(caught.exception))
+            with settings(False):
+                files._write_new(self.root, [], "note.txt", b"hello")        # no quota of its own
         self.assertEqual((self.root / "note.txt").read_bytes(), b"hello")
 
     def test_one_file_can_be_as_big_as_the_limit_and_no_bigger(self):
@@ -58,16 +57,16 @@ class FilesLimit(unittest.TestCase):
             files.copy_in(self.root, "", str(source))
         self.assertIn("up to 2 GB", str(caught.exception))
         self.assertEqual(list(self.root.iterdir()), [], "nothing written")
-        with settings(False), self.assertRaises(RegistryError) as caught:
-            files.copy_in(self.root, "", str(source))
-        self.assertIn("up to 1 GB", str(caught.exception))
+        roomy = type("Usage", (), {"total": 900 * GB, "used": 0, "free": 800 * GB})()
+        with settings(False), patch.object(files.shutil, "disk_usage", return_value=roomy):
+            files._room_for(self.root, int(2.5 * GB))                     # no quota: only the disk floor decides
 
     def test_the_terminal_and_background_commands_follow_it(self):
         computer = Path(self.tmp.name) / "computer"
         (computer / "files").mkdir(parents=True)
         with patch.object(files, "files_root", return_value=computer / "files"), \
                 patch.object(files, "folder_bytes", return_value=int(1.5 * GB)):
-            with settings(False), self.assertRaises(RegistryError) as caught:
+            with settings(True, 1), self.assertRaises(RegistryError) as caught:
                 files.run_command(computer, "echo hi", "pip")
             self.assertEqual(caught.exception.code, "computer_full")
             self.assertIn("(1 GB)", str(caught.exception))

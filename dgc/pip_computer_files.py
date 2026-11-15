@@ -35,14 +35,16 @@ MAX_LIST = 500
 MAX_TEXT_BYTES = 64 * 1024
 MAX_FILE_BYTES = 2 * 1024 * 1024          # read back or added through the editor
 MAX_FILE_URI_CHARS = 2_800_000
-MAX_FOLDER_BYTES = 1024 ** 3              # the Files folder, all in
+MAX_FOLDER_BYTES = 0                      # the Files folder, all in: 0 is no quota (his call 15 Nov; Dev Mode may set one)
+# What DGC keeps free on the user's disk: a Pip's computer has no size limit, but it never fills the disk (15 Nov).
+DISK_FLOOR_BYTES = 10 * 1024 ** 3
 MAX_COMMAND_CHARS = 4000
 COMMAND_SECONDS = 60
 MAX_OUTPUT_BYTES = 64 * 1024
 # Long commands in the background (pc-background-commands, 0.52): a download, an install or a build starts and the Pip
 # carries on; it checks later (running or finished, exit code, the end of its output) and can stop it. They don't hold
 # the Terminal. How long one may run and how many at once are Dev Mode limits (dgc.dev_mode).
-BACKGROUND_SECONDS = 60 * 60
+BACKGROUND_SECONDS = 0                   # no time limit, as Work's background jobs (15 Nov); Dev Mode may set one
 MAX_JOBS = 3
 JOBS_KEPT = 20
 MAX_HISTORY = 200
@@ -266,8 +268,7 @@ def add_raw_file(root: Path, folder: str, name: str, raw: bytes, *, maximum: int
 
 
 def _write_new(root: Path, parts: list[str], name: str, raw: bytes) -> dict:
-    if folder_bytes(root) + len(raw) > folder_limit():
-        raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
+    _room_for(root, len(raw))
     fd = _open_dir(root, parts)
     staging = f".dgc-add-{os.getpid()}-{os.urandom(6).hex()}"
     try:
@@ -304,11 +305,30 @@ COPY_CHUNK = 1024 * 1024
 
 
 def folder_limit() -> int:
-    """How much a computer's Files may hold, and so how big one file may be: 1 GB, or the GB you set in Dev Mode
+    """How much a computer's Files may hold, and so how big one file may be: no quota (0), or the GB you set in Dev Mode
     (pip_files_gb)."""
     from .dev_mode import chosen
     gb = chosen("pip_files_gb")
     return MAX_FOLDER_BYTES if gb is None else gb * 1024 ** 3
+
+
+def _room_for(root: Path, adding: int = 0) -> None:
+    """Refuse when the Files would pass a quota Dev Mode set, or the user's disk would keep less than DISK_FLOOR_BYTES
+    free. With neither, there is room: a Pip's computer has no size limit of its own."""
+    limit = folder_limit()
+    if limit and (adding > limit or folder_bytes(root) + adding > limit):
+        raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
+    free = _disk_free(root)
+    if free is not None and free - adding < DISK_FLOOR_BYTES:
+        raise RegistryError("computer_full", f"Your disk has {max(free, 0) / 1024 ** 3:.1f} GB free, and DGC keeps "
+                            f"{DISK_FLOOR_BYTES // 1024 ** 3} GB free for you. Free some space first.")
+
+
+def _disk_free(root: Path) -> int | None:
+    try:
+        return shutil.disk_usage(root).free
+    except OSError:
+        return None
 
 
 def _limit_words() -> str:
@@ -339,11 +359,10 @@ def copy_in(root: Path, folder, source) -> dict:
         if not name or len(name.encode("utf-8")) > MAX_NAME_BYTES or name in (".", ".."):
             raise RegistryError("invalid_request", "That file's name can't be used in a Pip's Files.")
         limit = folder_limit()
-        if info.st_size > limit:
+        if limit and info.st_size > limit:
             raise RegistryError("too_big", f"That file is {info.st_size / 1024 ** 3:.1f} GB. A Pip's computer takes "
                                            f"files up to {_limit_words()}.")
-        if folder_bytes(root) + info.st_size > limit:
-            raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
+        _room_for(root, info.st_size)
         fd = _open_dir(root, parts)
         staging = f".dgc-add-{os.getpid()}-{os.urandom(6).hex()}"
         try:
@@ -355,7 +374,7 @@ def copy_in(root: Path, folder, source) -> dict:
                     if not chunk:
                         break
                     copied += len(chunk)
-                    if copied > limit:                   # it grew while copying
+                    if limit and copied > limit:         # it grew while copying
                         raise RegistryError("too_big", f"A Pip's computer takes files up to {_limit_words()}.")
                     out.write(chunk)
             return _publish(fd, parts, name, staging, copied)
@@ -539,8 +558,7 @@ def _user_tasks() -> int:
 def _limits(processes: int):
     def apply() -> None:
         import resource
-        resource.setrlimit(resource.RLIMIT_CPU, (COMMAND_SECONDS, COMMAND_SECONDS + 5))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (512 * 1024 * 1024,) * 2)
+        # No CPU time or file size limit (his call, 15 Nov). The disk floor guards the disk (_room_for, _watch_disk).
         # The limit counts all of this user's processes, so it is set above what already runs:
         # room for a real command, not for a fork bomb.
         resource.setrlimit(resource.RLIMIT_NPROC, (processes + 256, processes + 256))
@@ -615,8 +633,9 @@ def run_command(computer_root: Path, command, by: str, *, policy=None, env: dict
     .terminal_env, at Do it all only); what it prints is masked of them before anyone sees or keeps it."""
     command = _check(command, by)
     files = files_root(computer_root)
-    if folder_bytes(files) > folder_limit():
-        raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
+    _room_for(files)
+    if sys.platform != "darwin":
+        return _run_or_carry_on(computer_root, files, command, by, policy=policy, env=env)
     marker = Path(computer_root) / "terminal.running"
     with _TerminalLock(computer_root, COMMAND_SECONDS + 10):
         started, at = time.monotonic(), int(time.time())
@@ -635,6 +654,80 @@ def run_command(computer_root: Path, command, by: str, *, policy=None, env: dict
                  "seconds": round(time.monotonic() - started, 2), "at": at, **reached}
         _remember(computer_root, entry)
         return entry
+
+
+def _run_or_carry_on(computer_root: Path, files: Path, command: str, by: str, *, policy=None, env: dict | None = None) -> dict:
+    """Run it with no time limit and wait up to COMMAND_SECONDS (his call, 15 Nov). Done by then: today's entry. Not
+    done: it is never stopped; it carries on in the background as a job (jobs, job_output, stop_job) and the Terminal is
+    free again. Its end is kept in the job and in the history, as a background command's is."""
+    marker = Path(computer_root) / "terminal.running"
+    job = {"id": "job_" + os.urandom(4).hex(), "by": by, "command": command, "state": "running", "exit": None,
+           "output": "", "started": int(time.time()), "ended": None, "pgid": None}
+    done, moved, lock, result = threading.Event(), threading.Event(), threading.Lock(), {}
+
+    def started(proc):
+        job["pgid"] = proc.pid
+        with lock:
+            if moved.is_set():
+                _job_write(computer_root, job)
+
+    def work():
+        try:
+            code, text, timed_out, reached = _execute(files, command, computer_root, policy=policy, env=env, seconds=0,
+                                                      on_start=started, tail=True)
+            if env:
+                from .redaction import redact_text
+                text = redact_text(text, [v for v in env.values() if isinstance(v, str) and v])
+            result.update(code=code, text=text, timed_out=timed_out, reached=reached)
+        except Exception as error:                 # noqa: BLE001 - recorded, never raised off-thread
+            result.update(code=None, text=f"It couldn't run: {str(error)[:300]}", timed_out=False, reached={})
+        with lock:
+            done.set()
+            carried = moved.is_set()
+        if carried:                                # it carries on as a job: its end goes there and to the history
+            try:
+                now = json.loads((_jobs_dir(computer_root) / f"{job['id']}.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                now = {}
+            job.update(state="stopped" if now.get("state") == "stopping" else "finished", exit=result["code"],
+                       output=result["text"], ended=int(time.time()), **result["reached"])
+            _JOB_THREADS.pop(job["id"], None)
+            _job_write(computer_root, job)
+            try:
+                _remember(computer_root, {"by": by, "command": command, "exit": job["exit"], "output": job["output"],
+                                          "timed_out": False, "background": True,
+                                          "seconds": job["ended"] - job["started"], "at": job["started"]})
+            except OSError:
+                pass
+
+    with _TerminalLock(computer_root, COMMAND_SECONDS + 10):
+        started_at, at = time.monotonic(), int(time.time())
+        marker.write_text(json.dumps({"by": by, "command": command, "at": at}), encoding="utf-8")
+        thread = threading.Thread(target=work, name=f"pip-computer-run-{job['id']}", daemon=True)
+        try:
+            thread.start()
+            done.wait(COMMAND_SECONDS)
+            with lock:
+                finished = done.is_set()
+                if not finished:
+                    moved.set()
+                    _JOB_THREADS[job["id"]] = thread
+                    _job_write(computer_root, job)
+        finally:
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+    if finished:
+        entry = {"by": by, "command": command, "exit": result["code"], "output": result["text"],
+                 "timed_out": result["timed_out"], "seconds": round(time.monotonic() - started_at, 2), "at": at,
+                 **result["reached"]}
+        _remember(computer_root, entry)
+        return entry
+    return {"by": by, "command": command, "exit": None, "timed_out": False, "job": job["id"],
+            "seconds": round(time.monotonic() - started_at, 2), "at": at,
+            "output": (f"Still running after {COMMAND_SECONDS} seconds: it carries on in the background as {job['id']} "
+                       "(nothing was stopped). Check it with jobs; stop_job stops it.")}
 
 
 def start_command(computer_root: Path, command, by: str = "you") -> dict:
@@ -780,8 +873,7 @@ def start_background(computer_root: Path, command, by: str, *, policy=None, env:
         raise RegistryError("unsupported", "Background commands aren't on a Mac yet: run it, up to 60 seconds.")
     command = _check(command, by)
     files = files_root(computer_root)
-    if folder_bytes(files) > folder_limit():
-        raise RegistryError("computer_full", f"This computer's Files are full ({_limit_words()}). Remove something first.")
+    _room_for(files)
     seconds, most = background_limits()
     if sum(1 for job in jobs(computer_root) if job["state"] == "running") >= most:
         raise RegistryError("busy", f"{most} background commands are already running here. Stop one (stop_job) or "
@@ -931,8 +1023,8 @@ def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=(), seconds: in
                tail: bool = False) -> tuple[int | None, str, bool]:
     """Run the boxed command for at most ``seconds`` (COMMAND_SECONDS). ``on_start(proc)`` learns its process (a
     background job's Stop); ``tail`` keeps the END of a long output (a background job's) rather than its start."""
-    seconds = COMMAND_SECONDS if seconds is None else seconds
-    # On a Mac the VM is the limit (its memory and CPUs, and `timeout` inside); here, rlimits on the box.
+    seconds = COMMAND_SECONDS if seconds is None else seconds      # 0: no time limit
+    # On a Mac the VM is the limit (its memory and CPUs, and `timeout` inside); here, the process cap and the disk floor.
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=_limits(_user_tasks()) if limits else None,
                             env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")}, pass_fds=tuple(pass_fds))
@@ -941,8 +1033,11 @@ def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=(), seconds: in
     output, timed_out = (_Tail() if tail else bytearray()), False
     reader = threading.Thread(target=lambda: _drain(proc.stdout, output, tail=tail), daemon=True)
     reader.start()
+    full = threading.Event()
+    watch = threading.Thread(target=_watch_disk, args=(proc, full), daemon=True, name="pip-computer-disk")
+    watch.start()
     try:
-        code = proc.wait(timeout=seconds)
+        code = proc.wait(timeout=seconds or None)
     except subprocess.TimeoutExpired:
         timed_out = True
         _end_box(proc.pid)
@@ -961,7 +1056,24 @@ def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=(), seconds: in
             text += f"\n… output cut at {MAX_OUTPUT_BYTES // 1024} KB."
     if timed_out:
         text += f"\nStopped after {_duration(seconds)}."
+    if full.is_set():
+        text += (f"\nStopped: your disk was nearly full (DGC keeps {DISK_FLOOR_BYTES // 1024 ** 3} GB free for you). "
+                 "Remove something, then run it again.")
     return code, text, timed_out
+
+
+DISK_WATCH_SECONDS = 2.0
+
+
+def _watch_disk(proc, full: threading.Event) -> None:
+    """Stop a running command whose writes would leave the disk under the floor (the user's machine, not the Pip's)."""
+    while proc.poll() is None:
+        free = _disk_free(Path.home())
+        if free is not None and free < DISK_FLOOR_BYTES:
+            full.set()
+            _end_box(proc.pid)
+            return
+        time.sleep(DISK_WATCH_SECONDS)
 
 
 class _Tail(bytearray):

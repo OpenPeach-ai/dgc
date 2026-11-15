@@ -308,7 +308,10 @@ class DeskTests(unittest.TestCase):
         self.assertEqual([e["by"] for e in entries], ["you", "pip"], "both show in the Terminal")
         with patch.object(desk, "COMMAND_SECONDS", 1):
             slow = desk.run_command(pip_computer.computer_root(self.registry.directory, pip["id"]), "sleep 5", "you")
-        self.assertTrue(slow["timed_out"])
+        # (15 Nov) Never stopped: past the wait it carries on in the background as a job.
+        self.assertFalse(slow["timed_out"])
+        self.assertIn("job", slow)
+        desk.stop_job(pip_computer.computer_root(self.registry.directory, pip["id"]), slow["job"])
 
     def test_a_running_command_holds_the_terminal(self):
         pip = self.computer_pip()

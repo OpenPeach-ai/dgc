@@ -38,7 +38,24 @@ from .workspace_registry import RegistryError
 IMAGE = "dgc-pip-computer"
 CLI_PATHS = ("/usr/local/bin/container",)        # its installer's place; a GUI app's PATH may lack it
 INSTALL = "Install Apple's container tool from github.com/apple/container/releases, then open the computer again."
-MEMORY, CPUS = "4G", "4"
+MEMORY, CPUS = "4G", "4"                      # the least a Pip's computer gets (vm_size)
+
+
+def _mac_memory() -> int:
+    """This Mac's memory in bytes (0 when it can't be read)."""
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError, AttributeError):
+        return 0
+
+
+def vm_size() -> tuple[str, str]:
+    """(memory, CPUs) for a Pip's computer: half this Mac's memory and half its cores, never less than MEMORY and CPUS
+    (his call, 15 Nov: no limits by default; the VM takes memory from macOS only as it uses it, so a high ceiling costs
+    little while the Pip is idle). Read at each start: a new size applies when the computer next starts."""
+    gb = _mac_memory() // 1024 ** 3 // 2
+    cores = (os.cpu_count() or 0) // 2
+    return f"{max(gb, int(MEMORY[:-1]))}G", str(max(cores, int(CPUS)))
 POOL_SIZE = 6
 START_SECONDS = 20
 DISPLAY = ":1"
@@ -370,7 +387,8 @@ class Computer:
                 except OSError:
                     pass
             zone = _host_timezone()
-            argv = ["run", "--detach", "--name", self.name, "--network", "none", "--memory", MEMORY, "--cpus", CPUS,
+            memory, cpus = vm_size()
+            argv = ["run", "--detach", "--name", self.name, "--network", "none", "--memory", memory, "--cpus", cpus,
                     "--label", f"{LABEL}=1", "--label", f"{OWNER_LABEL}={owner()}",
                     "--env", "LANG=C.UTF-8", *(["--env", f"TZ={zone}"] if zone else []),
                     "--volume", f"{home}:/home/pip",

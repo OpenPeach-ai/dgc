@@ -227,7 +227,7 @@ class ComputerTests(FakeContainerTests):
         run = next(c for c in self.calls() if c[0] == "run")
         value = lambda flag: [run[i + 1] for i, a in enumerate(run) if a == flag]
         self.assertEqual(value("--network"), ["none"], "no network of its own")
-        self.assertEqual((value("--memory"), value("--cpus")), ([pip_container.MEMORY], [pip_container.CPUS]))
+        self.assertEqual((value("--memory"), value("--cpus")), tuple([part] for part in pip_container.vm_size()))   # (15 Nov) half the Mac
         self.assertEqual(value("--env"), ["LANG=C.UTF-8", "TZ=Asia/Kolkata"])
         self.assertEqual(value("--volume"), [f"{self.root / 'home'}:/home/pip"], "only its own home")
         self.assertTrue(all(m.endswith(",readonly") for m in value("--mount")), value("--mount"))

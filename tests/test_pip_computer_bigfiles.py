@@ -62,14 +62,17 @@ class BigFileTests(unittest.TestCase):
     def test_over_the_limit_it_says_the_limit_and_writes_nothing(self):
         source = self.outside / "huge.bin"
         with open(source, "wb") as handle:                                   # sparse: no real disk used
-            handle.truncate(files.MAX_COPY_BYTES + 1)
+            handle.truncate(1024 ** 3 + 1)
+        # (15 Nov) No quota of its own any more; a quota Dev Mode sets still says itself and writes nothing.
+        quota = patch.object(files, "folder_limit", return_value=1024 ** 3)
+        quota.start(); self.addCleanup(quota.stop)
         reply = self.control({"type": "copy_pip_computer_file_in", "pip_id": self.pip["id"], "path": "", "source": str(source)})
         self.assertFalse(reply["ok"])
         self.assertIn("1 GB", reply["error"]["message"])
         self.assertEqual([p for p in self.folder(self.pip).iterdir() if p.name != "Downloads"], [])
         # With the folder nearly full, a file that would pass it is refused the same way.
         self.make("small.bin", 4096)
-        with patch.object(files, "folder_bytes", return_value=files.MAX_FOLDER_BYTES - 100):
+        with patch.object(files, "folder_bytes", return_value=1024 ** 3 - 100):
             full = self.control({"type": "copy_pip_computer_file_in", "pip_id": self.pip["id"], "path": "",
                                  "source": str(self.outside / "small.bin")})
         self.assertFalse(full["ok"])
