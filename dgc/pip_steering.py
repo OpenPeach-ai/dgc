@@ -58,8 +58,11 @@ MAX_ATTACHMENT_NOTE_BYTES = 512 * 1024
 MAX_INBOX_BYTES = MAX_PER_RUN * (6 * MAX_TEXT_BYTES + 256 + MAX_ATTACHMENT_NOTE_BYTES) + 2
 # Messages waiting for a turn of their own: the reply they joined finished without reading them. Each conversation of a
 # Pip has its own queue (pip_conversations): a steer belongs to the conversation of the reply it joined.
+# A reply that failed only because the model sent back nothing counts as ended for what it hadn't read (settle).
+EMPTY_REPLY_SQL = ("(r.status='failed' AND json_extract(r.error,'$.code')='invalid_reply' "
+                   "AND instr(json_extract(r.error,'$.message'),'empty')>0)")
 WAITING = ("SELECT s.* FROM pip_chat_steers s JOIN pip_runs r ON r.id=s.run_id "
-           "WHERE s.pip_id=? AND s.status='pending' AND r.status='succeeded'")
+           "WHERE s.pip_id=? AND s.status='pending' AND (r.status='succeeded' OR " + EMPTY_REPLY_SQL + ")")
 _IN_CONVERSATION = " AND s.conversation_id IS ?"
 
 
@@ -338,16 +341,27 @@ def advance(store, pip_id, config, conversation_id=None):
 
 def settle(store, run_id, config):
     """What becomes of what a chat reply hadn't read, when it has ended: see the top of this file."""
-    row = store.db.execute('SELECT pip_id,status FROM pip_runs WHERE id=?', (run_id,)).fetchone()
+    row = store.db.execute('SELECT pip_id,status,error FROM pip_runs WHERE id=?', (run_id,)).fetchone()
     if row is None:
         return
     if row['status'] == 'cancelled':
         with store.registry.transaction():
             stopped(store.db, row['pip_id'], run_id)
         return
-    if row['status'] == 'failed':
+    if row['status'] == 'failed' and not _empty_reply(row['error']):
         miss_pending(store, run_id)
+    # A reply that failed only because the model sent back nothing (live 15 Nov): what it hadn't read was never at
+    # fault, so it waits for its own turn, as after a reply that finished, instead of being marked missed.
     advance(store, row['pip_id'], config, conversation_of(store.db, run_id))
+
+
+def _empty_reply(error) -> bool:
+    try:
+        value = json.loads(error) if isinstance(error, str) else error
+    except ValueError:
+        return False
+    return (isinstance(value, dict) and value.get('code') == 'invalid_reply'
+            and 'empty' in str(value.get('message') or ''))
 
 
 def recover(store, config):
@@ -355,9 +369,9 @@ def recover(store, config):
     a turn (it stopped right after their reply finished) still get it."""
     with store.registry.transaction():
         store.db.execute("UPDATE pip_chat_steers SET status='missed' WHERE status='pending' AND run_id IN "
-                         "(SELECT id FROM pip_runs WHERE status IN ('failed','cancelled'))")
+                         "(SELECT r.id FROM pip_runs r WHERE r.status IN ('failed','cancelled') AND NOT " + EMPTY_REPLY_SQL + ")")
     for pip in store.db.execute("SELECT DISTINCT s.pip_id,s.conversation_id FROM pip_chat_steers s JOIN pip_runs r ON r.id=s.run_id "
-                                "WHERE s.status='pending' AND r.status='succeeded'").fetchall():
+                                "WHERE s.status='pending' AND (r.status='succeeded' OR " + EMPTY_REPLY_SQL + ")").fetchall():
         advance(store, pip['pip_id'], config, pip['conversation_id'])
 
 

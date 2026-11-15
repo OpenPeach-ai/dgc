@@ -3042,7 +3042,7 @@ _CANNOT_SEE = re.compile(r"\b(?:can(?:no|'|’)t|cannot|unable to|not able to|no
                          r"(?:the\s+|your\s+|this\s+|that\s+|any\s+)?(?:images?|pictures?|photos?|screenshots?|screen|canvas|design|visuals?)\b",
                          re.I)
 WORDLESS_REPAIR = ("This message is from DGC, not the user. You did not write a reply. Write it now, in two or three short "
-                   "sentences: what you did on your computer, how it ended, and anything left for the user. No more steps.")
+                   "sentences: what you did, how it ended, and anything left for the user. No more steps.")
 CARD_CLAIM_REPAIR = ("This message is from DGC, not the user. Your reply tells the user about a card or draft below it, but you "
                      "made none in this turn, so they see none. If they need to connect an app, call connect_app now; for a "
                      "plugin action, call call_plugin. If a draft was not made, say why in one sentence and ask for what is missing (such as "
@@ -3436,6 +3436,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         def _effective_thinking(self, user_text):
             # Explicit composer Off stays Off even when a prompt says 'think'.
             # This is inference guidance, never a change to the tool allowlist.
+            if getattr(self, '_dgc_words_now', False):
+                return 'off'                    # the "write your reply now" request: words, not more reasoning
             return chat_options['thinking'] if chat_options is not None else super()._effective_thinking(user_text)
 
         def _parallel_task_outputs(self, *args, **kwargs):
@@ -4500,11 +4502,18 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             # It told the user to tap a card it never made ("the card below is how you add that", battle test
             # 2026-10-09): once, ask it to make the card or say it again without one.
             ok = agent.run_turn(CARD_CLAIM_REPAIR)
-        if (ok and personal and conversation is not None and computer_pin is not None and not agent.cancelled.is_set()
-                and eyes['card'] is None and choices_candidate is None and not _turn_text(agent.messages).strip()):
-            # A long turn on its computer (its context compacted on the way) can end on a step with no words:
-            # once, ask it for its reply rather than failing a turn whose work is done.
-            ok = agent.run_turn(WORDLESS_REPAIR)
+        if (ok and conversation is not None and not agent.cancelled.is_set()
+                and eyes['card'] is None and choices_candidate is None and not _turn_text(agent.messages).strip()
+                and not (routine_candidates or core_setup_candidates
+                         or any(c is not None for c in (setup_candidate, email_candidate, calendar_candidate, connector_candidate)))):
+            # A turn can end on a step with no words (a long turn on its computer; a model at high thinking that ends on
+            # its reasoning, live 15 Nov): once, ask it for its reply rather than failing a turn whose work is done, with
+            # thinking off for that one request so it answers in words.
+            agent._dgc_words_now = True
+            try:
+                ok = agent.run_turn(WORDLESS_REPAIR)
+            finally:
+                agent._dgc_words_now = False
         # A model that made a card (a routine, a change, a draft) and then had no words is not a failed
         # turn: the card is its answer (a default line says so below).
         wordless = (ok is False and conversation is not None and not agent.cancelled.is_set()
@@ -4569,6 +4578,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                          else "Here’s the change. Review it below." if setup_candidate is not None
                          else "Here’s a draft. It waits for you below." if (email_candidate or calendar_candidate
                                                                           or connector_candidate) is not None
+                         # Ended on its choices with no words before them (live 15 Nov: the reply failed as
+                         # empty and the choices were lost): the choices are the answer.
+                         else "Choose one below." if choices_candidate is not None
                          else final)
             from .redaction import redact_text, secret_values
             # A reply past 256 KB: its start here, the whole of it passed up for the Pip's document (keep_long_reply).

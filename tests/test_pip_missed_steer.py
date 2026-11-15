@@ -272,6 +272,20 @@ class StoppedOrFailed(Base):
         self.run_to_end("Two.")
         self.assertEqual(self.said()[-2:], [("user", "Second thing"), ("assistant", "Two.")])
 
+    def test_an_empty_reply_hands_the_unread_message_on_as_the_next_turn(self):
+        # Live 15 Nov ("Test" Pip): a message sent while the reply ran was never read; the model then sent back nothing
+        # ("Conversation reply is empty or not text."), the turn failed, the message was marked missed and had to be
+        # sent again. Nothing was wrong with it: it becomes the next turn, as after a reply that finished.
+        self.job_ready()
+        self.send("Open the picture", "first")
+        self.send("And make it smaller", "mid")
+        self.run_to_end(error=("invalid_reply", "Conversation reply is empty or not text."))
+        self.assertIsNone(self.registry.db.execute("SELECT 1 FROM pip_chat_steers WHERE status='missed'").fetchone(),
+                          "not missed")
+        run = self.queued_run_of("And make it smaller")
+        self.assertIsNotNone(run, "it is a turn of its own now")
+        self.assertEqual(run["status"], "queued")
+
     def test_a_runner_restart_loses_the_reply_not_the_message(self):
         self.job_ready()
         first = self.send("Write the summary", "first")

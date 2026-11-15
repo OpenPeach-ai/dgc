@@ -516,6 +516,36 @@ with patch.object(LLMClient, "chat", chat), patch("requests.sessions.Session.req
         self.assertEqual(page["messages"][-1]["text"], "The queued model answered this Pip.")
 
 
+    def test_real_worker_never_fails_a_turn_that_ended_on_its_choices_with_no_words(self):
+        # Live 15 Nov ("Test" Pip): "Conversation reply is empty or not text." A turn that ends by offering choices
+        # with no words before them built an empty reply from its words alone and failed, losing the choices and
+        # the work. The choices are the answer: a short line says so.
+        self.setup_job()
+        sent = self.send()
+        row = self.store.claim_next()
+        fixture = r'''from unittest.mock import patch
+from dgc.llm import ChatResult, LLMClient, ToolCall
+from dgc.pips import _worker_main
+
+def chat(self, messages, tools=None, on_text=None, **kwargs):
+    return ChatResult(content="", tool_calls=[ToolCall("c1", "offer_choices", {"choices": ["Make it smaller", "Keep the size"]})])
+with patch.object(LLMClient, "chat", chat), patch("requests.sessions.Session.request", side_effect=AssertionError("No network")):
+    raise SystemExit(_worker_main())
+'''
+        original = subprocess.Popen
+        def launch(argv, *args, **kwargs):
+            if argv[1:] == ["-m", "dgc.pips", "--worker"]:
+                argv = [sys.executable, "-c", fixture]
+            return original(argv, *args, **kwargs)
+        with patch.object(pips.subprocess, "Popen", side_effect=launch):
+            result = pips._execute_run(self.registry, row, self.cfg)
+        final = self.store.finish(sent["run"]["id"], result=result)
+        self.assertEqual(final["status"], "succeeded")
+        last = pip_chat.list_messages(self.store, self.job["id"])["messages"][-1]
+        self.assertEqual(last["text"], "Choose one below.")
+        self.assertEqual([c["label"] if isinstance(c, dict) else c for c in last.get("choices", [])][:2],
+                         ["Make it smaller", "Keep the size"])
+
     def test_real_worker_carries_on_with_the_backup_and_says_so_once(self):
         # Pips package 6 (pip_backup): its own model doesn't answer (here: refused, as a usage limit or a sign-out is),
         # so the turn carries on with the backup; the first reply says so in one line, the next on the backup says
