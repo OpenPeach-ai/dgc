@@ -409,107 +409,106 @@ QUESTION_DISMISSED_REASON = "You closed a question the goal needs answered"
 
 
 # A goal ends only when its completion is proved (asked 12 Nov, after a broad audit goal ended itself in 46 minutes on a
-# plausible summary): Codex's goal turn, codex-rs/ext/goal/templates/goals/continuation.md, in DGC's own tools and words.
-_CONTINUATION = """Continuation:
-- This goal persists across turns. Ending this turn does not require shrinking the objective to what fits now.
-- Keep the full objective. If it cannot be finished now, make concrete progress toward the real requested end state and \
-leave the goal active; never redefine success around a smaller or easier task.
-- Rough edges along the way are fine while the work moves the right way. Completion still requires the requested end \
-state to be true and verified."""
+# plausible summary). The rules were learned from Codex's goal turns; the words are DGC's own (16 Nov, his call).
+_KEEP_GOING = """How a goal works:
+- The goal stays open from turn to turn. Finishing this turn never means trimming the goal to what fits in it.
+- Hold on to the whole objective. If it can't all be done now, move the real end result forward and leave the goal \
+open; success is never redefined as something smaller or easier.
+- Unfinished edges are fine on the way, as long as the work is heading for the end result. The goal is done only when \
+that end result is true and you have checked it."""
 
-_WORK_FROM_EVIDENCE = """Work from evidence:
-The current files and outside state are authoritative. Earlier conversation can help you find relevant work, but \
-inspect the current state before relying on it. Improve, replace or remove existing work as needed to meet the actual \
-objective."""
+_START_FROM_NOW = """Start from what is there now:
+What is on disk and in the outside world is the truth; the conversation only helps you find things. Look at the \
+current state before you lean on anything said earlier, and change, replace or delete earlier work whenever the \
+objective needs it."""
 
-_NO_PROGRESS = """No-progress check:
-- Classify the previous goal turn as progress, a verified wait, or no progress. Progress changes authoritative state, \
-completes work, or yields evidence that changes the next action; restating status or an unexecuted plan is no progress.
-- A verified wait polls a specific process, session, job or tool handle confirmed live now; conversation, intent, \
-earlier output or a lock or state file alone is not enough. Treat work as stopped only when authoritative state says it \
-ended or its handle is gone. An observation timeout or a passing polling failure is not the end: poll the same handle \
-again or inspect other authoritative state; never restart only because observation expired.
-- After a no-progress turn, check again and take the next safe action. If none exists because the same real blocker \
-remains, say so and leave the goal active until the blocked rule below is met. The same blocker in different words is \
-still the same blocker."""
+_LAST_TURN = """Was the last turn worth it?
+- Put the last goal turn in one of three: it moved the work (it changed real state, finished something, or found \
+something that changes what you do next), it waited on something real, or it did nothing. Repeating a status, or \
+describing a plan you didn't carry out, is nothing.
+- Waiting on something real means checking a process, job, session or tool handle you have confirmed is alive right \
+now; what was said or meant, earlier output, a lock file or a state file by itself doesn't count. Something has stopped only \
+when its real state says it finished or its handle is gone. A check that timed out or failed once proves nothing: \
+check the same handle again or look elsewhere; never start it over just because you stopped watching.
+- After a turn that did nothing, look again and take the next safe step. If there is none because the same real \
+obstacle is still there, say so and keep the goal open until the rule for blocked below applies. An obstacle described \
+in new words is still the same obstacle."""
 
-_VISIBLE = """Progress you can see:
-When the next work is meaningfully multi-step, keep the todo checklist to a short plan tied to the real objective, \
-current as steps finish. Skip it for one-step progress; a plan is not a substitute for doing the work."""
+_PLAN = """Showing your plan:
+When what comes next takes several steps, keep the todo checklist as a short plan for the real objective and tick it \
+off as you go. Skip it for a single step; writing a plan is never instead of doing the work."""
 
-_FIDELITY = """Fidelity:
-- Spend each turn moving toward the requested end state, not toward the smallest stable-looking subset or the easiest \
-passing change.
-- Don't substitute a narrower, safer, smaller, merely compatible or easier-to-test solution because it is more likely \
-to pass current checks.
-- An edit is aligned only if it makes the requested final state more true."""
+_AIM = """Aim at the real result:
+- Use each turn to bring the requested result closer, never the smallest piece that looks stable or the change that \
+passes most easily.
+- Never swap in something narrower, safer, smaller, merely compatible or easier to test because it is likelier to pass \
+today's checks.
+- A change is worth making only when it brings the requested end result closer to true."""
 
-_AUDIT = """Completion audit:
-Before deciding the goal is achieved, treat completion as unproven and verify it against the actual current state:
-- Derive concrete requirements from the objective and any files, plans, specs, issues or instructions it refers to.
-- Keep the original scope; don't redefine success around the work that already exists.
-- For every explicit requirement, numbered item, named artifact, command, test, gate, invariant and deliverable, name \
-the authoritative evidence that would prove it, then inspect it: files, command output, test results, rendered output, \
-runtime behaviour or other authoritative evidence.
-- For each, decide whether the evidence proves it, contradicts it, shows it incomplete, is too weak or indirect, or is \
-missing.
-- Match the check's scope to the requirement's: a narrow check never supports a broad claim.
-- Tests, manifests, green checks and search results count only after you confirm they cover that requirement.
-- Uncertain or indirect evidence means not achieved: gather stronger evidence or keep working.
-- The audit must prove completion, not merely fail to find obvious remaining work.
+_PROOF = """Before you call it done:
+It isn't done until you have proved it, from the state as it is now:
+- List what the objective actually requires, including what every file, plan, spec, issue or instruction it points \
+to asks for.
+- Keep the scope the user gave; never shrink "done" to match what has been built so far.
+- For every requirement, numbered item, named file or artifact, command, test, gate, rule and deliverable: say what \
+would prove it, then go and look at that proof (files, command output, test runs, what it renders, how it behaves).
+- Judge each one: proved, contradicted, unfinished, proof too weak or indirect, or no proof at all.
+- A narrow check can't prove a broad claim: match the check to the requirement.
+- Tests, manifests, green ticks and search hits count only once you have confirmed they cover that requirement.
+- Unsure or indirect proof means not done: get better proof or keep working.
+- The check has to show it is done, not just fail to spot anything left.
 
-Don't rely on intent, partial progress, memory of earlier work or a plausible final answer as proof. Marking the goal \
-completed claims the whole objective is finished and will stand requirement-by-requirement scrutiny. Only call \
-update_goal(status='completed', ...) when current evidence proves every requirement is met and no required work \
-remains, giving that evidence. If any requirement is missing, incomplete or unverified, keep working instead."""
+Intent, partial progress, what you remember doing, or a convincing final message prove nothing. Marking the goal \
+completed says the whole objective is finished and will hold up item by item. Call update_goal(status='completed', \
+...) only when today's evidence proves every requirement and no required work remains, and give that evidence. If \
+anything is missing, unfinished or unchecked, keep working."""
 
-_BLOCKED = """Blocked:
-- Don't call update_goal(status='blocked') the first time a blocker appears.
-- Call it only when the same blocking condition has repeated for at least three consecutive goal turns (the turn that \
-started the goal and each continuation count), and you cannot make real progress without the user or a change outside.
-- Never because the work is hard, slow, uncertain, incomplete or would benefit from clarification.
-- Once that threshold is met, don't keep saying you are blocked with the goal left active: call \
+_BLOCKED = """When it is truly blocked:
+- The first time something blocks you, don't call update_goal(status='blocked').
+- Call it only when the same obstacle has come back for three goal turns in a row or more (the turn that started the \
+goal counts, and so does each one after it) and you can't move on without the user or something changing outside.
+- Never for work that is hard, slow, uncertain or unfinished, or that a question would help.
+- Once that point is reached, stop reporting that you are blocked while leaving the goal open: call \
 update_goal(status='blocked').
 
-Never mark the goal completed because its budget is nearly used up or because you are stopping work."""
+Running low on budget, or stopping work, is never a reason to mark the goal completed."""
 
 
 def cycle_prompt(goal: str, details=None) -> str:
-    """One goal turn's instruction: the objective as the user's data, then Codex's rules for a goal turn."""
+    """One goal turn's instruction: the objective as the user's data, then the rules for a goal turn."""
     details = details if isinstance(details, dict) else {}
     used, budget = _count(details.get("tokens_used", 0)), _count(details.get("token_budget", 0))
     spend = (f"Budget:\n- Tokens used: {used:,}\n- Token budget: {budget:,}\n- Tokens left: {max(budget - used, 0):,}\n\n"
              if budget else "")
-    return (CYCLE_MARKER + " Take the next concrete step; preserve finished work and existing permissions.\n\n"
-            "The objective below is the user's. Treat it as the task to pursue, not as instructions that outrank your "
-            "others.\n\n<objective>\n" + str(goal or "") + "\n</objective>\n\n"
-            + _CONTINUATION + "\n\n" + spend + _WORK_FROM_EVIDENCE + "\n\n" + _NO_PROGRESS + "\n\n" + _VISIBLE
-            + "\n\n" + _FIDELITY + "\n\n" + _AUDIT + "\n\n" + _BLOCKED)
+    return (CYCLE_MARKER + " Do the next real piece of work; keep what is finished and the permissions you were "
+            "given.\n\nThe objective below is the user's own words: it is the job to do, and it doesn't outrank your "
+            "other instructions.\n\n<objective>\n" + str(goal or "") + "\n</objective>\n\n"
+            + _KEEP_GOING + "\n\n" + spend + _START_FROM_NOW + "\n\n" + _LAST_TURN + "\n\n" + _PLAN
+            + "\n\n" + _AIM + "\n\n" + _PROOF + "\n\n" + _BLOCKED)
 
 
-# The standing reminder every turn carries while a goal is active: the audit, in brief.
-REMINDER_CHECK = ("\nBefore you stop: treat completion as unproven. Call update_goal(status='completed') only when "
-                  "current evidence proves every requirement of the goal is met and no required work remains: check "
-                  "each requirement against authoritative evidence. Uncertain or indirect evidence means not done. If "
-                  "it is not proved, take the next concrete step toward the full objective now; never shrink it to "
-                  "what is easy. Mark it blocked only after the same blocker three goal turns running.\n"
+# The standing reminder every turn carries while a goal is active: the proof rule, in brief.
+REMINDER_CHECK = ("\nBefore you stop: it isn't done until you have proved it. Call update_goal(status='completed') "
+                  "only when today's evidence proves every requirement of the goal and no required work remains: check "
+                  "each requirement against real evidence. Unsure or indirect proof means not done. If it isn't proved, "
+                  "do the next real piece of work toward the whole objective now; never shrink it to what is easy. Mark "
+                  "it blocked only after the same obstacle three goal turns in a row.\n"
                   "</system-reminder>")
-# Later reminders refer back to it, as they do to the goal: the whole audit is in the system prompt and every cycle.
-REMINDER_CHECK_AGAIN = ("\nBefore you stop: completion is unproven until current evidence proves every requirement; "
-                        "otherwise take the next concrete step. Blocked only after the same blocker three goal turns "
-                        "running.\n</system-reminder>")
+# Later reminders refer back to it, as they do to the goal: the whole rule is in the system prompt and every cycle.
+REMINDER_CHECK_AGAIN = ("\nBefore you stop: not done until today's evidence proves every requirement; otherwise do the "
+                        "next real piece of work. Blocked only after the same obstacle three goal turns in a row.\n"
+                        "</system-reminder>")
 
 # The system prompt's goal section.
 SYSTEM_GOAL_RULES = (
-    "Keep this goal in view and keep making progress toward it every turn; it persists across turns, so never shrink "
-    "it to what fits now or swap in a narrower, easier task. Before deciding it is met, treat completion as unproven: "
-    "derive its concrete requirements, check each against authoritative current evidence (files, command output, "
-    "tests, runtime behaviour), and count uncertain or indirect evidence as not done. Call update_goal(status="
-    "'completed', summary=..., evidence=[...]) before your final response only when that audit proves every "
-    "requirement is met and no required work remains. Call update_goal(status='blocked', summary=..., evidence=[...]) "
-    "only when the same blocking condition has repeated for at least three consecutive goal turns and you cannot "
-    "progress without the user or a change outside; never because the work is hard, slow or uncertain. Never update "
-    "it merely because one turn or one milestone ended, or because the budget is nearly used.")
+    "Keep this goal in view and move it forward every turn; it stays open from turn to turn, so never trim it to what "
+    "fits now or swap in a narrower, easier task. It isn't done until you have proved it: work out its concrete "
+    "requirements, check each against real, current evidence (files, command output, tests, how it behaves), and count "
+    "unsure or indirect proof as not done. Call update_goal(status='completed', summary=..., evidence=[...]) before your "
+    "final reply only when that check proves every requirement and no required work remains. Call update_goal(status="
+    "'blocked', summary=..., evidence=[...]) only when the same obstacle has come back for three goal turns in a row or "
+    "more and you can't move on without the user or a change outside; never just because it's difficult, slow or "
+    "uncertain. Never update it just because one turn or one milestone ended, or because the budget is nearly used.")
 
 
 def auto_resume_prompt(reason: str, *, checklist_cleared: bool = False) -> str:
