@@ -369,7 +369,11 @@ def view(aid: str, *, store: Store | None = None, versions: bool = True) -> dict
     art = st.get(aid)
     out = {"id": art.id, "type": art.type, "label": LABELS[art.type], "title": art.title, "version": art.version,
            "created": art.created, "updated": art.updated, "origin": dict(art.origin),
-           "made_by": made_by(art.origin, maker_name), "exports": _exports(art, st)}
+           "made_by": made_by(art.origin, maker_name),
+           # What made it, for the Library's Widgets filter: a dgc-ui card a reply drew (artifact_cards), a ChatDGC widget
+           # (artifact_index), or "" for anything else.
+           "made_as": "card" if art.legacy.get("card") else "widget" if art.legacy.get("widget") else "",
+           "exports": _exports(art, st)}
     if art.link:
         out["link"] = dict(art.link)
     if art.legacy.get("canvas"):

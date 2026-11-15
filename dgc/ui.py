@@ -103,7 +103,7 @@ _ACTIVITY_VERBS = {
     "view_image": "Viewing an image",
     "multi_edit": "Editing a file", "apply_patch": "Applying a patch", "grep": "Searching",
     "glob": "Finding files", "ls": "Listing files", "repo_map": "Mapping the repo",
-    "code_intel": "Reading code structure", "web_search": "Searching the web",
+    "code_intel": "Reading code structure", "web_search": "Searching the web", "deep_research": "Researching in depth",
     "web_fetch": "Fetching a page", "todo": "Updating the plan", "task": "Delegating a task",
     "skill": "Reading a skill", "present_plan": "Presenting the plan",
     "propose_options": "Asking a question",

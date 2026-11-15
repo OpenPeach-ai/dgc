@@ -140,5 +140,27 @@ class AWorkTurnKeepsItsCard(unittest.TestCase):
         self.assertEqual(page.origin, origin)
 
 
+class MadeAs(unittest.TestCase):
+    """The Library's Widgets filter reads made_as from each view: "card" for a kept dgc-ui card, "widget" for a ChatDGC
+    widget, "" otherwise (the Library pass's backend item 1)."""
+
+    def test_views_say_what_made_them(self):
+        import os
+        import tempfile
+        from unittest import mock
+        from dgc import artifact_service
+        with mock.patch.dict(os.environ, {"DGC_HOME": tempfile.mkdtemp(prefix="dgc-madeas-")}):
+            from dgc.artifact_store import store
+            st = store()
+            card = st.create("page", "Card", {"index.html": b"<p>c</p>"}, origin={"surface": "work"}, author="DGC",
+                             summary="s", legacy={"card": "k", "card_place": "work:s::"})
+            widget = st.create("page", "Widget", {"index.html": b"<p>w</p>"}, origin={"surface": "chat"}, author="DGC",
+                               summary="s", legacy={"widget": "w1", "chat": "chat_1"})
+            plain = st.create("page", "Plain", {"index.html": b"<p>p</p>"}, origin={"surface": "work"}, author="DGC", summary="s")
+            self.assertEqual(artifact_service.view(card.id, store=st, versions=False)["made_as"], "card")
+            self.assertEqual(artifact_service.view(widget.id, store=st, versions=False)["made_as"], "widget")
+            self.assertEqual(artifact_service.view(plain.id, store=st, versions=False)["made_as"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

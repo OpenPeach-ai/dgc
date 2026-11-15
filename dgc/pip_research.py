@@ -56,9 +56,19 @@ def run(agent, pin: dict, args) -> str:
         if not isinstance(page, dict):
             raise ValueError("the page couldn't be read")
         return str(page.get("url") or url), str(page.get("text") or "")
+    def progress(text):
+        """Each step keeps the run alive (a research is minutes inside one tool call) and shows in the Pip's chat."""
+        ui = getattr(agent, "ui", None)
+        for name, call in (("tool_progress", lambda f: f("deep_research", text)), ("info", lambda f: f(text))):
+            hook = getattr(ui, name, None)
+            if callable(hook):
+                try:
+                    call(hook)
+                except Exception:                      # noqa: BLE001 -- a progress line never stops the research
+                    pass
     try:
         result = deep_research.run_report(
-            question, client_for=client_for, room=room, search=search, fetch=fetch,
+            question, client_for=client_for, room=room, search=search, fetch=fetch, progress=progress,
             depth=args.get("depth") or deep_research.TOOL_DEFAULT_DEPTH, cancel=agent.cancelled,
             thinking=str((getattr(agent, "config", None) or {}).get("thinking", "off") or "off"))
     except deep_research.ResearchError as exc:

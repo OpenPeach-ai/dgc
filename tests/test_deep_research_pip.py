@@ -200,5 +200,27 @@ class ConcurrentReads(unittest.TestCase):
         self.assertLess(took, 8 * 0.4 * 0.6, "side by side, not one after another")
 
 
+class PipProgress(unittest.TestCase):
+    def test_each_step_keeps_the_run_alive_and_shows_in_its_chat(self):
+        heard = []
+        ui = SimpleNamespace(tool_progress=lambda name, text, **k: heard.append(("alive", name, text)),
+                             info=lambda text: heard.append(("shown", text)))
+        agent = SimpleNamespace(client=SimpleNamespace(base_url="", api_key="", model="m", context_size=32768),
+                                _new_client=lambda *a, **k: SimpleNamespace(context_size=0), ui=ui,
+                                cancelled=threading.Event(), config={})
+
+        def fake(question, **kwargs):
+            kwargs["progress"]("Round 1 of up to 3: choosing what to search")
+            return {"report": "r", "sources": [], "how": ""}
+        with mock.patch("dgc.deep_research.run_report", side_effect=fake):
+            pip_research.run(agent, {"socket": "s", "token": "t"}, {"question": "q"})
+        self.assertIn(("alive", "deep_research", "Round 1 of up to 3: choosing what to search"), heard)
+        self.assertIn(("shown", "Round 1 of up to 3: choosing what to search"), heard)
+
+    def test_the_activity_row_names_it_in_plain_words(self):
+        from dgc.ui import activity_verb
+        self.assertNotIn("deep_research", activity_verb("deep_research"))
+
+
 if __name__ == "__main__":
     unittest.main()
