@@ -344,6 +344,7 @@ class Outcome:
     signed_in: bool = False
     held: dict | None = None            # {url}: a filled secret may still be on that page
     asked_else: bool = False
+    code_needed: bool = False           # the page asks for a one-time code this login has no key for: the code card
 
 
 class SignIn:
@@ -387,9 +388,10 @@ class SignIn:
         self._page(CLEAR, self.nonce)
         self._page(UNMARK, self.nonce)
 
-    def outcome(self, ok: bool, text: str, *, signed_in: bool = False, asked_else: bool = False) -> Outcome:
+    def outcome(self, ok: bool, text: str, *, signed_in: bool = False, asked_else: bool = False,
+                code_needed: bool = False) -> Outcome:
         held = {"url": self.secret_url} if self.secret_url and not signed_in and ok else None
-        return Outcome(ok, text, list(self.done), signed_in, held, asked_else)
+        return Outcome(ok, text, list(self.done), signed_in, held, asked_else, code_needed)
 
     def failed(self, text: str) -> Outcome:
         self.clear()
@@ -445,11 +447,13 @@ class SignIn:
             typed = self._fill(step, fields)
             if typed is None:
                 self._page(UNMARK, self.nonce)
-                if fields["code"] and not self.login.get("totp"):
+                if fields["code"] and not self.login.get("totp") and not self.login.get("given_code"):
+                    # The code card (0.52): the computer turns this into a card in the Pip's chat (pip_computer
+                    # _code_offer); this text is what the Pip hears only where no card can be made.
                     return self.outcome(bool(self.done), (f"Filled {self.words()} and sent it. " if self.done else "")
                                         + f"The page asks for a one-time code, and the login saved for {self.site} has no "
                                         "authenticator key. Stop and ask the user to type the code on your screen "
-                                        "(Open its computer).", asked_else=True)
+                                        "(Open its computer).", asked_else=True, code_needed=True)
                 if not fields["username"] and not fields["password"] and not fields["code"]:
                     return self.outcome(False, f"No sign-in boxes on this page. Open {self.site}'s sign-in page (the one "
                                         "with the username or password box), then use sign_in again.")
@@ -519,13 +523,17 @@ class SignIn:
                 typed.append(("password", "password"))
                 values.append(password)
         totp = self.login.get("totp")
-        if fields["code"] and totp and not moved:
-            from . import pip_totp
-            self.remember(totp["secret"], "password")
-            left = pip_totp.seconds_left(totp, self.wall())
-            if left < 3.0:
-                self.sleep(left + 0.3)           # never a code about to change
-            code = pip_totp.code(totp, self.wall())
+        given = str(self.login.get("given_code") or "")     # the code the user typed on the code card (0.52)
+        if fields["code"] and (totp or given) and not moved:
+            if totp:
+                from . import pip_totp
+                self.remember(totp["secret"], "password")
+                left = pip_totp.seconds_left(totp, self.wall())
+                if left < 3.0:
+                    self.sleep(left + 0.3)           # never a code about to change
+                code = pip_totp.code(totp, self.wall())
+            else:
+                code = given
             self.remember(code, "code")
             boxes = 1 if fields["code"] == 1 else min(fields["code"], len(code))
             last = ""

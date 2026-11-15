@@ -480,6 +480,11 @@ API97_READS = frozenset({'list_pip_agents'})
 API97_MUTATIONS = frozenset({'stop_pip_agent', 'set_pip_agents', 'retry_pip_fix'})
 READ_COMMANDS |= API97_READS
 MUTATION_COMMANDS |= API97_MUTATIONS
+# API 98: the code card. A site asks a Pip's computer for a one-time code its saved login has no key for: a held action
+# of kind "code" is its card; fill_pip_code types the user's code into that page once (never stored or answered).
+# Local only.
+API98_MUTATIONS = frozenset({'fill_pip_code'})
+MUTATION_COMMANDS |= API98_MUTATIONS
 
 
 def _api88_field(command, values) -> bool:
@@ -642,6 +647,7 @@ COMMAND_FIELDS = {
     'stop_pip_agent': frozenset({'pip_id', 'agent_id'}),
     'set_pip_agents': frozenset({'pip_id', 'slots'}),
     'retry_pip_fix': frozenset({'pip_id', 'fix_id', 'again'}),
+    'fill_pip_code': frozenset({'pip_id', 'action_id', 'expected_digest', 'code'}),
     'commit_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'set_pip_goal': frozenset({'pip_id', 'objective', 'conversation_id'}),
     'get_pip_goal': frozenset({'pip_id', 'conversation_id'}),
@@ -965,7 +971,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API97_READS | API97_MUTATIONS:
+        if command in API98_MUTATIONS:
+            minimum = 98
+        elif command in API97_READS | API97_MUTATIONS:
             minimum = 97
         elif command in API96_READS | API96_MUTATIONS:
             minimum = 96

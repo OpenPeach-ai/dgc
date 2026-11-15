@@ -2235,8 +2235,11 @@ def decide(registry, action_id: str, expected_digest: str, approve: bool, actor:
         raise RegistryError("local_only", "Approve a Pip's computer actions on this computer.")
     if not isinstance(approve, bool):
         raise RegistryError("invalid_request", "Choose approve or reject.")
-    if approve and json.loads(_row(registry, action_id)["summary"]).get("kind") == LOGIN_KIND:
+    kind = json.loads(_row(registry, action_id)["summary"]).get("kind")
+    if approve and kind == LOGIN_KIND:
         raise RegistryError("save_login", "Save the login on its card (Save login…), or choose Not now.")
+    if approve and kind == CODE_KIND:
+        raise RegistryError("type_code", "Type the code on its card, or choose Not now.")
     with registry.transaction():
         _decide(registry, action_id, expected_digest, approve, actor)
     return projection(_row(registry, action_id))
@@ -2307,6 +2310,18 @@ def tick(registry, config) -> dict:
         # The user paid on its screen themselves: the Pip is told once, and carries on (the next bill).
         try:
             follow = _continue_rejected(registry, row, config, paid=True)
+        except RegistryError:
+            follow = None
+        if follow:
+            with registry.transaction():
+                registry.db.execute("UPDATE pip_computer_actions SET continuation_run_id=? WHERE id=? AND continuation_run_id IS NULL",
+                                    (follow, row["id"]))
+    for row in registry.db.execute("SELECT * FROM pip_computer_actions WHERE continuation_run_id IS NULL AND resolved_at>? "
+                                   "AND json_extract(summary,'$.kind')=? AND (status='sent' OR (status='lost' AND resolved_by=?))",
+                                   (recent, CODE_KIND, CODE_LOST_BY)).fetchall():
+        # The code card (0.52): filled and sent, or the page had moved on. The Pip is told once, and carries on.
+        try:
+            follow = _continue(registry, row, config) if row["status"] == "sent" else _continue_lost(registry, row, config)
         except RegistryError:
             follow = None
         if follow:
@@ -2763,6 +2778,10 @@ class ViewServer:
                 request = json.loads(raw.decode("utf-8"))
                 if not isinstance(request, dict) or not _secrets.compare_digest(str(request.get("token", "")), self.token):
                     reply = {"ok": False, "error": "refused"}
+                elif request.get("op") == "code":
+                    # The code the user typed on the card in the Pip's chat (fill_pip_code): into this page, once.
+                    self.last_used = time.monotonic()
+                    reply = self.host.fill_code(str(request.get("action_id", "")), str(request.get("code", "")), "editor-user")
                 elif request.get("op") == "desktop":
                     # The full screen: after one line of reply, the connection is the viewer's stream.
                     self.last_used = time.monotonic()
@@ -2879,6 +2898,15 @@ def _settle_writes(self) -> None:
 # --------------------------------------------------------------------------- saved logins (Pips API 56)
 
 LOGIN_KIND = "login"                  # a card in the Pip's chat: save a login for this site (nothing paused)
+CODE_KIND = "code"                    # a card in the Pip's chat: type the one-time code a site sent (0.52)
+CODE_ASKED = ("{site} sent a one-time code, and its saved login has no authenticator key. DGC now shows the user a card "
+              "below your reply to type the code; you never see it, and DGC fills it into this page and sends it. Stop now "
+              "and tell them in one sentence that {site} sent a code and they can type it on the card below; once they do, "
+              "you are told. Never ask for the code in chat.")
+CODE_WAITING = ("The card to type the code for {site} is already below your reply. Stop now and tell the user in one "
+                "sentence that you need it.")
+CODE_RE = re.compile(r"[A-Za-z0-9-]{1,12}")
+CODE_LOST_BY = "page-moved"           # resolved_by when the page had moved on before the code came
 SIGN_IN_OFFERED = ("No saved login for {site}. DGC now shows the user a card below your reply, \"Save a login for {site}\", "
                    "so you can sign in yourself. Stop now and tell them in one sentence that {site} needs a sign-in and that "
                    "they can save it on the card below; once they do, you are told and you sign in. Don't ask them to sign "
@@ -3000,6 +3028,11 @@ def _sign_in(host, args: dict) -> str:
     step = _step_frame(host, ("Signed in to " if outcome.signed_in else "Sign-in on ") + site, masked=True)
     if held:
         return host._held_text(held) + _recorded(step)
+    if outcome.code_needed:
+        now_here = _page_now(host)
+        ok_now, code_host, _ = pip_logins.page_check(now_here)
+        if ok_now:
+            return _code_offer(host, site, code_host, now_here, login["id"], list(outcome.filled)) + _recorded(step)
     return outcome.text + _recorded(step)
 
 
@@ -3038,6 +3071,154 @@ def _login_offer(host, site: str, page_host: str, here: str) -> str:
                            payload={"action_id": action_id, "method": "SIGN IN", "host": page_host, "kind": LOGIN_KIND})
     host.waiting.append(action_id)
     return SIGN_IN_OFFERED.format(site=site)
+
+
+def _code_offer(host, site: str, page_host: str, here: str, login_id: str, filled: list) -> str:
+    """The page asks for a one-time code the saved login has no key for: one card in the Pip's chat to type it (the
+    code card, 0.52). Nothing is paused; the Pip stops; the user's code reaches this page through fill_pip_code."""
+    from datetime import timedelta
+    from . import pip_login_fill
+    from .pip_careful import shown_host
+    from .pip_schedules import _instant, timestamp
+    from .workspace_registry import WorkspaceRegistry, identifier
+    with WorkspaceRegistry(host.state_directory) as registry:
+        pending = registry.db.execute(
+            "SELECT 1 FROM pip_computer_actions WHERE pip_id=? AND status='pending' AND json_extract(summary,'$.kind')=? "
+            "AND json_extract(summary,'$.site')=? LIMIT 1", (host.pip_id, CODE_KIND, site)).fetchone()
+        if pending is not None:
+            return CODE_WAITING.format(site=site)
+        address = pip_login_fill.page_address(here)
+        parts = urlsplit(address)
+        summary = {"method": "CODE", "host": page_host, "path": (parts.path or "/")[:300], "fields": [],
+                   "more_fields": 0, "body_bytes": 0, "page": address[:500], "kind": CODE_KIND, "site": site,
+                   "shown": shown_host(page_host), "login": str(login_id)[:80],
+                   "filled": [str(f)[:20] for f in filled][:4]}
+        action_id, now = identifier("compact"), _now()
+        expires = timestamp(_instant(now) + timedelta(seconds=600))       # a code lives minutes, not a day
+        frame = host._frame("Code page", masked=True)
+        with registry.transaction():
+            registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,NULL,NULL,NULL)",
+                (action_id, host.pip_id, host.workspace_id, host.run_id, host.id, CAREFUL_REF + action_id,
+                 json.dumps(summary, ensure_ascii=False), _digest(summary), frame, now, expires))
+            registry.event(host.workspace_id, "pip_computer_action_held", pip_id=host.pip_id, run_id=host.run_id,
+                           payload={"action_id": action_id, "method": "CODE", "host": page_host, "kind": CODE_KIND})
+    host.waiting.append(action_id)
+    return CODE_ASKED.format(site=site)
+
+
+def _host_fill_code(self, action_id: str, code: str, actor: str) -> dict:
+    """In the supervisor, from the view's socket: the code the user typed on the card, filled into this computer's page
+    by the saved login's own sign-in (SignIn with a given code) and sent once. Never answers with the code; never keeps
+    it beyond the scrubber's memory of it (masking what the Pip reads next)."""
+    from . import pip_login_fill, pip_logins
+    from .workspace_registry import WorkspaceRegistry
+    code = "".join(str(code or "").split())
+    if not CODE_RE.fullmatch(code):
+        return {"ok": False, "error": "Type the code as the site shows it: letters and numbers, up to 12."}
+    with self.lock:
+        if self.run_id is not None:
+            return {"ok": False, "error": "The Pip is using its computer right now. Try again when it stops."}
+        with WorkspaceRegistry(self.state_directory) as registry:
+            try:
+                row = _row(registry, action_id)
+            except RegistryError:
+                return {"ok": False, "error": "That card is gone."}
+            summary = json.loads(row["summary"])
+            if row["pip_id"] != self.pip_id or summary.get("kind") != CODE_KIND or row["host_id"] != self.id:
+                return {"ok": False, "error": "That card is not this computer's code."}
+            if row["status"] != "pending" or _now() >= row["expires_at"]:
+                return {"ok": False, "error": f"That card was already answered ({row['status']})."}
+            here = _page_now(self)
+            ok, page_host, _ = pip_logins.page_check(here)
+            login = next((item for item in pip_logins.Store(self.state_directory).usable(self.pip_id, page_host or "")
+                          if item["id"] == summary.get("login")), None) if ok else None
+            still = login is not None and page_host == summary.get("host")
+            outcome = None
+            if still:
+                outcome = pip_login_fill.SignIn(self.browser, {**login, "given_code": code},
+                                                remember=self.secrets.remember).run()
+            typed = outcome is not None and "code" in outcome.filled
+            status, by = ("sent", actor) if typed else ("lost", CODE_LOST_BY)
+            with registry.transaction():
+                if status == "sent":            # one way: pending → approved → sent (one_way_pip_computer_action)
+                    registry.db.execute("UPDATE pip_computer_actions SET status='approved',resolved_at=?,resolved_by=? "
+                                        "WHERE id=? AND status='pending'", (_now(), by, action_id))
+                registry.db.execute("UPDATE pip_computer_actions SET status=?,resolved_at=?,resolved_by=? WHERE id=? "
+                                    "AND status=?", (status, _now(), by, action_id, "approved" if status == "sent" else "pending"))
+                registry.event(row["workspace_id"], "pip_computer_action_decided", pip_id=row["pip_id"], run_id=row["run_id"],
+                               payload={"action_id": action_id, "approved": typed})
+    if outcome is not None and outcome.held:
+        self.secret_hold = {"url": outcome.held["url"], "until": time.monotonic() + pip_login_fill.HOLD_SECONDS}
+    if not typed:
+        return {"ok": False, "lost": True, "error": "The page moved on before the code came: the Pip will ask again."}
+    return {"ok": True, "signed_in": bool(outcome.signed_in)}
+
+
+def _code_to_view(registry, pip_id: str, action: dict, code: str, actor: str) -> dict:
+    """The code to the computer that holds its card, through that computer's view socket (as the user's own typing in
+    the view goes), opening the view first when it isn't open. Nothing is written anywhere on the way."""
+    host_id = action["host_id"]
+
+    def endpoint():
+        for (key, value) in registry.db.execute("SELECT key,value FROM metadata WHERE key=? OR key LIKE ?",
+                                                (_view_key(pip_id, None), f"computer_view_n:{pip_id}:%")).fetchall():
+            try:
+                found = json.loads(value)
+            except ValueError:
+                continue
+            if isinstance(found, dict) and found.get("host_id") == host_id:
+                return found
+        return None
+    found = endpoint()
+    if found is None:
+        try:
+            request_open(registry, pip_id, actor)
+        except RegistryError:
+            pass
+        until = time.monotonic() + 20
+        while found is None and time.monotonic() < until:
+            time.sleep(0.25)
+            found = endpoint()
+    if found is None:
+        return {"ok": False, "error": "Its computer isn't open. Open it, then type the code again."}
+    try:
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(60)
+            client.connect(found["socket"])
+            client.sendall(json.dumps({"token": found["token"], "op": "code", "action_id": action["id"],
+                                       "code": code}).encode("utf-8") + b"\n")
+            raw = b""
+            while not raw.endswith(b"\n"):
+                chunk = client.recv(1 << 16)
+                if not chunk:
+                    break
+                raw += chunk
+        reply = json.loads(raw.decode("utf-8"))
+        return reply if isinstance(reply, dict) else {"ok": False, "error": "No reply."}
+    except (OSError, ValueError):
+        return {"ok": False, "error": "Its computer closed. Open it, then type the code again."}
+
+
+def fill_code(registry, pip_id: str, action_id: str, expected_digest: str, code: str, actor: str) -> dict:
+    """fill_pip_code (Pips API 98): the user's code from the card in a Pip's chat. Local only; the card must be this
+    Pip's pending code card, unchanged; the code goes to its computer and nowhere else, and never comes back."""
+    if actor not in ("editor-user", "local-console"):
+        raise RegistryError("local_only", "Type a Pip's code on this computer.")
+    if not isinstance(action_id, str) or not re.fullmatch(r"compact_[a-f0-9]{32}", action_id):
+        raise RegistryError("invalid_request", "That card is not a code to type.")
+    row = _row(registry, action_id)
+    summary = json.loads(row["summary"])
+    if row["pip_id"] != pip_id or summary.get("kind") != CODE_KIND:
+        raise RegistryError("invalid_request", "That card is not a code to type.")
+    if row["status"] != "pending":
+        raise RegistryError("conflict", f"That card was already answered ({row['status']}).")
+    if row["digest"] != expected_digest:
+        raise RegistryError("review_changed", "The card changed. Look at it again.")
+    if not isinstance(code, str) or not CODE_RE.fullmatch("".join(code.split())):
+        raise RegistryError("invalid_request", "Type the code as the site shows it: letters and numbers, up to 12.")
+    said = _code_to_view(registry, pip_id, dict(row), code, actor)
+    return {"ok": bool(said.get("ok")), **({"error": str(said.get("error"))[:300]} if not said.get("ok") else {}),
+            **({"signed_in": True} if said.get("signed_in") else {}), "action": projection(_row(registry, action_id))}
 
 
 def _take_card_note(host) -> str | None:
@@ -3499,6 +3680,7 @@ def _user_paid(self, held) -> None:
 
 Host.view = _host_view
 Host._settle_writes = _settle_writes
+Host.fill_code = _host_fill_code
 
 
 def desktop_status(registry, pip_id: str, actor: str) -> dict:

@@ -974,6 +974,11 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
     what = f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
     key = COMPUTER_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
     conversation = _computer_conversation(store, action_id)
+    if summary.get("kind") == "code":
+        site = str(summary.get("site") or summary.get("host") or "the site")[:255]
+        text = (f"The user typed the code {site} sent, and DGC filled it into the page and sent it (you never see it). "
+                "Read the page to see where it went, then carry on with what they asked.")
+        return _owed_turn(store, pip_id, text, key, "local-computer", config, conversation)
     if summary.get("kind") == "login":
         page = str(summary.get("sign_in_page") or summary.get("page") or "")
         where = (f"Its sign-in page is {page[:300]}: open it if it isn't open. " if page.startswith(("https://", "http://"))
@@ -1001,6 +1006,11 @@ def continue_after_rejection(store, pip_id, action_id, summary, config):
     """The chat's next turn once the user rejected a hold from its reply: the Pip says what wasn't done and goes
     on with the rest of the ask (pip_computer._continue_rejected decides whether it is due)."""
     key = COMPUTER_KEY + "no_" + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    if summary.get("kind") == "code":
+        site = str(summary.get("site") or summary.get("host") or "that site")[:255]
+        text = (f"The user chose not to give the code {site} sent. Don't ask for it again in chat; say in one sentence what "
+                "you couldn't do without signing in, and carry on with the rest of what they asked.")
+        return _send_in(store, pip_id, text, key, "local-computer", config, _computer_conversation(store, action_id))
     if summary.get("kind") == "login":
         text = COMPUTER_LOGIN_NOT_NOW.format(site=str(summary.get("site") or summary.get("host") or "that site")[:255])
         return _send_in(store, pip_id, text, key, "local-computer", config, _computer_conversation(store, action_id))
@@ -1020,7 +1030,10 @@ def continue_after_lost(store, pip_id, action_id, summary, config):
     whether it is due): the Pip does that step again."""
     key = COMPUTER_KEY + "lost_" + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
     from .pip_computer import is_payment
-    if summary.get("kind") == "login":
+    if summary.get("kind") == "code":
+        what = (f"filling the code {summary.get('site') or 'the site'} sent (the page moved on before it came): use "
+                "sign_in again, and DGC shows the user a new card if the site asks for a code again")
+    elif summary.get("kind") == "login":
         what = f"saving a login for {summary.get('site') or summary.get('host') or 'that site'}"
     else:
         what = (("a payment: " if is_payment(summary) else "")

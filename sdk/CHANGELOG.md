@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Pips API 98: the code card.** `fill_pip_code` types the code a site sent into a Pip's computer from its card in the Pip's chat; local only, never stored or answered.
 - Pips API 97: `list_pip_agents`, `stop_pip_agent`, `set_pip_agents` and `retry_pip_fix` (a Pip's sub-agents; Try again or Leave it after its last try), gated on API 97 in both SDKs; `list_pip_fixes`'s fixes gain `agent`; the Pip's check reply carries `check: true`.
 - The protocol copy knows a Work session's own agents model: `set_config` with `scope: "session"` takes `subagent_model`, `subagent_base_url`, `subagent_api_mode` and `subagent_api_key`; `get_agents_model` and `reset_agents_model` ("Same as settings") answer `agents_model {request_id, own, model, base_url, api_mode, api_key_set, settings_model, settings_base_url}`, offered when `ready.capabilities.agents_model` says so.
 - The protocol copy knows `undo_setting_change {change_id, request_id}` and its answer `setting_undone {request_id, change_id, ok, said}` (Undo on a dgc_settings change's line), offered when `ready.capabilities.settings_undo` says so.

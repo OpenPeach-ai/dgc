@@ -455,7 +455,9 @@ class SignInTests(unittest.TestCase):
         self.logins.save(address="login.northwind-bank.example", username="arjun", password=PASSWORD, totp=None,
                          pips=[self.pip["id"]], source="page")
         no_key = pip_computer.Host.act(self.host(Page(self.BANK)), "sign_in", {})["text"]
-        self.assertIn("asks for a one-time code, and the login saved for northwind-bank.example has no authenticator key", no_key)
+        # The code card (0.52): a card in its chat to type the code, never "type it on your screen".
+        self.assertIn("sent a one-time code, and its saved login has no authenticator key", no_key)
+        self.assertIn("card below your reply", no_key)
         refused = Page([self.BANK[0], {**self.BANK[0], "alert": "Wrong password"}])
         said = pip_computer.Host.act(self.host(refused), "sign_in", {})["text"]
         self.assertIn("did not accept the saved login", said)
