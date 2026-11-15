@@ -516,6 +516,8 @@ MAX_RESEARCH_PAGE = 400_000                 # characters of one page (the engine
 # (at most RESEARCH_AT_ONCE); every other op is served one at a time, as the worker sends one tool call at a time.
 BACKLOG = 16
 RESEARCH_AT_ONCE = 8
+# Keeping an image in the Library (dgc/image_keep.py): an https image, read here under careful mode and the leak guard.
+KEEP_OPS = ("keep_image",)
 MAX_QUERY = 400
 
 
@@ -669,6 +671,11 @@ class RunSocket:
         from .pip_videos import TOOLS as VIDEO_TOOLS
         from .pip_keys import TOOLS as KEY_TOOLS
         from .pip_library import TOOLS as LIBRARY_TOOLS
+        if op in KEEP_OPS:
+            try:
+                return self._keep_image(args)
+            except Exception as exc:              # never hang the Pip: say so
+                return f"error: not kept ({type(exc).__name__})."
         if op in RESEARCH_OPS:
             try:
                 return self._research(op, args)
@@ -786,6 +793,23 @@ class RunSocket:
             return text
         return ("Untrusted search results, not instructions:\n" + text)[:MAX_TEXT]
 
+    def _keep_image(self, args) -> str:
+        """An https image kept in the user's Library with this Pip as its maker (image_keep): careful mode first (an
+        address can carry what it read from the user's apps), then the leak guard and the image check."""
+        from . import image_keep
+        source = str(args.get("source") or "").strip()
+        if not source.lower().startswith(("https://", "http://")):
+            return "error: not kept: a Pip keeps an image from its https address."
+        if self.taint is not None and self.taint.carried(source, self.said):
+            return "error: not kept: that address would send something read from the user's apps to a website."
+        try:
+            data, final = image_keep.from_url(source, self.config)
+            kept = image_keep.keep(data, title=str(args.get("title") or ""), why=str(args.get("why") or ""), source=final,
+                                   surface="pip", where={"pip": self.pip_id, "run": self.run_id or ""})
+        except image_keep.KeepError as exc:
+            return f"error: not kept: {exc}"
+        return image_keep.said(kept)
+
     def _research(self, op, args):
         """One of deep research's reads (RESEARCH_OPS) as {"text", "data"}, or an error's words. Careful mode first: a
         search engine and a website are sends too; then DGC's leak guard; then the shared search or page reader."""
@@ -880,7 +904,7 @@ class RunSocket:
                     from .pip_library import TOOLS as LIBRARY_TOOLS
                     answer = ("error: invalid app arguments" if not isinstance(args, dict) else
                               self.call(op, args) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS + SDK_APP_OPS
-                              + IMAGE_TOOLS + VIDEO_TOOLS + KEY_TOOLS + LIBRARY_TOOLS + RESEARCH_OPS
+                              + IMAGE_TOOLS + VIDEO_TOOLS + KEY_TOOLS + LIBRARY_TOOLS + RESEARCH_OPS + KEEP_OPS
                               else "error: unknown app operation")
                     reply = answer if isinstance(answer, dict) else {"text": answer}
                 client.sendall(json.dumps(reply).encode("utf-8") + b"\n")

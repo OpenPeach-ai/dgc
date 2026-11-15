@@ -25,8 +25,11 @@ GENERATE_TOOL["function"]["parameters"]["properties"].pop("save_to", None)
 GENERATE_TOOL["function"]["parameters"]["properties"]["images"]["description"] = (
     "Images of this chat to edit or use as references: their file names")
 LIST_TOOL = copy.deepcopy(image_tools.LIST_SCHEMA)
-TOOLS = (GENERATE_TOOL, LIST_TOOL)
-NAMES = frozenset({"generate_image", "list_image_generators"})
+from .. import image_keep as _image_keep
+KEEP_TOOL = copy.deepcopy(_image_keep.SCHEMA)                  # keeping an image in the Library: the one module's tool (0.52)
+KEEP_TOOL["function"]["parameters"]["properties"]["source"]["description"] = "The image's https address."
+TOOLS = (GENERATE_TOOL, LIST_TOOL, KEEP_TOOL)
+NAMES = frozenset({"generate_image", "list_image_generators", _image_keep.NAME})
 MAX_CALLS = 4
 
 
@@ -94,6 +97,18 @@ def call(engine, chat: dict, tool_call, files: list, at: int, on_file, actions: 
     from .store import now
     import uuid
     args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
+    if tool_call.name == _image_keep.NAME:
+        # An https image kept in the Library as this chat's (image_keep); a temporary chat keeps nothing.
+        if chat.get("temporary"):
+            return "error: not kept: this is a temporary chat, which keeps nothing."
+        try:
+            data, final = _image_keep.from_url(str(args.get("source") or ""), engine.config)
+            kept = _image_keep.keep(data, title=str(args.get("title") or ""), why=str(args.get("why") or ""), source=final,
+                              surface="chat", where={"chat": str(chat.get("id") or ""),
+                                                     "chat_title": str(chat.get("title") or "")[:120]})
+        except _image_keep.KeepError as exc:
+            return f"error: not kept: {exc}"
+        return _image_keep.said(kept)
     place = surface(engine, chat, cancel)
     if tool_call.name == "list_image_generators":
         return image_tools.list_text(engine.config, args, place)

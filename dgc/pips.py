@@ -3176,7 +3176,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_connector_drafts
     connector_context = pip_connector_drafts.pin(manifest)
     connector_candidate = None
-    from . import pip_computer, pip_app_links, pip_plugins, pip_notes, pip_sdk_apps, pip_images, pip_videos, pip_keys, pip_library, pip_research
+    from . import pip_computer, pip_app_links, pip_plugins, pip_notes, pip_sdk_apps, pip_images, pip_videos, pip_keys, pip_library, pip_research, image_keep
     # It keeps notes about the user only in a reply to the user's own message: never in a routine's run or
     # a turn DGC wrote, whose text can carry an email or a page (pip_notes).
     keeps_notes = (conversation is not None and manifest.get('user_turn') is True      # every Pip (Q8, 14 Nov)
@@ -3557,7 +3557,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             schemas = super()._tool_schemas(*args, **kwargs)
             if conversation is not None and not (conversation.get('goal') or {}).get('own'):
                 schemas = [*schemas, OFFER_CHOICES]        # a folder Pip's chat offers buttons too (13 Nov)
@@ -3568,7 +3568,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                                                          eyes['convention'], desktop=computer_pin.get('desktop') is True)]
             if apps_pin is not None:                                        # the user's apps, plugins, the web (step 2b)
                 schemas = [*schemas, *pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')),
-                           *pip_images.schemas(), *pip_library.schemas(), *pip_library.doc_schemas(), *pip_research.schemas(), *pip_videos.schemas(), *pip_keys.schemas(),
+                           *pip_images.schemas(), *pip_library.schemas(), *pip_library.doc_schemas(), *pip_research.schemas(), image_keep.SCHEMA, *pip_videos.schemas(), *pip_keys.schemas(),
                            *(pip_plugins.schemas(apps_pin['plugins']) if apps_pin.get('plugins') else []),
                            *(pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin.get('sdk_apps') else []),
                            *_borrow_schemas()]
@@ -3998,6 +3998,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 return said
             if call.name == pip_library.DOCS_TOOL:
                 return pip_library.docs(call.arguments)          # DGC's own docs, read-only, from the package
+            if apps_pin is not None and call.name == image_keep.NAME:
+                # Keeping an image in the Library (0.52): read and kept by the controller, under careful mode.
+                arguments = call.arguments if isinstance(call.arguments, dict) else {}
+                return pip_app_links.worker_call(apps_pin, call.name, arguments, timeout=120)
             if apps_pin is not None and call.name in pip_research.TOOLS:
                 # Deep research (0.52): the one engine, here with this Pip's model; its searches and pages are read by
                 # the controller under careful mode and the leak guard (pip_research).

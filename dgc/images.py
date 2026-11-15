@@ -801,8 +801,26 @@ def library(*, query: str = "", project: str = "", surface: str = "", limit: int
             continue
         rows.append(row)
     limit = max(1, min(int(limit or 60), 200))
-    page = rows[offset:offset + limit]
+    page = [{**row, "made_by": _made_by(row)} for row in rows[offset:offset + limit]]
     return {key: page, "total": len(rows), "next_offset": offset + limit if offset + limit < len(rows) else None}
+
+
+def _made_by(row: dict) -> dict:
+    """Who made (or kept) it, by name, as every Library item says it (artifact_service.made_by): the Work session, the
+    chat (its own title when the row has it), the Pip. Never raises."""
+    try:
+        from .artifact_service import made_by, maker_name
+        surface = str(row.get("surface") or "")
+        origin = {"surface": surface, "session": row.get("session"), "chat": row.get("chat"), "pip": row.get("pip"),
+                  "app": row.get("app")}
+
+        def resolve(kind, ident):
+            if kind == "chat" and row.get("chat_title"):
+                return str(row["chat_title"])
+            return maker_name(kind, ident)
+        return made_by(origin, resolve)
+    except Exception:                                    # noqa: BLE001 -- a name is a courtesy
+        return {"kind": str(row.get("surface") or "unknown"), "id": "", "name": ""}
 
 
 def lease_router(config, generator: dict, owner: str, cancel=None):

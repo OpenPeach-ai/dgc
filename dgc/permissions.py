@@ -111,6 +111,8 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    "dgc_settings_read", "dgc_docs",
                    # Deep research (dgc/deep_research.py) reads the web, as web_search does: nothing changes.
                    "deep_research",
+                   # Keeping an image (dgc/image_keep.py) writes DGC's own Library, never the project.
+                   "keep_image",
                    # A wake-up (dgc/wakeups.py) only brings this chat back later; its turn asks for each thing as usual.
                    "wake_later", "wake_cancel",
                    "list_tasks", "wait_tasks",

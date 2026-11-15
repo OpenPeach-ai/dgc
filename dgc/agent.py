@@ -130,7 +130,9 @@ _DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_
                                            # video generation (dgc/video_tools.py)
                                            "generate_video", "list_video_generators",
                                            # deep research, the one engine every surface runs (dgc/deep_research.py)
-                                           "deep_research"})
+                                           "deep_research",
+                                           # keeping an image in the Library (dgc/image_keep.py)
+                                           "keep_image"})
 # Pips tools reach the model only after `use_pips` loads them (or the user points a turn at a
 # Pip). Offered on every request they cost more than every other tool together; a model that
 # needs them asks for them, the way mcp_search brings in MCP tools.
@@ -3331,6 +3333,7 @@ class Agent(GoalLifecycle):
                    + (self._video_tool_schemas() if self._image_tools_exposed() else [])
                    + (ARTIFACT_TOOL_SCHEMAS if self._artifacts_exposed() else [])
                    + (self._deep_research_schemas() if self._deep_research_exposed() else [])
+                   + (self._keep_image_schemas() if self._deep_research_exposed() else [])
                    + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas)
         from .pip_access import tools_available as pips_tools_available
         if not pips_tools_available(self.config):
@@ -4086,6 +4089,35 @@ class Agent(GoalLifecycle):
         except deep_research.ResearchError as exc:
             return f"error: {exc}"
         return deep_research.tool_text(result)
+
+    # ---- keeping an image in the Library (dgc/image_keep.py; offered as deep research is: _deep_research_exposed) -----
+    def _keep_image_schemas(self) -> list:
+        from .image_keep import SCHEMA
+        return [SCHEMA]
+
+    def _keep_image_tool(self, args: dict, call_id) -> str:
+        """A picture in the project (never a dot folder or a private file: a deck's own rule) or an https image, kept
+        in the Library with this session as its maker."""
+        from . import image_keep
+        args = args if isinstance(args, dict) else {}
+        source = str(args.get("source") or "").strip()
+        if not source:
+            return "error: say which image to keep (source)."
+        root = Path(self.config.project_root)
+        try:
+            if source.lower().startswith(("https://", "http://")):
+                data, source = image_keep.from_url(source, self.config)
+            else:
+                from .tools import _artifact_picture
+                data = image_keep.from_path(_artifact_picture(__import__("types").SimpleNamespace(project_root=root))(source))
+            session = getattr(getattr(self, "session_file", None), "stem", "") or ""
+            kept = image_keep.keep(data, title=str(args.get("title") or ""), why=str(args.get("why") or ""), source=source,
+                                   surface="work", where={"project": str(root), **({"session": session} if session else {})})
+        except image_keep.KeepError as exc:
+            return f"error: not kept: {exc}"
+        except Exception as exc:                   # noqa: BLE001 -- outside the project, a path that isn't there, ...
+            return f"error: not kept: {exc}"
+        return image_keep.said(kept)
 
     def _troupe_will_wake(self) -> bool:
         """A troupe this chat started is still running and its end will wake the chat: a turn waiting on it may stop
@@ -11102,6 +11134,8 @@ class Agent(GoalLifecycle):
                         out = self._video_tool(name, args, call_id)
                     elif name == "deep_research":
                         out = self._deep_research_tool(args, call_id)
+                    elif name == "keep_image":
+                        out = self._keep_image_tool(args, call_id)
                     elif name == "show_file" and self._already_shown_picture(args):
                         out = (f"{args.get('path')} is a picture generate_image made in this turn, and it's already "
                                "shown to the user above. There's nothing more to do: don't show it again.")
