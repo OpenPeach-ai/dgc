@@ -47,6 +47,7 @@ ORDINARY: dict[str, tuple] = {
     "disabled_mcp_servers": ("list", 200, "MCP servers turned off"),
     "fallback_model": ("text", 200, "The model DGC falls back to when its own doesn't answer"),
     "subagent_model": ("text", 200, "The model helpers use"),
+    "subagent_fallback_model": ("text", 200, "The model helpers fall back to when theirs doesn't answer"),
     "trash_mode": ("choice", ("dgc", "system", "off"), "Where deleted files go"),
     "eta": ("bool", None, "Show how long a turn will take"),
     "notify": ("choice", ("off", "done", "always"), "Desktop notifications"),

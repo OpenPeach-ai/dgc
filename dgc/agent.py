@@ -2798,12 +2798,29 @@ class Agent(GoalLifecycle):
         text = re.sub(r"\s+", " ", scrub_urls(str(error)))
         return self._safe_text(text)[:160] or "it stopped answering"
 
+    def _fallback_model(self) -> str:
+        """The model this agent carries on with when its own fails: a sub-agent's own fallback (0.52, Settings >
+        Sub-agents or its session's), else Main's, as a sub-agent with no agents model uses the main one."""
+        if getattr(self, "depth", 0) > 0:
+            own = str(self.config.get("subagent_fallback_model") or "")
+            if own:
+                return own
+        return str(self.config.get("fallback_model") or "")
+
+    def _fallback_prefix(self) -> str:
+        """Whose route the fallback takes: a sub-agent's own fallback's, or Main's."""
+        return ("subagent_fallback_" if getattr(self, "depth", 0) > 0 and self.config.get("subagent_fallback_model")
+                else "fallback_")
+
     def _fallback_client(self, model: str) -> LLMClient:
-        base = self.config.get("fallback_base_url") or self.config.base_url
-        key = Agent._route_api_key(self, base, "fallback_api_key")
+        prefix = Agent._fallback_prefix(self)
+        # A blank address is the main host, as for every secondary route; a key goes only to the address it is bound
+        # to (Config.get), and the main key only to the main host.
+        base = self.config.get(f"{prefix}base_url") or self.config.base_url
+        key = Agent._route_api_key(self, base, f"{prefix}api_key")
         return Agent._new_client(
             self, base, key, model,
-            api_mode=Agent._route_api_mode(self, base, "fallback_api_mode"), source="fallback")
+            api_mode=Agent._route_api_mode(self, base, f"{prefix}api_mode"), source="fallback")
 
     def _aux_client(self, *, max_tokens: int | None = None,
                     read_timeout: int | None = None, source: str = "other"):
@@ -5040,6 +5057,9 @@ class Agent(GoalLifecycle):
             restore_agents = getattr(self.config, "restore_agents_route", None)
             if callable(restore_agents):
                 restore_agents()              # and follows Settings' agents model (0.52)
+            restore_agents_fallback = getattr(self.config, "restore_agents_fallback", None)
+            if callable(restore_agents_fallback):
+                restore_agents_fallback()     # and its fallback
         self._mode_chosen_for_chat = False
         self._mode_restore_note = ""
         self._active_tool_intents: set[str] = set()
@@ -7368,6 +7388,10 @@ class Agent(GoalLifecycle):
                         agents_route=({key: str(self.config.get(f"subagent_{key}", "") or "")
                                        for key in ("model", "base_url", "api_mode")}
                                       if getattr(self.config, "agents_route_own", lambda: False)() else None),
+                        # and its own sub-agents fallback, only when it chose one
+                        agents_fallback=({key: str(self.config.get(f"subagent_fallback_{key}", "") or "")
+                                          for key in ("model", "base_url", "api_mode")}
+                                         if getattr(self.config, "agents_fallback_own", lambda: False)() else None),
                         images=image_index,
                         agents=self.subagents.saved_state(),
                         mode=self.mode, plan_return_mode=self.plan_return_mode,
@@ -7820,6 +7844,9 @@ class Agent(GoalLifecycle):
             restore_agents = getattr(self.config, "restore_agents_route", None)
             if callable(restore_agents):
                 restore_agents(record.get("agents_route"))
+            restore_agents_fallback = getattr(self.config, "restore_agents_fallback", None)
+            if callable(restore_agents_fallback):
+                restore_agents_fallback(record.get("agents_fallback"))
             restore_native = getattr(self.config, "restore_native_route", None)
             if callable(restore_native):
                 prior_model = str(self.config.model or "")
@@ -9155,7 +9182,7 @@ class Agent(GoalLifecycle):
                 if cli and self.depth == 0 and prompt_message is not None and not held_final_messages:
                     # D14: Claude Code or Codex is this chat's fallback: it takes the turn with the whole chat.
                     return self._cli_fallback_answers(cli, e, prompt_message)
-                fb = str(self.config.get("fallback_model") or "")
+                fb = Agent._fallback_model(self)
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
                     self._close_runs("gave_up")         # the primary's retry lines end here
                     if not getattr(self, "_fallback_outage", False):     # said once an outage (D14)

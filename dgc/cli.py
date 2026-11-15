@@ -1700,7 +1700,20 @@ class CLI:
                              f"host: {cfg.get('subagent_base_url') or '(inherit main)'}  ·  "
                              f"transport: {cfg.get('subagent_api_mode') or '(inherit/infer)'}  ·  "
                              f"context: {subagent_window_text(cfg)}  ·  "
-                             f"thinking: {cfg.get('subagent_thinking') or '(same as the main chat)'}")
+                             f"thinking: {cfg.get('subagent_thinking') or '(same as the main chat)'}  ·  "
+                             f"fallback: {cfg.get('subagent_fallback_model') or '(the main fallback)'}"
+                             + (f" at {cfg.get('subagent_fallback_base_url')}" if cfg.get('subagent_fallback_base_url') else ""))
+            elif args[0] == "fallback" and len(args) == 2:
+                name = "" if args[1].lower() in ("none", "same") else args[1]
+                cfg.set("subagent_fallback_model", name)
+                self.ui.info(f"sub-agent fallback → {name}" if name else "sub-agent fallback → the main fallback")
+            elif args[0] == "fallback-host" and len(args) > 1:
+                if len(args) > 2:
+                    self.ui.error("API keys are not accepted inline — use DGC_SUBAGENT_FALLBACK_API_KEY")
+                    return True
+                host = "" if args[1].lower() in ("none", "same") else args[1]
+                cfg.set("subagent_fallback_base_url", host)
+                self.ui.info(f"sub-agent fallback host → {host}" if host else "sub-agent fallback host → the main host")
             elif args[0] == "model" and len(args) > 1:
                 cfg.set("subagent_model", args[1])
                 self.ui.info(f"sub-agent model → {args[1]}")
@@ -1736,12 +1749,14 @@ class CLI:
                              else f"sub-agent thinking → {level}")
             elif args[0] == "clear":
                 for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
-                          "subagent_api_mode", "subagent_context_size", "subagent_thinking"):
+                          "subagent_api_mode", "subagent_context_size", "subagent_thinking", "subagent_fallback_model",
+                          "subagent_fallback_base_url", "subagent_fallback_api_key", "subagent_fallback_api_mode"):
                     cfg.set(k, "" if k != "subagent_context_size" else 0)
                 self.ui.info("sub-agent overrides cleared — inherits the main model/host")
             else:
                 self.ui.error("usage: /subagent [model NAME | host URL | transport MODE | context TOKENS | "
-                              "thinking same|off|low|medium|high|xhigh | clear]")
+                              "thinking same|off|low|medium|high|xhigh | fallback NAME|none | fallback-host URL|none | "
+                              "clear]")
         else:
             from .commands import discover_commands, render_command
             custom = discover_commands(self.config.project_root)

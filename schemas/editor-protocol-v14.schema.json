@@ -2441,6 +2441,18 @@
             "fallback_engine": {
               "type": "string"
             },
+            "subagent_fallback_model": {
+              "type": "string"
+            },
+            "subagent_fallback_base_url": {
+              "type": "string"
+            },
+            "subagent_fallback_api_mode": {
+              "type": "string"
+            },
+            "subagent_fallback_api_key_set": {
+              "type": "boolean"
+            },
             "dev_mode": {
               "type": "boolean"
             },
@@ -2708,6 +2720,27 @@
               "type": "string"
             },
             "settings_base_url": {
+              "type": "string"
+            },
+            "fallback_own": {
+              "type": "boolean"
+            },
+            "fallback_model": {
+              "type": "string"
+            },
+            "fallback_base_url": {
+              "type": "string"
+            },
+            "fallback_api_mode": {
+              "type": "string"
+            },
+            "fallback_api_key_set": {
+              "type": "boolean"
+            },
+            "settings_fallback_model": {
+              "type": "string"
+            },
+            "settings_fallback_base_url": {
               "type": "string"
             }
           },
@@ -7475,7 +7508,8 @@
               "enum": [
                 "main",
                 "subagent",
-                "fallback"
+                "fallback",
+                "subagent_fallback"
               ]
             },
             "ids": {
@@ -11078,6 +11112,13 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "part": {
+              "type": "string",
+              "enum": [
+                "model",
+                "fallback"
+              ]
             }
           },
           "required": [
@@ -14721,7 +14762,8 @@
               "enum": [
                 "main",
                 "subagent",
-                "fallback"
+                "fallback",
+                "subagent_fallback"
               ]
             },
             "base_url": {

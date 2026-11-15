@@ -5585,14 +5585,15 @@ can change a Dev Mode limit when you ask. DGC can never turn on Dev Mode, and on
 
 ## Credentials
 
-The `api_key`, `subagent_api_key` and `fallback_api_key` values, and each web search provider's
+The `api_key`, `subagent_api_key`, `fallback_api_key` and `subagent_fallback_api_key` values, and each web search provider's
 own key (`search_api_key_brave`, `search_api_key_tavily`, `search_api_key_ollama`), never live in
 `config.json`; they are written to `~/.dgc/secrets.json` with owner-only permissions, and each can
 be supplied by environment variable instead (`DGC_API_KEY`, `DGC_SEARCH_API_KEY` for the web search
 provider selected at start, …). On the
 command line, `--api-key-env NAME` reads a key from the environment **without persisting it at
 all**. `fallback_base_url` and `subagent_base_url` point the fallback and sub-agent at their own
-endpoints.
+endpoints, and `subagent_fallback_model` / `subagent_fallback_base_url` give sub-agents a fallback of
+their own (empty: the main fallback).
 
 ## Sampling and limits
 

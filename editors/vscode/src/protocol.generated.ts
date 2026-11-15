@@ -1908,6 +1908,30 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "subagent_fallback_model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "subagent_fallback_base_url": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "subagent_fallback_api_mode": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "subagent_fallback_api_key_set": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
     "dev_mode": {
       "types": [
         "boolean"
@@ -2205,6 +2229,48 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": true
+    },
+    "fallback_own": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "fallback_model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_base_url": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_api_mode": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "fallback_api_key_set": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "settings_fallback_model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "settings_fallback_base_url": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "model_defaults_changed": {
@@ -5693,7 +5759,8 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "enum": [
         "main",
         "subagent",
-        "fallback"
+        "fallback",
+        "subagent_fallback"
       ]
     },
     "ids": {
@@ -8301,6 +8368,16 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "part": {
+      "types": [
+        "string"
+      ],
+      "required": false,
+      "enum": [
+        "model",
+        "fallback"
+      ]
     }
   },
   "list_mcp_tools": {
@@ -10836,7 +10913,8 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "enum": [
         "main",
         "subagent",
-        "fallback"
+        "fallback",
+        "subagent_fallback"
       ]
     },
     "base_url": {

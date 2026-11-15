@@ -119,7 +119,7 @@ def _environment_secret_values() -> tuple[str, ...]:
 
 _CONFIG_SECRET_FALLBACK = ("api_key", "search_api_key", "search_api_key_brave", "search_api_key_tavily",
                            "search_api_key_ollama", "search_api_key_unassigned", "subagent_api_key",
-                           "fallback_api_key")
+                           "fallback_api_key", "subagent_fallback_api_key")
 
 
 def _config_secret_keys() -> tuple[str, ...]:

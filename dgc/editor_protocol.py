@@ -328,6 +328,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "turn_token_budget": _I(False),
         # Opt-in too: a Work session's fallback when it is Claude Code ("claude") or Codex ("codex"), else "" (D14).
         "fallback_engine": _S(False),
+        # Opt-in too (0.52, capabilities.subagent_fallback): the sub-agents' fallback, and whether its key is to hand.
+        "subagent_fallback_model": _S(False), "subagent_fallback_base_url": _S(False),
+        "subagent_fallback_api_mode": _S(False), "subagent_fallback_api_key_set": _B(False),
         # Opt-in too: Dev Mode's switch and its capacity limits (dgc/dev_mode.py; Settings -> Dev Mode).
         "dev_mode": _B(False), "dev_limits": _O(False), "dev_mode_tools": _B(False),
         "sandbox": _B(False), "sandbox_network": _B(False),
@@ -364,8 +367,13 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # A Work session's agents model (0.52, capabilities.agents_model): `own` when this session chose its own (in its
     # model menu), else it follows Settings > Sub-agents; settings_* are Settings' own; api_key_set says whether a key
     # for its address is to hand (the editor supplies one for an address Settings has no key for).
+    # fallback_* (capabilities.subagent_fallback): the sub-agents' fallback the same way, `fallback_own` when this
+    # session chose its own; a session's own fallback never makes its agents model its own.
     "agents_model": {"request_id": _S(False), "own": _B(), "model": _S(), "base_url": _S(), "api_mode": _S(),
-                     "api_key_set": _B(), "settings_model": _S(), "settings_base_url": _S()},
+                     "api_key_set": _B(), "settings_model": _S(), "settings_base_url": _S(),
+                     "fallback_own": _B(False), "fallback_model": _S(False), "fallback_base_url": _S(False),
+                     "fallback_api_mode": _S(False), "fallback_api_key_set": _B(False),
+                     "settings_fallback_model": _S(False), "settings_fallback_base_url": _S(False)},
     "model_defaults_changed": {"base_url": _S(), "model": _S(), "request_id": _S(False)},
     "model_provider_saved": {"id": _S(), "removed": _B(), "request_id": _S(False)},
     "subscription_default_changed": {"engine": _f("string", enum=("claude", "codex")),
@@ -829,7 +837,8 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # 0.52, capabilities.agents_model: which agents model this Work session uses (answers agents_model), and "Same as
     # settings" (drops the session's own; it follows Settings > Sub-agents again).
     "get_agents_model": {"request_id": _S(False)},
-    "reset_agents_model": {"request_id": _S(False)},
+    # `part` (capabilities.subagent_fallback): "model" or "fallback" drops only that one; none drops both.
+    "reset_agents_model": {"request_id": _S(False), "part": _f("string", required=False, enum=("model", "fallback"))},
     "list_mcp_tools": {
         "request_id": _S(), "offset": _I(False), "limit": _I(False),
     },
@@ -1497,7 +1506,7 @@ EVENT_FIELDS["undo_result"] = {"request_id": _S(), "index": _I(), "ok": _B(), "f
 # The answer is one `models_at` naming the request: `ids`, the transport that listed them (`api_mode`),
 # or `error`, a short reason that holds no URL, key or response body. A client that never asks never
 # gets one.
-LIST_MODELS_AT_ROLES = ("main", "subagent", "fallback")
+LIST_MODELS_AT_ROLES = ("main", "subagent", "fallback", "subagent_fallback")   # the last: 0.52
 COMMAND_FIELDS["list_models_at"] = {
     "request_id": _S(), "role": _f("string", enum=LIST_MODELS_AT_ROLES), "base_url": _S(),
     "api_mode": _f("string", required=False,

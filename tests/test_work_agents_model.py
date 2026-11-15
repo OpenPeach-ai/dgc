@@ -182,10 +182,13 @@ class SessionAgentsModel(window.IsolatedHome):
 class TheWire(unittest.TestCase):
     def test_the_commands_and_the_event_are_declared(self):
         self.assertEqual(set(COMMAND_FIELDS["get_agents_model"]), {"request_id"})
-        self.assertEqual(set(COMMAND_FIELDS["reset_agents_model"]), {"request_id"})
+        self.assertEqual(set(COMMAND_FIELDS["reset_agents_model"]), {"request_id", "part"})   # part: 0.52 fallback
         self.assertEqual(set(EVENT_FIELDS["agents_model"]),
                          {"request_id", "own", "model", "base_url", "api_mode", "api_key_set", "settings_model",
-                          "settings_base_url"})
+                          "settings_base_url",
+                          # the sub-agents' fallback (tests/test_subagent_fallback.py)
+                          "fallback_own", "fallback_model", "fallback_base_url", "fallback_api_mode",
+                          "fallback_api_key_set", "settings_fallback_model", "settings_fallback_base_url"})
 
 
 if __name__ == "__main__":

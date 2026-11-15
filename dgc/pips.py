@@ -4665,6 +4665,27 @@ def _worker_payload(value):
     return raw
 
 
+def _worker_config_overrides(payload: dict, backup: dict) -> dict:
+    """What a Pip run's worker sets over its config, whatever the snapshot's: its key, its backup as its fallback, and
+    nothing of the user's own Work setup."""
+    return {
+        "api_key": payload.get("api_key", ""), "mode": "default", "subscription_engine": "",
+        # A Pip's backup model (pip_backup), when it has one: the model it carries on with if its own doesn't answer.
+        "fallback_model": "" if ("brain" in backup or "router" in backup) else str(backup.get("model") or ""),
+        "fallback_base_url": str(backup.get("base_url") or ""),
+        "fallback_api_key": str(backup.get("api_key") or ""), "fallback_api_mode": str(backup.get("api_mode") or ""),
+        "mcp_servers": {}, "hooks": {}, "code_action": False, "ultra_mode": False,
+        "verify_before_done": False, "verify_command": "", "autonomous_gate": "",
+        "artifact_autostart": False, "tool_profile": "standard",
+        # A Pip run holds at most one DGC Router worker, leased by the controller when it left the queue: inside the
+        # run nothing routes again (its helpers inherit the run's own model), and it never holds a second one.
+        "router": {"enabled": False, "when_busy": "wait", "systems": []},
+        # A Pip's helpers carry on with the Pip's own backup (the fallback above), never a sub-agents fallback (0.52).
+        "subagent_fallback_model": "", "subagent_fallback_base_url": "", "subagent_fallback_api_key": "",
+        "subagent_fallback_api_mode": "",
+    }
+
+
 def _worker_main():
     """Private subprocess entry. Provider key arrives once over stdin, never argv/logs."""
     payload_bytes = sys.stdin.buffer.read(MAX_WORKER_INPUT_BYTES + 1)
@@ -4689,19 +4710,7 @@ def _worker_main():
         if key not in ("brain", "provider"):    # a subscription's CLI (pip_brain) or a saved provider's id: not DGC settings
             config.set(key, value, persist=False)
     backup = payload.get("backup") if isinstance(payload.get("backup"), dict) else {}
-    for key, value in {
-        "api_key": payload.get("api_key", ""), "mode": "default", "subscription_engine": "",
-        # A Pip's backup model (pip_backup), when it has one: the model it carries on with if its own doesn't answer.
-        "fallback_model": "" if ("brain" in backup or "router" in backup) else str(backup.get("model") or ""),
-        "fallback_base_url": str(backup.get("base_url") or ""),
-        "fallback_api_key": str(backup.get("api_key") or ""), "fallback_api_mode": str(backup.get("api_mode") or ""),
-        "mcp_servers": {}, "hooks": {}, "code_action": False, "ultra_mode": False,
-        "verify_before_done": False, "verify_command": "", "autonomous_gate": "",
-        "artifact_autostart": False, "tool_profile": "standard",
-        # A Pip run holds at most one DGC Router worker, leased by the controller when it left the queue: inside the
-        # run nothing routes again (its helpers inherit the run's own model), and it never holds a second one.
-        "router": {"enabled": False, "when_busy": "wait", "systems": []},
-    }.items():
+    for key, value in _worker_config_overrides(payload, backup).items():
         config.set(key, value, persist=False)
     # A fallback that is Claude Code or Codex, or DGC Router (9 Nov): the worker takes the whole turn there after a try
     # that said and did nothing (ReadOnlyAuditor._backup_turn). Kept on this worker's config only, never saved.

@@ -100,17 +100,19 @@ def search_settings(config) -> tuple[str, str, str]:
     return provider, (key if isinstance(key, str) else ""), str(config.get("search_url", "") or "")
 
 
-SECRET_KEYS = frozenset({"api_key", "subagent_api_key", "fallback_api_key", LEGACY_SEARCH_KEY,
+SECRET_KEYS = frozenset({"api_key", "subagent_api_key", "fallback_api_key", "subagent_fallback_api_key", LEGACY_SEARCH_KEY,
                          *_SEARCH_SECRET_KEYS})
 # DGC_SEARCH_API_KEY is the key of the provider selected when DGC starts, and only that provider's (load()).
 SECRET_ENV = {"api_key": "DGC_API_KEY", LEGACY_SEARCH_KEY: "DGC_SEARCH_API_KEY",
               "subagent_api_key": "DGC_SUBAGENT_API_KEY",
-              "fallback_api_key": "DGC_FALLBACK_API_KEY"}
-_PROVIDER_SECRET_KEYS = frozenset({"api_key", "subagent_api_key", "fallback_api_key"})
+              "fallback_api_key": "DGC_FALLBACK_API_KEY",
+              "subagent_fallback_api_key": "DGC_SUBAGENT_FALLBACK_API_KEY"}
+_PROVIDER_SECRET_KEYS = frozenset({"api_key", "subagent_api_key", "fallback_api_key", "subagent_fallback_api_key"})
 _PROVIDER_SECRET_ENDPOINTS = {
     "api_key": "base_url",
     "subagent_api_key": "subagent_base_url",
     "fallback_api_key": "fallback_base_url",
+    "subagent_fallback_api_key": "subagent_fallback_base_url",
 }
 _MCP_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
 _MAX_MCP_SECRET_SERVERS = 64
@@ -573,6 +575,12 @@ DEFAULTS: dict = {
     "subagent_base_url": "",                    # host for sub-agents (empty: inherit main host)
     "subagent_api_key": "",                     # key for another sub-agent endpoint
     "subagent_api_mode": "",                    # transport override; empty=infer for another endpoint
+    # 0.52: what a sub-agent carries on with when its own model fails (empty: Main's fallback, as an empty
+    # subagent_model is the main model). A blank address is the main host, as for every secondary route.
+    "subagent_fallback_model": "",
+    "subagent_fallback_base_url": "",
+    "subagent_fallback_api_key": "",
+    "subagent_fallback_api_mode": "",
     "subagent_context_size": 0,                 # sub-agents' context window in tokens (0: the main one's)
     "subagent_thinking": "",                    # helpers' thinking: "" the main chat's | off | low | medium | high | xhigh
     "subagent_worktree_root": "",                # private task checkout storage (empty: ~/.dgc/worktrees)
@@ -1458,11 +1466,19 @@ _SESSION_KEYS = frozenset({
     "subscription_effort", "provider_state", "prompt_cache", "prompt_cache_key", "prompt_cache_ttl",
     "provider_capabilities", "fallback_model", "fallback_base_url", "fallback_api_mode", "fallback_engine",
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_context_size", "subagent_thinking",
+    "subagent_fallback_model", "subagent_fallback_base_url", "subagent_fallback_api_mode",
 })
 # The agents model (Settings > Sub-agents). Still session keys, so the generic adopt never moves an address without
 # its key; since 0.52 a chat that didn't choose its own follows Settings on each save (Config._follow_agents_settings),
 # dropping the old address's key, and a Work session that chose its own holds it (Config.restore_agents_route).
 AGENTS_ROUTE_KEYS = ("subagent_model", "subagent_base_url", "subagent_api_mode")
+# The sub-agents' fallback (0.52) follows Settings, or a session's own, the same way, on its own.
+AGENTS_FALLBACK_KEYS = ("subagent_fallback_model", "subagent_fallback_base_url", "subagent_fallback_api_mode")
+AGENTS_PREFIXES = ("subagent_", "subagent_fallback_")
+
+
+def _agents_keys(prefix: str) -> tuple[str, str, str]:
+    return AGENTS_ROUTE_KEYS if prefix == "subagent_" else AGENTS_FALLBACK_KEYS
 
 
 # Lists several processes edit one entry at a time. Written whole, a Config that loaded before
@@ -2095,38 +2111,52 @@ class Config:
 
     def agents_route_own(self) -> bool:
         """Whether this Work session chose its own agents model (0.52) rather than following Settings > Sub-agents."""
+        return self._agents_own("subagent_")
+
+    def agents_fallback_own(self) -> bool:
+        """Whether this Work session chose its own sub-agents fallback (0.52) rather than following Settings'. Its own
+        fallback never makes its agents model its own: DGC Router still routes that."""
+        return self._agents_own("subagent_fallback_")
+
+    def _agents_own(self, prefix: str) -> bool:
         held = getattr(self, "_ephemeral_keys", set())
-        return any(key in held for key in AGENTS_ROUTE_KEYS)
+        return any(key in held for key in _agents_keys(prefix))
 
     def _follow_agents_settings(self, payload: dict, changed: dict) -> None:
-        """A chat that didn't choose its own agents model follows Settings > Sub-agents as it is on disk (0.52). A new
-        address never gets the old one's key: the key Settings saved for the new address, else none (the editor
-        supplies one)."""
-        if self.agents_route_own() or any(key in changed for key in AGENTS_ROUTE_KEYS):
+        """A chat that didn't choose its own agents model, or its own sub-agents fallback, follows Settings > Sub-agents
+        as it is on disk (0.52), each on its own."""
+        for prefix in AGENTS_PREFIXES:
+            self._follow_agents_group(prefix, payload, changed)
+
+    def _follow_agents_group(self, prefix: str, payload: dict, changed: dict) -> None:
+        """One of them (``prefix`` subagent_ or subagent_fallback_). A new address never gets the old one's key: the key
+        Settings saved for the new address, else none (the editor supplies one)."""
+        keys, secret_key = _agents_keys(prefix), f"{prefix}api_key"
+        if self._agents_own(prefix) or any(key in changed for key in keys):
             return
         future = dict(self.data)
-        for key in AGENTS_ROUTE_KEYS:
+        for key in keys:
             if key in payload:
                 future[key] = payload[key]
-        if all(future.get(key) == self.data.get(key) for key in AGENTS_ROUTE_KEYS):
+        if all(future.get(key) == self.data.get(key) for key in keys):
             return
-        before = _provider_secret_identity(self.data, "subagent_api_key")
-        after = _provider_secret_identity(future, "subagent_api_key")
+        before = _provider_secret_identity(self.data, secret_key)
+        after = _provider_secret_identity(future, secret_key)
         if before != after:
             secret = ""
             stored = _read_config_payload(USER_SECRETS) or {}
             bindings = stored.get("provider_identity")
-            if after and isinstance(bindings, dict) and bindings.get("subagent_api_key") == after \
-                    and isinstance(stored.get("subagent_api_key"), str):
-                secret = stored["subagent_api_key"]
-            self.data["subagent_api_key"] = secret
+            if after and isinstance(bindings, dict) and bindings.get(secret_key) == after \
+                    and isinstance(stored.get(secret_key), str):
+                secret = stored[secret_key]
+            self.data[secret_key] = secret
             identities = self.__dict__.setdefault("_provider_secret_identity", {})
             if secret and after:
-                identities["subagent_api_key"] = after
+                identities[secret_key] = after
             else:
-                identities.pop("subagent_api_key", None)
+                identities.pop(secret_key, None)
         baseline = getattr(self, "_baseline_data", None)
-        for key in AGENTS_ROUTE_KEYS:
+        for key in keys:
             if key in payload:
                 self.data[key] = payload[key]
                 if isinstance(baseline, dict):
@@ -2136,51 +2166,59 @@ class Config:
         """A Work session's agents model (0.52): its own as saved, held so no save adopts Settings' over it; or, with
         none, Settings > Sub-agents, followed live. A session file never holds its key: the one in Settings is used for
         its own address, the editor supplies any other (as for a session's fallback)."""
+        self._restore_agents_group("subagent_", saved)
+
+    def restore_agents_fallback(self, saved: dict | None = None) -> None:
+        """A Work session's sub-agents fallback (0.52), as restore_agents_route does its agents model."""
+        self._restore_agents_group("subagent_fallback_", saved)
+
+    def _restore_agents_group(self, prefix: str, saved: dict | None) -> None:
         from .sessions import _clean_agents_route
         route = _clean_agents_route(saved)
+        secret_key, endpoint_key = f"{prefix}api_key", f"{prefix}base_url"
         defaults = _read_config_payload(USER_CONFIG) or {}
-        settings = {key: str(defaults.get(f"subagent_{key}", DEFAULTS.get(f"subagent_{key}", "")) or "")
+        settings = {key: str(defaults.get(f"{prefix}{key}", DEFAULTS.get(f"{prefix}{key}", "")) or "")
                     for key in ("model", "base_url", "api_mode")}
         ephemeral = self.__dict__.setdefault("_ephemeral_keys", set())
         held = self.__dict__.setdefault("_held_keys", set())
         if route is None:
             baseline = getattr(self, "_baseline_data", None)
             for key in ("model", "base_url", "api_mode"):
-                ephemeral.discard(f"subagent_{key}")
-                held.discard(f"subagent_{key}")
-                self.data[f"subagent_{key}"] = settings[key]
+                ephemeral.discard(f"{prefix}{key}")
+                held.discard(f"{prefix}{key}")
+                self.data[f"{prefix}{key}"] = settings[key]
                 if isinstance(baseline, dict):
                     # As read from Settings, not chosen here: the next save adopts a newer Settings value, never
                     # writes this one back over it.
-                    baseline[f"subagent_{key}"] = settings[key]
+                    baseline[f"{prefix}{key}"] = settings[key]
         else:
             for key in ("model", "base_url", "api_mode"):
-                self.hold(f"subagent_{key}", route[key])
+                self.hold(f"{prefix}{key}", route[key])
         base = (route or settings)["base_url"]
-        identity = _provider_secret_identity({**self.data, "subagent_base_url": base}, "subagent_api_key")
+        identity = _provider_secret_identity({**self.data, endpoint_key: base}, secret_key)
         secret = ""
         if base == settings["base_url"]:
             stored = _read_config_payload(USER_SECRETS) or {}
             bindings = stored.get("provider_identity")
-            if isinstance(bindings, dict) and bindings.get("subagent_api_key") == identity:
-                value = stored.get("subagent_api_key")
+            if isinstance(bindings, dict) and bindings.get(secret_key) == identity:
+                value = stored.get(secret_key)
                 if isinstance(value, str):
                     secret = value
-        had_own_key = "subagent_api_key" in ephemeral or "subagent_api_key" in held
+        had_own_key = secret_key in ephemeral or secret_key in held
         if route is not None:
-            self.hold("subagent_api_key", secret)            # the editor supplies any other address's key
+            self.hold(secret_key, secret)                    # the editor supplies any other address's key
         elif had_own_key:
-            ephemeral.discard("subagent_api_key")
-            held.discard("subagent_api_key")
-            self.__dict__.setdefault("_env_secret_keys", set()).discard("subagent_api_key")
-            self.data["subagent_api_key"] = secret           # never the session's own key on Settings' address
+            ephemeral.discard(secret_key)
+            held.discard(secret_key)
+            self.__dict__.setdefault("_env_secret_keys", set()).discard(secret_key)
+            self.data[secret_key] = secret                   # never the session's own key on Settings' address
         else:
             return                                           # following Settings already, with its own key
         bindings = self.__dict__.setdefault("_provider_secret_identity", {})
         if secret and identity:
-            bindings["subagent_api_key"] = identity
+            bindings[secret_key] = identity
         else:
-            bindings.pop("subagent_api_key", None)
+            bindings.pop(secret_key, None)
 
     def restore_native_route(self, saved: dict | None = None) -> None:
         """Restore a chat's native endpoint/model without borrowing another host's key.

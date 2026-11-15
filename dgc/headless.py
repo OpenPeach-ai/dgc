@@ -247,6 +247,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "context_size", "subagent_context_size", "subagent_thinking", "show_reasoning", "preserve_thinking", "suggest",
     "plan_artifact",
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
+    "subagent_fallback_model", "subagent_fallback_base_url", "subagent_fallback_api_mode", "subagent_fallback_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
     "search_api_key_brave", "search_api_key_tavily", "search_api_key_ollama",
@@ -630,7 +631,10 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
                                    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
                                    "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
-                                   "fallback_engine", "dev_mode", "dev_limits", "dev_mode_tools"})
+                                   "fallback_engine", "dev_mode", "dev_limits", "dev_mode_tools",
+                                   # 0.52: the sub-agents' fallback, for Settings > Sub-agents
+                                   "subagent_fallback_model", "subagent_fallback_base_url",
+                                   "subagent_fallback_api_mode", "subagent_fallback_api_key_set"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
@@ -646,6 +650,9 @@ _CONFIG_STRING_LIMITS = {
     "fallback_model": 512,
     "fallback_base_url": 4096,
     "fallback_api_key": 16_384,
+    "subagent_fallback_model": 512,
+    "subagent_fallback_base_url": 4096,
+    "subagent_fallback_api_key": 16_384,
     "autonomous_gate": 512,
     "subscription_model": 256,
     # The shared web search: a SearXNG address, and each keyed provider's own key (kept in secrets.json, as
@@ -668,6 +675,7 @@ _CONFIG_ENUMS = {
                                      "chat_completions", "responses"}),
     "fallback_api_mode": frozenset({"", "auto", "ollama", "anthropic",
                                      "chat_completions", "responses"}),
+    "subagent_fallback_api_mode": frozenset({"", "auto", "ollama", "anthropic", "chat_completions", "responses"}),
     "fallback_engine": frozenset({"", "claude", "codex"}),
     "provider_state": frozenset({"stateless", "server"}),
     "search_provider": frozenset(SEARCH_PROVIDERS),
@@ -760,7 +768,7 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
                 or any(ord(char) < 32 and not (key == "autonomous_gate" and char == "\t")
                        for char in value)):
             return None, f"{key} must be a bounded plain string"
-    for key in ("subagent_base_url", "fallback_base_url", "search_url"):
+    for key in ("subagent_base_url", "fallback_base_url", "subagent_fallback_base_url", "search_url"):
         value = values.get(key)
         if value and (any(char.isspace() for char in value) or mcp_url_has_credentials(value)):
             return None, f"{key} cannot contain whitespace or URL credentials"
@@ -2915,6 +2923,12 @@ class Backend:
                           # never its key; it wins over DGC Router); reset_agents_model goes back to Settings';
                           # get_agents_model answers agents_model.
                           "agents_model": 1,
+                          # subagent_fallback (0.52): the sub-agents' own fallback, subagent_fallback_model, _base_url,
+                          # _api_mode and _api_key: in Settings (set_config), or this session's own (scope=session),
+                          # kept and followed as the agents model is; agents_model says which (fallback_*);
+                          # reset_agents_model takes part "model" or "fallback"; get_config sends the four
+                          # subagent_fallback_* fields when asked; list_models_at takes role "subagent_fallback".
+                          "subagent_fallback": 1,
                           "model_defaults": True,
                           "subscription_defaults": True,
                           # False: nothing chose a model (no saved route, no DGC_MODEL, no subscription), so the model
@@ -5831,6 +5845,14 @@ class Backend:
                      api_key_set=bool(cfg.get("subagent_api_key", "")),
                      settings_model=str(settings.get("subagent_model", "") or ""),
                      settings_base_url=str(settings.get("subagent_base_url", "") or ""),
+                     # and the sub-agents' fallback, the same way (capabilities.subagent_fallback)
+                     fallback_own=bool(cfg.agents_fallback_own()),
+                     fallback_model=str(cfg.get("subagent_fallback_model", "") or ""),
+                     fallback_base_url=str(cfg.get("subagent_fallback_base_url", "") or ""),
+                     fallback_api_mode=str(cfg.get("subagent_fallback_api_mode", "") or ""),
+                     fallback_api_key_set=bool(cfg.get("subagent_fallback_api_key", "")),
+                     settings_fallback_model=str(settings.get("subagent_fallback_model", "") or ""),
+                     settings_fallback_base_url=str(settings.get("subagent_fallback_base_url", "") or ""),
                      **_request_fields(request_id))
 
     def _save_model_provider(self, cmd: dict, request_id: str) -> None:
@@ -6209,7 +6231,9 @@ class Backend:
     # sends the main key only to the main host (Agent._route_api_key); every other host gets none.
     _MODELS_AT_ROUTES = {"main": ("api_key", "base_url", "api_mode"),
                          "subagent": ("subagent_api_key", "subagent_base_url", "subagent_api_mode"),
-                         "fallback": ("fallback_api_key", "fallback_base_url", "fallback_api_mode")}
+                         "fallback": ("fallback_api_key", "fallback_base_url", "fallback_api_mode"),
+                         "subagent_fallback": ("subagent_fallback_api_key", "subagent_fallback_base_url",
+                                               "subagent_fallback_api_mode")}
 
     def _list_models_at(self, cmd: dict) -> None:
         """One Model box's list: the models at its card's host, before anything is saved. One request per role runs
@@ -6388,6 +6412,11 @@ class Backend:
         if "fallback_engine" in self._config_fields:
             engine = str(c.get("fallback_engine", "") or "")
             extra["fallback_engine"] = engine if engine in ("claude", "codex") else ""
+        for field in ("subagent_fallback_model", "subagent_fallback_base_url", "subagent_fallback_api_mode"):
+            if field in self._config_fields:
+                extra[field] = str(c.get(field, "") or "")
+        if "subagent_fallback_api_key_set" in self._config_fields:
+            extra["subagent_fallback_api_key_set"] = bool(c.get("subagent_fallback_api_key", ""))
         from . import subscriptions as _subs
         self.em.emit("config", model=c.model, mode=self.agent.mode,
                      subscription_engine=str(c.get("subscription_engine", "")),
@@ -9885,40 +9914,45 @@ class Backend:
                              message=problem or "invalid settings values",
                              **_request_fields(request_id))
                 return
+            # 0.52: a session's own agents model and its own sub-agents fallback (Settings > Sub-agents for every other
+            # chat), each a group of model, address, API and key.
+            agents_groups = {prefix: {f"{prefix}{key}" for key in ("model", "base_url", "api_mode", "api_key")}
+                             for prefix in ("subagent_", "subagent_fallback_")}
             if session_route and not set(values).issubset({
                     "subscription_engine", "subscription_model", "subscription_effort",
                     "fallback_model", "fallback_base_url", "fallback_api_mode", "fallback_api_key",
-                    "fallback_engine",
-                    # 0.52: this session's own agents model (Settings > Sub-agents for every other chat)
-                    "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key"}):
+                    "fallback_engine", *agents_groups["subagent_"], *agents_groups["subagent_fallback_"]}):
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="session route may only change its subscription engine, model and effort, its fallback "
-                                     "and its agents model",
+                             message="session route may only change its subscription engine, model and effort, its fallback, "
+                                     "its agents model and their fallback",
                              **_request_fields(request_id))
                 return
-            agents_chosen = session_route and bool(set(values) & {"subagent_model", "subagent_base_url",
-                                                                  "subagent_api_mode"})
-            if agents_chosen:
-                from .sessions import _clean_agents_route
-                proposed = {key: str(values.get(f"subagent_{key}", self.config.get(f"subagent_{key}", "")) or "")
-                            for key in ("model", "base_url", "api_mode")}
-                if _clean_agents_route(proposed) is None:
-                    self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                                 message="the agents model's address must be a plain HTTP or HTTPS URL",
-                                 **_request_fields(request_id))
-                    return
+            for prefix, words in (("subagent_", "the agents model"), ("subagent_fallback_", "the sub-agents' fallback")):
+                if session_route and set(values) & (agents_groups[prefix] - {f"{prefix}api_key"}):
+                    from .sessions import _clean_agents_route
+                    proposed = {key: str(values.get(f"{prefix}{key}", self.config.get(f"{prefix}{key}", "")) or "")
+                                for key in ("model", "base_url", "api_mode")}
+                    if _clean_agents_route(proposed) is None:
+                        self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                                     message=f"{words}'s address must be a plain HTTP or HTTPS URL",
+                                     **_request_fields(request_id))
+                        return
             settings_agents = {}
-            # Settings' sub-agents key (the editor's, never saved by DGC): every other open chat that follows Settings
+            # Settings' sub-agents keys (the editor's, never saved by DGC): every other open chat that follows Settings
             # on that address gets it too, or its sub-agents would run keyless after following a new address (0.52).
-            settings_key = values.get("subagent_api_key") if not session_route else None
-            if (not session_route and getattr(self.config, "agents_route_own", lambda: False)()
-                    and set(values) & {"subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key"}):
-                # Settings > Sub-agents changed from a session that chose its own agents model: Settings is saved for
-                # every other chat, and this session keeps its own (0.52). A fresh Config owns the save, as
-                # save_model_provider's does; Settings' key stays with the editor, as it does for every chat.
-                settings_agents = {key: values.pop(key) for key in ("subagent_model", "subagent_base_url",
-                                                                    "subagent_api_mode") if key in values}
-                values.pop("subagent_api_key", None)
+            settings_keys = ({prefix: values[f"{prefix}api_key"] for prefix in agents_groups
+                              if f"{prefix}api_key" in values} if not session_route else {})
+            own_groups = [prefix for prefix in agents_groups
+                          if not session_route and set(values) & agents_groups[prefix]
+                          and getattr(self.config, "_agents_own", lambda _prefix: False)(prefix)]
+            if own_groups:
+                # Settings > Sub-agents changed from a session that chose its own agents model (or fallback): Settings
+                # is saved for every other chat, and this session keeps its own (0.52). A fresh Config owns the save,
+                # as save_model_provider's does; Settings' key stays with the editor, as it does for every chat.
+                for prefix in own_groups:
+                    settings_agents.update({key: values.pop(key) for key in (f"{prefix}model", f"{prefix}base_url",
+                                                                             f"{prefix}api_mode") if key in values})
+                    values.pop(f"{prefix}api_key", None)
                 try:
                     from .config import Config as _Fresh
                     fresh = _Fresh(project_root=self.config.project_root)
@@ -9976,7 +10010,7 @@ class Backend:
                         message="sandbox remains off because no supported confinement backend was found",
                         **_request_fields(request_id))
                     return
-            secret_keys = ("subagent_api_key", "fallback_api_key")
+            secret_keys = ("subagent_api_key", "fallback_api_key", "subagent_fallback_api_key")
             refresh = bool(set(values) & {
                 "api_mode", "provider_state", "prompt_cache", "prompt_cache_key",
                 "provider_capabilities", "capability_cache_ttl_s", "context_size",
@@ -10063,13 +10097,16 @@ class Backend:
                 if has_persist_flag:
                     self.config._persist = persist_before
             self._emit_config(request_id)
-            if settings_agents or (session_route and set(values) & {"subagent_model", "subagent_base_url",
-                                                                    "subagent_api_mode", "subagent_api_key"}):
+            if settings_agents or (session_route and set(values) & (agents_groups["subagent_"]
+                                                                    | agents_groups["subagent_fallback_"])):
                 self._emit_agents_model(request_id)
-            if isinstance(settings_key, str) and getattr(self, "_host", None) is not None:
+            if settings_keys and getattr(self, "_host", None) is not None:
                 from .config import USER_CONFIG, _read_config_payload
-                address = str((_read_config_payload(USER_CONFIG) or {}).get("subagent_base_url", "") or "")
-                self._host.share_agents_key(self.config, address, settings_key)
+                on_disk = _read_config_payload(USER_CONFIG) or {}
+                for prefix, settings_key in settings_keys.items():
+                    if isinstance(settings_key, str):
+                        address = str(on_disk.get(f"{prefix}base_url", "") or "")
+                        self._host.share_agents_key(self.config, address, settings_key, prefix=prefix)
             if "subscription_engine" in values or "prompt_cache" in values:
                 self._publish_cache_clock(current=True)  # whose cache the next turn uses changed
             if "subscription_engine" in values and getattr(self, "_server_window_wanted", False):
@@ -10084,11 +10121,20 @@ class Backend:
         elif t == "get_agents_model":
             self._emit_agents_model(request_id)
         elif t == "reset_agents_model":
-            # "Same as settings": this session drops its own agents model and follows Settings again (0.52).
+            # "Same as settings": this session drops its own agents model and follows Settings again (0.52); `part`
+            # "model" or "fallback" (capabilities.subagent_fallback) drops only that one, and none drops both.
+            part = cmd.get("part")
+            if part not in (None, "model", "fallback"):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message='part must be "model" or "fallback"', **_request_fields(request_id))
+                return
             before = (copy.deepcopy(self.config.data), set(getattr(self.config, "_ephemeral_keys", set())),
                       set(getattr(self.config, "_held_keys", set())), set(getattr(self.config, "_env_secret_keys", set())),
                       dict(getattr(self.config, "_provider_secret_identity", {})))
-            self.config.restore_agents_route(None)
+            if part in (None, "model"):
+                self.config.restore_agents_route(None)
+            if part in (None, "fallback"):
+                self.config.restore_agents_fallback(None)
             if not self.agent._persist():
                 (self.config.data, self.config._ephemeral_keys, self.config._held_keys, self.config._env_secret_keys,
                  self.config._provider_secret_identity) = before
@@ -11330,18 +11376,18 @@ class Host:
                 threading.Thread(target=self._refresh_catalogs, args=(chat, catalogs), daemon=True,
                                  name=f"dgc-refresh-{chat.chat_id}").start()
 
-    def share_agents_key(self, source: Config, address: str, key: str) -> None:
-        """Settings' sub-agents key reaches every other open chat that follows Settings on that address (0.52): never one
-        that chose its own sub-agents model, and never one on another address."""
+    def share_agents_key(self, source: Config, address: str, key: str, *, prefix: str = "subagent_") -> None:
+        """Settings' sub-agents key (``prefix`` subagent_fallback_: its fallback's) reaches every other open chat that
+        follows Settings on that address (0.52): never one that chose its own, and never one on another address."""
         with self._chats_lock:
             others = [chat for chat_id, chat in self.chats.items()
                       if chat.config is not source and chat_id not in self._closing]
         for chat in others:
             config = chat.config
             try:
-                if config.agents_route_own() or str(config.get("subagent_base_url", "") or "") != address:
+                if config._agents_own(prefix) or str(config.get(f"{prefix}base_url", "") or "") != address:
                     continue
-                config.set_runtime_secret("subagent_api_key", key)
+                config.set_runtime_secret(f"{prefix}api_key", key)
             except Exception:                           # noqa: BLE001 -- one chat's config never stops the rest
                 continue
 

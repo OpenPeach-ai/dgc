@@ -724,6 +724,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          native_route: dict | None = None,
          fallback_route: dict | None = None,
          agents_route: dict | None = None,
+         agents_fallback: dict | None = None,
          chat_changes: dict | None = None,
          images: list | None = None,
          agents: dict | None = None,
@@ -833,6 +834,9 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
         clean_agents_route = _clean_agents_route(agents_route)
         if clean_agents_route:
             data["agents_route"] = clean_agents_route       # only when the session chose its own (0.52)
+        clean_agents_fallback = _clean_agents_route(agents_fallback)
+        if clean_agents_fallback:
+            data["agents_fallback"] = clean_agents_fallback  # its own sub-agents fallback, likewise (0.52)
         if images:
             # images: the viewed-image index, metadata only (the bytes live in <session>.images/).
             # A name is display text a page or tool chose, so it is redacted like any other.

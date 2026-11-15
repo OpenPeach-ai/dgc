@@ -830,6 +830,10 @@ class TUI:
             ("fallback_base_url", "Fallback endpoint", "str"),
             ("fallback_api_mode", "Fallback transport", "enum",
              ["inherit", "auto", "ollama", "anthropic", "chat_completions", "responses"]),
+            ("subagent_fallback_model", "Sub-agent fallback model (empty = the fallback above)", "str"),
+            ("subagent_fallback_base_url", "Sub-agent fallback endpoint", "str"),
+            ("subagent_fallback_api_mode", "Sub-agent fallback transport", "enum",
+             ["inherit", "auto", "ollama", "anthropic", "chat_completions", "responses"]),
         ],
         "Display": [
             ("theme", "Theme", "enum", ["auto", "dark", "light"]),
@@ -9205,7 +9209,8 @@ class TUI:
                         else f"sub-agent thinking → {level}"); return
         if args and args[0] == "clear":
             for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
-                      "subagent_api_mode", "subagent_context_size", "subagent_thinking"):
+                      "subagent_api_mode", "subagent_context_size", "subagent_thinking", "subagent_fallback_model",
+                      "subagent_fallback_base_url", "subagent_fallback_api_key", "subagent_fallback_api_mode"):
                 cfg.set(k, 0 if k == "subagent_context_size" else "")
             self._flash("sub-agent overrides cleared — inherits the main model/host"); return
         labels = ["Set sub-agent host (provider or a custom LAN URL)",
@@ -9236,7 +9241,8 @@ class TUI:
                                   lambda j: self._subagent_flow(f"thinking {levels[j]}"))
             else:
                 for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
-                          "subagent_api_mode", "subagent_context_size", "subagent_thinking"):
+                          "subagent_api_mode", "subagent_context_size", "subagent_thinking", "subagent_fallback_model",
+                          "subagent_fallback_base_url", "subagent_fallback_api_key", "subagent_fallback_api_mode"):
                     cfg.set(k, 0 if k == "subagent_context_size" else "")
                 self._flash("sub-agent → inherits the main model/host")
         sm = cfg.get("subagent_model") or f"(inherit: {cfg.model})"
