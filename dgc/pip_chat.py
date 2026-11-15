@@ -422,7 +422,8 @@ def message_files(db, message_id):
                           (message_id,)).fetchall()
     except Exception:
         return []
-    return [{"index": r[0], "name": r[1], "bytes": r[2]} for r in rows]
+    from .pip_chat_sends import file_type
+    return [{"index": r[0], "name": r[1], "bytes": r[2], "mime": file_type(r[1])} for r in rows]   # mime: API 101
 
 
 def bounded_image_uris(value):
@@ -635,7 +636,34 @@ def kept_document(db, run_id):
     return artifact_ref(row[0])
 
 
-def request(text, key, chat_options=None, images=None, files=None):
+# The @ outputs (Pips API 100): what the user chose this reply to make, as Work's Output menu (artifact_tools). One list,
+# Work's own; Auto (or none) asks for nothing.
+from .artifact_tools import OUTPUT_LINES as _OUTPUT_LINES
+OUTPUTS = tuple(_OUTPUT_LINES)
+
+
+def checked_output(output):
+    """The chosen output kind, or None for Auto (none, "", "auto"); anything else is refused."""
+    if output is None or output in ("", "auto"):
+        return None
+    if not isinstance(output, str) or output not in OUTPUTS:
+        raise RegistryError("invalid_output", "Choose Document, Slides, Spreadsheet, Page or Dashboard for this reply, "
+                                              "or Auto.")
+    return output
+
+
+def output_missing(db, run_id) -> str:
+    """Work's line under a reply that didn't make what the user chose for it (API 100), or ""."""
+    row = db.execute("SELECT CASE WHEN json_valid(result) THEN json_extract(result, '$.output_missing') END "
+                     "FROM pip_runs WHERE id=?", (run_id,)).fetchone()
+    if row is None or row[0] not in OUTPUTS:
+        return ""
+    from .artifact_tools import missing_note
+    return missing_note(row[0], [])
+
+
+def request(text, key, chat_options=None, images=None, files=None, output=None):
+    output = checked_output(output)
     if images is not None:
         images = validate_images(images)
         if isinstance(text, str) and not text.strip():
@@ -667,6 +695,10 @@ def request(text, key, chat_options=None, images=None, files=None):
         result['digest'] = hashlib.sha256(_json({'text': text, 'chat_options': result.get('chat_options'),
                                                  'images': [i['sha256'] for i in images or []],
                                                  'files': [[i['name'], i['sha256']] for i in files]}).encode()).hexdigest()
+    if output is not None:
+        # The retry key binds the chosen output too; a message with none keeps the digest it always had.
+        result['output'] = output
+        result['digest'] = hashlib.sha256(_json({'digest': result['digest'], 'output': output}).encode()).hexdigest()
     return result
 
 
@@ -1433,6 +1465,8 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     if req.get("reply_to"):
         # Reply on one of its messages (pip_replies): a bounded quote of its own words, given with this turn only.
         context["reply_to"] = req["reply_to"]
+    if req.get("output"):
+        context["output"] = req["output"]                 # API 100: what this reply should make (Work's Output menu)
     if pip.get("pip_type") == "core" and not str(req.get("request_key") or "").startswith(DGC_KEYS):
         # A question another Pip has waited on for a day: Core says it once, in its next reply to the user.
         from datetime import datetime, timezone
@@ -1519,8 +1553,9 @@ def insert_user(store, pip, req, run_id, model, now, *, waiting=None):
         store.db.execute("INSERT INTO pip_chat_files VALUES(?,?,?,?,?)", (message_id, index, item["name"], item["sha256"], item["bytes"]))
     if waiting is not None:
         # What it brought while a reply ran is this message's own now, kept once.
-        from .pip_steering import drop_attachments
+        from .pip_steering import drop_attachments, drop_output
         drop_attachments(store.db, message_id)
+        drop_output(store.db, message_id)              # its output is in its own run's conversation now
 
 
 PLUGIN_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
@@ -1627,8 +1662,11 @@ def validate_steers(value, text: str) -> list:
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers"}:
+    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
+    if "output_missing" in result and (not isinstance(result["output_missing"], str)
+                                       or result["output_missing"] not in OUTPUTS):
+        raise RegistryError("invalid_reply", "What this reply didn't make is one of Work's outputs.")
     if "apps" in result and valid_apps(result["apps"]) is None:
         raise RegistryError("invalid_reply", "This reply's plugin cards are invalid.")
     if "kept_document" in result and (not isinstance(result["kept_document"], str)
@@ -1710,6 +1748,8 @@ def insert_reply(store, run, result, now):
     attach_images(store, run, reply_id)
     from .pip_videos import attach as attach_videos         # videos it started this run (generate_video): the same
     attach_videos(store, run, reply_id)
+    from .pip_chat_sends import attach as attach_sent       # files it sent from its computer (API 101): the same
+    attach_sent(store, run, reply_id)
     if "eyes" in result:
         from .pip_eyes import record_card
         record_card(store, run, result["eyes"], reply_id)
@@ -1820,9 +1860,12 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             if asked and not str(asked["request_key"] or "").startswith(DGC_KEYS):
                 # API 83: the user's message this reply answers. The chat quotes it only when it isn't the one just above.
                 message["answers"] = asked["id"]
-            pictures = message_images(store.db, row["id"])   # images the Pip made for this reply (generate_image)
+            pictures = message_images(store.db, row["id"])   # images the Pip made or sent for this reply
             if pictures:
                 message["images"] = pictures
+            sent = message_files(store.db, row["id"])
+            if sent:
+                message["files"] = sent                     # API 101: files it sent from its computer (send_to_chat)
             offered = message_choices(store.db, row["id"])
             if offered:
                 message["choices"] = offered
@@ -1852,6 +1895,9 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             kept = kept_document(store.db, row["run_id"])
             if kept is not None:
                 message["artifact"] = kept          # a reply past 256 KB: the rest is in the Pip's document (Pips API 79)
+            missing = output_missing(store.db, row["run_id"])
+            if missing:
+                message["output_missing"] = missing  # API 100: "The model didn't make a page..." as Work says it
             if quiet_reply(store.db, row["run_id"], row["text"]):
                 message["quiet"] = True             # a routine with nothing to say: one faint line (Pips package 2)
             from .pip_own_changes import for_runs as own_changes
@@ -1911,12 +1957,13 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
 
 def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, files=None,
          spooled_images=None, spooled_files=None, display_mentions=None, conversation_id=None, reply_to=None,
-         _intro=False):
+         output=None, _intro=False):
     """Queue a reply to a message, with what it brings: images and files inline (API 43) or handed
     over through the backend's spool (API 52, ``spooled_images`` and ``spooled_files``). ``conversation_id``: which of
     the Pip's conversations (API 79, pip_conversations); none names the first one, as an older client means.
     ``reply_to``: the id of one of the Pip's own messages in that conversation, which this message quotes (API 83,
-    pip_replies)."""
+    pip_replies). ``output``: what the reply should make, Work's Output menu (API 100): document, slides, spreadsheet,
+    page or dashboard; none or "auto" asks for nothing."""
     from .pip_conversations import is_full, resolve as resolve_conversation, roll_over
     try:
         conversation_id = resolve_conversation(store.db, pip_id, conversation_id)
@@ -1925,6 +1972,7 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
             # Refused before anything of the message is stored; the quote is the stored message's own words.
             from .pip_replies import check as checked_reply
             quoted = checked_reply(store.db, pip_id, reply_to, conversation_id)
+        output = checked_output(output)               # refused before anything of the message is kept
         if is_full(store.db, conversation_id):
             conversation_id = roll_over(store.registry, pip_id, conversation_id)   # a full one: carry on in a fresh one
         # Validate the request identity before copying attachments into the kept store.
@@ -1958,7 +2006,7 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         # A send refused before its spooled files were read leaves none of them behind.
         _drop_spooled(spooled_images if isinstance(spooled_images, list) else None, "name")
         _drop_spooled(spooled_files if isinstance(spooled_files, list) else None, "spool")
-    req = request(text, key, chat_options, images=images, files=files)
+    req = request(text, key, chat_options, images=images, files=files, output=output)
     req["conversation_id"] = conversation_id
     if quoted is not None:
         req["reply_to"] = quoted
@@ -2054,7 +2102,9 @@ def answer_waiting(store, row, config):
     # The photos and files it brought while the reply ran (API 84) come with its turn, as any message's do.
     from .pip_steering import attachments
     images, files = attachments(store.db, row["id"])
-    req = request(row["text"], row["request_key"], images=images or None, files=files or None)
+    from .pip_steering import output_of
+    req = request(row["text"], row["request_key"], images=images or None, files=files or None,
+                  output=output_of(store.db, row["id"]))      # and what it asked the reply to make (API 100)
     if "conversation_id" in row.keys() and row["conversation_id"]:
         req["conversation_id"] = row["conversation_id"]      # its own conversation's next turn
         from .pip_conversations import is_full, roll_over
@@ -2117,7 +2167,7 @@ def _left_waiting(store, run, result) -> bool:
 
 def validate_context(value):
     if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips", "projects",
-                                                    "goal", "long_waits", "conversation_id", "inputs_ref", "reply_to"} not in (
+                                                    "goal", "long_waits", "conversation_id", "inputs_ref", "reply_to", "output"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -2125,6 +2175,8 @@ def validate_context(value):
         validate_images(value["images"])
     if "files" in value:
         validate_files(value["files"])
+    if "output" in value and checked_output(value["output"]) is None:
+        raise RegistryError("invalid_history", "A reply's chosen output is one of Work's.")
     if "run_posts" in value:
         from .pip_run_posts import validate_recent
         validate_recent(value["run_posts"])

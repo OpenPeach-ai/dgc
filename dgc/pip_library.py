@@ -39,6 +39,7 @@ class Session:
     def __init__(self, directory, config, pip_id, workspace_id=None, run_id=None):
         self.directory, self.config, self.pip_id, self.run_id = directory, config, pip_id, run_id
         self.name = self._name() or "A Pip"
+        self.made = []          # the kinds this run made or changed (doc, page, ...), seen here, never the worker's word
 
     def _name(self) -> str:
         try:
@@ -75,7 +76,21 @@ class Session:
         if op == "edit_artifact" and not self._may_edit(str(args.get("id") or "")):
             return ("error: that one isn't yours to change. A Pip edits what it made and the dashboards the user gave it "
                     "to keep current; make your own instead, or tell the user what you'd change.")
-        return artifact_tools.run(op, args, origin={"surface": "pip", "pip": self.pip_id}, author=self.name)
+        # What it made or changed counts toward the reply's chosen output, as in Work (Agent._artifact_changed).
+        return artifact_tools.run(op, args, origin={"surface": "pip", "pip": self.pip_id}, author=self.name,
+                                  on_change=lambda view, _op: self.made.append(str(view.get("type") or "")))
+
+
+def unmet(wanted, made) -> str:
+    """The first output the user chose for this reply (its own message's, then each one read on the way: Work's Output
+    menu, Pips API 100) that the run didn't make, or "". What it made is counted by the controller (Session.made)."""
+    from .artifact_tools import OUTPUT_TYPES
+    made = set(made or ())
+    for output in wanted or ():
+        kind = OUTPUT_TYPES.get(str(output or ""))
+        if kind and kind not in made:
+            return str(output)
+    return ""
 
 
 # ---- DGC's own docs, read-only (0.52): read in the worker itself, from the package ------------------------------------

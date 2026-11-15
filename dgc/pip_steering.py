@@ -104,6 +104,50 @@ def conversation_of(db, run_id):
     return row[0] if row else None
 
 
+# What a message sent while a reply ran asked its reply to make (Pips API 100, Work's Output menu: artifact_tools), beside
+# it as its photos are: read on the way, it rides with its words (the reply is given Work's line); left for a turn of
+# its own, that turn asks for it. Made the first time a message brings one.
+OUTPUTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pip_chat_steer_outputs (
+ message_id TEXT PRIMARY KEY,
+ pip_id TEXT NOT NULL REFERENCES pips(id),
+ output TEXT NOT NULL CHECK(output IN ('document','slides','spreadsheet','page','dashboard'))
+);
+"""
+
+
+def _kept_outputs(db) -> bool:
+    return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_chat_steer_outputs'").fetchone() is not None
+
+
+def save_output(db, pip_id, message_id, output) -> None:
+    if output:
+        db.execute(OUTPUTS_SCHEMA)
+        db.execute("INSERT OR REPLACE INTO pip_chat_steer_outputs VALUES(?,?,?)", (message_id, pip_id, output))
+
+
+def output_of(db, message_id):
+    """What the message asked its reply to make, or None (Auto, or a registry from before)."""
+    if not _kept_outputs(db):
+        return None
+    row = db.execute("SELECT output FROM pip_chat_steer_outputs WHERE message_id=?", (message_id,)).fetchone()
+    return row[0] if row else None
+
+
+def drop_output(db, message_id) -> None:
+    if _kept_outputs(db):
+        db.execute("DELETE FROM pip_chat_steer_outputs WHERE message_id=?", (message_id,))
+
+
+def outputs_read(db, run_id) -> list:
+    """What the messages this reply read on the way asked it to make, in the order they were sent."""
+    if not _kept_outputs(db):
+        return []
+    return [row[0] for row in db.execute(
+        "SELECT o.output FROM pip_chat_steers s JOIN pip_chat_steer_outputs o ON o.message_id=s.id "
+        "WHERE s.run_id=? AND s.status='applied' ORDER BY s.seq", (run_id,)).fetchall()]
+
+
 def _kept_attachments(db) -> bool:
     return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_chat_steer_attachments'").fetchone() is not None
 
@@ -143,7 +187,9 @@ def shown(db, message_id, item):
     if images:
         item['images'] = [{'index': i, 'mime': image['mime'], 'bytes': image['bytes']} for i, image in enumerate(images)]
     if files:
-        item['files'] = [{'index': i, 'name': file['name'], 'bytes': file['bytes']} for i, file in enumerate(files)]
+        from .pip_chat_sends import file_type        # mime: API 101, as a message of its own lists them
+        item['files'] = [{'index': i, 'name': file['name'], 'bytes': file['bytes'], 'mime': file_type(file['name'])}
+                         for i, file in enumerate(files)]
     return item
 
 
@@ -183,6 +229,7 @@ def _insert(store, pip, run_id, req, actor):
     from .pip_replies import save as save_reply
     save_reply(store.db, pip['id'], message_id, req.get('reply_to'))
     save_attachments(store.db, pip['id'], message_id, req.get('images'), req.get('files'))
+    save_output(store.db, pip['id'], message_id, req.get('output'))
     return store.db.execute('SELECT * FROM pip_chat_steers WHERE id=?', (message_id,)).fetchone()
 
 
@@ -254,6 +301,9 @@ def stage(db, run_id, folder: Path, directory=None):
     items = []
     for row in rows:
         item = {'id': row['id'], 'text': quoted(row['text'], quote_of(db, row['id']), MAX_TEXT_BYTES)}
+        output = output_of(db, row['id'])
+        if output:
+            item['output'] = output                 # API 100: the worker gives the reply Work's line with its words
         images, files = attachments(db, row['id'])
         if images or files:
             if directory is None:
@@ -292,8 +342,10 @@ def read_worker(folder: Path, seen: set[str]):
         return []
     if not isinstance(items, list) or len(items) > MAX_PER_RUN:
         return []
-    return [item for item in items if isinstance(item, dict) and {'id', 'text'} <= set(item) <= {'id', 'text', 'images', 'files'}
+    from .pip_chat import OUTPUTS
+    return [item for item in items if isinstance(item, dict) and {'id', 'text'} <= set(item) <= {'id', 'text', 'images', 'files', 'output'}
             and isinstance(item['id'], str) and item['id'].startswith('message_')
+            and ('output' not in item or (isinstance(item['output'], str) and item['output'] in OUTPUTS))
             and isinstance(item['text'], str) and len(item['text'].encode()) <= MAX_TEXT_BYTES
             and _named(item.get('images'), {'sha256', 'mime', 'bytes', 'path'})
             and _named(item.get('files'), {'name', 'sha256', 'bytes', 'path'})
@@ -420,6 +472,9 @@ def forget_resent(store, pip_id, req, actor):
             forget_replies(store.db, match, values)
             if _kept_attachments(store.db):
                 store.db.execute("DELETE FROM pip_chat_steer_attachments WHERE message_id IN "
+                                 "(SELECT id FROM pip_chat_steers WHERE " + match + ")", values)
+            if _kept_outputs(store.db):
+                store.db.execute("DELETE FROM pip_chat_steer_outputs WHERE message_id IN "
                                  "(SELECT id FROM pip_chat_steers WHERE " + match + ")", values)
             store.db.execute("DELETE FROM pip_chat_steers WHERE " + match, values)
 

@@ -39,7 +39,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_setups", "get_pip_setup", "accept_pip_setup", "reject_pip_setup", "revise_pip_setup",
     "list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context",
     "archive_pip", "restore_pip", "delete_archived_pip",
-    "list_workspaces", "list_pips", "list_pip_types", "list_pip_models", "list_pip_messages", "send_pip_message", "introduce_pip", "get_pip_message_image", "create_pip", "get_pip", "propose_pip_update",
+    "list_workspaces", "list_pips", "list_pip_types", "list_pip_models", "list_pip_messages", "send_pip_message", "introduce_pip", "get_pip_message_image", "get_pip_message_file", "create_pip", "get_pip", "propose_pip_update",
     "accept_pip_update", "pause_pip", "resume_pip", "run_pip", "list_pip_runs",
     "get_pip_run", "cancel_pip_run", "list_workspace_activity", "list_pip_run_activity",
     "reject_pip_update", "list_pip_versions", "get_workspace_context",
@@ -271,7 +271,7 @@ _COMMAND_ARGS = {
     "list_workspaces": set(), "list_pips": {"workspace_id", "limit", "offset", "query", "order", "scope"}, "list_pip_types": set(),
     "list_pip_models": set(),
     "list_pip_messages": {"pip_id", "before_id", "limit", "conversation_id"},
-    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files", "spooled_images", "spooled_files", "display_mentions", "conversation_id", "reply_to"}, "introduce_pip": {"pip_id"},
+    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files", "spooled_images", "spooled_files", "display_mentions", "conversation_id", "reply_to", "output"}, "introduce_pip": {"pip_id"},
     # API 79: several conversations per Pip (pip_conversations).
     "list_pip_conversations": {"pip_id", "archived"}, "create_pip_conversation": {"pip_id", "title"},
     "rename_pip_conversation": {"pip_id", "conversation_id", "title"},
@@ -279,6 +279,7 @@ _COMMAND_ARGS = {
     "add_pip_computer": {"pip_id"}, "rename_pip_computer": {"pip_id", "number", "name"},
     "set_pip_computer_screen": {"pip_id", "size"},
     "get_pip_message_image": {"pip_id", "message_id", "index", "as_file"},
+    "get_pip_message_file": {"pip_id", "message_id", "index"},   # API 101: a message's file, on this computer
     "create_pip": {"workspace_id", "name", "goal", "source_ref", "pip_type", "model_choice", "computer"}, "get_pip": {"pip_id"},
     "propose_pip_update": {"pip_id", "expected_version", "changes", "reason"},
     "accept_pip_update": {"pip_id", "proposal_id", "expected_version"},
@@ -1386,7 +1387,8 @@ class PipStore:
             quoted = conversation_request.get("reply_to")
             conversation_request = pip_chat.request(conversation_request.get("text"), conversation_request.get("request_key"),
                                                     conversation_request.get('chat_options'), images=conversation_request.get('images'),
-                                                    files=conversation_request.get('files'))
+                                                    files=conversation_request.get('files'),
+                                                    output=conversation_request.get('output'))
             if marks:
                 conversation_request["display_mentions"] = marks      # display-only: never part of the retry key
             if conversation_id is not None:
@@ -2966,6 +2968,17 @@ def _outlook_words(microsoft) -> str:
     return outlook_words(microsoft)
 
 
+def _output_line(output, apps_pin) -> str:
+    """Work's one line for the output the user chose for this reply (Pips API 100, artifact_tools.OUTPUT_LINES), given
+    only to a turn that has make_artifact (its app socket): one without it would be asked for what it can't do, and its
+    reply says it didn't make it."""
+    if not output or apps_pin is None:
+        return ""
+    from .artifact_tools import output_line
+    line = output_line(output)
+    return "\n\nOutput: " + line if line else ""
+
+
 def _app_tools_note(apps_pin) -> str:
     """Said beside the user's message, where a model weighs it most: the earlier conversation above
     may hold replies from before these tools existed ("I don't have a Composio connector"), and a
@@ -3252,6 +3265,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         if brought is None:
                             continue
                         text, images = brought
+                    # API 100: what it asked this reply to make, in Work's words, read with it.
+                    text += _output_line(item.get('output'), apps_pin)
                     if self.steer(text, images=images, request_id=item['id']):
                         seen.add(item['id'])
                         received.append(item['id'])
@@ -4365,6 +4380,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             + ("\n\nworking_notes: " + pip_working_notes.NOTICE if working_notes is not None else "")
             + (_app_tools_note(apps_pin) if apps_pin is not None else "")
             + ("\n\n" + left_out_told if left_out_told else "")
+            + _output_line(conversation.get("output"), apps_pin)
             + "\n\nCurrent user message:\n" + conversation["text"])
     elif task_history is not None:
         from .pip_chat_continuity import reference as continuity_reference
@@ -5501,6 +5517,16 @@ def _execute_run(registry, row, config):
             # worker's word for one.
             from .mcp_apps import summary as app_summary
             result["apps"] = [app_summary(record) for record in app_socket.plugins.app_cards[:8]]
+        # What the user chose this reply to make (Pips API 100: its message's output, then each message it read on the
+        # way): one it didn't make or change is said under the reply, in Work's words. Counted here, never the worker's.
+        result.pop("output_missing", None)
+        if manifest.get("run_kind") == "conversation" and isinstance(manifest.get("conversation"), dict):
+            from .pip_library import unmet
+            from .pip_steering import outputs_read
+            wanted = [manifest["conversation"].get("output"), *outputs_read(registry.db, row["id"])]
+            missing = unmet([w for w in wanted if w], app_socket.library.made if app_socket is not None else [])
+            if missing:
+                result["output_missing"] = missing
         if current_tree:
             from .pip_tree_snapshot import verify
             verify(snapshot, source['source_snapshot'])
@@ -7073,6 +7099,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     except OSError:
                         fixes = []
                 result = {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "fixes": fixes}
+            elif command == "get_pip_message_file":
+                from .pip_chat_sends import get_file
+                result = get_file(store, pip_id, request.get("message_id"), request.get("index"), actor)
             elif command == "get_pip_message_image":
                 from .pip_chat import get_image
                 if type(request.get("index")) is not int:
@@ -7093,7 +7122,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                               files=request.get('files'), spooled_images=request.get('spooled_images'),
                               spooled_files=request.get('spooled_files'),
                               display_mentions=request.get('display_mentions'),
-                              conversation_id=request.get('conversation_id'), reply_to=request.get('reply_to'))
+                              conversation_id=request.get('conversation_id'), reply_to=request.get('reply_to'),
+                              output=request.get('output'))
             elif command == "list_pips":
                 # A page at a time (100 at most, the reply's size), oldest first unless `order` says
                 # "recent"; `query` keeps those whose name or title contains it. `total` is how many

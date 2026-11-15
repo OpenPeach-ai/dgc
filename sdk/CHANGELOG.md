@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Pips API 101: a Pip sends files in its chat.** A reply's `files` `[{index, name, bytes, mime}]` beside its `images`; `get_pip_message_file {pip_id, message_id, index}` reads any message's file (where it is kept, local only). Python and TypeScript clients refuse it before API 101.
+- **Pips API 100: `@` outputs in a Pip's chat.** `send_pip_message` takes `output` (`document`, `slides`, `spreadsheet`, `page`, `dashboard`; `auto` or none: nothing asked), as Work's Output menu; a reply that didn't make one carries `output_missing`. Python and TypeScript clients refuse it before API 100.
 - **Pips API 99: where a message sent while a Pip worked was read.** A reply's `steers` (`[{id, at}]`) places each such message in the reply's text; no new command.
 - **Pips API 98: the code card.** `fill_pip_code` types the code a site sent into a Pip's computer from its card in the Pip's chat; local only, never stored or answered.
 - Pips API 97: `list_pip_agents`, `stop_pip_agent`, `set_pip_agents` and `retry_pip_fix` (a Pip's sub-agents; Try again or Leave it after its last try), gated on API 97 in both SDKs; `list_pip_fixes`'s fixes gain `agent`; the Pip's check reply carries `check: true`.

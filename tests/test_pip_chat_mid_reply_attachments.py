@@ -45,7 +45,7 @@ class WhileItWorks(Base):
         message = sent["message"]
         self.assertTrue(message["steered"])
         self.assertEqual(message["images"], [{"index": 0, "mime": "image/png", "bytes": len(PNG)}])
-        self.assertEqual(message["files"], [{"index": 0, "name": "broker notes.txt", "bytes": 20}])
+        self.assertEqual(message["files"], [{"index": 0, "name": "broker notes.txt", "bytes": 20, "mime": "text/plain"}])   # mime: API 101
         listed = [m for m in self.page()["messages"] if m["id"] == message["id"]][0]
         self.assertEqual((listed["images"], listed["files"]), (message["images"], message["files"]))
         self.assertEqual(pip_chat.get_image(self.store, self.job["id"], message["id"], 0)["image"], DOT)

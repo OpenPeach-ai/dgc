@@ -192,8 +192,10 @@ class WordingTests(unittest.TestCase):
         # 2026-11-15: +948 (about 240 tokens a request) for his asks that day: "Better tools" (a Pip finds, judges and
         # installs open-source programs and models itself, asks in the chat before a big one; cut from 1524 to fit)
         # and the Terminal's no-limit wording (a long command carries on in the background).
+        # 2026-11-16: +192 (about 50 tokens a request) for send_to_chat: a Pip sends what it made in its chat, as a
+        # person does (his ask, 15 Nov; Pips API 101), and is told to, so it never only says where a file is.
         size = len(json.dumps(pip_computer.schema(None))) + len(pip_computer.NOTICE)
-        self.assertLessEqual(size, 5710, size)
+        self.assertLessEqual(size, 5910, size)
 
 
 @unittest.skipUnless(REAL_CHROME and box.capability().get("available"), "needs Linux, bubblewrap and a Chromium build")

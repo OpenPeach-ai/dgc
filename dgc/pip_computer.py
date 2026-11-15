@@ -132,7 +132,7 @@ TOOL = "computer"
 # and reload, check and uncheck, and the mouse over or a drag between refs.
 TEXT_OPS = ("open", "read", "click", "type", "press", "choose", "back", "forward", "reload", "wait", "check", "uncheck",
             "hover", "tabs", "close_browser", "status", "dialog", "files", "open_file", "run", "jobs", "stop_job",
-            "sign_in")
+            "sign_in", "send_to_chat")
 # Eyes and a cursor (pip_eyes): a screenshot the model sees, and the mouse by position. Only a Pip whose
 # model can see (or that has a vision model look for it) is offered the position ops. drag also works by ref (ref onto
 # to), so a Pip that can't see has it too.
@@ -144,7 +144,7 @@ from .pip_desktop_eyes import DESKTOP_OPS, DESKTOP_POINT_OPS  # noqa: E402
 OPS = TEXT_OPS + ("look",) + POINT_OPS + ("upload",) + DESKTOP_OPS
 APP_KEYS = ("images", "documents", "pdf", "code", "files", "terminal", "browser")
 # Files and the Terminal: no browser, so they never wait on (or hold) the browser.
-DESK_OPS = ("files", "open_file", "run", "jobs", "stop_job")
+DESK_OPS = ("files", "open_file", "run", "jobs", "stop_job", "send_to_chat")
 # A Pip answers in its conversations in parallel (pip_conversations), and its computer is one screen: the reply that has
 # it keeps it until it ends, and another reply's computer step waits its turn, with no cut-off (his call, 10 Nov). The
 # first look answers at once with what the computer is busy with (FIRST_LOOK), so the chat can say so; the worker then
@@ -217,7 +217,8 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                         "save one. " + eyes_text + "upload puts a file from your Files (path) into the page's "
                         "file field or upload button (ref" + (", or x,y" if eyes in ("own", "relay") else "") + "). "
                         "Files (your own folder; browser downloads land in Downloads, photos and files the user sent "
-                        "in From chat): files lists a folder (path), open_file reads a text file (path). Terminal: run "
+                        "in From chat): files lists a folder (path), open_file reads a text file (path), send_to_chat (path) "
+                        "shows the user one of your files with your reply. Terminal: run "
                         "runs a shell command in Files (public websites only), with no time limit: one still running "
                         "after a minute carries on in the background on its own (it says its job); background true "
                         "starts a long one there at once: jobs lists them, stop_job (job) stops one. Reading is free; anything "
@@ -274,7 +275,8 @@ NOTICE = ("You have your own browser and saved sign-ins through the computer too
           "here, so get system tools with micromamba from conda-forge. Over about 1 GB, ask the user in the chat first "
           "at every level (its size, what it gives; offer_choices \"Download it\" or \"Not now\"); smaller ones just "
           "fetch. Tell the user in one line what you installed and why; when one worked well, note it and use it first "
-          "next time.")
+          "next time. Send what you made for the user (a picture, a video, a file) with send_to_chat; never only say "
+          "where it is.")
 
 
 # What a Personal Pip with a computer is told about paying and ordering, in place of the "You cannot book, buy, pay"
@@ -1508,6 +1510,18 @@ class Host:
                 return f"Files/{listing['path']}:\n" + ("\n".join(rows) if rows else "(empty)")
             if op == "open_file":
                 return desk.read_for_pip(files, args.get("path"))
+            if op == "send_to_chat":
+                # Pips API 101 (pip_chat_sends): read here, inside its Files, kept and recorded for this reply.
+                from . import pip_chat_sends
+                frames = getattr(self, "frames_dir", None)
+                if getattr(self, "run_id", None) is None or frames is None:
+                    return "error: send_to_chat works only while you are answering the user in your chat."
+                raw, size = desk._read_bytes(files, args.get("path"), pip_chat_sends.MAX_FILE_BYTES + 1)
+                if size > pip_chat_sends.MAX_FILE_BYTES:
+                    return (f"error: that file is over {pip_chat_sends.MAX_FILE_BYTES // 1048576} MB. Tell the user "
+                            "where it is in your Files instead; they can open it there.")
+                name = str(args.get("path") or "").replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+                return pip_chat_sends.send(self.state_directory, self.pip_id, Path(frames).parent.parent, name, raw)
             if op == "jobs":
                 listed = desk.jobs(self.root)
                 if not listed:
@@ -1536,8 +1550,9 @@ class Host:
                 job = desk.start_background(self.root, args.get("command"), "pip",
                                             policy=self._terminal_policy() if careful else None, env=keys)
                 seconds, _most = desk.background_limits()
-                return (f"Started in the background as {job['id']}: $ {job['command']}\nIt may run up to "
-                        f"{seconds // 60} minutes. Check it with jobs; stop it with stop_job (job: {job['id']}).")
+                limit = f"It may run up to {seconds // 60} minutes." if seconds else "It has no time limit."
+                return (f"Started in the background as {job['id']}: $ {job['command']}\n{limit} Check it with jobs; "
+                        f"stop it with stop_job (job: {job['id']}).")
             entry = desk.run_command(self.root, args.get("command"), "pip", policy=self._terminal_policy() if careful else None,
                                      env=keys)
             from .tools import _UNTRUSTED_PAGE
@@ -3247,7 +3262,7 @@ def _take_card_note(host) -> str | None:
 
 WAIT_SECONDS, MAX_WAIT_SECONDS = 10.0, 30.0
 # Steps a page's open confirm or prompt doesn't stop: answering it, saying where the browser is, the other tabs, Files.
-DIALOG_FREE_OPS = ("dialog", "status", "tabs", "files", "open_file", "run", "jobs", "stop_job")
+DIALOG_FREE_OPS = ("dialog", "status", "tabs", "files", "open_file", "run", "jobs", "stop_job", "send_to_chat")
 
 
 def _untrusted() -> str:

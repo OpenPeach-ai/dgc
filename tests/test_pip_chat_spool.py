@@ -219,7 +219,8 @@ class SpooledFileTests(unittest.TestCase):
                                              {"name": "notes.txt", "spool": self.spool(notes, ".bin")}])
         self.assertTrue(sent["ok"], sent.get("error"))
         self.assertEqual(sent["result"]["message"]["files"],
-                         [{"index": 0, "name": "hospital bill.pdf", "bytes": len(pdf)}, {"index": 1, "name": "notes.txt", "bytes": len(notes)}])
+                         [{"index": 0, "name": "hospital bill.pdf", "bytes": len(pdf), "mime": "application/pdf"},
+                          {"index": 1, "name": "notes.txt", "bytes": len(notes), "mime": "text/plain"}])   # mime: API 101
         self.assertEqual(self.spooled(), [])
         [path, _] = pip_chat.file_paths(self.registry.directory, pip["id"], [
             {"name": "hospital bill.pdf", "sha256": __import__("hashlib").sha256(pdf).hexdigest(), "bytes": len(pdf)},

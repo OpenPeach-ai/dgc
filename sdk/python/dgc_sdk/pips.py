@@ -485,6 +485,16 @@ MUTATION_COMMANDS |= API97_MUTATIONS
 # Local only.
 API98_MUTATIONS = frozenset({'fill_pip_code'})
 MUTATION_COMMANDS |= API98_MUTATIONS
+# API 100: @ outputs in a Pip's chat, as Work's Output menu. send_pip_message's `output` asks the reply to make one
+# document, slides, spreadsheet, page or dashboard ("auto" or none: nothing asked); a reply that didn't carries
+# `output_missing` (the line to show under it).
+API100_FIELDS = {'send_pip_message': frozenset({'output'})}
+# API 101: a Pip sends files in its chat (its computer's send_to_chat): a reply's `files` [{index, name, bytes, mime}]
+# beside its `images`; any message's file (the user's too) is read with get_pip_message_file {pip_id, message_id,
+# index}, answered with where it is kept on this computer (local only), checked against its digest.
+API101_READS = frozenset({'get_pip_message_file'})
+READ_COMMANDS |= API101_READS
+PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
 def _api88_field(command, values) -> bool:
@@ -763,8 +773,9 @@ COMMAND_FIELDS = {
     'review_pip_execution': frozenset(['expected_revision', 'reason', 'run_id', 'status']),
     'review_pip_finding': frozenset(['expected_revision', 'finding_index', 'reason', 'run_id', 'status']),
     'run_pip': frozenset(['idempotency_key', 'pip_id', 'expected_version', 'expected_lifecycle_revision', 'expected_plan_digest']),
-    'send_pip_message': frozenset(['chat_options', 'conversation_id', 'display_mentions', 'files', 'idempotency_key', 'images', 'pip_id', 'reply_to', 'spooled_files', 'spooled_images', 'text']),
+    'send_pip_message': frozenset(['chat_options', 'conversation_id', 'display_mentions', 'files', 'idempotency_key', 'images', 'output', 'pip_id', 'reply_to', 'spooled_files', 'spooled_images', 'text']),
     'get_pip_message_image': frozenset(['as_file', 'index', 'message_id', 'pip_id']),
+    'get_pip_message_file': frozenset(['index', 'message_id', 'pip_id']),
     'introduce_pip': frozenset(['pip_id']),
     'stop_pips': frozenset([]),
 }
@@ -971,7 +982,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API98_MUTATIONS:
+        if command in API101_READS:
+            minimum = 101
+        elif command in API98_MUTATIONS:
             minimum = 98
         elif command in API97_READS | API97_MUTATIONS:
             minimum = 97
@@ -1287,6 +1300,12 @@ class Pips:
             raise DGCConfigError("key_id is the key's id, pipkey_ and 32 hex digits")
         if command == 'save_pip_key' and not (isinstance(values.get('value'), str) and len(values['value']) <= MAX_PLUGIN_KEY):
             raise DGCConfigError('value is the key, up to 16,384 characters')
+        if API100_FIELDS.get(command, frozenset()) & set(values):
+            if version < 100:
+                raise DGCUnsupportedError("Asking a Pip's reply for a document, deck, sheet, page or dashboard (output) "
+                                          "requires a runtime advertising Pips API 100 or newer")
+            if values['output'] not in PIP_OUTPUTS:
+                raise DGCConfigError("output is auto, document, slides, spreadsheet, page or dashboard")
         if API86_FIELDS.get(command, frozenset()) & set(values) and version < 86:
             raise DGCUnsupportedError("Naming which of a Pip's computers (number) requires a runtime advertising Pips API 86 or newer")
         if (command in API86_FIELDS and 'number' in values) or command == 'rename_pip_computer':

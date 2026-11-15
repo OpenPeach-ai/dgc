@@ -64,6 +64,14 @@ class MovesToTheBackground(unittest.TestCase):
     tearDown = jobs_tests.BackgroundJobs.tearDown
     job = jobs_tests.BackgroundJobs.job
 
+    def test_a_background_command_is_never_said_to_run_up_to_0_minutes(self):
+        host = types.SimpleNamespace(root=self.root, files_dir=desk.files_root(self.root), waiting=[], last_used=0,
+                                     run_id=None, careful=False, state_directory=None, pip_id=None)
+        with mock.patch("dgc.dev_mode.chosen", return_value=None):
+            said = pip_computer.Host._desk(host, "run", {"command": "sleep 1", "background": True})
+        self.assertIn("no time limit", said)
+        self.assertNotIn("0 minutes", said)
+
     def test_a_quick_command_answers_as_before(self):
         entry = desk.run_command(self.root, "echo hi", "pip")
         self.assertEqual((entry["exit"], entry["output"].strip()), (0, "hi"))

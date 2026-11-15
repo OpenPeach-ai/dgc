@@ -59,6 +59,7 @@ export type PipReadParams = {
   list_pip_computer_actions: { pip_id: string; limit?: number };
   get_pip_computer_frame: { run_id: string; frame: string };
   get_pip_message_image: { pip_id: string; message_id: string; index: number; as_file?: boolean };
+  get_pip_message_file: { pip_id: string; message_id: string; index: number };
   list_pip_computer_frames: { run_id: string; pointers?: boolean };
   list_pip_action_grants: { pip_id: string };
   list_pip_feedback: { pip_id: string };
@@ -287,7 +288,8 @@ export type PipMutationParams = {
   review_pip_finding: { expected_revision: number; finding_index: number; reason: string; run_id: string; status: string };
   run_pip: { idempotency_key: string; pip_id: string; expected_version?: number; expected_lifecycle_revision?: number; expected_plan_digest?: string };
   send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[]; files?: { name: string; data: string }[]; display_mentions?: unknown[];
-    spooled_images?: { name: string; media_type: string }[]; spooled_files?: { name: string; spool: string }[]; conversation_id?: string; reply_to?: string };
+    spooled_images?: { name: string; media_type: string }[]; spooled_files?: { name: string; spool: string }[]; conversation_id?: string; reply_to?: string;
+    output?: "auto" | "document" | "slides" | "spreadsheet" | "page" | "dashboard" };
   introduce_pip: { pip_id: string };
   stop_pips: { [key: string]: never };
 };
@@ -543,6 +545,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
     "files",
     "idempotency_key",
     "images",
+    "output",
     "pip_id",
     "reply_to",
     "spooled_files",
@@ -551,6 +554,11 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   ],
   "get_pip_message_image": [
     "as_file",
+    "index",
+    "message_id",
+    "pip_id"
+  ],
+  "get_pip_message_file": [
     "index",
     "message_id",
     "pip_id"
@@ -1029,6 +1037,10 @@ for (const command of API97_MUTATIONS) MUTATIONS.add(command);
 // Local only.
 const API98_MUTATIONS = new Set(["fill_pip_code"]);
 for (const command of API98_MUTATIONS) MUTATIONS.add(command);
+// API 101: a Pip sends files in its chat; get_pip_message_file reads any message's file (where it is kept, this
+// computer only), checked against its digest. A reply carries `files` [{index, name, bytes, mime}].
+const API101_READS = new Set(["get_pip_message_file"]);
+for (const command of API101_READS) READS.add(command);
 /** What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list) and
  *  use_pip_computer_view's op close (its tab closed). start_pip_app_link's another is older (0.51). */
 function api88Field(command: string, values: Record<string, unknown>): boolean {
@@ -1187,7 +1199,7 @@ export class Pips {
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
     if (appEvent && this.plan) throw new DGCUnsupportedError("Sending your app's events to Pips is unavailable in plan mode");
-    const minimum = API98_MUTATIONS.has(command) ? 98 : API97_READS.has(command) || API97_MUTATIONS.has(command) ? 97 : API96_READS.has(command) || API96_MUTATIONS.has(command) ? 96 : API93_READS.has(command) || API93_MUTATIONS.has(command) ? 93 : API92_READS.has(command) || API92_MUTATIONS.has(command) ? 92 : API91_READS.has(command) || API91_MUTATIONS.has(command) ? 91 : API90_READS.has(command) || API90_MUTATIONS.has(command) ? 90 : API88_READS.has(command) || API88_MUTATIONS.has(command) ? 88 : API87_MUTATIONS.has(command) ? 87 : API86_MUTATIONS.has(command) ? 86 : API82_READS.has(command) || API82_MUTATIONS.has(command) ? 82 : API79_READS.has(command) || API79_MUTATIONS.has(command) ? 79 : API77_MUTATIONS.has(command) ? 77 : API76_READS.has(command) || API76_MUTATIONS.has(command) ? 76 : API75_READS.has(command) || API75_MUTATIONS.has(command) ? 75 : API72_READS.has(command) || API72_MUTATIONS.has(command) ? 72 : API69_READS.has(command) || API69_MUTATIONS.has(command) ? 69 : API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API101_READS.has(command) ? 101 : API98_MUTATIONS.has(command) ? 98 : API97_READS.has(command) || API97_MUTATIONS.has(command) ? 97 : API96_READS.has(command) || API96_MUTATIONS.has(command) ? 96 : API93_READS.has(command) || API93_MUTATIONS.has(command) ? 93 : API92_READS.has(command) || API92_MUTATIONS.has(command) ? 92 : API91_READS.has(command) || API91_MUTATIONS.has(command) ? 91 : API90_READS.has(command) || API90_MUTATIONS.has(command) ? 90 : API88_READS.has(command) || API88_MUTATIONS.has(command) ? 88 : API87_MUTATIONS.has(command) ? 87 : API86_MUTATIONS.has(command) ? 86 : API82_READS.has(command) || API82_MUTATIONS.has(command) ? 82 : API79_READS.has(command) || API79_MUTATIONS.has(command) ? 79 : API77_MUTATIONS.has(command) ? 77 : API76_READS.has(command) || API76_MUTATIONS.has(command) ? 76 : API75_READS.has(command) || API75_MUTATIONS.has(command) ? 75 : API72_READS.has(command) || API72_MUTATIONS.has(command) ? 72 : API69_READS.has(command) || API69_MUTATIONS.has(command) ? 69 : API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -1382,6 +1394,16 @@ export class Pips {
       }
       if (!(typeof values.reply_to === "string" && /^message_[0-9a-f]{32}$/.test(values.reply_to))) {
         throw new DGCConfigError("reply_to names one of the Pip's own messages (message_ and 32 hex digits)");
+      }
+    }
+    // API 100: @ outputs in a Pip's chat, as Work's Output menu: the reply is asked for one document, deck, sheet, page
+    // or dashboard ("auto": nothing asked); a reply that didn't make one carries `output_missing`, the line to show.
+    if (command === "send_pip_message" && Object.hasOwn(values, "output")) {
+      if ((this.caps.pips_api_version as number) < 100) {
+        throw new DGCUnsupportedError("Asking a Pip's reply for a document, deck, sheet, page or dashboard (output) requires a runtime advertising Pips API 100 or newer");
+      }
+      if (!["auto", "document", "slides", "spreadsheet", "page", "dashboard"].includes(values.output as string)) {
+        throw new DGCConfigError("output is auto, document, slides, spreadsheet, page or dashboard");
       }
     }
     if (API79_FIELDS.has(command) && Object.hasOwn(values, "conversation_id")) {

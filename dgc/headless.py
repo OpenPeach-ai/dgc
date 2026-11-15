@@ -554,7 +554,15 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # finding becomes a fix by the Pip's level; list_pip_attention kinds fix_ask, fix_ready, fix_held, waiting; a run post's
 # said, found and findings[].state; a change's tests and git. A Work chat gets a Pip's card only for a run it started;
 # get_pip's report_chats is 0 and report_session null. get_pip_owner, set_pip_owner and list_session_pips are gone.
-PIPS_API_VERSION = 99
+# API 99 (0.52): a reply's `steers` [{id, at}], where each message sent while the Pip worked was read.
+# API 100 (0.52, @ outputs in a Pip's chat as in Work): send_pip_message takes `output` (document | slides | spreadsheet
+# | page | dashboard; "auto" or none asks for nothing), the reply is given Work's line for it (artifact_tools), a message
+# sent while the Pip works keeps its own; a reply that didn't make or change one carries `output_missing` (the line).
+# API 101 (0.52, a Pip sends files in its chat): its computer's send_to_chat {path} shows the user one of its files with
+# its reply (a reply's `images` and, new, `files` [{index, name, bytes, mime}]; a user message's files gain `mime`);
+# get_pip_message_file {pip_id, message_id, index} answers with where a message's file is kept (local only), checked
+# against its digest.
+PIPS_API_VERSION = 101
 
 
 def attachment_limits() -> dict:
