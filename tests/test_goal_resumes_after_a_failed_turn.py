@@ -171,5 +171,33 @@ class TheBackendSide(unittest.TestCase):
         self.assertEqual(self.timers, [])
 
 
+class WakesWaitForTheResume(unittest.TestCase):
+    backend, schedule, fire = TheBackendSide.backend, TheBackendSide.schedule, TheBackendSide.fire
+    """The soak's outage: every sub-agent hand-back woke the session and failed again (7 error lines in 2 minutes).
+    While a goal waits on its resume after a failed turn, a wake waits too; the resumed turn reads what arrived."""
+
+    def test_no_wake_while_the_resume_is_waiting(self):
+        agent = Agent()
+        agent.monitors = object()
+        be = self.backend(agent)
+        be._agent_wakes = ["agent finished"]
+        with self.schedule(be):
+            be._maybe_auto_resume_goal(failed=True, cancelled=False)
+        self.assertTrue(be._wake_blocked_locked(), "waits for the resume")
+        be._goal_resume_token = None
+        self.assertFalse(be._wake_blocked_locked())
+
+    def test_a_resume_that_doesnt_run_lets_the_waiting_wakes_go(self):
+        agent = Agent()
+        be = self.backend(agent)
+        woken = []
+        be._maybe_wake = lambda: woken.append(1)
+        with self.schedule(be):
+            be._maybe_auto_resume_goal(failed=True, cancelled=False)
+        agent.update_goal("paused", reason="Paused by you")
+        self.fire(be)
+        self.assertEqual(woken, [1])
+
+
 if __name__ == "__main__":
     unittest.main()

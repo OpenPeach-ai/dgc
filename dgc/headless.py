@@ -5070,6 +5070,10 @@ class Backend:
         if (getattr(agent, "monitors", None) is None or getattr(self, "_wake_suppressed", 0)
                 or getattr(agent, "stopping", False)):
             return True
+        if getattr(self, "_goal_resume_token", None) is not None:
+            # A goal waits on its resume after a failed turn (an outage): a wake now would only fail again; the resumed
+            # turn reads what arrived, and _resume_goal_now lets the wakes go if it doesn't run (the goal soak, 16 Nov).
+            return True
         config = getattr(self, "config", getattr(agent, "config", None))
         get = getattr(config, "get", None)
         engine = get("subscription_engine", "") if callable(get) else ""
@@ -5342,14 +5346,18 @@ class Backend:
             if (getattr(agent, "stopping", False) is True or getattr(agent, "goal_status", "") != "paused"
                     or getattr(agent, "_goal_failed_pause", False) is not True or self._queue
                     or getattr(self, "_worker", None) is not None):
-                return
-            if not agent.update_goal("active"):
-                return
-            self._queue.append((auto_resume_prompt(reason, checklist_cleared=self._checklist_cleared()),
-                                None, None, "resume"))
-            worker = threading.Thread(target=self._run_turn_queue, daemon=True, name="dgc-headless-turns")
-            self._worker = worker
-            worker.start()
+                resumed = False
+            else:
+                resumed = bool(agent.update_goal("active"))
+            if resumed:
+                self._queue.append((auto_resume_prompt(reason, checklist_cleared=self._checklist_cleared()),
+                                    None, None, "resume"))
+                worker = threading.Thread(target=self._run_turn_queue, daemon=True, name="dgc-headless-turns")
+                self._worker = worker
+                worker.start()
+        if not resumed:
+            self._maybe_wake()               # the wakes that waited for it go now
+            return
         self._emit_goal()
         self.ui.info(f"continuing the goal ({number} of {AUTO_RESUME_MAX})")
 
