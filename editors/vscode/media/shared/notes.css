@@ -6,7 +6,8 @@
 .hc-note[data-form="m"], .hc-note[data-form="l"], .hc-note[data-form="full"] { gap: 8px; }
 .nt-top { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .nt-askbox:empty, .nt-undobox:empty, .nt-fmtbox:empty, .nt-under:empty, .nt-toolsbox:empty, .nt-pop:empty { display: none; }
-.nt-folder { flex: 0 1 auto; gap: 5px; min-width: 0; max-width: 170px; height: 24px; padding: 0 7px; }
+/* (26px, as New note beside it and the search box under it: it was 24 in a row of 26.) */
+.nt-folder { flex: 0 1 auto; gap: 5px; min-width: 0; max-width: 170px; height: 26px; padding: 0 7px; }
 .nt-folder span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nt-folder svg { flex: none; }
 .nt-find { position: relative; flex: 1 1 auto; display: flex; min-width: 0; color: var(--hc-quiet); }

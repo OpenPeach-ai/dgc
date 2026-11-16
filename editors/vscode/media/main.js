@@ -4076,12 +4076,14 @@
     const node = el("div", "tip");
     node.hidden = true; node.setAttribute("role", "tooltip"); node.id = "hover-tip";
     document.body.appendChild(node);
-    let timer = 0, warm = 0, target = null, native = "", alive = 0;
+    // (`extra`: words cut with "…" under the pointer, said under the control's own label; `own`: the label of a box
+    // that has none of its own, only words that are cut.)
+    let timer = 0, warm = 0, target = null, native = "", alive = 0, extra = "", own = "";
     function hide() {
       clearTimeout(timer); if (alive) { clearInterval(alive); alive = 0; }
       if (target && native) target.setAttribute("title", native);
       if (node.hidden === false) warm = Date.now();
-      target = null; native = ""; node.hidden = true; node.className = "tip";
+      target = null; native = ""; extra = ""; own = ""; node.hidden = true; node.className = "tip";
     }
     function paint(el0, label) {
       const [head, ...rest] = label.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -4108,12 +4110,12 @@
       node.style.setProperty("--tip-arrow", `${Math.round(Math.max(8, Math.min(centre, box.width - 8)))}px`);
       node.classList.add(side);
     }
-    function show(el0, instant) {
-      if (el0 === target) return;
-      const label = (el0.getAttribute("title") || el0.dataset.tip || "").trim();
+    function show(el0, instant, more = "", mine = "") {
+      if (el0 === target && more === extra) return;
+      const label = mine || (el0 === target && native ? native : (el0.getAttribute("title") || el0.dataset.tip || "")).trim();
       if (!label || el0.closest("[hidden]")) return;
       hide();
-      target = el0; native = el0.getAttribute("title") || "";
+      target = el0; native = el0.getAttribute("title") || ""; extra = more; own = mine;
       // Moving to a neighbouring control should not make you wait again -- but the window in
       // which that holds is short, or scanning a toolbar makes every label feel instant.
       //
@@ -4126,7 +4128,7 @@
         // A long name sliding in a menu shows its whole self (DgcMenu.slide): a label would only cover the row above.
         if (el0.classList.contains("is-sliding")) return;
         if (native) el0.removeAttribute("title");
-        paint(el0, (native || el0.dataset.tip || "").trim() || label);
+        paint(el0, ((own || native || el0.dataset.tip || "").trim() || label) + (extra ? `\n${extra}` : ""));
         // A control the page took away while its label was up (a list drawn again under the pointer) takes its label
         // with it: a label never stays over rows it does not belong to.
         if (alive) clearInterval(alive);
@@ -4151,6 +4153,26 @@
   })();
   renderCacheClock();             // the clock's first paint: in the footer from the start, its words through the label
   const tipTarget = (event) => event.target?.closest?.("[title], [data-tip]") || null;
+  // Words cut with "…" say the whole of themselves to a pointer that rests on them (the layout audit, 0.52), as on
+  // every other page (media/shared/tip.js, cutUnder: the same rule; this page draws its own label). Looked for
+  // through what lies at the pointer (a card that is one button lies over its own lines); a menu's row is left alone
+  // (its name slides into sight by itself).
+  function cutUnder(x, y) {
+    if (typeof document.elementsFromPoint !== "function" || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const at = document.elementsFromPoint(x, y).slice(0, 6), seen = new Set();
+    for (const start of at) for (let n = start, k = 0; n && n.nodeType === 1 && k < 3; n = n.parentElement, k++) {
+      if (seen.has(n)) break;
+      seen.add(n);
+      if (n.classList.contains("dgc-menu-label")) return null;
+      const s = getComputedStyle(n);
+      if (s.display === "inline" || s.textOverflow !== "ellipsis" || s.overflowX === "visible" || !(n.scrollWidth > n.clientWidth + 1)) continue;
+      const b = n.getBoundingClientRect();
+      if (x < b.left || x > b.right || y < b.top || y > b.bottom) continue;
+      const words = (n.textContent || "").replace(/\s+/g, " ").trim();
+      if (words) return { el: n, words };
+    }
+    return null;
+  }
   // Focus DGC puts back for the reader as a dialog closes is not a request for a label: the label on
   // the control it lands on (the agents pill) would cover what the dialog was opened over, such as a
   // docked question's pager. Only this one programmatic focus is quiet; the next one labels as usual.
@@ -4162,8 +4184,10 @@
     hoverTip.hide();
   }
   document.addEventListener("pointerover", (e) => {
-    const found = tipTarget(e);
-    if (found) hoverTip.show(found, false); else hoverTip.hide();
+    const found = tipTarget(e), cut = cutUnder(e.clientX, e.clientY);
+    if (found) hoverTip.show(found, false, cut && (found.contains(cut.el) || cut.el.contains(found)) && !(found.getAttribute("title") || found.dataset.tip || "").includes(cut.words.slice(0, 24)) ? cut.words : "");
+    else if (cut) hoverTip.show(cut.el, false, "", cut.words);
+    else hoverTip.hide();
   });
   document.addEventListener("pointerdown", () => hoverTip.hide(), true);
   document.addEventListener("focusin", (e) => {

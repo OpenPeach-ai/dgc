@@ -80,8 +80,13 @@
     doc.body.append(menu);
     // Beside what opened it, inside the page: above when there is room, and never past an edge.
     const a = at ? { left: at.x, right: at.x, top: at.y, bottom: at.y, width: 0 } : anchor.getBoundingClientRect();
-    const w = menu.offsetWidth, h = menu.offsetHeight, vw = view.innerWidth, vh = view.innerHeight, gap = at ? 2 : 8;
+    const w = menu.offsetWidth, vw = view.innerWidth, vh = view.innerHeight, gap = at ? 2 : 8;
+    let h = menu.offsetHeight;
     const above = place === "above" ? a.top - gap - h >= 6 || a.top > vh - a.bottom : !(a.bottom + gap + h <= vh - 6 || a.top < vh - a.bottom);
+    // Where neither side has room for all of it (a short window), it takes the room its side has and scrolls inside
+    // itself: it never lies over the control that opened it.
+    const room = Math.floor(above ? a.top - gap - 6 : vh - 6 - a.bottom - gap);
+    if (h > room && room >= 64) { menu.style.maxHeight = `${room}px`; menu.style.overflowY = "auto"; menu.style.overscrollBehavior = "contain"; h = menu.offsetHeight; }
     const left = Math.max(6, Math.min(vw - w - 6, at ? a.left : a.left + a.width / 2 - w / 2));
     const top = Math.max(6, Math.min(vh - h - 6, above ? a.top - gap - h : a.bottom + gap));
     menu.style.left = `${Math.round(left)}px`; menu.style.top = `${Math.round(top)}px`;

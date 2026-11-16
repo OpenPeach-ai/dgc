@@ -958,7 +958,10 @@ function notice() { return pluginNotice ? `<p class="notice" role="status">${esc
 function addMenu() { return `<div class="add-wrap"><button id="add-menu" class="secondary" aria-haspopup="menu" aria-expanded="false">Add <span aria-hidden="true">⌄</span></button><div id="add-options" class="add-menu dgc-popover" role="menu" hidden><button role="menuitem" data-add="create">Create plugin</button><button role="menuitem" data-add="marketplace">Add a marketplace</button><button role="menuitem" data-add="mcp">Add MCP server</button><button role="menuitem" data-add="link">Install from link</button></div></div>`; }
 function bindAddMenu(main) {
     const menu = $('add-options'), toggle = $('add-menu');
-    if (toggle) toggle.onclick = () => { menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); if (!menu.hidden) menu.querySelector('button').focus(); };
+    // (It hangs from the button's right edge; where the button stands at the page's left, in a narrow tab, that ran past
+    // the page's edge and was cut: there it hangs from the button's left edge.)
+    if (toggle) toggle.onclick = () => { menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden));
+        if (!menu.hidden) { menu.classList.remove('from-left'); const page = (menu.closest('main') || document.documentElement).getBoundingClientRect(); if (menu.getBoundingClientRect().left < Math.max(0, page.left) + 4) menu.classList.add('from-left'); menu.querySelector('button').focus(); } };
     menu?.addEventListener('keydown', e => {
         const buttons = [...menu.querySelectorAll('button')], at = buttons.indexOf(document.activeElement);
         if (['ArrowDown','ArrowUp'].includes(e.key)) { e.preventDefault(); buttons[(at + (e.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length].focus(); }

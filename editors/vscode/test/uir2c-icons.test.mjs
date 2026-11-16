@@ -7,14 +7,11 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { chromiumOrNull } from "./support/look-probe.mjs";
-import { launchArgs, glyphs, glyphsWithMenus, ACTION_OF } from "./support/uir2c-scene.mjs";
-import { openWork, openChatDgc, openPip } from "./support/uir2a-scene.mjs";
-import { openHomeCards, grid } from "./support/uir2b-scene.mjs";
-import { openHome } from "./support/home-scene.mjs";
+import { launchArgs, ACTION_OF } from "./support/uir2c-scene.mjs";
 import { openDock } from "./support/dock-scene.mjs";
-import { openLibraryTab, openLibraryPage } from "./support/library-scene.mjs";
 import { openOnePips, MORNINGS } from "./support/one-pips-scene.mjs";
 import { cleanup } from "./support/panel-bundle.mjs";
+import { GLYPH, GLYPH_PLACES, walkGlyphs, glyphFaults, sizeFaults } from "./support/icon-walk.mjs";
 
 const chromium = await chromiumOrNull();
 let browser;
@@ -28,54 +25,14 @@ const skipOrFail = (t) => {
 before(async () => { if (!chromium) return; try { browser = await chromium.launch({ args: launchArgs }); } catch { browser = null; } });
 after(async () => { await browser?.close(); cleanup(); });
 const ICONS = new URL("../media/shared/icons.js", import.meta.url);
-/** The one glyph each action draws. */
-const GLYPH = { "open-in-editor": "go-to-file", more: "more", back: "arrow-left", settings: "settings-gear", add: "add", close: "close", copy: "copy", delete: "trash", pin: "pin", unpin: "unpin", archive: "archive", stop: "debug-stop", save: "desktop-download" };
-// (The box's own Stop is the Send button's other state, drawn by each box: read, and held to one drawing, but not the row glyph.)
-
-/** Every surface, read: [{ where, action, label, sig, size, shown, menu }]. */
-async function walk() {
-  const found = [], take = async (page, where, opts) => { found.push(...await glyphsWithMenus(page, where, opts)); };
-  // Work: the side bar's list of sessions (a row pointed at), and a session's own page.
-  { const x = await openDock(browser, { tab: "work", width: 440 });
-    try { await x.page.hover("#sessions-list .session-row").catch(() => {}); await x.page.waitForTimeout(120); await take(x.page, "Work's list"); } finally { await x.page.close(); } }
-  { const x = await openWork(browser, { width: 700, turns: 1, running: true });
-    try { await take(x.page, "a Work session"); } finally { await x.page.close(); } }
-  // The side bar's Chat list, and ChatDGC's page.
-  { const x = await openHome(browser, { tab: "chat", width: 440 });
-    try { await x.page.hover("#chats-list .chat-row").catch(() => {}); await x.page.waitForTimeout(120); await take(x.page, "the Chat list"); } finally { await x.page.close(); } }
-  { const x = await openChatDgc(browser, { width: 700, turns: 1 });
-    try { await take(x.page, "ChatDGC"); } finally { await x.page.close(); } }
-  // Pips: the list (a row pointed at), a Pip's chat in the side bar and in its tab, and its page.
-  for (const where of ["side", "tab"]) { const x = await openOnePips(browser, { where, width: where === "side" ? 300 : 700, api: 103 });
-    try { await take(x.page, `the Pips list (${where})`); await x.openPip(MORNINGS); await take(x.page, `a Pip's chat from the list (${where})`);
-      // Its page: Settings, from the chat's menu.
-      await x.inPips((root) => root.querySelector('.pip-menu [data-tab="settings"], .pip-menu [data-tab]')?.click()); await x.page.waitForTimeout(300); await take(x.page, `a Pip's page (${where})`); } finally { await x.close(); } }
-  for (const width of [300, 700]) { const x = await openPip(browser, { width, said: [{ role: "user", text: "Which sources?" }, { role: "assistant", text: "Two: the tide tables and the port log." }] });
-    try { await take(x.page, `a Pip's chat (${width}px)`); } finally { await x.close(); } }
-  // Home (every card), the Library in the side bar and in its tab, and the dock with its menus.
-  { const x = await openHomeCards(browser, { width: 440, layout: grid.EVERY });
-    try { await take(x.page, "Home"); await x.page.click("#dgc-dock .dgc-dock-add, #dgc-dock [data-add]").catch(() => {}); await x.page.waitForTimeout(150); found.push(...await glyphs(x.page, "the dock's New menu"));
-      await x.page.keyboard.press("Escape"); await x.page.click("#dgc-dock .dgc-dock-tile", { button: "right" }).catch(() => {}); await x.page.waitForTimeout(150); found.push(...await glyphs(x.page, "a dock tile's menu")); } finally { await x.page.close(); } }
-  { const x = await openLibraryTab(browser, { width: 440 });
-    try { await x.page.hover(".lib-row, #lib-list li").catch(() => {}); await take(x.page, "the Library (side bar)"); } finally { await x.page.close(); } }
-  { const x = await openLibraryPage(browser, { width: 1100 });
-    try { await x.page.hover(".lib-row, #lib-list li").catch(() => {}); await take(x.page, "the Library (tab)"); } finally { await x.close(); } }
-  return found;
-}
+const walk = () => walkGlyphs(browser);
 
 test("on every surface, two controls with the same action draw the same glyph, and it is the action's one glyph", async (t) => {
   if (skipOrFail(t)) return;
   const found = await walk();
   const places = new Set(found.map((f) => f.where.replace(/ \(a More menu\)$/, "")));
-  for (const need of ["Work's list", "a Work session", "the Chat list", "ChatDGC", "the Pips list (side)", "the Pips list (tab)", "a Pip's chat (300px)", "a Pip's chat (700px)", "a Pip's page (side)", "a Pip's page (tab)", "Home", "the Library (side bar)", "the Library (tab)"])
-    assert.ok(places.has(need), `premise: ${need} draws controls with these actions`);
-  const byAction = new Map();
-  for (const f of found) { if (!byAction.has(f.action)) byAction.set(f.action, new Map()); const m = byAction.get(f.action); if (!m.has(f.sig)) m.set(f.sig, []); m.get(f.sig).push(`${f.where}: “${f.label}”`); }
-  const off = [];
-  for (const [action, sigs] of byAction) {
-    if (action === "stop-reply") continue;
-    for (const [sig, at] of sigs) if (sig !== GLYPH[action]) off.push(`${action} is drawn as ${sig} (not ${GLYPH[action]}) at ${[...new Set(at)].slice(0, 4).join("; ")}`);
-  }
+  for (const need of GLYPH_PLACES) assert.ok(places.has(need), `premise: ${need} draws controls with these actions`);
+  const { off, byAction } = glyphFaults(found);
   assert.deepEqual(off, [], "one action, one glyph");
   for (const action of ["open-in-editor", "more", "back", "settings", "add", "close", "copy", "delete", "pin", "stop"]) assert.ok(byAction.has(action), `premise: ${action} is drawn somewhere on these pages`);
   // Open in editor is on Work's rows, the Pips list and a Pip's chat header: the three that differed.
@@ -85,12 +42,8 @@ test("on every surface, two controls with the same action draw the same glyph, a
 
 test("a glyph is 16 px in a header or row button and 15 px in a menu row, on every surface", async (t) => {
   if (skipOrFail(t)) return;
-  // Held to the two sizes: a button that is only its glyph, in a header or on a row, and a menu's row. Not held to them,
-  // each for its own reason: More is the menus' three dots, 14 on its box wherever it is (DgcMenu.DOTS); a glyph
-  // beside a word ("+ New") is the word's size; the row of small buttons under a message is 12 on every surface; Home's
-  // cards draw their corner buttons at a card's own small scale.
-  const found = (await walk()).filter((f) => f.shown && GLYPH[f.action] === f.sig && f.action !== "more" && (f.menu || !f.worded) && !f.message && !/^(Home|the dock|a dock)/.test(f.where));
-  const off = found.filter((f) => (f.menu ? Math.abs(f.size - 15) > 0.6 : Math.abs(f.size - 16) > 0.6)).map((f) => `${f.where}: “${f.label}” draws ${f.sig} at ${f.size}px (${f.menu ? "a menu row: 15" : "a button: 16"})`);
+  // (Which controls are held to the two sizes, and why the others are not: support/icon-walk.mjs, sizeFaults.)
+  const off = sizeFaults(await walk());
   assert.deepEqual([...new Set(off)], []);
 });
 

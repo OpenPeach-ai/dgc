@@ -826,6 +826,7 @@
     "check-types": "tsc --noEmit",
     "package": "npm run check-types && node esbuild.js --production",
     "test": "node --test \"test/**/*.test.mjs\"",
+    "test:layout": "node --test test/layout-audit/layout-audit.audit.mjs",
     "test:host": "node test/run-extension-host.mjs",
     "test:host:stall": "node test/run-extension-host-stall.mjs",
     "test:host:images": "node test/run-extension-host-images.mjs",

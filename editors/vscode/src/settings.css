@@ -176,6 +176,7 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 .notice{padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);color:var(--text);font-size:12px}
 .add-wrap{position:relative}
 .add-menu{position:absolute;right:0;top:calc(100% + 6px);width:185px;z-index:4;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--vscode-menu-background,var(--surface));color:var(--vscode-menu-foreground,var(--text));padding:4px;}
+.add-menu.from-left{right:auto;left:0}
 .add-menu button{display:block;padding:7px 10px;text-align:left;width:100%;border-radius:5px;background:none}
 .add-menu button:hover,.add-menu button:focus{background:var(--vscode-menu-selectionBackground,var(--hover));color:var(--vscode-menu-selectionForeground,var(--text))}
 .directory-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.directory-toolbar .search{max-width:none;flex:1}

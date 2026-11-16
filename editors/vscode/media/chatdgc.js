@@ -4293,6 +4293,9 @@
     state.menuProvider = providerOf(modelPick.value);
     renderModelMenu();
     modelMenu.hidden = false;
+    // (In a narrow chat the pill is not at the box's right end, and a menu hung from its right edge ran past the
+    // window's left: it is put back inside.)
+    window.DgcMenu?.keepInside(modelMenu);
     pill.setAttribute("aria-expanded", "true");
     (modelMenu.querySelector(".cd-menu-row.sel") || modelMenu.querySelector(".cd-dial-face"))?.focus();
   });

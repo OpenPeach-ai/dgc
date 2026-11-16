@@ -1,0 +1,6 @@
+# What a run of the audit writes.
+report.md
+report.json
+pictures/
+parts/
+.report-*.json

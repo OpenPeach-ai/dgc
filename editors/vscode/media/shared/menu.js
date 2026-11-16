@@ -227,5 +227,39 @@
     if (doc.body) start(); else doc.addEventListener("DOMContentLoaded", start);
   }
 
-  root.DgcMenu = Object.freeze({ html, keys, handle, hintHtml, KEY, esc, CHECK, DOTS, more, pill, item, slide });
+  /**
+   * A menu its stylesheet places beside its button (from the button's left or right edge, over or under it) runs past
+   * the window where the button stands near the other edge, and past its foot in a short window. This puts it back
+   * inside: shifted sideways by the `translate` property (its own, so the menu's pop-in transform is left alone), and
+   * where it is taller than the room it has, given that room to scroll in. `top` and `bottom`: room to keep clear at
+   * the window's head and foot (a bar that stays, the dock); `anchor`: the button it opened from, so a menu with no
+   * room on its side goes to the button's other side, never over the button. Call it when the menu opens.
+   */
+  function keepInside(menu, { margin = 6, top = 0, bottom = 0, anchor = null } = {}) {
+    if (!menu || typeof menu.getBoundingClientRect !== "function") return;
+    const page = menu.ownerDocument.documentElement;
+    menu.style.translate = "";
+    if (menu.dataset.dgcFit) { menu.style.maxHeight = ""; menu.style.overflowY = ""; delete menu.dataset.dgcFit; }
+    const r = menu.getBoundingClientRect(), vw = page.clientWidth, lo = top + margin, hi = page.clientHeight - bottom - margin;
+    if (!r.width || !r.height) return;
+    let dx = 0, dy = 0;
+    if (r.left < margin) dx = margin - r.left; else if (r.right > vw - margin) dx = Math.max(margin - r.left, vw - margin - r.right);
+    // Past the foot (it opens under its button) or past the head (over it): the part that fits, scrolling, when that
+    // is a few rows; shifted whole otherwise.
+    const over = r.bottom > hi ? "foot" : r.top < lo ? "head" : "";
+    if (over) {
+      const room = Math.floor(over === "foot" ? hi - r.top : r.bottom - lo);
+      if (room >= 96 && room < r.height) { menu.style.maxHeight = `${room}px`; menu.style.overflowY = "auto"; menu.dataset.dgcFit = "1"; }
+      else if (room < r.height && anchor && typeof anchor.getBoundingClientRect === "function") {
+        // No room on its side: the other side of its button, with what room that side has.
+        const a = anchor.getBoundingClientRect(), gap = 4, other = Math.floor(over === "foot" ? a.top - gap - lo : hi - a.bottom - gap), tall = Math.min(r.height, Math.max(64, other));
+        if (tall < r.height) { menu.style.maxHeight = `${tall}px`; menu.style.overflowY = "auto"; menu.dataset.dgcFit = "1"; }
+        dy = over === "foot" ? a.top - gap - tall - r.top : a.bottom + gap - r.top;
+      }
+      else if (room < r.height) dy = over === "foot" ? Math.max(lo - r.top, hi - r.bottom) : Math.min(hi - r.bottom, lo - r.top);
+    }
+    if (dx || dy) menu.style.translate = `${Math.round(dx)}px ${Math.round(dy)}px`;
+  }
+
+  root.DgcMenu = Object.freeze({ html, keys, handle, hintHtml, KEY, esc, CHECK, DOTS, more, pill, item, slide, keepInside });
 })();

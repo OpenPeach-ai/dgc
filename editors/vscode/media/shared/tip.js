@@ -15,6 +15,26 @@
   "use strict";
   const DELAY_MS = 700, WARM_MS = 300, GAP = 6, EDGE = 4;
 
+  /** Words cut with "…" under the pointer: the box that cuts them and their whole text, or null. Looked for through
+   *  what lies at that point (a card that is one button lies over its own lines), a few boxes up from each. A menu's
+   *  row is left alone: its name slides into sight by itself (media/shared/menu.js). */
+  function cutUnder(scope, x, y, view) {
+    if (typeof scope.elementsFromPoint !== "function" || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const at = scope.elementsFromPoint(x, y).slice(0, 6), seen = new Set();
+    for (const start of at) for (let n = start, k = 0; n && n.nodeType === 1 && k < 3; n = n.parentElement, k++) {
+      if (seen.has(n)) break;
+      seen.add(n);
+      if (n.classList.contains("dgc-menu-label")) return null;
+      const s = view.getComputedStyle(n);
+      if (s.display === "inline" || s.textOverflow !== "ellipsis" || s.overflowX === "visible" || !(n.scrollWidth > n.clientWidth + 1)) continue;
+      const b = n.getBoundingClientRect();
+      if (x < b.left || x > b.right || y < b.top || y > b.bottom) continue;       // the pointer is over something else of that box's parent
+      const words = (n.textContent || "").replace(/\s+/g, " ").trim();
+      if (words) return { el: n, words };
+    }
+    return null;
+  }
+
   function install(options = {}) {
     const scope = options.root || root.document, doc = scope.ownerDocument || scope, view = doc.defaultView || root;
     const shell = options.shell || doc.body, delayMs = Number.isFinite(options.delay) ? options.delay : DELAY_MS;
@@ -22,7 +42,9 @@
     const look = options.look || "dgc-tip", node = doc.createElement("div");
     node.className = look; node.hidden = true; node.setAttribute("role", "tooltip");
     shell.appendChild(node);
-    let timer = 0, warm = 0, target = null, lifted = "", watching = null, lastKey = "", alive = 0;
+    // (`extra`: words cut with "…" under the pointer, said under the control's own label; `own`: the label of a box
+    // that has none of its own, only words that are cut.)
+    let timer = 0, warm = 0, target = null, lifted = "", watching = null, lastKey = "", alive = 0, extra = "", own = "";
 
     const labelOf = (el) => (el.getAttribute("title") || el.dataset.tip || "").trim();
     const find = (event) => {
@@ -37,7 +59,7 @@
       if (watching) { watching.disconnect(); watching = null; }
       if (target && lifted && target.isConnected && !target.hasAttribute("title")) target.setAttribute("title", lifted);
       if (!node.hidden) warm = Date.now();
-      target = null; lifted = ""; node.hidden = true; node.className = look;
+      target = null; lifted = ""; extra = ""; own = ""; node.hidden = true; node.className = look;
     }
     function paint(el, label) {
       const [head, ...more] = label.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -73,25 +95,32 @@
       watching = new view.MutationObserver(() => { if (target !== el) return; const now = el.getAttribute("title"); if (now) { lifted = now; el.removeAttribute("title"); if (!node.hidden) paint(el, now.trim()); } });
       watching.observe(el, { attributes: true, attributeFilter: ["title"] });
     }
-    function show(el, instant) {
+    function show(el, instant, more = "", mine = "") {
       // (The keyboard's label keeps the control's `title`: the system shows its tooltip only to a pointer. A pointer that
       // then rests on the same control has it lifted.)
-      if (el === target) { if (!instant && !node.hidden && !lifted) { lift(el); watch(el); } return; }
-      const label = labelOf(el);
+      if (el === target && more === extra) { if (!instant && !node.hidden && !lifted) { lift(el); watch(el); } return; }
+      const label = mine || (el === target && lifted) || labelOf(el);
       if (!label || el.closest("[hidden]")) { hide(); return; }
       hide();
-      target = el;
+      target = el; extra = more; own = mine;
       timer = view.setTimeout(() => {
         if (target !== el || !el.isConnected) return;
         if (el.classList.contains("is-sliding")) return;       // a long name sliding in a menu shows itself whole
-        const words = labelOf(el); if (!words) return;
-        if (!instant) { lift(el); watch(el); }
-        paint(el, words);
+        const words = own || labelOf(el); if (!words) return;
+        if (!instant && !own) { lift(el); watch(el); }
+        paint(el, extra ? `${words}\n${extra}` : words);
         // A control the page took away while its label was up (a list drawn again) takes its label with it.
         alive = view.setInterval(() => { if (!el.isConnected || !el.getClientRects().length) hide(); }, 400);
       }, instant ? 0 : Date.now() - warm < WARM_MS ? 0 : delayMs);
     }
-    const over = (e) => { const found = find(e); if (found) show(found, false); else hide(); };
+    // Words cut with "…" say the whole of themselves to a pointer that rests on them (the layout audit, 0.52): under
+    // the label of the control they are in when it has one that does not say them, as a label of their own otherwise.
+    const over = (e) => {
+      const found = find(e), cut = cutUnder(scope, e.clientX, e.clientY, view);
+      if (found) { const said = found === target && lifted ? lifted : labelOf(found); show(found, false, cut && (found.contains(cut.el) || cut.el.contains(found)) && !said.includes(cut.words.slice(0, 24)) ? cut.words : ""); }
+      else if (cut) show(cut.el, false, "", cut.words);
+      else hide();
+    };
     const leave = (e) => { if (!e.relatedTarget) hide(); };            // the pointer left the page
     const down = () => hide();
     const focus = (e) => {
@@ -121,5 +150,5 @@
     } };
   }
 
-  root.DgcTip = { install, DELAY_MS, WARM_MS };
+  root.DgcTip = { install, cutUnder, DELAY_MS, WARM_MS };
 })(typeof window !== "undefined" ? window : globalThis);

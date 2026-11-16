@@ -159,6 +159,15 @@ export function mountPips(options) {
   if(!remoteHost)shell.classList.add('extension-pips');
   // Every control's `title` shows as DGC's own label, inside this view (in the side bar's shadow root, or the tab).
   if(typeof DgcTip!=='undefined'){const tip=DgcTip.install({root,shell});disposers.push(()=>tip.dispose());}
+  // A menu a <details> opens (Teams, a Pip's More, Controls) hangs under its button by the stylesheet: in a short
+  // window it ran past the foot, and under the dock. Once open it is kept inside the view, over the dock, and scrolls
+  // in the room it has (media/shared/menu.js, keepInside).
+  {const fitMenu=event=>{const details=event.target;if(!details?.matches?.('details.pip-menu,details.runner-controls')||!details.open)return;
+    const menu=details.querySelector(':scope > .tabs-menu, :scope > .runner-menu');if(!menu||!globalThis.DgcMenu?.keepInside)return;
+    // (The dock only where it is drawn: inside a Pip, and in a Pips tab, there is none.)
+    const dock=owner.getElementById('dgc-dock'),held=dock&&dock.dataset.show==='always'&&dock.getClientRects().length&&dock.getBoundingClientRect().height>0?Math.max(0,owner.documentElement.clientHeight-dock.getBoundingClientRect().top):0;
+    globalThis.DgcMenu.keepInside(menu,{bottom:held,anchor:details.querySelector(':scope > summary')});};
+   root.addEventListener('toggle',fitMenu,true);disposers.push(()=>root.removeEventListener('toggle',fitMenu,true));}
   const document={
     ownerDocument:owner,
     head:embedded?root:nativeDocument.head,body:shell,
@@ -4558,7 +4567,9 @@ function closeRowMenu(focus=false){
 function placeRowMenu(keyboard){
   const menu=$('pip-row-menu');if(!menu)return;
   const host=menu.closest('.pip-app-root')||document.documentElement,box=menu.getBoundingClientRect(),room=host.getBoundingClientRect();
-  if(box.bottom>Math.min(room.bottom,window.innerHeight)-4)menu.classList.add('up');
+  // (The dock lies over the view's foot: a menu that would open under it opens over its "…" too.)
+  const dock=menu.ownerDocument.getElementById('dgc-dock'),held=dock&&dock.dataset.show==='always'&&dock.getClientRects().length&&dock.getBoundingClientRect().height>0?dock.getBoundingClientRect().top:Infinity;
+  if(box.bottom>Math.min(room.bottom,window.innerHeight,held)-4)menu.classList.add('up');
   if(keyboard)menu.querySelector('.dgc-menu-row')?.focus({preventScroll:true});
 }
 function homeRowInner(p,place=''){const pin=jobPin(p),tab=jobOpen(p),row=homeRow(p,place),more=jobMore(p,pin,tab);return pin||tab?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}${tab?' has-open':''}${more?' has-more':''}${rowMenuFor===p.id?' menu-open':''}">${row}${tab}${pin}${more}</div>`:row;}
@@ -7979,7 +7990,15 @@ document.addEventListener('keydown',event=>{
   if(!S.review&&pageMenu&&globalThis.DgcMenu){
    const summary=opened.querySelector(':scope > summary');
    if(event.target===summary&&event.key==='ArrowDown'){const first=pageMenu.querySelector('button:not(:disabled)');if(first){event.preventDefault();first.focus();return;}}
+   // (Opened by a click, the focus is still on its button: Escape closes it from there too.)
+   else if(event.target===summary&&event.key==='Escape'){event.preventDefault();event.stopPropagation();opened.removeAttribute('open');summary.focus({preventScroll:true});return;}
    else if(pageMenu.contains(event.target)&&globalThis.DgcMenu.handle(pageMenu,event,{rows:':scope > button',close:()=>opened.removeAttribute('open'),trigger:summary}))return;
+  }
+  // (…and from anywhere else in the view that is not a layer of its own: a menu left open is closed by Escape, and the
+  // focus goes to its button.)
+  if(!S.review&&event.key==='Escape'&&!event.defaultPrevented&&!opened&&!event.target.closest?.('.dgc-menu,dialog,[role="dialog"],input,textarea,select,[contenteditable]')){
+   const left=document.querySelector('details.pip-menu[open]');
+   if(left?.querySelector(':scope > .tabs-menu.dgc-menu')){event.preventDefault();event.stopPropagation();left.removeAttribute('open');left.querySelector(':scope > summary')?.focus({preventScroll:true});return;}
   }
   // The Controls menu on the list of Pips (the "…" beside Start): Escape closes it and returns to its button, as a Pip's
   // page menus do above. It holds switches and buttons, not rows, so the arrows are left to them.

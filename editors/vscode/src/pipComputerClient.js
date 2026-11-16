@@ -859,6 +859,10 @@ function show(app,explicit=false){
 function shut(){
  const from={keys:'pc-keys',clip:'pc-clip',files:'pc-files'}[S.panel];S.panel='';render();const back=$(from);(back?.offsetWidth?back:$('pc-more')||back)?.focus();
 }
+// A panel opened by the keyboard (Enter or Space on its button: a click with no pointer) takes the focus: it floats
+// over the screen, after every button of the bar, so Tab did not reach it from the button that opened it. Escape puts
+// the focus back on that button (shut()). A panel opened by the pointer leaves the focus where it was.
+function intoPanel(event){if(!S.panel||event.detail!==0)return;$('pc-panel')?.querySelector('button:not([disabled]),input:not([disabled]),textarea:not([disabled]),[tabindex="0"]')?.focus({preventScroll:true});}
 document.addEventListener('click',event=>{
  // A press anywhere else closes the size menu, and "…".
  const wasSize=S.sizeMenu&&!event.target.closest?.('#pc-size-menu,#pc-size,#pc-more-menu'),wasMore=S.more&&!event.target.closest?.('#pc-more-menu,#pc-more');
@@ -886,8 +890,8 @@ document.addEventListener('click',event=>{
  else if(id==='pc-fit'||id==='pc-actual'){S.fit=id==='pc-fit';render();vscode.setState({app:S.app,fit:S.fit});}
  else if(id==='pc-size'){S.sizeMenu=!S.sizeMenu;render();if(S.sizeMenu)($('pc-size-menu')?.querySelector('[aria-checked="true"]')||$('pc-size-menu')?.querySelector('.dgc-menu-row'))?.focus();}
  else if(t.dataset.size)void chooseSize(t.dataset.size);
- else if(id==='pc-keys'||id==='pc-clip'){if(!mayType())return;const panel=id==='pc-keys'?'keys':'clip';S.panel=S.panel===panel?'':panel;if(S.panel){S.fan=false;if(S.panel==='clip')S.clip={...S.clip,fresh:false};}render();}
- else if(id==='pc-files'){S.panel=S.panel==='files'?'':'files';if(S.panel)S.fan=false;render();if(S.panel==='files')void loadFiles();}
+ else if(id==='pc-keys'||id==='pc-clip'){if(!mayType())return;const panel=id==='pc-keys'?'keys':'clip';S.panel=S.panel===panel?'':panel;if(S.panel){S.fan=false;if(S.panel==='clip')S.clip={...S.clip,fresh:false};}render();intoPanel(event);}
+ else if(id==='pc-files'){S.panel=S.panel==='files'?'':'files';if(S.panel)S.fan=false;render();intoPanel(event);if(S.panel==='files')void loadFiles();}
  else if(t.id==='pc-full'){if(S.full)leaveFull();else void enterFull();}
  else if(t.dataset.key)pressKeys(t.dataset.key);
  else if(t.id==='pc-paste')pasteIn();

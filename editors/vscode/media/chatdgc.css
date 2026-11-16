@@ -529,7 +529,8 @@ body.cd-blank .cd-fine { display: none; }
 .cd-output { position: static; display: inline-flex; }
 .cd-output .cd-tool { max-width: 180px; }
 .cd-output .cd-tool-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cd-output-menu { position: absolute; left: var(--sp-2); bottom: 100%; z-index: 20; margin-bottom: var(--sp-2); width: min(320px, calc(100% - var(--sp-4))); }
+/* (Its left edge is the box's own inner edge, where the "+" that opens it starts: it stood 4px to the left of it.) */
+.cd-output-menu { position: absolute; left: var(--sp-3); bottom: 100%; z-index: 20; margin-bottom: var(--sp-2); width: min(320px, calc(100% - 2 * var(--sp-3))); }
 .cd-output-desc { padding-left: var(--sp-3); }
 /* The Folder chip: Output's look. With a folder it shows the folder's name, cut short, and is the first in the row to
    give way when the row is full (the spacer goes first); its menu opens above the box as Output's does. */

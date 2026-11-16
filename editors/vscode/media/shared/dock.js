@@ -261,6 +261,9 @@
     function placeTip() {
       if (!named || tip.hidden) return;
       const r = named.getBoundingClientRect(), h = host.getBoundingClientRect();
+      // (Measured from the dock's left edge: measured where it last stood, near the right edge, its words were
+      // squeezed into the sliver of room left there, one word to a line.)
+      tip.style.left = "0px";
       const w = tip.offsetWidth;
       tip.style.left = `${Math.round(Math.max(6, Math.min(h.width - w - 6, r.left - h.left + r.width / 2 - w / 2)))}px`;
       tip.style.bottom = `${Math.round(h.bottom - r.top + 7)}px`;
@@ -270,7 +273,9 @@
     function itemMenu(button, keyboard) {
       const item = itemOf(button), at = items.indexOf(item), pop = root.DgcBlob?.popup;
       if (!item || !pop) return;
-      name(null); pointer = null; kick();
+      // (Its tiles are at rest before the menu is placed: a menu placed against a tile still swollen under the pointer
+      // stood off its tile, and off its centre, once the tile had settled.)
+      name(null); pointer = null; settle();
       pop(button, { keyboard, label: item.title,
         rows: [...(Array.isArray(item.menu) && item.menu.length ? item.menu : [[{ id: "open", label: "Open", icon: "open" }, { id: "unpin", label: "Unpin", icon: "unpin" }]]),
           [{ id: "left", label: "Move left", icon: "left", disabled: at === 0 }, { id: "right", label: "Move right", icon: "right", disabled: at === items.length - 1 }]],
@@ -286,7 +291,7 @@
     function addMenu(button, keyboard) {
       const pop = root.DgcBlob?.popup;
       if (!pop) return;
-      name(null); pointer = null; kick();
+      name(null); pointer = null; settle();
       const made = [offers.work && { id: "work", label: "New work", icon: "work" }, offers.chat && { id: "chat", label: "New ChatDGC chat", icon: "chat" },
         offers.pip && { id: "pip", label: "New Personal Pip", icon: "pip" }].filter(Boolean);
       pop(button, { keyboard, label: "New", rows: [made, offers.settings ? [{ id: "settings", label: "Settings", icon: "settings" }] : []],
