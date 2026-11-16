@@ -92,7 +92,7 @@ class PipChatTests(unittest.TestCase):
             self.finish(sent)
 
     def test_a_reply_can_offer_choices_that_the_chat_lists_under_it(self):
-        # Grok's A/B card: the Pip offers "Yes, connect Gmail" / "Not yet"; the user's tap answers.
+        # An A/B card: the Pip offers "Yes, connect Gmail" / "Not yet"; the user's tap answers.
         self.setup_job()
         sent = self.send()
         self.store.claim_next()
@@ -106,7 +106,7 @@ class PipChatTests(unittest.TestCase):
                 pip_chat.validate_choices(bad)
 
     def test_a_reply_says_which_plugins_it_used_and_a_run_without_them_says_nothing(self):
-        # "Used [logo] Aave" under the reply, as ChatGPT names the apps it used: the plugins its controller saw it read.
+        # "Used [logo] Aave" under the reply, naming the apps it used: the plugins its controller saw it read.
         self.setup_job()
         used = [{"plugin": "aave", "name": "Aave"}, {"plugin": "context7", "name": "Context7"}]
         sent = self.send()

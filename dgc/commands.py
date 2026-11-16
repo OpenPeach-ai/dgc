@@ -27,7 +27,7 @@ def is_slash_command_text(text: str) -> bool:
 
     Command names are one path-free token. Treating every leading slash as a command makes a
     perfectly ordinary prompt such as ``/home/me/project is my workspace`` fail as an unknown
-    command. This matches Codex's composer boundary: another slash in the first token means the
+    command. So another slash in the first token means the
     text is prose/path input. A bare slash keeps its existing command-palette/error behaviour.
     """
     value = str(text or "")

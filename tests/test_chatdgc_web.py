@@ -1,4 +1,4 @@
-"""ChatDGC and the web, as ChatGPT has it: search is always there, and a message that turns on facts (rules, rates,
+"""ChatDGC and the web: search is always there, and a message that turns on facts (rules, rates,
 prices, news, people) is looked up before it's answered, not left to a model that's sure of itself. The box's Search
 makes it search first for one message; only Settings -> Web search turns it off, and then nothing goes online.
 Pictures too, only where seeing helps: the same check names an image search, and the reply shows what it finds."""

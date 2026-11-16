@@ -1,4 +1,4 @@
-"""Interactive answers (ChatGPT's): show_widget keeps one small self-contained HTML page on the reply, which opens in a
+"""Interactive answers: show_widget keeps one small self-contained HTML page on the reply, which opens in a
 locked-down tab beside the chat. Measured with deepseek-v4.1-flash: as a ```widget block, an EMI calculator or a
 stopwatch went into a canvas or a file 5 of 6 times; as a tool, a widget 9 of 9, and none for a plain question. The
 screen tells what an open widget shows, and the model checks it with that, fixing it once if it's wrong."""

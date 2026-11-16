@@ -1,4 +1,4 @@
-"""Writing blocks (ChatGPT's): a draft the user will send as it is sits in an ```email or ```draft block, and an edit
+"""Writing blocks: a draft the user will send as it is sits in an ```email or ```draft block, and an edit
 made in place replaces exactly that block's words in the saved reply, so the model reads the user's version next."""
 import unittest
 

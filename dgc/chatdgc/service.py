@@ -1549,7 +1549,7 @@ class ChatService:
         self._opened(fresh, cmd["request_id"])
         self._changed(fresh["id"], None)
 
-    # -- projects (ChatGPT's): chats, files and instructions together
+    # -- projects: chats, files and instructions together
 
     def _projects(self, cmd: dict) -> None:
         self.emit("chatdgc_projects", request_id=cmd["request_id"], projects=self.engine.store.projects())
@@ -1584,7 +1584,7 @@ class ChatService:
             self.emit("chatdgc_changed", conversation_id=chat_id, summary=None)
         self._projects_changed()
 
-    # -- the Library (ChatGPT's): every file you attached
+    # -- the Library: every file you attached
 
     def _library(self, cmd: dict) -> None:
         found = self.engine.store.library(query=cmd.get("query", ""), kind=cmd.get("kind", ""),
@@ -1644,7 +1644,7 @@ class ChatService:
         self.emit("chatdgc_canvas", conversation_id=conversation_id, canvas=view, request_id=cmd["request_id"])
 
     def _draft(self, cmd: dict) -> None:
-        """A draft edited in place (ChatGPT's writing blocks): the reply as it is now, on every screen. Not while a
+        """A draft edited in place: the reply as it is now, on every screen. Not while a
         reply is being written in the chat: its save would put the old words back."""
         conversation_id = cmd["conversation_id"]
         with self._lock:

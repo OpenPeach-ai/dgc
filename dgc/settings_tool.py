@@ -2,7 +2,7 @@
 
 `dgc_settings_read` (read-only) lists what DGC may change with its value now and one line each, the permission rules,
 and Dev Mode with its limits and what raising each costs. `dgc_settings` changes one: an ordinary setting, a permission
-rule (Claude Code's form, `Bash(npm test:*)`), or a Dev Mode limit — that last only while Dev Mode is on AND the user's
+rule (a tool and a pattern, `Bash(npm test:*)`), or a Dev Mode limit — that last only while Dev Mode is on AND the user's
 own "Let DGC change Dev Mode settings" switch is on. The ordinary permission engine decides each call (auto mode: no
 card, his call; the other modes ask). Every change is recorded so Undo can put it back while the setting still holds what
 the change wrote. Never through it: keys and secrets, the sandbox, redaction, hooks, MCP server commands, language
@@ -161,7 +161,7 @@ def read(config, topic: str = "") -> str:
         lines.append(f"- {key}: {_shown(config.get(key))} — {words}")
     perms = getattr(config, "permissions", {}) or {}
     if not topic or topic in ("rules", "permissions", "allow", "deny", "ask"):
-        lines.append("Permission rules (change one with action \"rule\"; Claude Code's form, e.g. Bash(npm test:*)):")
+        lines.append("Permission rules (change one with action \"rule\"; a tool and a pattern, e.g. Bash(npm test:*)):")
         for action in RULE_ACTIONS:
             lines.append(f"- {action}: {', '.join(perms.get(action) or []) or '(none)'}")
     if not topic or "dev" in topic or "limit" in topic:
@@ -202,7 +202,7 @@ def change(config, key, value, reason: str = "") -> str:
 
 
 def rule(config, action, text, remove: bool = False, reason: str = "") -> str:
-    """Add (or remove) one permission rule, in Claude Code's form, after it parses."""
+    """Add (or remove) one permission rule (a tool and a pattern), after it parses."""
     from .permissions import Rule
     if action not in RULE_ACTIONS:
         raise SettingsError("A rule is allow, ask or deny.")

@@ -787,7 +787,7 @@ const API44_READS = new Set(["list_pip_plugins", "list_pip_plugin_uses", "list_p
 const API44_MUTATIONS = new Set(["allow_pip_plugin", "decline_pip_plugin", "set_pips_limit", "add_pip_note", "forget_pip_note", "set_pip_careful", "forget_pip_site"]);
 for (const command of API44_READS) READS.add(command);
 for (const command of API44_MUTATIONS) MUTATIONS.add(command);
-// API 45: what each plugin may do without asking (ChatGPT's four levels), for every Pip; local only.
+// API 45: what each plugin may do without asking (four levels), for every Pip; local only.
 const API45_MUTATIONS = new Set(["set_plugin_permission"]);
 for (const command of API45_MUTATIONS) MUTATIONS.add(command);
 // API 47: a Pip's context window and thinking are its own (its prompt box), for all its runs; local only.

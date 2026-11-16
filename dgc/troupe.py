@@ -2,9 +2,9 @@
 
 The maintainers' design (2026-10-14): for a job too big for one agent to do reliably, the model writes a work order and
 DGC runs it exactly as written -- every item gets its agent, every finding gets its checkers -- instead of one agent
-deciding each step as it goes and losing track, skipping parts or stopping early. Claude Code calls its version a
-Workflow and has the model write JavaScript; a troupe's work order is data (JSON), which local models write far more
-reliably than a program, needs no script runtime to confine, and works on every platform.
+deciding each step as it goes and losing track, skipping parts or stopping early. A troupe's work order is data
+(JSON), not a program: local models write it far more reliably, it needs no script runtime to confine, and it works on
+every platform.
 
 A work order is a title, the items to fan out over, and up to four stages. Each stage gives every item (or, with
 `over: "all"`, the whole list at once) to one agent of a given kind with a prompt, optionally several times

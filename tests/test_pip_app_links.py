@@ -1,4 +1,4 @@
-"""A Personal Pip's own apps, connected from its chat like Grok's connectors (pip_app_links)."""
+"""A Personal Pip's own apps, connected from its chat (pip_app_links)."""
 import json
 import socket
 import unittest

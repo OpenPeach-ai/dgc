@@ -748,7 +748,7 @@ class TodoLifecycleTests(unittest.TestCase):
         self.agent.run_turn("Continue")
         # The report is refused every cycle and the NEXT cycle's prompt says which step refused it
         # (never a second user turn in a row); three turns that did nothing else (no reply, no other
-        # tool work) are empty turns, and Codex's rule then blocks the goal (12 Nov: it replaced
+        # tool work) are empty turns, and the rule then blocks the goal (12 Nov: it replaced
         # "three cycles without distinct tool progress").
         self.assertEqual(self.agent.goal_status, "blocked")
         snapshot = self.agent.goal_snapshot()

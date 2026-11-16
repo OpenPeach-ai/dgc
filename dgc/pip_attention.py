@@ -1,4 +1,4 @@
-"""Everything your Personal Pips are waiting on you for, in one list (Grok's sidebar, Dots' activity view).
+"""Everything your Personal Pips are waiting on you for, in one list.
 
 Each Pip shows its own cards in its chat: an email to Send, a Connect card, a plugin it asks to use, a
 submit its computer held, a robot check, a routine it suggested. With many Pips you would open each to

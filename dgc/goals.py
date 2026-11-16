@@ -307,7 +307,7 @@ class Progress:
         self.digest, self.count, self.calls = hashlib.sha256(), 0, 0
 
     def add(self, name: str, args: dict, output: str) -> None:
-        self.calls += 1                  # any tool work at all: what an empty goal turn lacks (Codex's rule)
+        self.calls += 1                  # any tool work at all: what an empty goal turn lacks
         if name in ("update_goal", "todo"):
             return
         # Re-running one command with a changing timestamp or timing footer is not new work.
@@ -412,7 +412,7 @@ QUESTION_DISMISSED_REASON = "You closed a question the goal needs answered"
 
 
 # A goal ends only when its completion is proved (asked 12 Nov, after a broad audit goal ended itself in 46 minutes on a
-# plausible summary). The rules were learned from Codex's goal turns; the words are DGC's own (16 Nov, his call).
+# plausible summary).
 _KEEP_GOING = """How a goal works:
 - The goal stays open from turn to turn. Finishing this turn never means trimming the goal to what fits in it.
 - Hold on to the whole objective. If it can't all be done now, move the real end result forward and leave the goal \
@@ -1049,7 +1049,7 @@ class GoalLifecycle:
                     return result
                 signature = str(result.get("progress_signature") or "") if external else self._goal_progress.signature()
                 details = self._goal_details
-                # Codex's rule (12 Nov, his call): a goal turn is empty when it did no tool work and said nothing;
+                # The rule (12 Nov, his call): a goal turn is empty when it did no tool work and said nothing;
                 # three in a row and the goal is blocked. A turn that only waited on a job, or repeated a check, is
                 # not empty: whether that is progress is the model's audit (the cycle prompt's no-progress check).
                 if external:
@@ -1081,7 +1081,7 @@ class GoalLifecycle:
                 self._goal_refusal_note = ""
                 prompt = ((refusal + "\n\n") if refusal else "") + cycle_prompt(self.goal, details)
                 if getattr(self, "goal_turns", False):
-                    # Codex's shape (12 Nov, his call): each goal cycle is a turn of its own, with its own reply and
+                    # 12 Nov, his call: each goal cycle is a turn of its own, with its own reply and
                     # file changes; the frontend starts the next one when it is idle (after anything queued).
                     self._goal_next_turn = prompt
                     return result

@@ -1,4 +1,4 @@
-"""A finished Pip run posts its result in that Pip's own chat, as Grok Bots and OpenAI Dots do.
+"""A finished Pip run posts its result in that Pip's own chat.
 
 Reported 19 Oct: "instead of showing these Runs under the Runs tab of Pips, they should just simply be
 part of the chat?" -- "Yes, post in its chat". Each run's result is a short message from the Pip in its own

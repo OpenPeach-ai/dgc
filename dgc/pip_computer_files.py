@@ -48,7 +48,7 @@ BACKGROUND_SECONDS = 0                   # no time limit, as Work's background j
 MAX_JOBS = 3
 JOBS_KEPT = 20
 MAX_HISTORY = 200
-# The Terminal is online like Grok's bots, through the same way out as the browser: an in-box relay to
+# The Terminal is online, through the same way out as the browser: an in-box relay to
 # DGC's egress proxy, which reaches public websites (ports 80 and 443) and never this computer or the
 # local network. Tools that honour the standard proxy settings (curl, pip, npm, git over https) work.
 ONLINE = "Online through DGC: public websites only, never this computer or your network."

@@ -147,7 +147,7 @@ class Notifier:
                 # Something a Pip did on its own: say what, so it is never a surprise.
                 body = new_ran[0][1] + (f" And {len(new_ran) - 1} more." if len(new_ran) > 1 else "")
             elif new_finished:
-                # A routine it ran by itself is done: what it said, as Grok's bots do.
+                # A routine it ran by itself is done: what it said.
                 body = new_finished[0][1] + (f" And {len(new_finished) - 1} more." if len(new_finished) > 1 else "")
             elif new_asking:
                 body = new_asking[0][1] + (f" And {len(new_asking) - 1} more." if len(new_asking) > 1 else "")

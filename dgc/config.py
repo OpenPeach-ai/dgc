@@ -1835,7 +1835,7 @@ class Config:
         # Releases through 0.26 wrote their then-default 40/80 iteration ceiling into every config,
         # making long, productive coding turns stop and ask the user to say "continue". Those values
         # were not evidence of an intentional limit, so migrate both historical defaults to the new
-        # Codex-like unlimited setting. Any other positive custom value remains an explicit backstop.
+        # unlimited setting. Any other positive custom value remains an explicit backstop.
         if raw.get("max_turns") in (40, 80):
             raw["max_turns"] = 0
             migrated = True

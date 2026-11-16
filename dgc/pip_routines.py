@@ -1,4 +1,4 @@
-"""A Personal Pip's routines, like Grok's: what it does by itself, and when.
+"""A Personal Pip's routines: what it does by itself, and when.
 
 Its Instructions say who the Pip is; a routine is one thing it does on its own: "every weekday at
 8:00, send me the three biggest tech stories", or "when an email from my bank arrives, tell me what

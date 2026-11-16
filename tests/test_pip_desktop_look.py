@@ -1,4 +1,4 @@
-"""pc-desktop (0.52, his list of 9 Nov after the OpenMausBot computer check): "A taskbar with the open windows, a clock
+"""pc-desktop (0.52, his list of 9 Nov): "A taskbar with the open windows, a clock
 and the tray, labelled icons on the desktop for each app, and an app menu. Today a Pip's desktop is a dark wallpaper
 and a dock, and a maximised browser covers it."
 

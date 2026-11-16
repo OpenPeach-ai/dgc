@@ -128,8 +128,7 @@ def activity_verb(name: str) -> str:
 def display_path(path, root=None) -> str:
     """A path as a reader wants to see it: short, and still unambiguous.
 
-    The same rule Codex uses (codex-rs/tui/src/diff_render.rs display_path_for), because it is the
-    right one and there is no value in differing: a path already relative is left alone; one inside
+    A path already relative is left alone; one inside
     the project loses that prefix, which is the common case and turns
     /home/you/project/src/app/page.tsx into src/app/page.tsx; one elsewhere in the same repository
     is shown relative, so a sibling reads ../packages/ui/x.ts rather than an absolute line; one

@@ -617,8 +617,8 @@ def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", m
     from .pip_computer import validate_plan as validate_computer_plan
     computer_plan = validate_computer_plan(computer_plan)
     if computer_plan is not None:            # any Pip's (one kind of Pip, 16 Nov: A2; a folder Pip's box, see has_box)
-        # A Pip may browse and read the user's apps, like Grok's bots (reported 2026-10-07: "exactly
-        # like Grok"); what it would send or change still waits for the user's Allow.
+        # A Pip may browse and read the user's apps (reported 2026-10-07); what it would send or change still waits for
+        # the user's Allow.
         definition['computer_plan'] = computer_plan
     if len(_json(definition).encode()) > 16384:
         raise RegistryError('input_limit', 'The reviewed job exceeds 16 KiB.')

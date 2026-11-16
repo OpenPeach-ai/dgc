@@ -1,4 +1,4 @@
-"""ChatDGC Phase 7, as ChatGPT has it: Branch in new chat (a reply's conversation so far, in a new chat of its own),
+"""ChatDGC Phase 7: Branch in new chat (a reply's conversation so far, in a new chat of its own),
 Projects (chats, files and instructions together) and the Library (every file you attached, in one place)."""
 import tempfile
 import unittest
@@ -184,7 +184,7 @@ class ProjectTests(Phase7):
         chat = self.engine.open(project=private["id"])
         self.assertFalse(self.engine._memory_on(chat))
         self.store.update_project(private["id"], memory="shared")
-        self.assertTrue(self.engine._memory_on(chat), "switchable, as ChatGPT's is")
+        self.assertTrue(self.engine._memory_on(chat), "switchable")
 
     def test_moving_a_chat_in_and_out_and_a_move_made_mid_reply_stays(self):
         trip = self.store.create_project("Goa trip")

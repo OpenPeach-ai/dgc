@@ -5401,7 +5401,7 @@ file by hand.
 
 Ask in a Work chat ("turn thinking up to high", "let `npm test` run without asking") and DGC changes
 the setting itself with `dgc_settings`: an ordinary setting (the model, thinking, a timeout,
-notifications, memory and the like) or a permission rule in Claude Code's form (`Bash(npm test:*)`).
+notifications, memory and the like) or a permission rule (a tool and a pattern, `Bash(npm test:*)`).
 Your permission mode decides as for any tool: auto mode shows no card, the other modes ask. Each change
 says what it changed and can be undone while the setting still holds what it wrote. `dgc_settings_read`
 shows what it may change, the rules, and each Dev Mode limit with what raising it costs; when a limit

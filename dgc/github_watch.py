@@ -1,7 +1,7 @@
 """``dgc watch-github <link>``: follow a GitHub pull request or Actions run, one line per new thing.
 
-A chat watches a pull request and CI (work-watch-events, asked 8 Nov: "like Claude Code getting a pull request's activity
-and CI results as notices"). The model runs this as a monitor (``monitor {command: "dgc watch-github <link>",
+A chat watches a pull request and CI (work-watch-events, asked 8 Nov: a pull request's activity and CI results as
+notices). The model runs this as a monitor (``monitor {command: "dgc watch-github <link>",
 persistent: true}``), so each line it prints reaches the chat as a notice and wakes it when idle; stopping the monitor
 stops watching, and it ends by itself when the pull request closes or the run finishes.
 

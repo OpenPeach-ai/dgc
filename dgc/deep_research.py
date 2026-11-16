@@ -1,4 +1,4 @@
-"""Deep research: a question researched on the web with the user's own model, as ChatGPT's Deep research does it.
+"""Deep research: a question researched on the web with the user's own model.
 
 ONE module for every surface (0.52, "one capability, one module"): ChatDGC's screen (plan first, to edit), a Work
 session's deep_research tool and a Pip's (run_report, no plan to edit) all run this engine, so a change here reaches

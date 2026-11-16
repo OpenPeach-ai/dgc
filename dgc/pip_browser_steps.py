@@ -1,8 +1,7 @@
 """What each step on a Pip's browser changed, what the page reported, and where the browser is.
 
 A Pip's computer answers every browser step with the page as it is now. These are the short lines around it, so a
-small model needn't compare two pages itself or read again (OpenMausBot's bot browser: browser-tool-shape.ts,
-browser-page-health.ts):
+small model needn't compare two pages itself or read again:
 
 - ``change_line``: "Moved to <url>", "Opened a new tab: <title>", "Appeared: …", "Gone: …", "Now showing: …" or
   "Nothing on the page changed", with any download, alert or file picker the step caused. At most CHANGE_CHARS.

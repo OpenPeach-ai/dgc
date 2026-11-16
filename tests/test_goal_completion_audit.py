@@ -1,7 +1,7 @@
 """A goal ends only when its completion is proved (asked 12 Nov).
 
 His ERP audit goal ("each and every unit, everything, all end point connections") ended itself after 46 minutes on a
-plausible summary; a Codex goal of his has run 11 hours. The rules were learned from Codex's goal turns: prove every
+plausible summary. The rules: prove every
 requirement against current evidence before calling it done (unsure is not done), never a narrower task, a check of
 whether the last turn moved anything, and a three-turn rule before "blocked". DGC's goal cycle, its standing reminder,
 the system prompt's goal section and update_goal's description carry them, in DGC's own words (16 Nov: "learn from it

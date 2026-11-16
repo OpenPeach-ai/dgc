@@ -1,4 +1,4 @@
-"""pc-background-commands (0.52, his list of 9 Nov after the OpenMausBot computer check): "A Pip starts a long command
+"""pc-background-commands (0.52, his list of 9 Nov): "A Pip starts a long command
 (a download, an install, a build) in the background on its computer, checks on it later (running or finished, exit
 code, the end of its output) and can stop it."
 

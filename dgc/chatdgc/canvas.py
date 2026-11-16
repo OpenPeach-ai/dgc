@@ -1,8 +1,8 @@
-"""Canvas (ChatGPT's), as a real file beside the chat: ChatDGC and the user work on one document or piece of code.
+"""Canvas, as a real file beside the chat: ChatDGC and the user work on one document or piece of code.
 
 A canvas is a file VS Code opens in an editor beside the chat, named for its title, under
 ``<chat root>/canvas/<chat>/<id>/``; the user edits it there like any file. The model changes it with exact
-find-and-replace edits (as ChatGPT's canvas does) or a rewrite, and reads it fresh from disk every turn, so what the
+find-and-replace edits or a rewrite, and reads it fresh from disk every turn, so what the
 user typed is what it works from. Every change is a version, with who made it, to compare and restore; an edit of the
 user's that the model hasn't seen yet becomes a version of theirs first.
 

@@ -5,7 +5,7 @@ pinned or archived, the ChatDGC project it's in (if any), and its messages. A sm
 (``index.sqlite3``) keeps the list, search and the Library fast without opening every file. A chat is the same
 whatever folder DGC runs in: nothing here knows a Work folder.
 
-Projects, as ChatGPT has them (chats, files and instructions together), are ``projects.json``; a project's own
+Projects (chats, files and instructions together), are ``projects.json``; a project's own
 files are under ``project-files/<project>/``.
 
 Writes are atomic (a temporary file, then a rename) and owner-only; a lock file serialises writers across
@@ -40,10 +40,10 @@ PROJECT_ID = re.compile(r"proj_[a-f0-9]{32}\Z")
 MAX_PROJECTS = 200
 MAX_PROJECT_NAME = 80
 MAX_INSTRUCTIONS = 8_000             # characters of a project's instructions
-MAX_PROJECT_FILES = 40               # ChatGPT's own most, per project
+MAX_PROJECT_FILES = 40               # per project
 PROJECT_COLORS = ("purple", "blue", "teal", "green", "yellow", "orange", "red", "pink", "gray")
 PROJECT_MEMORY = ("shared", "project")     # the memory you share with every chat, or this project's alone
-# The Library's kinds, as ChatGPT filters it: what an attachment is, by its kind and its name.
+# The Library's kinds: what an attachment is, by its kind and its name.
 LIBRARY_TYPES = ("image", "pdf", "document", "spreadsheet", "presentation", "code", "text")
 _SHEETS = {"xlsx", "xls", "xlsm", "csv", "tsv", "ods", "numbers"}
 _SLIDES = {"pptx", "ppt", "odp", "key"}
@@ -306,7 +306,7 @@ class ChatStore:
     def listing(self, *, query: str = "", archived: bool = False, limit: int = 50, offset: int = 0,
                 project: str = "") -> dict:
         """The Chat list: pinned first, then the newest; ``query`` matches titles and what was said. ``project``:
-        that project's chats; without one, the chats in no project, as ChatGPT lists them apart (a search
+        that project's chats; without one, the chats in no project, listed apart (a search
         looks through every chat, and each says its project)."""
         if project and not PROJECT_ID.fullmatch(str(project)):
             raise ChatStoreError("That project doesn't exist.")
@@ -503,12 +503,12 @@ class ChatStore:
                     db.execute("DELETE FROM body_fts WHERE id=?", (chat_id,))
 
 
-    # -- the Library (ChatGPT's): every file you attached, in one place
+    # -- the Library: every file you attached, in one place
 
     def library(self, *, query: str = "", kind: str = "", origin: str = "", limit: int = 60, offset: int = 0) -> dict:
         """Every file you attached, in every chat (archived ones too) and every project, the newest first: ``kind``
-        one of LIBRARY_TYPES, ``query`` part of a name, ``origin`` "made" (by ChatDGC) or "uploaded" (by you), as
-        ChatGPT filters it. ``counts`` says how many of each kind the query finds, ``origins`` how many of each origin."""
+        one of LIBRARY_TYPES, ``query`` part of a name, ``origin`` "made" (by ChatDGC) or "uploaded" (by you).
+        ``counts`` says how many of each kind the query finds, ``origins`` how many of each origin."""
         if type(limit) is not int or not 1 <= limit <= MAX_LIST or type(offset) is not int or offset < 0:
             raise ChatStoreError(f"Ask for 1–{MAX_LIST} files at a time.")
         if kind and kind not in LIBRARY_TYPES:
@@ -652,7 +652,7 @@ class ChatStore:
             self._write(chat)
         return removed
 
-    # -- projects (ChatGPT's): chats, files and instructions together
+    # -- projects: chats, files and instructions together
 
     @property
     def projects_path(self) -> Path:
@@ -732,7 +732,7 @@ class ChatStore:
         return self.project(project_id)
 
     def delete_project(self, project_id: str, *, keep_chats: bool) -> list[str]:
-        """Delete a project and its files. Its chats go too, as ChatGPT deletes them, unless ``keep_chats``: then
+        """Delete a project and its files. Its chats go too, unless ``keep_chats``: then
         they move back to your chats. Returns the chats deleted."""
         deleted = []
         with self._locked():

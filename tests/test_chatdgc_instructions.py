@@ -1,4 +1,4 @@
-"""ChatDGC's custom instructions and personality (ChatGPT's): what it should know about you, how it should answer,
+"""ChatDGC's custom instructions and personality: what it should know about you, how it should answer,
 and its manner, set once in Settings and read by every chat from its next reply."""
 import io
 import json
@@ -143,7 +143,7 @@ class VoiceReplyTests(unittest.TestCase):
 
 
     def test_a_spoken_turn_is_offered_nothing_to_look_at_and_typing_brings_it_back(self):
-        """As ChatGPT's voice mode: a spoken turn gets no question card, file, widget or canvas -- not offered, not
+        """Voice mode: a spoken turn gets no question card, file, widget or canvas -- not offered, not
         described, and refused if a model calls one anyway -- and a typed message after it has them all again."""
         offered, told = [], []
 

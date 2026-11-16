@@ -198,7 +198,7 @@ class TurnProseIdentityTests(unittest.TestCase):
         closed = self.events("stream_end")[0]
         self.assertNotIn("phase", closed)
         self.assertEqual(self.ui.final_message_id, "t1:1")
-        # ... but a stated answer outranks it, exactly as Codex orders the two rules.
+        # ... but a stated answer outranks it.
         self.ui.on_text("The answer.")
         self.ui.end_stream("answer")
         self.assertEqual(self.ui.final_message_id, "t1:2")

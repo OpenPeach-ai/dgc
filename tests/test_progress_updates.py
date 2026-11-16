@@ -3,8 +3,8 @@
 A user watched turns where many tool calls went by before the model said anything, with only
 its thinking to read. Codex ("preamble messages") and Claude Code both tell their models to say in
 a sentence what they are about to do before the first tool call, and to give a one-line update when
-they find something or change course. DGC's Work prompt now says the same. Its cadence is by time,
-as Codex's newest templates put it (never more than about a minute without an update), and since an
+they find something or change course. DGC's Work prompt now says the same. Its cadence is by time
+(never more than about a minute without an update), and since an
 open model cannot see a clock, DGC tells it when a tool round ends a minute or more after the user
 last read anything from it (`Agent._quiet_note`). The model may also write out a detailed message
 mid-turn (a diagnosis, a plan before substantial work), and the final answer must stand on its own.

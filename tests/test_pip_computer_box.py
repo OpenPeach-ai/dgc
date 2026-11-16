@@ -64,7 +64,7 @@ def serve():
 
 
 class BrowserChoiceTests(unittest.TestCase):
-    """Google Chrome by default, as on Grok's bots; Chromium only when Chrome is not installed."""
+    """Google Chrome by default; Chromium only when Chrome is not installed."""
 
     def setUp(self):
         import tempfile
@@ -252,7 +252,7 @@ class RealBoxTests(unittest.TestCase):
         self.assertNotIn("/subscribe", [path for path, _ in self.received])
 
     def test_pages_do_not_see_an_automated_browser(self):
-        # Like Chrome on Grok's bots (reported 2026-10-07): with navigator.webdriver true, Google's
+        # A real Chrome (reported 2026-10-07): with navigator.webdriver true, Google's
         # search answered every Pip with "are you a robot".
         self.assertEqual(self.browser.navigate(self.base + "/"), "loaded")
         self.assertIs(self.browser.evaluate_json("navigator.webdriver"), False)

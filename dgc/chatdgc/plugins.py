@@ -2,9 +2,9 @@
 is every Pip's. Turning a plugin on is the consent: there is no "use this plugin?" card.
 
 A read (the vendor's ``readOnlyHint``, or DGC's reviewed reads) runs at once and its answer goes to the model as
-untrusted data. A change waits on a card under the reply, as ChatGPT confirms an action: the exact tool and inputs,
+untrusted data. A change waits on a card under the reply, saying the action: the exact tool and inputs,
 which the user can edit, with **Send it now** or **Hand it to a Pip** (first for something recurring or that has to
-wait), or **Don't**. Nothing goes until the user chooses. The plugin's level (ChatGPT's four, shared with Pips in
+wait), or **Don't**. Nothing goes until the user chooses. The plugin's level (one of four, shared with Pips in
 Settings → Plugins) can let a change through, but never a payment plugin's, and never one that carries what the chat
 read from the user's apps that they didn't say themselves (the careful check Pips use, pip_careful).
 

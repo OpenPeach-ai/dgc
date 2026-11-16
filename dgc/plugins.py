@@ -1976,7 +1976,7 @@ def uninstall(name: str, *, config, manager=None) -> dict:
             'removed_mods':removed_mods}
 
 
-# What a plugin may do without asking, ChatGPT's four levels (OpenAI, "Managing app permissions in ChatGPT"):
+# What a plugin may do without asking, one of four levels:
 # always_ask asks even before it reads; any_changes reads at once and asks before any change; important (the
 # default) reads at once and asks before an important action (sending, creating, editing, deleting, sharing,
 # paying); never_ask asks nothing, and is never offered for a plugin that can move money. Turning a plugin on

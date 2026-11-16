@@ -171,7 +171,7 @@ class PluginReadDuringTurnTests(unittest.TestCase):
     # ------------------------------------------------- changing packages, beside the turn ---
 
     def test_package_changes_run_beside_the_turn(self):
-        """These change what the model CAN run, not what it is ALLOWED to do -- Codex's line. They
+        """These change what the model CAN run, not what it is ALLOWED to do. They
         used to wait because `reload_skills()` emptied the dict the turn iterates; it swaps it now,
         so they run on the package slot while the turn carries on."""
         self.in_a_turn(lambda: None)

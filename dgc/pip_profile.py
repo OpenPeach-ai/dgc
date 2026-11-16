@@ -1,4 +1,4 @@
-"""A Personal Pip's own page, as on Grok's bots (Pips API 43, schema 41).
+"""A Personal Pip's own page (Pips API 43, schema 41).
 
 Its look (one of the eight Pip faces, and a colour), a short title under its name, and whether it
 tells you when it finishes something on its own or needs you. All of it is the user's, set on this

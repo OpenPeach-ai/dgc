@@ -796,7 +796,7 @@ TASK_BATCH_MIN = 2
 TASK_BATCH_MAX = 32         # one `task` call's helpers: as many as may run at once (config.MAX_PARALLEL_TASKS)
 
 
-# A helper's brief as fields (work-helper-briefs, 0.52; agreed 9 Nov): a peer's brief, as Claude Code's are. goal,
+# A helper's brief as fields (work-helper-briefs, 0.52; agreed 9 Nov): a peer's brief. goal,
 # done_when and returns are needed when any field is used; known and files are optional. They become the helper's
 # prompt (compose_brief) as the call arrives, so everything after reads one prompt.
 BRIEF_FIELDS = ("goal", "known", "files", "done_when", "returns")

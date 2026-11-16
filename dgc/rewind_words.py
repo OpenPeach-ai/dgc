@@ -137,8 +137,8 @@ def stopped(n: int) -> str:
             else f"{n} background helpers from those turns were stopped.")
 
 
-# Undo rewrites files and nothing else: never the index, HEAD, a branch, a stash or a commit (Codex's
-# server-side undo reset people's staging, openai/codex#8214). When a command in the undone turns moved
+# Undo rewrites files and nothing else: never the index, HEAD, a branch, a stash or a commit (an undo
+# that resets someone's staging loses work they meant to keep). When a command in the undone turns moved
 # one of those, the question and the line after say so.
 GIT_LEFT_QUESTION = "Your files are put back; Git's commits, branches, stashes and staging are left as they are."
 GIT_LEFT = "Git's commits, branches, stashes and staging are left as they are."

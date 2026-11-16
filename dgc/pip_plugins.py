@@ -4,7 +4,7 @@ Turning a plugin on is the consent to use it (reported 2026-10-09): no "use this
 a plugin's tool list (``plugin_tools``) and calls a tool (``call_plugin``) through the controller, over the
 run's socket (pip_app_links.RunSocket): the Pip's own process never connects to a server or holds a credential.
 
-What runs at once and what waits for the user's Allow is the plugin's level (plugins.permission, ChatGPT's four):
+What runs at once and what waits for the user's Allow is the plugin's level (plugins.permission, one of four):
 a read (the vendor's ``readOnlyHint``, or DGC's reviewed reads) runs at once unless the level is always_ask; a
 change asks unless the level lets it through, and in a run nobody is watching every change waits. A change that
 asks becomes an Allow card (a connector draft, pip_connector_drafts). A payment plugin's changes always ask and
@@ -966,7 +966,7 @@ class Session:
         self.carries = None          # careful mode: text -> whether it carries what the Pip read from apps (RunSocket)
         self.level_now = None        # the Pip's level, read at each call (pip_levels.follow): Do it all runs changes now
         self.calls, self.reads, self.asked = 0, 0, []
-        # The plugins this reply took an answer from ([{"plugin", "name"}]): "Used Aave" under it, as ChatGPT names
+        # The plugins this reply took an answer from ([{"plugin", "name"}]): "Used Aave" under it, naming
         # the apps it used. The controller records them, so the worker can't claim one.
         self.used: list[dict] = []
         # MCP Apps: the plugin cards this reply showed (kept on disk, dgc/mcp_apps.py), for the controller to put on the

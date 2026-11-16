@@ -1,4 +1,4 @@
-"""Files ChatDGC makes (ChatGPT's "here's your report.docx"): Word, PDF, Excel, PowerPoint, CSV and Markdown.
+"""Files ChatDGC makes: Word, PDF, Excel, PowerPoint, CSV and Markdown.
 
 The model never writes a file's bytes or its markup. It hands over what the file says: Markdown for a document or a
 PDF, rows for a spreadsheet, titles and bullets for a deck; this module lays it out, the same way every time. Each

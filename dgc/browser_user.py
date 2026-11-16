@@ -1,7 +1,7 @@
 """The user's own Chrome, signed in as them, for a Work session (reported 2026-10-13: "main DGC could use the
 logged-in Chrome"; Pips have computers of their own).
 
-Claude Code and Codex reach the user's browser through extensions of their own. DGC needs none: Chrome 144 and later
+DGC needs no browser extension to reach the user's browser: Chrome 144 and later
 let the user allow remote debugging of the browser they are running (chrome://inspect/#remote-debugging), and then
 ask them, in Chrome, every time a program connects; Chrome shows its "controlled by automated test software" banner
 while it is. The running browser writes DevToolsActivePort (its port and path) into its profile folder, which is how

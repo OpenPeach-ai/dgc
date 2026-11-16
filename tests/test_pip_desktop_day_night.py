@@ -1,5 +1,5 @@
 """A Pip computer's desktop (his calls, 16 Nov): it opens on the desktop, with no browser started; one wallpaper in two
-versions, the teal one by day and the dark grey one by night, by this computer's clock; a dock like a Mac's; smaller
+versions, the teal one by day and the dark grey one by night, by this computer's clock; a rounded glass dock; smaller
 icons on the desktop.
 
 The day and night switch moments are worked out here, by DGC, from this computer's own clock, and written for the
@@ -172,7 +172,7 @@ class TheDesktopFollowsTheClock(unittest.TestCase):
         self.assertEqual((out.returncode, out.stdout.strip()), (0, "done"), "harmless with no display")
 
 
-class AMacLikeDock(unittest.TestCase):
+class AGlassDock(unittest.TestCase):
     def test_the_dock_is_a_rounded_glass_bar_with_close_set_icons(self):
         conf = conf_for()
         light, dark = rc((conf / "tint2rc-light").read_text()), rc((conf / "tint2rc-dark").read_text())

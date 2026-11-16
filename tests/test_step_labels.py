@@ -1,5 +1,5 @@
 """Plain-words labels on each step (0.52, asked 11 Nov): a bash call may carry a short `description` ("List the project's
-files"), shown as the step's grey label in Work, with the exact command one click away, as Claude Code's Bash tool does.
+files"), shown as the step's grey label in Work, with the exact command one click away.
 
 The label is the model's own words, so it never decides anything: the permission decision, the approval card's summary
 and command, and the rule an Always allow would save all go by the exact command, whatever the label says."""
@@ -24,7 +24,7 @@ class StepLabels(unittest.TestCase):
     def test_bash_takes_an_optional_short_label(self):
         bash = schema("bash")
         label = bash["parameters"]["properties"].get("description")
-        self.assertIsNotNone(label, "bash takes a description, as Claude Code's Bash does")
+        self.assertIsNotNone(label, "bash takes a description")
         self.assertEqual(label["type"], "string")
         self.assertNotIn("description", bash["parameters"]["required"], "optional: a call without one works as before")
         self.assertLess(len(label.get("description", "")), 160, "the always-sent schema stays small")

@@ -1,6 +1,6 @@
 """How much a Personal Pip asks (Pips API 58): its approval level, set on its page by the user only.
 
-Three levels, OpenMausBot's (docs/approval-levels.md) cut to what a Pip does, chosen with the level chip in its prompt
+Three levels, cut to what a Pip does, chosen with the level chip in its prompt
 box or on its page:
 
 - **Ask me first** (``ask``): today's behaviour. Careful mode asks before a new site, every submit its browser makes waits for
@@ -17,8 +17,7 @@ At every level, unchanged: a payment asks and never gets Always allow (a card nu
 checkout's address, a button that says pay, a payment provider's site; ``classify``), what only might be one asks with
 Always allow, a plugin the user set to Always ask asks before each call, a card the user types on the Pip's screen is
 their own approval, the Pip never types a card, a saved login is sent only to its own site, careful mode's check of what
-it read from the user's apps, and the safety floor: a Terminal command that could wipe its Files waits for the user
-(OpenMausBot's safety floor, server/safety-floor.ts).
+it read from the user's apps, and the safety floor: a Terminal command that could wipe its Files waits for the user.
 
 Everything here runs in the supervisor (pip_computer.Host, pip_action_grants.dispatch_for_run's neighbour): the Pip's
 own process only ever reads the tool's answer. Each action a level approved is kept (a computer action ``sent`` by

@@ -1,4 +1,4 @@
-"""A Pip computer's desktop, like Grok's bots: a real screen you watch and use in the editor.
+"""A Pip computer's desktop: a real screen you watch and use in the editor.
 
 The desktop runs in its own box with no network at all: a VNC display (TigerVNC's Xtigervnc, on a
 Unix socket only), the openbox window manager, a dock (tint2) with three apps, the wallpaper
@@ -269,7 +269,7 @@ def terminal_command(mac: bool = False) -> str:
 CONTROL_LINES = frozenset({"browser", "images", "documents", "pdf", "code"})
 
 
-# The dock, a rounded glass bar at the foot like a Mac's (16 Nov): close-set 48 px icons that light up under the pointer.
+# The dock, a rounded glass bar at the foot (16 Nov): close-set 48 px icons that light up under the pointer.
 DOCK_ICON = 48                    # each app's icon
 DOCK_GAP = 6                      # between two icons
 DOCK_PAD = (8, 2)                 # the bar's own padding at each end, and the icons' (tint2: panel, launcher)

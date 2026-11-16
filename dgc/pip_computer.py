@@ -127,7 +127,7 @@ CREATE TRIGGER retain_pip_computer_action BEFORE DELETE ON pip_computer_actions
 """
 
 TOOL = "computer"
-# The browser by text (the sturdier browser, 2026-10-21: OpenMausBot's bot browser): wait for what a page is still
+# The browser by text (the sturdier browser, 2026-10-21): wait for what a page is still
 # loading, tabs (a link that opens one moves the Pip there), status, a page's own confirm or prompt (dialog), forward
 # and reload, check and uncheck, and the mouse over or a drag between refs.
 TEXT_OPS = ("open", "read", "click", "type", "press", "choose", "back", "forward", "reload", "wait", "check", "uncheck",
@@ -1143,8 +1143,8 @@ class Host:
                                  "you open a page or launch it.")}
             if op == "tabs" and not self.browser.alive():
                 return {"text": "The browser isn't open, so it has no tabs."}
-            # Chrome runs as a window on the computer's screen whenever this machine can show one, as on
-            # Grok's bots: headless Chrome names itself HeadlessChrome, and Google asked it for a robot check.
+            # Chrome runs as a window on the computer's screen whenever this machine can show one:
+            # headless Chrome names itself HeadlessChrome, and Google asked it for a robot check.
             if self.desktop is None or not self.desktop.running():
                 try:
                     self.ensure_desktop()
@@ -2245,8 +2245,8 @@ def is_payment(summary) -> bool:
 
 
 def never_replayed(summary) -> bool:
-    """A pay, buy or order step: no Always allow is given on one and none sends one (agreed 10 Nov; OpenMausBot never
-    saves a click on pay, buy or order as a step to replay). Pay and buy are payments (is_payment); an order may be one
+    """A pay, buy or order step: no Always allow is given on one and none sends one (agreed 10 Nov: a click on pay,
+    buy or order is never saved as a step to replay). Pay and buy are payments (is_payment); an order may be one
     (pip_levels: a maybe-payment by the word "order")."""
     return is_payment(summary) or (summary.get("asks_because") == "maybe_payment" and summary.get("asks_word") == "order")
 
@@ -2957,7 +2957,7 @@ def _page_now(host) -> str:
 
 
 def _secret_hold_refusal(host, op: str) -> str | None:
-    """While a secret DGC typed may still be on a page: steps that could copy it from there wait (OpenMausBot's
+    """While a secret DGC typed may still be on a page: steps that could copy it from there wait (the
     secret hold). The hold ends when the page changes or, after HOLD_SECONDS, when DGC clears the boxes itself."""
     hold = getattr(host, "secret_hold", None)
     if not hold:
@@ -3741,7 +3741,7 @@ def desktop_status(registry, pip_id: str, actor: str) -> dict:
 
 # A page that asks a human to prove they are not a robot: Google's "unusual traffic" page, reCAPTCHA,
 # hCaptcha, Cloudflare's check. A Pip never tries to pass one; it stops and asks the user, who finishes
-# it on the Pip's screen, as on Grok's bots. Matched on the address, the title, the text and the frames.
+# it on the Pip's screen. Matched on the address, the title, the text and the frames.
 HUMAN_CHECK_URL = re.compile(r"(?:^https?://(?:www\.)?google\.[a-z.]+/sorry/|/cdn-cgi/challenge-platform/|[?&]__cf_chl_)", re.I)
 HUMAN_CHECK_TEXT = re.compile(r"(?:unusual traffic from your computer network|verify (?:that )?you are (?:a )?human|"
                               r"i'?m not a robot|are you a robot|checking (?:if|whether) the site connection is secure|"

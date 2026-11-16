@@ -1,6 +1,6 @@
 """Sessions in other directories, in one backend: open_chat, the chat envelope, close_chat.
 
-Codex's model: one process holds many sessions, each with its own directory, config, trust, MCP
+One process holds many sessions, each with its own directory, config, trust, MCP
 servers and mode. A client opts in by sending open_chat; from then on every chat-scoped event and
 command says which chat it belongs to. A client that never opts in never sees the field.
 """

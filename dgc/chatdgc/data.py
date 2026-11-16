@@ -1,6 +1,6 @@
-"""Data analysis (ChatGPT's), without running code the model wrote: a chat's spreadsheets as SQLite tables to query.
+"""Data analysis, without running code the model wrote: a chat's spreadsheets as SQLite tables to query.
 
-ChatGPT answers questions about a spreadsheet by writing and running Python. ChatDGC loads each CSV, TSV or Excel
+ChatDGC never runs code a model wrote to answer about a spreadsheet. It loads each CSV, TSV or Excel
 sheet the chat holds (attached, in its project, or made by it) into an in-memory SQLite database, and the model asks
 with one read-only SELECT at a time (``query_data``): exact sums, groups, trends and medians, never estimates from
 reading rows. Nothing it writes can touch a file or the network: the database lives in memory, an authorizer allows
@@ -201,7 +201,7 @@ class Data:
         self.db.set_authorizer(self._authorize)
 
     def _functions(self) -> None:
-        """What ChatGPT's pandas would have: medians, spreads, correlations, roots and logs."""
+        """What a data frame library would have: medians, spreads, correlations, roots and logs."""
         class Median:
             def __init__(self): self.values = []
             def step(self, v):

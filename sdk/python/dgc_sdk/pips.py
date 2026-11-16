@@ -244,7 +244,7 @@ API44_READS = frozenset({'list_pip_plugins', 'list_pip_plugin_uses', 'list_pip_a
 API44_MUTATIONS = frozenset({'allow_pip_plugin', 'decline_pip_plugin', 'set_pips_limit', 'add_pip_note', 'forget_pip_note', 'set_pip_careful', 'forget_pip_site'})
 READ_COMMANDS |= API44_READS
 MUTATION_COMMANDS |= API44_MUTATIONS
-# API 45: what each plugin may do without asking (ChatGPT's four levels), for every Pip; local only.
+# API 45: what each plugin may do without asking (four levels), for every Pip; local only.
 API45_MUTATIONS = frozenset({'set_plugin_permission'})
 MUTATION_COMMANDS |= API45_MUTATIONS
 # API 47: a Pip's context window and thinking are its own (its prompt box), for all its runs; local only.

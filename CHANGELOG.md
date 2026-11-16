@@ -37,7 +37,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **Work sessions no longer get a Pip's reports.** A Work session or chat gets a Pip's card only for a run it started itself; attaching a Pip to a chat no longer brings its reports there. The owner-session commands of the 0.52 previews are gone (Pips API 96).
 - Settings › Dev Mode can hold **"Let DGC change Dev Mode settings"** (`dev_mode_tools`, off by default, only you set it): `set_config` takes it, a client that asks is told it, and `ready.capabilities.dev_mode_tools` says so, so the editor shows the switch.
 - **A session can always read its Pips.** Reading what Pips found and did (`pips_context`) is offered in every turn, so a Work chat asked about a Pip answers from the Pip's own history instead of guessing; the tools that change Pips still load with `use_pips`, and one called before that says to load them first. Seen on a user's machine: a chat asked why a Pip's findings came back couldn't read its records and blamed the wrong cause.
-- **DGC can change its own settings when you ask** (`dgc_settings`): an ordinary setting (the model, thinking, a timeout, notifications, memory and the like), a permission rule in Claude Code's form (`Bash(npm test:*)`), or, only when you have turned on Dev Mode and "Let DGC change Dev Mode settings", a Dev Mode limit. Your permission mode decides as for any tool (auto mode: no card; the others ask), and each change says what it changed and can be undone. Never through it: keys, the sandbox, redaction, hooks, MCP servers, provider addresses, Dev Mode itself. `dgc_settings_read` shows what it may change, the rules and each Dev Mode limit with what raising it costs; when a limit stops what you asked, DGC says which setting would raise it, once. `dgc_docs` answers how-to questions from DGC's own docs. A file edit of DGC's own settings file is refused in every mode and pointed at `dgc_settings`. DGC Router follows the same rule now: auto mode changes it without a card.
+- **DGC can change its own settings when you ask** (`dgc_settings`): an ordinary setting (the model, thinking, a timeout, notifications, memory and the like), a permission rule (a tool and a pattern, `Bash(npm test:*)`), or, only when you have turned on Dev Mode and "Let DGC change Dev Mode settings", a Dev Mode limit. Your permission mode decides as for any tool (auto mode: no card; the others ask), and each change says what it changed and can be undone. Never through it: keys, the sandbox, redaction, hooks, MCP servers, provider addresses, Dev Mode itself. `dgc_settings_read` shows what it may change, the rules and each Dev Mode limit with what raising it costs; when a limit stops what you asked, DGC says which setting would raise it, once. `dgc_docs` answers how-to questions from DGC's own docs. A file edit of DGC's own settings file is refused in every mode and pointed at `dgc_settings`. DGC Router follows the same rule now: auto mode changes it without a card.
 - **A Pip in a project folder reads your files as they are now, in every run, scheduled ones included**: its run reads its own copy of the folder in its box (Git-listed files without what Git ignores, never `.git`), not the last commit. Seen on a user's machine: scheduled Pips read only committed code, DGC's fixes were applied but not committed, and every evening the Pips reported again what was already fixed. A Pip that reads current files on request (the earlier way) and one on a computer that can't run boxes read as before.
 - **A reworded finding counts as a repeat, not as new**: when a Pip words a finding's title differently, it is matched with the earlier finding at the same file and quoted code (that earlier one not reported again), as the digest already matched them, so a card's "earlier" count is right. A second issue on a line whose first issue is still reported stays new.
 - **Every Pip has its own box, step 2b: a folder Pip's chat has your apps, your plugins and the web**, as a Personal Pip's chat has: your apps through DGC (Composio and your DGC plugins; their keys stay in DGC), web_search, making images and video, its own keys at Do it all, and borrowing your Chrome when you allow it. Careful mode remembers what it read from apps, and its level is said to it. Your personal notes, routines, goals and skills stay with your Personal Pips.
@@ -48,7 +48,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - A DGC that holds a session never hides any more. Seen on a user's machine: dismissing a Pip report card saved the session while a Pip fix inside the same chat was recording a step, and the two waited on each other for good; the process's heartbeat froze behind them, and 15 minutes later another DGC deleted its note as "gone", so neither `dgc ps`, Running sessions nor Open Here could find the process still holding the session ("This session is open in another window", again after Open here). Now the report save lets go of the history lock before it saves, a process's note is written without waiting on its turn, a live process whose heartbeat stopped is listed as "stuck" (never deleted), and stopping one ends it after SIGTERM's wait, as `--force` would.
 - "All projects" and the Project Folder list leave out folders that are never your projects: ones in the temporary folder (a test run, a scratch run) and ones inside a DGC home (a helper's worktree, a fix's copy), and their Pips too; this window's own folder is always listed. Each project folder is read once and remembered until its sessions change. Seen on a machine with thousands of such folders: they filled the list, and indexing them all on every listing kept DGC too busy to answer the Pips view ("DGC is busy").
 - Work sessions can be archived, as in Codex: archiving moves a session and everything beside it that is its own (its plan, counters, recall, monitors, wake-ups, images and helpers) into the project's archived folder, where nothing resumes, wakes or runs it, and Restore brings it back as it was. It is refused while a turn runs or while anything has the session open. The archived list is paged and searched like the Work list (`list_sessions {archived: true}`, every project's with `scope: "all"`), and an archived session can be deleted for good (`delete_session {archived: true}`). `archive_session {path, archived, pips}` answers with the new `session_archived` event, and keeps the Project Pips archived with the session (`pips`) beside it, so restoring it answers with them and the editor brings them back too; `create_session {name}` makes a named, empty session in the project (the new `session_created` event), which a Project Pip can be given as its owner when its owner session is archived or deleted. Behind `ready.capabilities.session_archive`.
-- A goal in Work runs as Codex's does: each work cycle is a turn of its own, ending like any turn with its reply, the files it changed and its time, then DGC starts the goal's next turn by itself ("Goal · turn 3", never a bubble you sent). A message you queue runs first, as its own turn; a turn that ends with a question to you waits for your answer. A goal is blocked after three turns in a row that come back empty (no reply and no tool work), Codex's rule, in place of "three cycles without distinct tool progress". The terminal and SDK apps keep a goal's cycles inside one turn.
+- A goal in Work runs as turns: each work cycle is a turn of its own, ending like any turn with its reply, the files it changed and its time, then DGC starts the goal's next turn by itself ("Goal · turn 3", never a bubble you sent). A message you queue runs first, as its own turn; a turn that ends with a question to you waits for your answer. A goal is blocked after three turns in a row that come back empty (no reply and no tool work), Codex's rule, in place of "three cycles without distinct tool progress". The terminal and SDK apps keep a goal's cycles inside one turn.
 - Dev Mode, for a big machine: off by default. On, DGC's capacity limits are yours to set, with no ceiling: Pip runs at once (32 without it), computers per Pip (3), monitors per chat and per DGC (4 and 16), Pip runs waiting (20), routines per Pip (10), conversations per Pip (500), shell output the model sees (30,000 characters), lines one file read shows (2,000), characters a web fetch shows (8,000), and agents one troupe may start (400) and items it may take (200). Safety limits never move (each Pip's daily dollar limit for paying is yours to set on its page, not a Dev Mode limit). The settings are `dev_mode` and `dev_limits`; its page in Settings comes next.
 - A Work chat can come back by itself later. Ask "check the tests in 30 minutes" or "every 10 minutes until CI is green": the chat sets a wake-up (`wake_later`), and at its time a new turn starts in that chat and does what it said. A repeating check is one wake-up at a time, ending once its condition is met. A wake-up stays with its chat across a reload or an editor restart; one that came due while DGC was closed runs when the chat is opened again and says how late it is. Up to 4 per chat, 1 minute to 7 days.
 
@@ -1666,7 +1666,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips: a Pip's runs in its own chat (Pips API 51)
 
-- **Each run posts its result in the Pip's own chat**, as Grok Bots and OpenAI Dots post a scheduled run: a
+- **Each run posts its result in the Pip's own chat**: a
   review's findings (how many, the worst severity, the top three with file and line), Pulse checks, a Quill draft,
   a Personal Pip's scheduled result, and a failure of any of them in plain words, with when it runs next. It is
   written when the run finishes, by the runner, so it is there once per run even if no editor was open. It says
@@ -1809,7 +1809,7 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   streaming a chunked or compressed response could make DGC buffer without bound or loop), and CVE-2026-97687 (TLS
   settings for an HTTPS proxy and the target server not kept apart). DGC streams every model response.
 - A sub-agent record's SHA-1 id says it is not a security use (`usedforsecurity=False`), as the code scan asked.
-- **Plugin sign-ins are kept in your system keychain**, as Codex and Claude Code keep theirs: the macOS Keychain, or
+- **Plugin sign-ins are kept in your system keychain**: the macOS Keychain, or
   the desktop keyring on Linux (`secret-tool`). Where there is none DGC can use (a Mac over SSH keeps its keychain
   locked; Linux without `secret-tool`), an owner-only file, `~/.dgc/plugin-auth/<server>/credentials.json`.
   `plugin_credentials_store` (`auto`, `keyring` or `file`) chooses. Each entry belongs to one DGC home, so a test or an
@@ -1931,11 +1931,11 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
 - **Spoken replies:** in voice mode, a message sent by voice asks for an answer that sounds like speech: a few short
   sentences, no tables or headings, with an offer to go into detail. Without this, a long Markdown plan took five
   minutes to read aloud. `chatdgc_send` takes `voice`, offered as `ready.capabilities.chatdgc.voice_replies`.
-  - **Nothing to look at, as ChatGPT's voice mode:** a spoken turn isn't offered `ask_user`, `make_file`,
+  - **Nothing to look at:** a spoken turn isn't offered `ask_user`, `make_file`,
     `show_widget` or the canvas tools, nor told about them or about charts; one called anyway is refused. Typing
     again brings them back.
 - **Which plugin a reply used, with its logo:** a reply that read from a plugin shows **Used [logo] Aave** under it
-  once it's finished, in ChatDGC and in a Pip's chat, as ChatGPT names the apps it used: numbers from a live plugin no
+  once it's finished, in ChatDGC and in a Pip's chat: numbers from a live plugin no
   longer look like the model's memory. A card that waits, a listing, or a read that came back as an error is not a
   use. ChatDGC keeps them on the message as `plugins: [{plugin, name}]`. A Pip's controller records them per run
   (never the worker's word for it), and `list_pip_messages` returns them as the reply's `plugins`. The editor reads
@@ -1943,7 +1943,7 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
 - **Compact now, then Edit at once:** "compacted" was said while the chat was still busy recounting its window, so
   editing the new summary straight away was refused as "still answering". It's said once the chat is free.
 - **A card of several questions:** `ask_user` takes `questions` (up to four, each with its options) and `submit`, the
-  button's words, as ChatGPT's form does. The card is kept on the reply with its first question as `question` /
+  button's words. The card is kept on the reply with its first question as `question` /
   `options` too, so an older screen shows that one. `chatdgc_answer` takes `choices`, one per question, offered as
   `ready.capabilities.chatdgc.question_forms`; the message sent is the model's own with each question and its
   answer under it.
@@ -2162,7 +2162,7 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   that…" only. With deepseek-v4.1-flash, 11 cases twice: a landlord email saved 2–3 facts, now none; a birthday
   message duplicated a sister, now nothing; a weather question guessed a city once, now never; "not vegetarian
   anymore" left the old fact 2 of 2, now replaces it 2 of 2; real facts (diet, health, family, a new job) still saved.
-- **Canvas in ChatDGC** (`dgc/chatdgc/canvas.py`), as ChatGPT has it: tools `canvas_create` and `canvas_edit` (exact
+- **Canvas in ChatDGC** (`dgc/chatdgc/canvas.py`): tools `canvas_create` and `canvas_edit` (exact
   find-and-replace edits, each found once, or a rewrite); the canvas is a file under `~/.dgc/chat/canvas/<chat>/<id>/`
   that the editor opens beside the chat, read fresh every turn (the user's edits become a version of theirs first),
   with versions in `.versions/`. New event `chatdgc_canvas` (as a reply makes or changes one), command
@@ -2188,19 +2188,19 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   `$$ ` an equation. GitHub task lists (`- [ ]`, `- [x]`) are list items with `checked`, read by a token pass that
   takes the box off the item's text; a box ticks them; Enter splits a ticked item into an unticked one. A table or
   display maths inside a list or quote stays a kept block (its lines carry the container's indent).
-- **Writing blocks in ChatDGC**, as ChatGPT has them: the prompt (`DRAFTS`) puts a draft the user will send as it is
+- **Writing blocks in ChatDGC**: the prompt (`DRAFTS`) puts a draft the user will send as it is
   in its own ` ```email ` (Subject:, To:) or ` ```draft ` block; `chatdgc_draft` {conversation_id, message_id, original,
   text} edits one in place (answered by `chatdgc_message`; refused mid-turn, or when the block's words changed
   since). Real model (deepseek-v4.1-flash): emails 4 of 4 in their block with a subject and plain text, revisions
   rewrite the whole block, other drafts 5 of 6 labelled (the screen also reads a label on the line after the
   backticks), no block for a plain question. And main DGC's no-emoji rule: none in 12 replies that didn't ask; a
   caption "with emojis" still gets them.
-- **Study mode in ChatDGC**, as ChatGPT's "Study and learn": `chatdgc_send` takes `study` (true on, false off,
+- **Study mode in ChatDGC**: `chatdgc_send` takes `study` (true on, false off,
   left out unchanged); the chat keeps it (`study` on the conversation) and its system prompt then adds `STUDY`
   (`dgc/chatdgc/prompt.py`): find the level first, one step at a time, end with something to try, hints before
   solutions, a quiz every few steps through `ask_user` (exactly one right option; the choice comes back as the
   next message), and the answer when asked for it.
-- **Files ChatDGC makes** (`dgc/chatdgc/made.py`), as ChatGPT hands you a report: a `make_file` tool (up to 3 a
+- **Files ChatDGC makes** (`dgc/chatdgc/made.py`): a `make_file` tool (up to 3 a
   reply) takes `name`, `format` (docx, pdf, xlsx, pptx, csv, md) and `content` (Markdown) or `sheets` (rows) or
   `slides` (titles, bullets, tables), and DGC lays the file out with the standard library and markdown-it-py
   (already rich's): Word with title, headings, lists, tables and links; Excel with numbers as numbers, formulas
@@ -2436,8 +2436,7 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
     and no bubblewrap allowed to lend them (a stock Ubuntu 24.04; DGC tries a box rather than trusting that
     bubblewrap is installed). There it says to install Google Chrome, whose package brings the AppArmor profile.
 - **Your own Chrome, signed in, for the tasks that need your logins.** The browser tool takes `signed_in: true`:
-  DGC opens a window of its own in the Chrome you're running and works in that one tab, as Claude Code's and
-  Codex's Chrome extensions do, with no extension: Chrome 144+ lets you allow remote debugging of your browser
+  DGC opens a window of its own in the Chrome you're running and works in that one tab, with no extension: Chrome 144+ lets you allow remote debugging of your browser
   (`chrome://inspect/#remote-debugging`), asks you each time DGC connects, and shows its automation banner. DGC finds
   it by the `DevToolsActivePort` file in its profile folder (Chrome, Beta, Edge, Brave, Chromium; Linux, macOS,
   Windows). It never touches your other tabs, their events, cookies or storage, and closes only its own tab.
@@ -2726,8 +2725,8 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   model requests.
 - `get_pip_chat_context` (Pips API 44) estimates how much of the context window a Personal Pip's
   chat takes in its next reply, for the prompt box's meter.
-- **Plugins in Pips: each Pip asks first.** A Personal Pip can use the plugins you added to DGC,
-  as Grok's bots use connectors: when it needs one it asks (`use_plugin`), and its chat shows
+- **Plugins in Pips: each Pip asks first.** A Personal Pip can use the plugins you added to DGC:
+  when it needs one it asks (`use_plugin`), and its chat shows
   "Let Ava use Airtable?". **Allow** lets that one Pip use it, with no second sign-in; the plugin's
   sign-in in Settings → Plugins is used. The Pip lists the plugin's tools (`plugin_tools`) and
   calls one (`call_plugin`) through the Pips controller; the Pip's own process never connects to a
@@ -2741,7 +2740,7 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`. Registry schema 42.
 - A plugin added in Settings while Pips are running reaches the Pips at once: they read the saved
   settings, not the ones the runner started with.
-- **Routines (app triggers).** A Personal Pip does things on its own, as Grok's bots do: each
+- **Routines (app triggers).** A Personal Pip does things on its own: each
   routine has a name, what to do, and when (a time, a new email matching a Gmail search, or a set
   time before each calendar event). You add them on its page, or the Pip suggests one with a new
   `add_routine` tool and you choose **Add routine** on the card under its reply. A due routine is a
@@ -2802,7 +2801,7 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 - A Pip computer's DevTools pipe never blocks on a read. A second reader of the pipe (a test that
   drove the browser without taking the computer's lock) took the data `select()` had announced, and the
   blocking read then held the lock forever; a non-blocking read just waits out its deadline.
-- A Pip's computer browses more like Chrome on Grok's bots: its Chrome is not marked as automated
+- A Pip's computer browses more: its Chrome is not marked as automated
   (`navigator.webdriver` is false), runs as a window on the computer's screen whenever this machine can
   show one (headless Chrome names itself HeadlessChrome), keeps the user's time zone (the boxes ran in
   UTC), tells pages it is online (its isolated network made Chrome report offline while it loaded
@@ -2834,7 +2833,7 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   instead of repeating the whole email in the chat.
 - A new Pip introduces itself by the name you gave it, not its character's (a Pip named Gmail said
   "Hi, I'm Scout").
-- A Pip computer's Terminal is online, like Grok's bots: commands (the Terminal tab's, the Pip's own and
+- A Pip computer's Terminal is online: commands (the Terminal tab's, the Pip's own and
   the desktop's Terminal app) reach public websites on ports 80 and 443 through the same egress proxy
   as its browser, via an in-box relay and the standard proxy variables (curl, pip, npm, git over
   https); the CA certificates are bound in. Nothing on this computer or the local network is reachable,
@@ -2847,13 +2846,13 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   (reserved key `check_`), so it looks again and carries on.
 - A connected app card (`list_pip_app_links`) names its `server` and `account`, as the account picker
   already did, so the editor can prepare a send from the Pip's own account.
-- A Pip's chat reply can offer 2 to 4 choices, like Grok's A/B cards ("Yes, connect Gmail" / "Not
+- A Pip's chat reply can offer 2 to 4 choices ("Yes, connect Gmail" / "Not
   yet"): the new `offer_choices` tool (chat runs only) saves them with the reply (registry schema 39,
   `pip_chat_choices`), `list_pip_messages` returns them as the reply's `choices`, and a new Pip's
   hello ends with its question's answers as choices. A chat reply is now everything the Pip said after
   the user's message, in order (text before a tool call was lost: only the last text was saved), and
   it ends where the Pip offered its choices.
-- A Personal Pip connects your apps from its own chat, like Grok's connectors. It asks with the new
+- A Personal Pip connects your apps from its own chat. It asks with the new
   `connect_app` tool (the call records a card; registry schema 38 adds `pip_app_links`); the user's
   Connect makes DGC call Composio's `COMPOSIO_MANAGE_CONNECTIONS` over their Composio connection
   ("list" first, so an account Composio already has is used; then "add"), and the editor opens the
@@ -2863,8 +2862,8 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   tools reach DGC over a per-run socket only that run's token opens). New Pips commands (API 43,
   unreleased): `list_pip_app_links`, `start_pip_app_link`, `check_pip_app_link`,
   `decline_pip_app_link`, `disconnect_pip_app_link`; the Pip is told when an app connects.
-- A Pip with a computer may also read connected apps (the maintainers chose Grok's model: one Pip can
-  browse and read your mail; what it would send or change still waits for Allow).
+- A Pip with a computer may also read connected apps (the maintainers' choice: one Pip can browse
+  and read your mail; what it would send or change still waits for Allow).
 - Outside auto mode, a Pip the main chat proposes is no longer an "Allow this tool?" prompt: the
   `pips_setup` call only saves its card, which the editor docks above the chat box, and the user's
   **Create Pip** there is the approval. Auto mode, an allow rule or the user's Allow on an ask rule
@@ -2897,7 +2896,7 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   and a Pip with a computer also finds them in its Files, under From chat (`send_pip_message`
   `images` and `files`, `get_pip_message_image`). Registry schema 37 (36 adds `pip_chat_images`,
   37 `pip_chat_files`): an older `dgc` can't open the Pips registry once this one has.
-- A Pip's computer is a real desktop, like Grok's bots, when the desktop programs are installed
+- A Pip's computer is a real desktop, when the desktop programs are installed
   (`sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm`): Google Chrome (or
   Chromium) in a window, a file manager and a terminal, on a dock, streamed to the editor. The
   desktop has no network; the browser keeps its proxy and holds; the Pip's own commands never see
@@ -2910,7 +2909,7 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 - Personal Pips use your DGC skills that fit everyday work: your own and plugin skills, and the
   built-in deep-research, dataviz and plan. A Pip lists them and loads one with the skill tool;
   skills you turn off are off for Pips too. A skill never grants a tool or access.
-- A Pip's computer has Files and a Terminal beside its browser, like Grok's bots. Browser
+- A Pip's computer has Files and a Terminal beside its browser. Browser
   downloads land in its Files. The Terminal runs one command at a time with no network, only the
   computer's Files as its home, and a 60-second limit. The Pip uses both through its computer
   tool, and now also from its chat, so you can watch it work; a submit it holds there continues

@@ -77,7 +77,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
     mode.
   - **What it needs:** a dictation model and a voice, both from Settings → Voice. Pips have it too. Nothing
     records while it speaks, so the reply never comes back as your words.
-  - **Nothing to look at:** as in ChatGPT's voice mode, a spoken reply makes no canvas, file, chart, widget or
+  - **Nothing to look at:** a spoken reply makes no canvas, file, chart, widget or
     question card. Ask for one and it says it can once you're back to typing.
 - **Mention with `@`.** Type `@` for what this chat can use, as in Work's box: your plugins, the Outputs, your Personal
   Pips (`@pip` lists them with their faces) and this window's files. A plugin shows its logo and name, an Output its
@@ -103,7 +103,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
     ChatDGC tries your sub-agent model, then your main model, then a model installed on the same Ollama
     that says it can see. **Seen by** under your message shows which model looked and what it saw, and the
     chat's model reads that description in place of the pictures.
-- **Web search** is always there, as in ChatGPT. Before it answers a message that turns on facts it could
+- **Web search** is always there. Before it answers a message that turns on facts it could
   get wrong (news, prices, rates, rules, laws, taxes, limits, figures, specific people, products or places),
   ChatDGC checks whether it needs the web and, if so, searches first and answers from what it found. It
   doesn't search for maths, writing, code or explanations of things that don't change. Press **Search** in
@@ -118,7 +118,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   about a site's address only (never the page), as Work's links do; `dgc.linkFavicons` off turns them all
   into a globe. One reply makes at most five searches.
 
-  **Pictures**, as ChatGPT shows them, only where seeing helps: the same check that decides whether to search
+  **Pictures**, only where seeing helps: the same check that decides whether to search
   decides whether pictures belong in the answer (what a place, building, dish, animal, plant, product,
   artwork or style looks like), and for rules, prices, news, advice, code or writing there are none. Up to
   four show above the answer, each with the site it's from; click one for it larger, with its title and
@@ -271,11 +271,11 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   afterwards the card shows what you chose, or **Not answered**. One card per reply. Models that can't
   use tools answer without asking.
   - **Several questions at once:** when the model needs a few things to go on, one card holds up to four
-    questions, numbered, as ChatGPT asks them. The first answer of each is chosen until you change it, and one
+    questions, numbered. The first answer of each is chosen until you change it, and one
     button, in the model's words (**Build my plan**), sends them all: its message with each question and your
     answer under it, one a line.
 - **Send while it answers.** Type your next message while a reply is still being written (or while it
-  summarizes) and press Enter, or the Send arrow beside Stop: it waits above the box, as Codex queues one, and
+  summarizes) and press Enter, or the Send arrow beside Stop: it waits above the box, and
   goes by itself when the reply finishes, then the next after that one's reply. **Edit** puts a waiting message
   back in the box, and ↑ in an empty box takes back the last one; **✕** removes it. **Stop** (or a reply that
   fails) sends none of them: they all come back to the box, in order, for you to send or change.
@@ -283,15 +283,15 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   for another one, with whatever model and thinking level the box is set to. Either way, the old version
   stays: **‹ 2 / 3 ›** steps between versions of the conversation from that point. A version that has its own
   versions comes back as you left it. One point keeps up to 50 versions.
-- **Follow-ups**, as ChatGPT shows them: under the latest reply, up to three next messages you might send (a
+- **Follow-ups**: under the latest reply, up to three next messages you might send (a
   next step, a deeper detail, applying it to you). Click one and it's sent; what you were typing stays in the
   box. None after a greeting or thanks, a finished task, a reply that asked you something or waits on a card,
   or research. **Settings → ChatDGC → Suggest follow-ups** turns them off.
-- **Branch in new chat**, as ChatGPT has it: the branch button under a reply starts a new chat holding the
+- **Branch in new chat**: the branch button under a reply starts a new chat holding the
   conversation up to that reply (the versions you see), with its files. It opens in a tab of its own, named
   "Branch · …", and a line after that reply says where it branched from, with a link back. The original
   stays as it was. A temporary chat can't be branched.
-- **Projects**, as ChatGPT has them: chats, files and instructions kept together.
+- **Projects**: chats, files and instructions kept together.
   - **In the side bar**, Projects sit above your chats. Click one to open its page; its arrow lists its chats
     there. Drag a chat onto a project to move it in, or back onto Chats to take it out. A chat's **⋯ →
     Move to project…** does the same, and can make a new project.
@@ -306,7 +306,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
     project knows what the project's other chats are about.
   - **Deleting a project** deletes its files and instructions, and its chats too unless you keep them; kept
     chats move back to your chats.
-- **Plugins in chat**, as ChatGPT uses its apps: every plugin turned on in **Settings → Plugins** is ChatDGC's
+- **Plugins in chat**: every plugin turned on in **Settings → Plugins** is ChatDGC's
   to use, with no "use this plugin?" question. Ask for something one of them does and it uses it in the reply.
   - **Reads** (what the vendor marks read-only, or DGC's reviewed list) run at once. Composio's multi-execute
     tool counts as a read when every app call inside it is one DGC reviewed (Gmail's Fetch emails, Google
@@ -337,19 +337,19 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
     list) shows it above the reply that used it, in your editor's theme, and again when you reopen the chat. What
     the card asks of its plugin follows the same level; DGC's Allow card asks first for a change. See **Plugin
     cards** in `/docs`.
-- **Data analysis**, as ChatGPT has it: attach a spreadsheet (CSV, TSV or Excel; each sheet is a table) and ask
+- **Data analysis**: attach a spreadsheet (CSV, TSV or Excel; each sheet is a table) and ask
   about it. ChatDGC answers with exact numbers by asking the data in SQL, read-only and in memory, rather than
   reading rows by eye: totals, groups, monthly trends, averages, medians, spreads and correlations. Nothing it
   writes runs as a program or can change a file. **Analyzed the data** under the reply shows each query and what it
   returned. Spreadsheets in the chat's project, and ones ChatDGC made, count too.
-- **Charts**, as ChatGPT's interactive charts: where numbers compare or change, a reply can draw a bar, line, area,
+- **Charts**: where numbers compare or change, a reply can draw a bar, line, area,
   pie or scatter chart from numbers it has (never made-up ones). Hover for a value, click the legend to hide a
   series, **Data** for the numbers as a table, **Copy data** (CSV) and **Save image** (PNG).
-- **Maths**, drawn as ChatGPT draws it: a formula in a reply (`$…$` or `\(…\)` in a line, `$$…$$` or `\[…\]` on
+- **Maths**, drawn properly: a formula in a reply (`$…$` or `\(…\)` in a line, `$$…$$` or `\[…\]` on
   its own) shows as typeset maths, in the editor's colours; a screen reader reads it too. Dollar amounts stay
   dollar amounts ("$5 and $10" has no maths in it), and code stays code. **Copy** gives the formula as it was
-  written (TeX), as ChatGPT's does.
-- **Interactive answers**, as ChatGPT has them: when something is better used than read (a loan calculator, a
+  written (TeX).
+- **Interactive answers**: when something is better used than read (a loan calculator, a
   converter, a timer, a quiz, a small simulation), the reply makes a widget, and it opens in a tab beside the chat
   (as a canvas does; the chat keeps focus). It's a small page that runs on its own: no network, nothing loaded from
   anywhere, no access to your chats, files or VS Code. It takes the editor's colours. Once it's open, ChatDGC sees
@@ -359,7 +359,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   under the reply names it: **Open** shows it again, **Show code** shows its page; every widget is also in the
   Library, under **Widgets**. (VS Code runs nothing in a frame inside the chat, so a widget can't sit inside the reply
   itself.)
-- **Canvas**, as ChatGPT has it: for a longer piece you'll keep working on (an essay, a plan, a report, a program),
+- **Canvas**: for a longer piece you'll keep working on (an essay, a plan, a report, a program),
   or when you ask for one, ChatDGC opens a canvas: a real file in an editor beside the chat. You both work on it.
   - **A document opens formatted**, as a page (headings, lists, tables, maths drawn), with a toolbar: text style,
     bold, italic, strikethrough, code, link, lists, quote, divider, **Ask ChatDGC**, shortcuts, and **Open as
@@ -389,7 +389,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   - **Download:** a document as Word, PDF or Markdown; code as its file.
   - Canvases live with the chat (`~/.dgc/chat/canvas/`); a branch gets its own copy, and deleting the chat deletes
     them.
-- **Writing blocks**, as ChatGPT has them: an email, a message, a letter or a post you'll send as it is comes in
+- **Writing blocks**: an email, a message, a letter or a post you'll send as it is comes in
   its own box, apart from what ChatDGC says about it. An email shows who it's to and its subject on their own.
   - **Copy** puts just the text on the clipboard: no stars, no hashes.
   - **Open in mail app** starts a new email with the address, subject and text filled in (a long one's text goes
@@ -398,7 +398,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   - The reply's own **Copy** copies it as it reads: formatted when you paste into a mail app or a document, clean
     text everywhere else.
 - **No emoji** unless you ask for them, as in the rest of DGC.
-- **Files it makes**, as ChatGPT hands you a report: ask for a document, a PDF, a spreadsheet or slides (or
+- **Files it makes**: ask for a document, a PDF, a spreadsheet or slides (or
   something that's plainly a file, like a CV or a budget to fill in) and the reply comes with a card: the
   file's name, kind, size and pages, with **Open** (in its own app; Markdown and CSV open in an editor tab) and
   **Save a copy…**.
@@ -415,12 +415,12 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
     replies know what each file it made says.
   - **Where it's kept:** with the chat, and in the Library, marked as made. A temporary chat's files last
     only while DGC runs.
-- **Study mode**, as ChatGPT's "Study and learn": **Study** in the box turns it on for the chat, until you turn
+- **Study mode**: **Study** in the box turns it on for the chat, until you turn
   it off (the chat remembers it). It teaches instead of handing over answers: it first asks what you know or
   what it's for, goes one step at a time, ends each reply with a question or something to try, gives hints
   before solutions, and every few steps checks with a quick quiz (a question card with choices; your choice
   comes back and it says whether you were right and why). Ask it to just tell you, and it does.
-- **The Library**, as ChatGPT has it: **Library** in the side bar opens every file you attached or ChatDGC
+- **The Library**: **Library** in the side bar opens every file you attached or ChatDGC
   made, in every chat and project (temporary chats keep none), newest first. Show what you uploaded or what
   ChatDGC made, one kind (images, PDFs, documents, spreadsheets, presentations, code, pasted text), or search by
   name. Each file can open the chat or project it's in, start a

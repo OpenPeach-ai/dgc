@@ -1,4 +1,4 @@
-"""Canvas (ChatGPT's), as a real file beside the chat: the model makes and changes it with exact edits, the user edits
+"""Canvas, as a real file beside the chat: the model makes and changes it with exact edits, the user edits
 the file in their editor, and the model reads it fresh every turn. Every change is a version, the user's too."""
 import io
 import json

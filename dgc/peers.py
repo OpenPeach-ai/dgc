@@ -1,9 +1,7 @@
 """Other DGC agents working in the same place, and how sure we are they are still there.
 
-DGC is the outlier among coding agents: opencode, Codex and qwen-code each run ONE owner process
-that every window talks to, so two of their windows never contend. DGC spawns a `dgc serve` per
-window, so two DGCs really can be editing one checkout at the same time -- and neither knew the
-other existed.
+DGC spawns a `dgc serve` per window, so two DGCs really can be editing one checkout at the same
+time -- and neither knew the other existed.
 
 This is the smallest thing that fixes that: each agent leaves a note saying who and where it is,
 and every agent can read the others. No daemon, no port, no protocol change.

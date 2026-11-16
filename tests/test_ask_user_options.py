@@ -1,6 +1,6 @@
 """`ask_user` can carry the picker's options without becoming the picker.
 
-DGC already had Codex's non-blocking shape -- `ask_user` returns at once, the card sits in the
+DGC's `ask_user` doesn't block: it returns at once, the card sits in the
 transcript, folds to a line you can answer later, and the answer arrives as an ordinary tagged
 prompt. What it lacked was options, so a model that COULD name the choices had to either invent a
 free-text question or call `propose_options` and stop the turn dead.

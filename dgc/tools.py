@@ -3235,7 +3235,7 @@ def _queue_image(owner: str, entry: dict) -> None:
 # Files the model produced and asked to show. Queued exactly like images, on the same call key, so
 # a chip lands under the step that made it. Unlike an image this carries NO BYTES: a recording can
 # be hundreds of megabytes and the protocol frame ceiling is 4 MiB. The panel gets a path and asks
-# the editor to open it, which is what Codex does and what an editor is for.
+# the editor to open it, which is what an editor is for.
 _PENDING_FILES: dict = {}
 
 

@@ -1832,7 +1832,7 @@ class HeadlessUI:
 
     @property
     def final_message_id(self):
-        """Which prose block this turn designates as its answer -- Codex's rule, exactly.
+        """Which prose block this turn designates as its answer.
 
         The last block the loop called an answer wins. Failing that, and only because ``turn_end``
         is by construction terminal, the last block that stated no phase at all wins, so a seam
@@ -2920,7 +2920,7 @@ class Backend:
                           # Archive and Restore for Work sessions, and a new named one (13 Nov): archive_session,
                           # list_sessions {archived}, delete_session {archived}, create_session.
                           "session_archive": True,
-                          # A goal runs one turn per cycle here (the editor's backend, Codex's shape, 12 Nov).
+                          # A goal runs one turn per cycle here (the editor's backend, 12 Nov).
                           "goal_turns": self._goal_turns_wanted(),
                           "plugin_management": True, "plugin_keys": True,
                           # Each installed plugin's name by its servers ({"example": "MCP Apps example"}): an Allow
@@ -5412,7 +5412,7 @@ class Backend:
         self.ui.info(f"continuing the goal ({number} of {AUTO_RESUME_MAX})")
 
     def _maybe_continue_goal(self, failed: bool, cancelled: bool) -> bool:
-        """Codex's shape for a goal (12 Nov, his call): each cycle is a turn of its own, and when one ends with the goal
+        """A goal as turns (12 Nov, his call): each cycle is a turn of its own, and when one ends with the goal
         still running, DGC queues the next, after anything already queued (a message you queued runs first, as its
         own turn). Not after a turn that failed or was stopped (the goal is paused or being retried), not while a
         question to you is open (your answer comes first), and not while the backend is going down."""
@@ -9747,7 +9747,7 @@ class Backend:
                          self.config.project_root, limit=limit, offset=offset, query=query)]
             self.em.emit("sessions", items=items, **_request_fields(request_id))
         elif t == "archive_session":
-            # Archive, or (archived: false) restore, one of this project's sessions (13 Nov, Codex's shape):
+            # Archive, or (archived: false) restore, one of this project's sessions (13 Nov):
             # sessions.archive moves it and what is its own out of the way; the answer is session_archived, a refusal
             # command_rejected with why (a turn running, open somewhere).
             # pips: the Project Pips the editor archived with it, kept beside it; restoring answers with them, so the
@@ -11412,7 +11412,7 @@ class Host:
     """The process half of `dgc serve`: one wire, one request registry, one stdin, its chats.
 
     Each chat is a Backend with its own config and agent -- its own directory, trust, MCP servers,
-    skills, permission rules and mode, Codex's model. What only the process can own lives here:
+    skills, permission rules and mode. What only the process can own lives here:
 
     * the Emitter. One `seq` counter per stdout: all three clients drop the connection on a
       non-increasing seq. Its sanitizer redacts EVERY live chat's secrets, not one config's: the

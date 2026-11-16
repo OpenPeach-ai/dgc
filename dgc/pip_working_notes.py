@@ -1,6 +1,6 @@
 """A Personal Pip's own working notes: how it does its job, kept by the Pip, loaded into every run of it.
 
-Like OpenMausBot's MEMORY.md, for one Pip: "the hospital portal asks for the UHID first", "bills go to Arjun Mehta",
+A Pip's own notes on how things work: "the hospital portal asks for the UHID first", "bills go to Arjun Mehta",
 "the electricity board's site logs out after 5 minutes". The Pip writes them with one small tool (``working_notes``:
 add a line, replace one, strike one), within a budget (MAX_LINES lines or MAX_BYTES), and every later run of that Pip,
 its chat replies and its routines alike, starts with them.

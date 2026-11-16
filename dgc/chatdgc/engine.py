@@ -50,11 +50,11 @@ SEARCH_TOOL = {"type": "function", "function": {
                     "One short query per call."),
     "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "What to search for"}},
                    "required": ["query"]}}}
-# A question in the answer, as ChatGPT puts one: a card with choices where the model asked it. It doesn't wait:
+# A question in the answer: a card with choices where the model asked it. It doesn't wait:
 # the model carries on, and the choice comes back as the user's next message, which the model wrote ahead
 # (`prompt`, with {answer} where the choice goes). Kept on the reply (`questions`), answered by a message that
 # says so (`answers`), so it survives a reload, a restart and every version. When it needs a few things at once, a
-# card holds up to four questions answered together (ChatGPT's form), sent with one button (`submit`).
+# card holds up to four questions answered together, sent with one button (`submit`).
 ASK_TOOL = {"type": "function", "function": {
     "name": "ask_user",
     "description": (
@@ -120,7 +120,7 @@ FORGET_TOOL = {"type": "function", "function": {
 MAX_MEMORY_PER_REPLY = 3
 # What only shows on the screen: a spoken turn's reply (voice mode) makes none of it.
 _SEEN_ONLY = frozenset({"ask_user", "make_file", "show_widget", "canvas_create", "canvas_edit", "generate_image"})
-# Files ChatDGC makes (made.py), as ChatGPT hands you report.docx: the model says what the file says, DGC lays it out,
+# Files ChatDGC makes (made.py), a report.docx and the like: the model says what the file says, DGC lays it out,
 # and a card under the reply opens or saves it. It's in the Library too, marked as made.
 MAKE_FILE_TOOL = {"type": "function", "function": {
     "name": "make_file",
@@ -153,7 +153,7 @@ MAKE_FILE_TOOL = {"type": "function", "function": {
         "required": ["name", "format"]}}}
 MAX_FILES_PER_REPLY = 3
 MAX_ARTIFACT_CALLS = 6       # make_artifact and edit_artifact calls in one reply
-# Canvas (canvas.py), ChatGPT's: a document or code beside the chat, in a real editor, that both sides change.
+# Canvas (canvas.py): a document or code beside the chat, in a real editor, that both sides change.
 CANVAS_CREATE_TOOL = {"type": "function", "function": {
     "name": "canvas_create",
     "description": (
@@ -193,7 +193,7 @@ QUERY_DATA_TOOL = {"type": "function", "function": {
         "sql": {"type": "string", "description": "One SELECT (or WITH … SELECT) over those tables."}},
         "required": ["sql"]}}}
 MAX_QUERIES = 12
-# Interactive answers (ChatGPT's): a small self-contained HTML page, in a locked-down tab of its own beside the chat.
+# Interactive answers: a small self-contained HTML page, in a locked-down tab of its own beside the chat.
 WIDGET_TOOL = {"type": "function", "function": {
     "name": "show_widget",
     "description": (
@@ -284,7 +284,7 @@ LOOK_UP_SCHEMA = {"type": "object", "properties": {"needs_search": {"type": "boo
                                                               "description": "Ids of remembered facts this message makes "
                                                                              "wrong or out of date, or none."}},
                   "required": ["needs_search", "query"]}
-# Pictures from the web above a reply, when the check above asks for them (ChatGPT's image strip): fetched while the
+# Pictures from the web above a reply, when the check above asks for them: fetched while the
 # answer streams, kept with the chat, shown from there (the screen never asks an image host itself).
 MAX_PICTURES = 4
 PICTURE_BYTES = 400_000                 # one thumbnail at most; a search engine's copy is a few tens of KB
@@ -319,7 +319,7 @@ PROJECTS_FRESH = 300          # seconds a list of the user's projects is reused
 PROJECT_SHARE = 0.25          # of the window, at most, for a ChatDGC project's files (each chat in it reads them)
 PROJECT_FILE_CHARS = 200_000  # the same, when the window isn't known
 OTHER_CHATS = 8               # a project chat is told what this many of the project's other chats are about
-# Suggested next messages under a reply (ChatGPT's follow-ups): one small structured call after the reply ends.
+# Suggested next messages under a reply: one small structured call after the reply ends.
 FOLLOW_UP = ("Suggest up to three follow-ups the user might want to send next in this conversation, written the way the "
              "user would type them to you: first person, plain words, at most 12 words each. Each one should go somewhere "
              "the last reply opened up: a next step, a deeper detail, a related choice, or applying it to the user's own "
@@ -552,7 +552,7 @@ class ChatEngine:
     def open(self, chat_id: str | None = None, *, temporary: bool = False, project: str | None = None) -> dict:
         """An existing chat, or a new one. A new chat is written with its first message (an empty one is
         never in the list); a temporary one is kept in memory only, never written or listed. A new chat in a
-        ``project`` is what that project's page starts, as ChatGPT's does."""
+        ``project`` is what that project's page starts."""
         if chat_id:
             return self._chat(chat_id)
         if project:
@@ -611,7 +611,7 @@ class ChatEngine:
                     self.store.set_folder(chat["id"], draft["folder"])
         return self.store.save(chat)
 
-    # -- projects (ChatGPT's): chats, files and instructions together; the store keeps them (store.py)
+    # -- projects: chats, files and instructions together; the store keeps them (store.py)
 
     def move(self, chat_id: str, project_id: str) -> dict:
         """Put a chat in a project, or ("") take it out of one. A new chat that isn't written yet moves too."""
@@ -629,7 +629,7 @@ class ChatEngine:
                 raise ChatEngineError("A temporary chat isn't kept, so it can't be in a project.")
         return self.store.move(chat_id, project_id)
 
-    # -- writing blocks: a draft (```email or ```draft) the user edits in place, as ChatGPT's writing blocks are
+    # -- writing blocks: a draft (```email or ```draft) the user edits in place
 
     def edit_draft(self, chat_id: str, message_id: str, original: str, text: str) -> dict:
         """The user's edit of a draft in a reply: the reply keeps their words where the draft was, and the model reads
@@ -1163,7 +1163,7 @@ class ChatEngine:
     # an inactive version stays in `forks` under its own key and comes back when that version does.
 
     def _web_mode(self, search: str) -> str:
-        """Web search is always there, as in ChatGPT: the model looks things up when an answer depends on it
+        """Web search is always there: the model looks things up when an answer depends on it
         ("auto"), or before it answers ("on", the box's Search). None only when Settings turns it off, or a client
         asks for none."""
         return "off" if self.config.get("chatdgc_web", True) is False else search
@@ -1387,7 +1387,7 @@ class ChatEngine:
         return self.store.update(chat_id, title=name[:60], expect_title=title_from(first.get("text", "")))
 
     def followups(self, chat_id: str, message_id: str, cancel=None) -> list[str] | None:
-        """Up to three suggested next messages for the chat's last reply, kept on it (ChatGPT's follow-ups). None when
+        """Up to three suggested next messages for the chat's last reply, kept on it. None when
         they're turned off, the reply isn't one that leaves a next step (it asked a question, waits on a card, is a
         research report, or didn't finish), the model suggests none, or the conversation moved on meanwhile."""
         if self.config.get("chatdgc_followups", True) is False:
@@ -1609,7 +1609,7 @@ class ChatEngine:
         return chat["summary"]
 
     def branch(self, chat_id: str, message_id: str) -> dict:
-        """Branch in new chat, as ChatGPT has it: a new chat holding this conversation up to and including that
+        """Branch in new chat: a new chat holding this conversation up to and including that
         reply, as you see it (the versions shown), with its files and what was summarized of it. The original is
         left as it is; the branch says where it came from."""
         chat = self._chat(chat_id)
@@ -1990,7 +1990,7 @@ class ChatEngine:
 
     def _memory_on(self, chat: dict) -> bool:
         """Memory is read and written unless it's turned off, the chat is temporary, or its project keeps its memory
-        to itself (ChatGPT's project-only memory)."""
+        to itself."""
         if self.config.get("memory", True) is False or chat.get("temporary"):
             return False
         return (self._project_of(chat) or {}).get("memory") != "project"
@@ -2802,7 +2802,7 @@ class ChatEngine:
             if known is None:
                 if len(sources) >= MAX_SOURCES:
                     continue
-                # The snippet goes with it, for the reply's source cards (ChatGPT's hover card and Sources panel).
+                # The snippet goes with it, for the reply's source cards.
                 known = {"n": len(sources) + 1, "title": title or url, "url": url[:2000]} | (
                     {"snippet": snippet[:300]} if snippet else {})
                 sources.append(known)
@@ -2928,7 +2928,7 @@ class ChatEngine:
         if plugins is not None and self._apps_on() and hasattr(plugins, "app_owner"):
             plugins.app_owner = {"conversation_id": chat["id"], "message_id": reply_id}
 
-        # Voice mode, as ChatGPT's: a spoken turn's reply is heard, not looked at, so it gets no question card, file,
+        # Voice mode: a spoken turn's reply is heard, not looked at, so it gets no question card, file,
         # widget or canvas (and its instructions offer none); typing again brings them back.
         spoken = bool((self._last_user(chat) or {}).get("voice"))
 
@@ -2973,7 +2973,7 @@ class ChatEngine:
         web_images = (existing or {}).get("images")       # a continued reply keeps the pictures it has
         picturing = None
         if (search in ("auto", "on") or self._memory_on(chat)) and existing is None and name not in self._toolless:
-            # As ChatGPT does: a question that turns on facts is looked up before it's answered, not left to a
+            # A question that turns on facts is looked up before it's answered, not left to a
             # model that's sure of itself (deepseek answered tax and remittance rules from memory, 2 in 2). With
             # the box's Search ("on") the model is told to search anyway: the check only says whether to show
             # pictures, which it does for either.

@@ -1554,7 +1554,7 @@ COMMAND_FIELDS.update({
     # widget shows once it's open, in any chat, with `chatdgc_widget_report`, so a reply waits a moment for it.
     "chatdgc_open": {"request_id": _S(), "conversation_id": _S(False), "temporary": _B(False), "project": _S(False),
                      "widget_reports": _B(False)},
-    # Projects, as ChatGPT has them: chats, files and instructions together. `chatdgc_projects` lists them (each
+    # Projects: chats, files and instructions together. `chatdgc_projects` lists them (each
     # {id, name, color, instructions, memory: shared|project, files: [{id, kind, name, size, ...}], chats,
     # created_at, updated_at}); `chatdgc_project` creates, changes, deletes (its chats too unless keep_chats) or
     # adds and removes a project's files (attachments as chatdgc_send's), answered by `chatdgc_project`, and
@@ -1567,7 +1567,7 @@ COMMAND_FIELDS.update({
                         "memory": _f("string", required=False, enum=("shared", "project")), "keep_chats": _B(False),
                         "attachments": _A(False), "file_id": _S(False)},
     "chatdgc_move": {"request_id": _S(), "conversation_id": _S(), "project_id": _S()},
-    # The Library (ChatGPT's): every file you attached, in every chat and project, newest first; `kind` one of
+    # The Library: every file you attached, in every chat and project, newest first; `kind` one of
     # image, pdf, document, spreadsheet, presentation, code, text; `query` part of a name. Answered by
     # `chatdgc_library` {files: [{source: chat|project, id, name, kind, type, mime, size, chars, created_at,
     # chat_id?, chat_title?, message_id?, project_id?, project_name?}], total, next_offset, counts}.
@@ -1636,7 +1636,7 @@ COMMAND_FIELDS.update({
                      # A part of a canvas the message is about (Ask ChatDGC on a selection): {canvas_id,
                      # start_line, end_line, text}. The user's message keeps it as `canvas`.
                      "canvas_selection": _O(False),
-                     # Study mode (ChatGPT's "Study and learn"): true turns it on for the chat from this message,
+                     # Study mode: true turns it on for the chat from this message,
                      # false turns it off; left out, the chat stays as it is. The conversation carries `study`.
                      "study": _B(False)},
     "chatdgc_continue": {"request_id": _S(), "conversation_id": _S(), "message_id": _S()},
@@ -1751,7 +1751,7 @@ EVENT_FIELDS.update({
     # plugins: [{id, name}], every plugin a reply can use. pips: [{id, name, pip_type, goal}], your Personal Pips;
     # error: why they can't be listed (Pips off), with the plugins still there.
     "chatdgc_mentions": {"request_id": _S(), "plugins": _A(), "pips": _A(), "error": _S(False)},
-    # Suggested next messages under a reply (ChatGPT's follow-ups), after it ended; the reply carries them in
+    # Suggested next messages under a reply, after it ended; the reply carries them in
     # `followups` too. Only the chat's last reply has any worth showing.
     "chatdgc_followups": {"conversation_id": _S(), "message_id": _S(), "followups": _A()},
     "chatdgc_library_file": {"request_id": _S(), "op": _S(), "path": _S(False), "bytes": _I(False)},
@@ -1785,7 +1785,7 @@ EVENT_FIELDS.update({
     # kind "image", mime, title, url (the page it's on), site, image, width?, height?}]}; each one's bytes are asked
     # for by id with `chatdgc_file`. The finished reply carries them in `images` too.
     "chatdgc_images": {"conversation_id": _S(), "message_id": _S(), "images": _O()},
-    # A file the reply made (ChatGPT's report.docx), as the reply puts it there: {id, name, kind "document", mime, size,
+    # A file the reply made, as the reply puts it there: {id, name, kind "document", mime, size,
     # chars, format (docx, pdf, xlsx, pptx, csv, md), made: true, at, created_at, pages?, note?}. It's opened or saved
     # with `chatdgc_library_file`, as a Library file is; the finished reply carries them in `files`.
     "chatdgc_made": {"conversation_id": _S(), "message_id": _S(), "file": _O()},

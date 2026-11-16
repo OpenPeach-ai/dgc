@@ -33,7 +33,7 @@ class _Told(retry._Recorder):
 
 
 def fixture_engine(key, short_label, out, sent):
-    """A stand-in CLI: prints ``out`` (Codex's JSON lines) and records what it was given."""
+    """A stand-in CLI: prints ``out`` and records what it was given."""
     script = f"import sys\nsys.stdout.write({out!r})\nsys.stdout.flush()\n"
     return types.SimpleNamespace(key=key, label=f"{short_label} (fixture)", short_label=short_label, stream="codex",
                                  supports_effort=lambda: False,

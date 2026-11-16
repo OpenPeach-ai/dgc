@@ -1,8 +1,7 @@
 """Other DGC agents working in the same checkout.
 
-DGC spawns a `dgc serve` per window, so two DGCs really can edit one checkout at the same time --
-opencode, Codex and qwen-code each run ONE owner process and never have this problem. Neither DGC
-knew the other existed. This is the registry that fixes that.
+DGC spawns a `dgc serve` per window, so two DGCs really can edit one checkout at the same time,
+and neither knew the other existed. This is the registry that fixes that.
 
 What these tests are mostly about is the thing that makes it safe: a pid is not an identity. Pids
 are recycled, and a note whose pid now belongs to something else must not read as a live DGC.

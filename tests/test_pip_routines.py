@@ -1,4 +1,4 @@
-"""A Personal Pip's routines (pip_routines): what it does by itself, and when, like Grok's."""
+"""A Personal Pip's routines (pip_routines): what it does by itself, and when."""
 import json
 import unittest
 from datetime import timedelta

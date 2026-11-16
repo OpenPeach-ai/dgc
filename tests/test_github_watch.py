@@ -1,5 +1,5 @@
-"""A chat watches a pull request and CI (work-watch-events, asked 8 Nov: "like Claude Code getting a pull request's
-activity and CI results as notices").
+"""A chat watches a pull request and CI (work-watch-events, asked 8 Nov: a pull request's activity and CI results as
+notices).
 
 `dgc watch-github <link>` follows a GitHub pull request or an Actions run and prints one line per new thing: a review,
 a comment, a code comment, new commits, checks finishing, the pull request closing; a run's result with what failed.

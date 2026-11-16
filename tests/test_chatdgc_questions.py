@@ -1,4 +1,4 @@
-"""ChatDGC: a question in the answer, as ChatGPT asks one. The model calls ask_user mid-answer; nothing waits: the
+"""ChatDGC: a question in the answer. The model calls ask_user mid-answer; nothing waits: the
 card is shown where it asked and the answer goes on. Continue sends the message the model wrote ahead of time,
 with the choice in. The question lives on the reply and the answer on the user's message, so it survives
 anything a chat survives. A model that can't take tools still answers."""
@@ -76,7 +76,7 @@ class QuestionTests(unittest.TestCase):
                                  memory=SharedMemory(Path(temp.name) / "memory"), projects=lambda hidden: [])
 
     def asked(self, chat, **extra):
-        """A reply that answers, asks, and goes on, as ChatGPT's did."""
+        """A reply that answers, asks, and goes on."""
         self.world["script"] += [{"parts": ["Get a written opinion first.", "\n\n## My question to you"],
                                   "calls": [("ask_user", {**FUNDS, **extra})]},
                                  {"parts": ["The answer matters: the routes differ."]}]
@@ -203,7 +203,7 @@ PLAN = {"questions": [
 
 
 class FormTests(unittest.TestCase):
-    """A card of several questions answered together (ChatGPT's form): up to four, numbered on the card, each with
+    """A card of several questions answered together: up to four, numbered on the card, each with
     its options; one button with the model's words sends the message it wrote with every answer under it."""
 
     def setUp(self):

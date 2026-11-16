@@ -1,6 +1,6 @@
 """The versioned install layout, and the only code that changes which DGC version runs.
 
-Modelled on Claude Code's native installer, adapted for a Python virtualenv:
+Versions side by side, each a whole tree with its own Python virtualenv:
 
     <data_dir>/versions/<version>/            a complete release tree with its OWN .venv
                                               (a non-editable install, so a running
@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 LAYOUT = 1
-#: Versions kept besides the active one (Claude Code keeps the same two).
+#: Versions kept besides the active one.
 KEEP_OTHER_VERSIONS = 2
 #: An unfinished build older than this, with no live process in it, is swept by retention.
 STALE_BUILD_SECONDS = 3600
@@ -628,8 +628,8 @@ def _record_usable(record: dict) -> bool:
 
 
 def locate(env=None, prefix: str | None = None, argv0: str | None = None) -> Location:
-    """Where `dgc update` should install: self-located from sys.prefix first (like Codex's
-    CODEX_MANAGED_PACKAGE_ROOT, except DGC then targets that install instead of only warning),
+    """Where `dgc update` should install: self-located from sys.prefix first (and DGC then
+    targets that install instead of only warning),
     then the install record, then the old single-tree layout, then the defaults."""
     env = os.environ if env is None else env
     real_prefix = _real(sys.prefix if prefix is None else prefix)
@@ -754,7 +754,7 @@ def installation_report(env=None, prefix: str | None = None,
     if (location.kind in ("versions", "legacy") and launcher.target is not None
             and launcher.kind in ("managed", "legacy")
             and _real(launcher.target.parent.parent) != real_prefix):
-        # Codex's doctor warns when "update would target a different npm install"; here the
+        # An update would target a different install than the one running; the
         # usual cause is a dgc started before an update or a rollback.
         notes.append(f"{launcher.path} runs {launcher.target.parent.parent.parent}, not this dgc "
                      f"({real_prefix.parent}) — restart dgc to use it")

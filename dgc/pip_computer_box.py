@@ -217,7 +217,7 @@ _CHROME_FLAGS = (
     "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
     f"--proxy-server=http://127.0.0.1:{BOX_PROXY_PORT}", "--proxy-bypass-list=<-loopback>",
     "--remote-debugging-pipe", "--user-data-dir=/home/pip/.browser",
-    # Like Chrome on Grok's bots: not marked as automated (navigator.webdriver), so Google's search
+    # A real Chrome, not marked as automated (navigator.webdriver), so Google's search
     # answers instead of asking "are you a robot" every time (reported 2026-10-07). A check that
     # still appears stops the Pip and asks the user (pip_computer.human_check); it never solves one.
     "--disable-blink-features=AutomationControlled",
@@ -227,7 +227,7 @@ ONLINE = {"offline": False, "latency": 40, "downloadThroughput": 12_500_000, "up
           "connectionType": "ethernet"}
 # A step on a tab whose page is asking a question (confirm or prompt): nothing else runs there until it is answered.
 DIALOG_OPEN = "the page is asking a question (a dialog is open); answer it with dialog first"
-# A new window on the computer's screen opens here, as on Grok's bots.
+# A new window on the computer's screen opens here.
 HOME_PAGE = "https://www.google.com/"
 
 
@@ -496,7 +496,7 @@ def _real_binary(path) -> bool:
 
 
 def find_chrome(home: Path | None = None) -> Path | None:
-    """The browser a Pip's computer runs: Google Chrome when it is installed, as on Grok's bots;
+    """The browser a Pip's computer runs: Google Chrome when it is installed;
     otherwise a Playwright Chromium build, or a system Chromium.
 
     Snap-packaged Chromium cannot run inside another sandbox, so it is never chosen, and neither is
@@ -681,7 +681,7 @@ class Box:
         chrome_dir = self.chrome.parent
         flags = list(_CHROME_FLAGS)
         if self.display_dir is not None:
-            # A window on the Pip's desktop, like Chrome on Grok's bots; still driven and gated here.
+            # A window on the Pip's desktop; still driven and gated here.
             # Sized to leave the dock's strip at the bottom of the screen free, whenever the dock appears.
             flags = [f for f in flags if f != "--headless=new"] + [f"--window-position=0,{TOP_BAR}", "--password-store=basic",
                                                                   "--disable-session-crashed-bubble"]

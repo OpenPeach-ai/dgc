@@ -1,6 +1,6 @@
 """The prompt cache's clock for a chat: when its cached conversation runs out, from the provider's own word.
 
-The editor shows a small clock after the context meter, as Claude Code does (0.48): the minutes the
+The editor shows a small clock after the context meter (0.48): the minutes the
 cached prefix has left, in whole minutes, or the clock alone in the error colour once it has gone. It
 is shown only where DGC knows the answer from the provider itself, and only after a reply proved a
 cache is in use:

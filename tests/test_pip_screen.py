@@ -1,4 +1,4 @@
-"""A Pip computer's full screen, like Grok's bots: the desktop box, the viewer's input filter, who
+"""A Pip computer's full screen: the desktop box, the viewer's input filter, who
 a submit belongs to, and the stream `dgc serve` carries to the editor."""
 import base64
 import json
@@ -194,7 +194,7 @@ class DesktopBoxTests(unittest.TestCase):
             listener.close()
 
     def test_the_desktop_terminal_is_online_only_through_the_computers_egress(self):
-        # Like Grok's: the desktop's Terminal app reaches public sites through DGC's egress proxy, the
+        # The desktop's Terminal app reaches public sites through DGC's egress proxy, the
         # same way out as the browser; the box itself still has no network.
         found = {role: Path("/usr/bin") / name for role, name in pip_screen.PROGRAMS.items()}
         egress = self.base / "egress.sock"
@@ -321,8 +321,8 @@ class DesktopWithoutBrowserTests(unittest.TestCase):
 
 
 class BrowserOnTheScreenTests(unittest.TestCase):
-    """A Pip's browser steps run Chrome as a window on its screen when the machine can show one, as on
-    Grok's bots (headless Chrome names itself HeadlessChrome and Google asked it for a robot check)."""
+    """A Pip's browser steps run Chrome as a window on its screen when the machine can show one
+    (headless Chrome names itself HeadlessChrome, and Google asked it for a robot check)."""
 
     def host(self, shown):
         steps = []
@@ -621,7 +621,7 @@ class RealScreenTests(unittest.TestCase):
         self.assertFalse(host.browser.alive(), "the screen opens on its desktop, with no browser (16 Nov)")
         self.assertEqual(host.browser.display_dir, host.desktop.x11_dir, "when it opens, it is a window on the screen")
         # The desktop's Terminal is online through the computer's egress, like the browser: the desktop
-        # box runs its own relay to it (Grok's terminal has internet; a user: "lets copy grok").
+        # box runs its own relay to it.
         def parent(pid):
             try:
                 return int(next(l for l in open(f"/proc/{pid}/status") if l.startswith("PPid:")).split()[1])

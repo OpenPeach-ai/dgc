@@ -1,8 +1,7 @@
 """A finished Pip run posts its result in that Pip's own chat, as a short message from the Pip.
 
-Grok Bots and OpenAI Dots both post a scheduled run's result in the bot's own conversation, where you
-can reply to it, and keep a separate run list for the record. A Pip does the same: each run's result
-appears in its chat, and the run list behind it is the History tab (it was Runs).
+Each run's result appears in the Pip's chat, where you can reply to it, and the run list behind it is the History
+tab (it was Runs), for the record.
 
 Which runs. A source review (Scout, Lens, Rook, Lock), a Pulse check, a live-data run (pip_live_data:
 its summary, the one post a model writes, held to the numbers its commands printed), a Quill draft and a

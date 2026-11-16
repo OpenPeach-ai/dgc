@@ -1,4 +1,4 @@
-"""Data analysis (ChatGPT's), without running code the model wrote: the chat's spreadsheets as in-memory SQLite tables
+"""Data analysis, without running code the model wrote: the chat's spreadsheets as in-memory SQLite tables
 it asks with one read-only SELECT at a time, for exact numbers. And charts: the model's ```chart JSON is in the prompt."""
 import tempfile
 import unittest

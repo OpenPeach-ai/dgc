@@ -1,4 +1,4 @@
-"""Follow-ups, as ChatGPT shows them: a few next messages under a reply, from one small call after it ends, kept on the
+"""Follow-ups: a few next messages under a reply, from one small call after it ends, kept on the
 reply and shown only under the chat's last one. None when they're turned off, after a reply that asked the user
 something or waits on a card, after research, or when the model sees nothing natural to follow."""
 import tempfile

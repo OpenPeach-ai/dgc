@@ -584,8 +584,7 @@ commands are reviewed on the card.
 ## A Pip's runs in its own chat
 
 Each run a Pip finishes is posted in its own chat, as a message from the Pip: its face, its name and
-the time, then what happened in its own short words, the way Grok Bots and OpenAI Dots post a scheduled
-run in the bot's conversation. Reply to it there: "is the e-way one the same as last week?" The full
+the time, then what happened in its own short words. Reply to it there: "is the e-way one the same as last week?" The full
 list is the Pip's **Reports** (a Pip with a folder) or **History**.
 
 | Run | What the Pip says | Under it |
@@ -1203,7 +1202,7 @@ The gear on **Your Pips** opens settings for all of them:
   in DGC **Settings → Plugins**, and so are the skills your Pips use.
 - **Plugins**: every plugin you turned on in DGC **Settings → Plugins**. Each one is every Pip's to
   use; turning it on is your consent, so a Pip never asks "use this plugin?". For each plugin, choose
-  what it may do without asking you (the same four choices as ChatGPT):
+  what it may do without asking you (one of four choices):
   - **Always ask**: it asks before it reads or changes anything.
   - **Ask before any change**: it reads at once, and asks before it changes anything.
   - **Ask before important actions** (the default): it reads at once, and asks before it sends,
@@ -1276,7 +1275,7 @@ proxy, workbench and bash tools) are refused for a Pip with a linked app that ha
 accounts. The Pip's page shows which account each app is on; **Disconnect**, and asking again,
 gives the same choice.
 
-A connected app is that Pip's: it reads it when you ask, like Grok's connectors
+A connected app is that Pip's: it reads it when you ask
 (Gmail messages, Calendar events, Drive and Notion search results, Contacts), and the
 results reach the model as untrusted text. Anything it would send or change, such as
 an email or a calendar event, is a draft that waits for your **Allow** (or your
@@ -1439,7 +1438,7 @@ without.
 
 ### How much it asks
 
-Every Pip has a level, with a folder or without, the way OpenMausBot's bots do (Pips API 58; a Pip with a folder from
+Every Pip has a level, with a folder or without (Pips API 58; a Pip with a folder from
 Pips API 95): **Ask me first**, **Approve for me** or **Do it all**. Its chip sits at the left of its prompt box, where Work's mode picker is, and says the level's name. Its
 menu gives each level with one line saying what it means, and a last row, **What PIP can do**. The same setting is on
 its page under **How much it asks**: change it in one place and the other follows. A change made while a reply runs
@@ -1523,7 +1522,7 @@ find becomes a fix by its level: see [When a check finds something](#when-a-chec
 
 ### Working notes, a daily log, and /learn
 
-A Pip learns its job as it goes (Pips API 57; every Pip from 0.52), the way OpenMausBot's bots keep a `MEMORY.md`:
+A Pip learns its job as it goes (Pips API 57; every Pip from 0.52), in notes of its own:
 
 - **Its working notes.** It keeps short lines on how the job goes, like "The hospital portal asks for the UHID first"
   or "Bills go to the accounts inbox", with a small tool of its own (add a line, replace one, strike one), up to 60 lines or
@@ -1544,7 +1543,7 @@ A Pip learns its job as it goes (Pips API 57; every Pip from 0.52), the way Open
 
 ### Saved logins
 
-A Personal Pip with a computer can sign in by itself (Pips API 56), the way OpenMausBot's bots do: you save a
+A Personal Pip with a computer can sign in by itself (Pips API 56): you save a
 site's login once, and DGC types it in whenever the Pip needs it. The Pip never sees the username, the password or
 the code; it is told only what was filled.
 
@@ -1665,7 +1664,7 @@ Large and fills in the checkout; then it asks you to type your card on its scree
 **Its screen in an editor tab.** The computer button in a Pip's chat (or **Open its computer**
 in Settings) opens "NAME · Computer" as an editor tab.
 
-The tab is the Pip's real screen, like Grok's bots: a small Linux desktop on DGC's own wallpaper,
+The tab is the Pip's real screen: a small Linux desktop on DGC's own wallpaper,
 with a dock at the bottom holding **Browser** (Google Chrome), **Files** (a file manager),
 **Terminal**, and its image editor, **Documents** and PDF viewer when this computer has them. It opens
 with nothing open. Click, type and move windows as on any computer. While a
@@ -1709,7 +1708,7 @@ cookies, so a site usually trusts it for a while afterwards.
   **Downloads**. Open a file to see it, **Save to…** to copy it where you choose, **Add files…**
   (or drop them) to give the Pip something to work on, and **Remove**. It holds 1 GB.
 - **Terminal**: run a command in the computer's Files. Yours and the Pip's commands show
-  together. It is online like Grok's bots: commands reach public websites on ports 80 and 443
+  together. It is online: commands reach public websites on ports 80 and 443
   through DGC, the same way out as the browser (curl, pip, npm and git over https work), and
   never this computer or your local network. Under each command DGC lists the sites it reached,
   and anything it refused. It sees nothing but those Files and stops a command after 60 seconds.

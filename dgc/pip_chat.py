@@ -148,7 +148,7 @@ def widen_tables(db) -> None:
         db.execute(f"ALTER TABLE {table}_widened RENAME TO {table}")
 
 
-# Options a Pip offers under its reply, like Grok's A/B cards ("Yes, connect Gmail" / "Not yet"); the
+# Options a Pip offers under its reply, as A/B cards ("Yes, connect Gmail" / "Not yet"); the
 # user's tap sends one as their next message.
 CHOICES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS pip_chat_choices (

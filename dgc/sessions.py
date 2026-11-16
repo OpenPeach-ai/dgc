@@ -372,7 +372,7 @@ def resolve_path(project_root, path, *, must_exist: bool = False) -> Path:
     return p
 
 
-# ---- archive (his call, 13 Nov), in Codex's shape -------------------------------------------------------------------
+# ---- archive (his call, 13 Nov) ------------------------------------------------------------------------------------
 # Codex moves an archived thread's file into an archived folder and back (codex-rs thread-store archive_thread.rs,
 # unarchive_thread.rs). A Work session is its file and the files beside it that are its own; archiving moves them all
 # into <project>/archived/, where nothing resumes, wakes or runs it, and Restore moves them back as they were. The
@@ -443,7 +443,7 @@ def _clean_pip_ids(pips) -> list[str] | None:
 
 def archive(path, project_root, *, pips=()) -> tuple[bool, str]:
     """Archive one of this project's sessions: (True, "") or (False, why, in plain words). Refused while a turn runs or
-    while anything has it open (a tab, a terminal, a DGC running with no window), as Codex stops a live thread first.
+    while anything has it open (a tab, a terminal, a DGC running with no window): a live session is stopped first.
     ``pips``: the Project Pips archived with it, kept beside it until it is restored (archived_with)."""
     name = _session_name(path)
     if name is None or str(path) != name:

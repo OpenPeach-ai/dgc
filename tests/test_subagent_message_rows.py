@@ -1,4 +1,4 @@
-"""A parent steering a running sub-agent names that agent, the way Codex does.
+"""A parent steering a running sub-agent names that agent.
 
 The row read "Used tool · message task" in the editor and a bare `message_task` in the terminal: a
 message to no one in particular, from a parent that had started two or three children. Codex says

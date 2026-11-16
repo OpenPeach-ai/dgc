@@ -122,8 +122,8 @@ AGENT_MESSAGE_SUFFIX = "\n</parent-agent-message>"
 # The same channel, saying the opposite thing. `message_task` was a CORRECTION by construction --
 # "fold it in if it applies" reads as "what you are doing may be wrong" -- so a parent with more
 # work for a running child had to phrase an addition as a correction, and the envelope then told
-# the child the opposite of what was meant. Codex draws exactly this line with one word in its
-# envelope (MESSAGE vs NEW_TASK) on one shared send path; this is DGC's half of it.
+# the child the opposite of what was meant. Now the envelope says which it is, with one word on one
+# shared send path: a correction, or more work.
 #
 # NOT a wake: DGC's children have no idle state to wake into, and the finished ones leave nothing
 # to resume. This adds scope to a child that is still working, and says so.

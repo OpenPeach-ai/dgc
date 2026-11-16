@@ -1,4 +1,4 @@
-"""A Personal Pip's own apps, connected from its chat like Grok's connectors.
+"""A Personal Pip's own apps, connected from its chat.
 
 The Pip asks (``connect_app``): the controller records the request, and the editor shows a Connect
 card in the Pip's chat. The user's Connect makes the controller call Composio's
@@ -136,7 +136,7 @@ def listing(registry, pip_id) -> list[dict]:
             item = projection(row)
             if row["status"] in ("requested", "failed") and not linked:
                 # An account another Pip already uses: the card asks to let this one use it too
-                # (Connect then reuses it, no sign-in), as Grok asks before a bot uses a connector.
+                # (Connect then reuses it, no sign-in) before a bot uses a connector.
                 known = registry.db.execute("SELECT label FROM pip_app_links WHERE toolkit=? AND status='connected' "
                                             "AND pip_id<>? ORDER BY updated_at DESC LIMIT 1", (toolkit, pip_id)).fetchone()
                 if known is not None:

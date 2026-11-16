@@ -3686,11 +3686,8 @@ class Agent(GoalLifecycle):
         unreachable. Flat is therefore the behaviour that actually shipped, and it stays the
         default; what changes is that it is now a number anyone can see and raise.
 
-        Every serious harness bounds delegation with an integer read off the real parent chain --
-        Codex, Claude Code, Grok Build, opencode, qwen-code and OpenClaw all do exactly this, with
-        defaults between 1 and 5 (Grok Build: `MAX_SUBAGENT_DEPTH: u32 = 1` in
-        xai-grok-tools/src/implementations/grok_build/task/mod.rs, host-overridable) -- because the
-        depth of the agent that is running is a fact about
+        Delegation is bounded by an integer read off the real parent chain, with a small default
+        that the host can raise, because the depth of the agent that is running is a fact about
         the run, not something the agent can argue its way past.
         """
         from .dev_mode import chosen
@@ -6559,7 +6556,7 @@ class Agent(GoalLifecycle):
         """
         self._last_turn_error = ""
         self._last_turn_pause = ""
-        # A goal's next turn the frontend started by itself (goal_turns, Codex's shape): its prompt is DGC's cycle
+        # A goal's next turn the frontend started by itself (goal_turns): its prompt is DGC's cycle
         # prompt, not anything typed; its tools and skills follow the goal, and its inputs were given at its start.
         continuing = self.take_goal_continuing()
         began_files = self._turn_files_begin() if self.depth == 0 else None

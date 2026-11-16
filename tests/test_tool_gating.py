@@ -426,9 +426,8 @@ class DelegationDepthIsASettingNotAPhraseTests(unittest.TestCase):
     to a sub-agent" could nest and "split this across helpers" could not, and the shape of the
     agent tree came down to the parent's choice of words.
 
-    Every harness that bounds delegation for real — Codex, Claude Code, Grok Build, opencode,
-    qwen-code, OpenClaw — uses an integer depth compared against a configured cap, and not one of
-    them reads the brief to decide it. `self.depth` is set by the parent at spawn, so a child
+    Delegation is bounded by an integer depth compared against a configured cap, never by reading the
+    brief. `self.depth` is set by the parent at spawn, so a child
     cannot claim to be shallower than it is.
     """
 

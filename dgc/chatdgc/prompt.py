@@ -41,7 +41,7 @@ MEMORY = (
     "announce saving: the reply shows it.\n")
 
 
-# Writing blocks (ChatGPT's): a draft the user will send as it is goes in its own fenced block, which the screen shows as
+# Writing blocks: a draft the user will send as it is goes in its own fenced block, which the screen shows as
 # an email or a draft with Copy (plain text), Open in mail app, and Edit in place.
 DRAFTS = (
     "- When you write something the user will send or post as it is (an email, a message, a letter, a social post, a "
@@ -52,7 +52,7 @@ DRAFTS = (
     "whole block again.\n")
 
 
-# Charts (ChatGPT's interactive charts): JSON in a ```chart block, drawn by the screen.
+# Charts: JSON in a ```chart block, drawn by the screen.
 CHARTS = (
     "- When numbers compare or change over time and a picture makes them clearer, add a chart after them: a fenced "
     "block ```chart holding JSON like {\"type\": \"bar\", \"title\": \"Spend by month\", \"x\": [\"Jan\", \"Feb\"], "
@@ -63,7 +63,7 @@ CHARTS = (
     "two numbers. The chart shows its numbers too, so don't repeat them all in a table.\n")
 
 
-# Interactive answers (ChatGPT's): a small self-contained HTML page (show_widget) in a locked-down tab beside the chat.
+# Interactive answers: a small self-contained HTML page (show_widget) in a locked-down tab beside the chat.
 WIDGETS = (
     "- When the answer is better used than read (a calculator with inputs, a converter, a quiz, a timer, a small "
     "simulation or an interactive diagram), show a widget with show_widget: one small self-contained HTML page. "
@@ -72,7 +72,7 @@ WIDGETS = (
     "question.\n")
 
 
-# Canvas (ChatGPT's): a longer piece to keep working on together goes in an editor beside the chat.
+# Canvas: a longer piece to keep working on together goes in an editor beside the chat.
 CANVAS = (
     "- When the user asks you to write something long (a blog post, an essay, an article, a report, a story, a speech, "
     "a plan of more than a few lines, a program over about 40 lines) or asks for a canvas, write it in a canvas (but a "
@@ -90,8 +90,8 @@ ARTIFACTS = (
     "work on together is a canvas. make_file is for a file to download as it is (a Word file, a PDF, a CSV).\n")
 
 
-# Voice mode: the message was spoken and the reply will be read aloud, so it should sound like speech, as ChatGPT's
-# voice answers do -- a few sentences, nothing to look at -- unless the user asks for the detail.
+# Voice mode: the message was spoken and the reply will be read aloud, so it should sound like speech
+# -- a few sentences, nothing to look at -- unless the user asks for the detail.
 VOICE = (
     "\nThe user spoke this message in voice mode, and your reply will be read aloud to them. Answer the way you would "
     "speak: a few short, natural sentences (about 60 words), leading with what matters. No headings, tables, lists, "
@@ -101,7 +101,7 @@ VOICE = (
     "for the full detail.\n")
 
 
-# Study mode (ChatGPT's "Study and learn"): the chat teaches instead of answering, until the user turns it off. Its own
+# Study mode: the chat teaches instead of answering, until the user turns it off. Its own
 # words, written for DGC: it finds the level first, goes a step at a time, makes them try, and checks with a quiz card.
 STUDY = (
     "\nStudy mode is on: the user wants to learn and understand, not just get an answer. Be a patient, encouraging "

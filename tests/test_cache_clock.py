@@ -1,6 +1,6 @@
 """The prompt cache's clock for a Work chat (0.48): what the backend tells the editor, and when.
 
-The editor shows a small clock after the context meter, as Claude Code does: whole minutes left
+The editor shows a small clock after the context meter: whole minutes left
 while the provider's cache is warm, the clock alone in the error colour once it is gone, nothing at
 all where DGC cannot know. Known means the provider said so itself: Anthropic's own cache
 read/write report and the TTL its write used (anchored at the request's send time), or a local

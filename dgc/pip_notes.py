@@ -1,6 +1,6 @@
 """What a Personal Pip remembers about you, built from your chat with it, visible and deletable.
 
-Grok's bots and Dots keep memory you cannot see; Pips show every note. While it replies, a Pip may keep a
+A Pip shows every note it keeps. While it replies, a Pip may keep a
 short note (``remember``) of something you told it in your own words that will help later: your name,
 who people are, what you like, how you want things done. Each note shows on its page under "What it
 remembers", with Forget. You can add one there too. Later replies and tasks get the notes as reference.

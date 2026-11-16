@@ -3133,7 +3133,7 @@ class TUI:
         """How many output lines a finished tool step shows before collapsing.
 
         A file read shows none: the header already names the file and its length, and the body
-        is text the user owns — Claude Code and Codex both collapse it to one line. Everything
+        is text the user owns, so it collapses to one line. Everything
         else keeps the ten-line preview. A failure always shows its output.
         """
         if b.get("error"):
@@ -5819,7 +5819,7 @@ class TUI:
 
     def _mark_turn_end(self, verb: str, seconds: float) -> None:
         """A finished turn that used tools gets "· Worked for 43s · 5 tools" above its answer, the editor's words
-        for the same moment, and Codex's place for it in a terminal: the steps stay on screen above the line,
+        for the same moment: the steps stay on screen above the line,
         and the answer under it stands on its own. Any other end (stopped, failed, paused, an answer with no
         steps, steps with no answer) keeps the line under the turn: "· done · 3s"."""
         from .subagents import format_elapsed

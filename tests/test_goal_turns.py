@@ -1,6 +1,6 @@
-"""A Work goal in Codex's shape (12 Nov night, his call after reading Codex's code together): each goal cycle is a turn of
+"""A Work goal as turns (12 Nov night, his call): each goal cycle is a turn of
 its own, with its own reply and file changes, and the editor's backend starts the next one when the last ended with the
-goal still running, after anything already queued. Codex's stop rule replaces "three cycles without distinct tool
+goal still running, after anything already queued. The stop rule replaces "three cycles without distinct tool
 progress": three goal turns in a row that came back empty (no tool work and no reply). An SDK client and the terminal
 keep the goal inside one turn (goal_turns off)."""
 import copy

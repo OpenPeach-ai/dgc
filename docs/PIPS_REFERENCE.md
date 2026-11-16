@@ -1021,7 +1021,7 @@ there is no `use_plugin` or per-Pip card (API 44's `pip_plugin_grants` rows are 
 consulted, and Needs attention no longer lists them).
 
 What runs at once is the plugin's level, `plugins.permission(name)`, kept in
-`~/.dgc/plugins/installed.json` under `permissions` (ChatGPT's four; default `important`):
+`~/.dgc/plugins/installed.json` under `permissions` (one of four; default `important`):
 `always_ask` (every call is an Allow card, a read too), `any_changes` (reads run, every change asks),
 `important` (reads run, and a change runs at once only when its vendor marks it `destructiveHint: false`
 and `openWorldHint: false`; every other change asks) and `never_ask` (everything runs). A read is MCP
