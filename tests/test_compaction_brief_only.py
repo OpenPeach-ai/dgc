@@ -2,8 +2,8 @@
 
 On kimi-k3.1-pro the second compaction's brief was mostly the summariser's own reasoning: it opened "I need produce
 compact brief exactly headings…", guessed at things, and repeated one failed git line four times. The check only asked
-that "## Goal", "## Progress" and "## Next" appear somewhere, and thinking that names the headings passes that. Now the
-brief is taken from its real "## Goal" heading on (headings at the start of a line, in order); anything before it, and
+that its three main headings appear somewhere, and thinking that names the headings passes that. Now the
+brief is taken from its real first heading ("## The ask") on (headings at the start of a line, in order); anything before it, and
 any <think> block, is dropped; a reply with no such brief is not used (the mechanical summary stands in, as before)."""
 from __future__ import annotations
 
@@ -14,20 +14,20 @@ import unittest
 from dgc.agent import _brief_only
 from tests import test_compaction_keeps_the_ask as fixtures
 
-BRIEF = "## Goal\n- Build everything in PLAN-2.md.\n## Progress\n- Items 1–9 committed.\n## Next\n- Item 10."
-THINKING = ("I need produce compact brief exactly headings ## Goal ## Progress ## Next. The plan items are probably "
+BRIEF = "## The ask\n- Build everything in PLAN-2.md.\n## Done so far\n- Items 1–9 committed.\n## Next step\n- Item 10."
+THINKING = ("I need produce compact brief exactly headings ## The ask ## Done so far ## Next step. The plan items are probably "
             "26-47. git commit failed. git commit failed. Let me write it.\n\n")
 
 
 class BriefOnly(unittest.TestCase):
     def test_the_brief_from_its_goal_heading_on(self):
         self.assertEqual(_brief_only(THINKING + BRIEF), BRIEF)
-        self.assertEqual(_brief_only("<think>headings first ## Goal</think>\n" + BRIEF), BRIEF)
+        self.assertEqual(_brief_only("<think>headings first ## The ask</think>\n" + BRIEF), BRIEF)
         self.assertEqual(_brief_only(BRIEF), BRIEF)
 
     def test_thinking_that_only_names_the_headings_is_no_brief(self):
         self.assertEqual(_brief_only(THINKING), "")
-        self.assertEqual(_brief_only("## Goal\n- x\n## Next\n- y\n## Progress\n- z"), "", "headings out of order")
+        self.assertEqual(_brief_only("## The ask\n- x\n## Next step\n- y\n## Done so far\n- z"), "", "headings out of order")
 
 
 class InACompaction(unittest.TestCase):

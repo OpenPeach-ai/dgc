@@ -28,7 +28,7 @@ class ContinuityTests(unittest.TestCase):
     def send(self, key='first', text='Keep project codename Lavender. Never deploy without a visual review.', **kwargs):
         return pip_chat.send(self.store, self.pip['id'], text, key, 'user', self.cfg, **kwargs)['run']
 
-    def candidate(self, run, summary='## Goal\nRemember Lavender.\n## Progress\nRead source only.\n## Next\nVisual review before deployment.', advance=True):
+    def candidate(self, run, summary='## The ask\nRemember Lavender.\n## Done so far\nRead source only.\n## Next step\nVisual review before deployment.', advance=True):
         pin = run['manifest']['conversation']['continuity']
         return {'version': 1, 'base_digest': pin['base_digest'], 'head_digest': pin['head']['archive_digest'],
                 'advance': advance, 'summary': summary if advance else pin['state']['summary'],
@@ -243,7 +243,7 @@ class WorkerBriefTests(unittest.TestCase):
         def chat(messages, **kwargs):
             calls.append((messages,kwargs))
             if error:raise RuntimeError('offline')
-            return ChatResult(content='bad' if malformed else '## Goal\nLavender sk-test-secret-value\n## Progress\nRead only\n## Next\nVisual review')
+            return ChatResult(content='bad' if malformed else '## The ask\nLavender sk-test-secret-value\n## Done so far\nRead only\n## Next step\nVisual review')
         agent=SimpleNamespace(messages=[{'role':'system','content':'restricted'},{'role':'user','content':'[Earlier conversation compacted to this summary]\nDuring-turn memory'}],
                               config=cfg,cancelled=stop,context_size=lambda:32768,
                               _aux_client=lambda **kw:SimpleNamespace(chat=chat),_record_usage=lambda *args:None)

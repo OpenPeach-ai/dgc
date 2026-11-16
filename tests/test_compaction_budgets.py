@@ -10,7 +10,7 @@ above ~30k tokens. So on that session the summariser read 60,000 characters -- a
 891,289-token transcript: 20,106 characters of head, 30,159 of tail, and the whole middle thrown
 away before any model saw it. The early user asks were in the discarded middle. What survived was
 the recent tail, which in a sub-agent run is tool output. The summariser was then asked, under the
-heading "## Goal -- what the user ultimately wants", to say what the user wanted.
+heading "## The ask -- what the user wants in the end", to say what the user wanted.
 
 These tests pin the two properties that failure violated: the budget is derived from the window
 rather than capped flat, and on a real window the summariser sees the whole transcript.
@@ -124,7 +124,7 @@ class OnlyTheUserIsLabelledUserTest(unittest.TestCase):
                 {"role": "system", "content": "config"},
                 {"role": "weird", "content": "?"},
                 {"role": "user", "content": "relayed", "_dgc_steering": ["x"]},
-                {"role": "user", "content": _COMPACT_PREFIX + "\n## Goal\n- old thing"}):
+                {"role": "user", "content": _COMPACT_PREFIX + "\n## The ask\n- old thing"}):
             label = summariser_role(message)
             self.assertNotEqual(label, "user", f"{message.get('role')} must not read as the user")
             self.assertIn("not the user", label,
@@ -134,8 +134,8 @@ class OnlyTheUserIsLabelledUserTest(unittest.TestCase):
         import inspect
         from dgc.agent import Agent
         source = inspect.getsource(Agent._compact)
-        self.assertIn("ONLY lines labelled `user:` are the user speaking", source)
-        self.assertIn("NOTES FOR THE NEXT MODEL", source,
+        self.assertIn("Only `user:` lines are the user.", source)
+        self.assertIn("Write notes for the model", source,
                       "the brief must be framed as notes, not as the user talking")
 
 
@@ -174,7 +174,7 @@ class TheUsersOwnWordsSurviveTest(unittest.TestCase):
         from dgc.agent import _COMPACT_PREFIX, _retain_user_turns
         messages = [{"role": "user", "content": "real ask"},
                     {"role": "user", "content": "steered", "_dgc_steering": ["s"]},
-                    {"role": "user", "content": _COMPACT_PREFIX + "\n## Goal\n- stale"}]
+                    {"role": "user", "content": _COMPACT_PREFIX + "\n## The ask\n- stale"}]
         kept = _retain_user_turns(messages, 10_000)
         self.assertEqual([m["content"] for m in kept], ["real ask"],
                          "a prior brief carried forward as a user turn is the bug, not the fix")

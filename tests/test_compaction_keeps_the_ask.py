@@ -120,8 +120,8 @@ class TheAskSurvivesEveryCompactionTest(unittest.TestCase):
         with patch.object(Agent, "_new_client", lambda self, *a, **k: _Client("http://localhost.invalid/v1", "", "fixture")):
             agent = Agent(fixture_config(Path(self.root.name), compact_threshold=0.0, context_size=WINDOW), QuietUI())
         agent.session_file = sessions.new_path(Path(self.root.name))
-        brief = types.SimpleNamespace(content="## Goal\n- Not stated in the steps shown.\n## Progress\n"
-                                      "- Dragged the text box a few times.\n## Next\n- Keep going.",
+        brief = types.SimpleNamespace(content="## The ask\n- Not stated in the steps shown.\n## Done so far\n"
+                                      "- Dragged the text box a few times.\n## Next step\n- Keep going.",
                                       tool_calls=None, usage=None)
         summariser = types.SimpleNamespace(chat=lambda *a, **k: brief)
         agent._aux_client = lambda *a, **k: summariser

@@ -6424,7 +6424,7 @@ def test_context_prune():
           "ORIGINAL-COMPACTION-GOAL" in fallback_summary
           and "src/alpha.py" in fallback_summary
           and "TAIL-COMPACTION-ERROR" in fallback_summary
-          and "Mechanical fallback" in fallback_summary
+          and "Written without a model" in fallback_summary
           and [message.get("content") for message in fallback_agent.messages[-2:]] ==
               ["RECENT-USER-CONTEXT", "RECENT-ASSISTANT-CONTEXT"]
           and not _tool_transcript_errors(fallback_agent.messages),
@@ -6460,8 +6460,8 @@ def test_context_prune():
         def chat(self, messages, **kwargs):
             compact_calls.append((messages, kwargs))
             return _CompactResult(content=(
-                "## Goal\nUNIQUE-PRIOR-BRIEF\n## Constraints\nkeep it\n"
-                "## Progress\ncondensed\n## Next\ncontinue\n## Critical\npaths"))
+                "## The ask\nUNIQUE-PRIOR-BRIEF\n## Rules to keep\nkeep it\n"
+                "## Done so far\ncondensed\n## Next step\ncontinue\n## Exact details\npaths"))
     def _bounded_aux(**kwargs):
         compact_calls.append(("aux", kwargs))
         return _BoundedCompactor()
@@ -6649,8 +6649,8 @@ def test_context_prune():
     class _SchemaCompactor:
         def chat(self, *args, **kwargs):
             return _CompactResult(content=(
-                "## Goal\ncontinue\n## Constraints\nkeep APIs\n## Progress\nreviewed\n"
-                "## Next\nimplement\n## Critical\ncontext"))
+                "## The ask\ncontinue\n## Rules to keep\nkeep APIs\n## Done so far\nreviewed\n"
+                "## Next step\nimplement\n## Exact details\ncontext"))
     schema_agent._aux_client = lambda **kwargs: _SchemaCompactor()
     schema_agent._compact(tools=large_schema)
     check("native tool schemas participate in the actual compaction threshold",
