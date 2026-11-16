@@ -403,8 +403,10 @@ class Computer:
             result = run(*argv, image(), "sleep", "infinity", timeout=120)
             if result.returncode != 0:
                 raise RegistryError("computer_unavailable", "Its computer did not start: " + _last_line(result.stderr))
-            setup = run("exec", self.name, "sh", "-c", "mkdir -p /run/dgc/sock /run/dgc/log && chown -R pip:pip /run/dgc/sock "
-                        "/run/dgc/log && chmod 700 /run/dgc/sock", timeout=30)
+            # The launch FIFO: desktop.sh opens the desktop's Files and Terminal by one word on it (open_in_desktop).
+            setup = run("exec", self.name, "sh", "-c", "mkdir -p /run/dgc/sock /run/dgc/log && (test -p /run/dgc/sock/launch "
+                        "|| mkfifo -m 600 /run/dgc/sock/launch) && chown -R pip:pip /run/dgc/sock /run/dgc/log && chmod 700 "
+                        "/run/dgc/sock", timeout=30)
             boxd = run("exec", "--detach", "--user", "pip", self.name, "sh", "-c",
                        "exec python3 /run/dgc/boxd/pip_boxd.py > /run/dgc/log/boxd.log 2>&1", timeout=30)
             if setup.returncode != 0 or boxd.returncode != 0:
@@ -687,6 +689,16 @@ class ContainerDesktop:
         if result.returncode != 0 or not self._vnc_ready():
             raise RegistryError("desktop_unavailable", "The computer's screen did not start. See its desktop logs.")
         self._up = True
+
+    def open_in_desktop(self, what: str) -> None:
+        """Open the desktop's own Files or Terminal (the Pip's launch_app): one word to the launch FIFO inside the VM,
+        as on Linux."""
+        if what not in ("files", "terminal"):
+            raise ValueError("the desktop opens files or terminal")
+        result = run("exec", "--user", "pip", self.computer.name, "sh", "-c", f"echo {what} > /run/dgc/sock/launch",
+                     timeout=15)
+        if result.returncode != 0:
+            raise RegistryError("desktop_unavailable", "The computer's screen is not ready yet.")
 
     def stop(self) -> None:
         self._up = False

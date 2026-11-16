@@ -252,6 +252,27 @@ class ComputerTests(FakeContainerTests):
         self.computer.stop()
         self.assertIn(["delete", "--force", self.computer.name], self.calls())
 
+    def test_the_vm_has_the_launch_fifo_its_desktop_listens_on(self):
+        """The desktop's Files and Terminal open by one word on /run/dgc/sock/launch (desktop.sh only listens when it is
+        a FIFO): on a Mac nothing made it, so the Pip's launch_app could never open them (finding 81, 16 Nov)."""
+        with patch.object(pip_container, "START_SECONDS", 0.2):
+            self.computer.start()
+        setup = next(c for c in self.calls() if c[0] == "exec" and "--detach" not in c and "mkdir -p /run/dgc/sock" in c[-1])
+        script = setup[-1]
+        self.assertIn("mkfifo -m 600 /run/dgc/sock/launch", script)
+        self.assertLess(script.index("mkfifo"), script.index("chown -R pip:pip /run/dgc/sock"), "made before it's given to pip")
+
+    def test_a_macs_desktop_opens_files_and_the_terminal_with_one_word(self):
+        desktop = pip_container.ContainerDesktop.__new__(pip_container.ContainerDesktop)
+        desktop.computer = self.computer
+        for what in ("files", "terminal"):
+            desktop.open_in_desktop(what)
+            self.assertEqual(self.calls()[-1], ["exec", "--user", "pip", self.computer.name, "sh", "-c",
+                                                f"echo {what} > /run/dgc/sock/launch"])
+        for bad in ("browser", "files; rm -rf ~", ""):
+            with self.assertRaises(ValueError):
+                desktop.open_in_desktop(bad)
+
     def test_vms_a_stopped_dgc_left_are_deleted_and_nothing_else(self):
         ours = {"dgc.pip-computer": "1", "dgc.pip-computer.owner": pip_container.owner()}
         listing = [{"configuration": {"id": "dgc-pip-0123456789ab", "labels": ours}},
