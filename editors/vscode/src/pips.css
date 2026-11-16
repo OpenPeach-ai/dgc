@@ -1587,7 +1587,8 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .pip-message .ract.ract-yes{color:var(--text,var(--vscode-foreground))}
 .chat-style .pip-message:not(:hover):not(:focus-within) .response-actions>.ract-yes{opacity:1}
 .pip-message .ract.ract-yes:disabled{opacity:.45}
-.msg-made-files{display:flex;flex-direction:column;gap:6px;min-width:0;max-width:min(100%,420px);margin:6px 0 0}
+.msg-made-files,.msg-made-artifacts{display:flex;flex-direction:column;gap:6px;min-width:0;max-width:min(100%,420px);margin:6px 0 0}
+.msg-made-artifacts .dgc-doc-card{flex-wrap:nowrap;width:100%;max-width:100%;margin:0}
 .msg-made-files .dgc-doc-card.msg-made-file{flex-wrap:nowrap;width:100%;max-width:100%;margin:0}
 .msg-made-files .dgc-doc-card.msg-made-file .dgc-doc-words{flex:1 1 0}
 .pip-message.user .msg-images,.pip-message.user .msg-files{align-self:flex-end;max-width:100%}

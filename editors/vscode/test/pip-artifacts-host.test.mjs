@@ -72,15 +72,17 @@ test("the person's dashboards come from the editor's artifacts list, dashboards 
   assert.match(old.reply("c1").error.message, /Update DGC/);
 });
 
-test("Open opens an artifact by its id, of a kind a Pip's settings show, and nothing else", () => {
+test("Open opens an artifact by its id, of a kind a Pip's settings show or a reply made, and nothing else", () => {
   const h = hub();
   const x = editor(67, h);
   x.e.receive({ type: "pipsOpenArtifact", id: DASH, artifactType: "dashboard" });
   x.e.receive({ type: "pipsOpenArtifact", id: "ar_" + "d".repeat(16), artifactType: "doc" });
   x.e.receive({ type: "pipsOpenArtifact", id: "../../etc/passwd", artifactType: "doc" });
+  // A reply's card (Pips API 102) opens a page or a deck it made too; a kind DGC doesn't make, never.
   x.e.receive({ type: "pipsOpenArtifact", id: DASH, artifactType: "page" });
-  assert.deepEqual(h.calls.open, [[DASH, { type: "dashboard" }], ["ar_" + "d".repeat(16), { type: "doc" }]]);
+  x.e.receive({ type: "pipsOpenArtifact", id: DASH, artifactType: "video" });
+  assert.deepEqual(h.calls.open, [[DASH, { type: "dashboard" }], ["ar_" + "d".repeat(16), { type: "doc" }], [DASH, { type: "page" }]]);
   const old = editor(66, h);
   old.e.receive({ type: "pipsOpenArtifact", id: DASH, artifactType: "dashboard" });
-  assert.equal(h.calls.open.length, 2, "an older runtime's page has nothing to open");
+  assert.equal(h.calls.open.length, 3, "an older runtime's page has nothing to open");
 });

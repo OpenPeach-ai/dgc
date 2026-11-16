@@ -1601,7 +1601,8 @@ export class PipsEditor implements vscode.Disposable {
     if (message?.type === 'pipsOpenArtifact' && !computer) {
       // A Pip's report document or sheet, or a dashboard it refreshes: in the artifact panel (a document in the editor).
       const id = String(message.id || ''), kind = String(message.artifactType || '');
-      if (this.apiVersion >= 67 && ARTIFACT_ID.test(id) && ['doc', 'sheet', 'dashboard'].includes(kind)) this.artifacts?.()?.open(id, { type: kind });
+      // (Pips API 102: what a reply made opens the same way, a page or a deck too.)
+      if (this.apiVersion >= 67 && ARTIFACT_ID.test(id) && ['doc', 'sheet', 'dashboard', 'page', 'slides'].includes(kind)) this.artifacts?.()?.open(id, { type: kind });
       return;
     }
     if (message?.type === 'pipsFiles' && !computer) {

@@ -562,7 +562,9 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # its reply (a reply's `images` and, new, `files` [{index, name, bytes, mime}]; a user message's files gain `mime`);
 # get_pip_message_file {pip_id, message_id, index} answers with where a message's file is kept (local only), checked
 # against its digest.
-PIPS_API_VERSION = 101
+# API 102 (0.52): a Pip's reply carries `artifacts` [{id, type, title, op}]: the pages, docs, sheets, decks and dashboards
+# it made or changed (op made | changed), counted by DGC, for the chat to show each as a card to open.
+PIPS_API_VERSION = 102
 
 
 def attachment_limits() -> dict:

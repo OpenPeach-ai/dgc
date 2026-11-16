@@ -184,6 +184,23 @@ export function sentFilesMarkup(m,name='the Pip'){
   }).join('')}</div>`;
 }
 
+// What its reply made or changed (Pips API 102): each page, doc, sheet, deck or dashboard is the card Work draws, its
+// tile over "Page · made", and the card opens it (data-artifact-open, the Pip page's own Open).
+const MADE_KINDS={doc:'Document',slides:'Slides',sheet:'Spreadsheet',page:'Page',dashboard:'Dashboard'};
+const MADE_ID=/^ar_[0-9a-f]{16}$/;
+export function madeArtifactsMarkup(m){
+  const list=Array.isArray(m.artifacts)?m.artifacts.slice(0,8).filter(a=>a&&MADE_ID.test(String(a.id||''))&&MADE_KINDS[a.type]&&typeof a.title==='string'):[];
+  if(!list.length)return '';
+  const sheets=globalThis.DgcFileSheet;
+  return `<div class="msg-made-artifacts" role="group" aria-label="What this reply made">${list.map(a=>{
+    const kind=MADE_KINDS[a.type],name=a.title.trim()||kind,did=a.op==='changed'?'changed':'made';
+    return `<div class="dgc-doc-card run-post-doc" data-tone="${a.type}"><span class="dgc-doc-tile${sheets?' has-sheet':''}" aria-hidden="true">${sheets?sheets.html(a.type):''}</span>`
+      +`<span class="dgc-doc-words"><span class="dgc-doc-name">${esc(name)}</span><span class="dgc-doc-meta">${kind} · ${did}</span></span>`
+      +(sheets?`<span class="dgc-doc-acts">${sheets.openPill()}</span>`:'')
+      +`<button type="button" class="dgc-doc-open" data-artifact-open="${esc(a.id)}" data-artifact-type="${a.type}" aria-label="Open ${esc(name)}, ${kind.toLowerCase()} ${did} in this reply">Open</button></div>`;
+  }).join('')}</div>`;
+}
+
 // `inline`: the messages a reply read on the way, each one's drawn bubble by its id (replyPieces); `live`: the reply as
 // it is being written, the finished reply's own markup without the row it ends with.
 // `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
@@ -268,7 +285,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
     if(i===lastWords)return;
     before+=`<article class="pip-message msg assistant dgc reply-piece" data-reply-piece="${esc(m.id)}:${i}">${opened?role:opens}${words(p.text)}</article>`;opened=true;
   });
-  return `${before}<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}${parted?' reply-piece reply-end':''}${live?' live-reply':''}" ${live?`data-live-reply="${esc(m.run_id)}" aria-label="Live reply"`:`data-message="${esc(m.id)}"`}>${opened?role:opens}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${missing}${status}${live?'</article>'+after:`<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${yesAction}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>${after}`}`;
+  return `${before}<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}${parted?' reply-piece reply-end':''}${live?' live-reply':''}" ${live?`data-live-reply="${esc(m.run_id)}" aria-label="Live reply"`:`data-message="${esc(m.id)}"`}>${opened?role:opens}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${user?'':madeArtifactsMarkup(m)}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${missing}${status}${live?'</article>'+after:`<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${yesAction}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>${after}`}`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

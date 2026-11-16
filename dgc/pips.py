@@ -5527,6 +5527,13 @@ def _execute_run(registry, row, config):
             missing = unmet([w for w in wanted if w], app_socket.library.made if app_socket is not None else [])
             if missing:
                 result["output_missing"] = missing
+        # What it made or changed (Pips API 102), counted here: each a card under the reply.
+        result.pop("artifacts", None)
+        if app_socket is not None and manifest.get("run_kind") == "conversation":
+            from .pip_library import reply_artifacts
+            made = reply_artifacts(app_socket.library.made_items)
+            if made:
+                result["artifacts"] = made
         if current_tree:
             from .pip_tree_snapshot import verify
             verify(snapshot, source['source_snapshot'])

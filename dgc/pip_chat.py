@@ -652,6 +652,19 @@ def checked_output(output):
     return output
 
 
+def reply_artifacts(db, run_id) -> list:
+    """The pages, docs, sheets, decks and dashboards a reply made or changed (API 102), as its run's result kept them."""
+    row = db.execute("SELECT CASE WHEN json_valid(result) THEN json_extract(result, '$.artifacts') END "
+                     "FROM pip_runs WHERE id=?", (run_id,)).fetchone()
+    if row is None or not isinstance(row[0], str):
+        return []
+    from .pip_library import valid_reply_artifacts
+    try:
+        return valid_reply_artifacts(json.loads(row[0])) or []
+    except ValueError:
+        return []
+
+
 def output_missing(db, run_id) -> str:
     """Work's line under a reply that didn't make what the user chose for it (API 100), or ""."""
     row = db.execute("SELECT CASE WHEN json_valid(result) THEN json_extract(result, '$.output_missing') END "
@@ -1662,8 +1675,12 @@ def validate_steers(value, text: str) -> list:
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing"}:
+    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing", "artifacts"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
+    if "artifacts" in result:
+        from .pip_library import valid_reply_artifacts
+        if valid_reply_artifacts(result["artifacts"]) is None:
+            raise RegistryError("invalid_reply", "What this reply made is not a list of its artifacts.")
     if "output_missing" in result and (not isinstance(result["output_missing"], str)
                                        or result["output_missing"] not in OUTPUTS):
         raise RegistryError("invalid_reply", "What this reply didn't make is one of Work's outputs.")
@@ -1898,6 +1915,9 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             missing = output_missing(store.db, row["run_id"])
             if missing:
                 message["output_missing"] = missing  # API 100: "The model didn't make a page..." as Work says it
+            made = reply_artifacts(store.db, row["run_id"])
+            if made:
+                message["artifacts"] = made         # API 102: what it made or changed, each a card to open
             if quiet_reply(store.db, row["run_id"], row["text"]):
                 message["quiet"] = True             # a routine with nothing to say: one faint line (Pips package 2)
             from .pip_own_changes import for_runs as own_changes

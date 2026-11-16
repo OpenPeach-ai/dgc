@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Pips API 102: what a Pip's reply made.** A reply carries `artifacts` `[{id, type, title, op}]`; no new command.
 - **Pips API 101: a Pip sends files in its chat.** A reply's `files` `[{index, name, bytes, mime}]` beside its `images`; `get_pip_message_file {pip_id, message_id, index}` reads any message's file (where it is kept, local only). Python and TypeScript clients refuse it before API 101.
 - **Pips API 100: `@` outputs in a Pip's chat.** `send_pip_message` takes `output` (`document`, `slides`, `spreadsheet`, `page`, `dashboard`; `auto` or none: nothing asked), as Work's Output menu; a reply that didn't make one carries `output_missing`. Python and TypeScript clients refuse it before API 100.
 - **Pips API 99: where a message sent while a Pip worked was read.** A reply's `steers` (`[{id, at}]`) places each such message in the reply's text; no new command.

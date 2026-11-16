@@ -10,6 +10,7 @@ else: someone else's document is never changed by a Pip.
 from __future__ import annotations
 
 import copy
+import re
 
 TOOLS = ("make_artifact", "edit_artifact")
 
@@ -40,6 +41,7 @@ class Session:
         self.directory, self.config, self.pip_id, self.run_id = directory, config, pip_id, run_id
         self.name = self._name() or "A Pip"
         self.made = []          # the kinds this run made or changed (doc, page, ...), seen here, never the worker's word
+        self.made_items = []    # and each one: {id, type, title, op}, for the reply's cards (Pips API 102)
 
     def _name(self) -> str:
         try:
@@ -78,7 +80,39 @@ class Session:
                     "to keep current; make your own instead, or tell the user what you'd change.")
         # What it made or changed counts toward the reply's chosen output, as in Work (Agent._artifact_changed).
         return artifact_tools.run(op, args, origin={"surface": "pip", "pip": self.pip_id}, author=self.name,
-                                  on_change=lambda view, _op: self.made.append(str(view.get("type") or "")))
+                                  on_change=self._changed)
+
+    def _changed(self, view, op) -> None:
+        self.made.append(str(view.get("type") or ""))
+        self.made_items.append({"id": str(view.get("id") or ""), "type": str(view.get("type") or ""),
+                                "title": str(view.get("title") or "")[:200], "op": "made" if op == "made" else "changed"})
+
+
+MAX_REPLY_ARTIFACTS = 8
+_ARTIFACT_ID = re.compile(r"ar_[0-9a-f]{16}\Z")
+_ARTIFACT_TYPES = ("doc", "slides", "sheet", "page", "dashboard")
+
+
+def reply_artifacts(items) -> list:
+    """What a reply made or changed, for its cards (Pips API 102): one per artifact (its last title and op, in the
+    order first touched), at most MAX_REPLY_ARTIFACTS, only well-formed ones."""
+    out = {}
+    for item in items or ():
+        if isinstance(item, dict) and _ARTIFACT_ID.fullmatch(str(item.get("id") or "")):
+            out[item["id"]] = {"id": item["id"], "type": item.get("type"), "title": str(item.get("title") or "")[:200],
+                               "op": item.get("op")}
+    return valid_reply_artifacts(list(out.values())[:MAX_REPLY_ARTIFACTS]) or []
+
+
+def valid_reply_artifacts(value):
+    """The list, checked, or None when it doesn't read as one (the reply is then refused, as any bad field is)."""
+    if (not isinstance(value, list) or len(value) > MAX_REPLY_ARTIFACTS
+            or any(not isinstance(i, dict) or set(i) != {"id", "type", "title", "op"}
+                   or not isinstance(i["id"], str) or not _ARTIFACT_ID.fullmatch(i["id"])
+                   or i["type"] not in _ARTIFACT_TYPES or not isinstance(i["title"], str) or len(i["title"]) > 200
+                   or i["op"] not in ("made", "changed") for i in value)):
+        return None
+    return [dict(i) for i in value]
 
 
 def unmet(wanted, made) -> str:
