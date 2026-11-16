@@ -43,6 +43,8 @@
   const TAB_IDS = TABS.map((t) => t[0]);
   // Artifacts' kinds: the filter's word, and the word of an empty list.
   const A_KINDS = [["", "All", "artifacts"], ["page", "Pages", "pages"], ["sheet", "Sheets", "sheets"], ["doc", "Docs", "docs"], ["slides", "Decks", "decks"], ["dashboard", "Dashboards", "dashboards"]];
+  // The Widgets tab's kinds (his call, 16 Nov): the widgets you use again, or the charts a chat's replies drew.
+  const W_KINDS = [["", "All", "widgets or charts"], ["widget", "Widgets", "widgets"], ["chart", "Charts", "charts"]];
   const A_KIND = { doc: "Doc", slides: "Deck", sheet: "Sheet", page: "Page", dashboard: "Dashboard" };
   // Files' kinds (ChatDGC's own), and where a file came from.
   const F_KINDS = [["", "All", "files"], ["image", "Images", "images"], ["pdf", "PDFs", "PDFs"], ["document", "Documents", "documents"], ["spreadsheet", "Spreadsheets", "spreadsheets"],
@@ -265,7 +267,7 @@
     const str = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
     const state = {
       tab: TAB_IDS.includes(saved.tab) ? saved.tab : "artifacts", query: "", shown: PAGE,
-      filters: { artifacts: { kind: A_KINDS.some((k) => k[0] === savedF.artifacts?.kind) ? savedF.artifacts.kind : "", maker: str(savedF.artifacts?.maker) }, widgets: { maker: str(savedF.widgets?.maker) },
+      filters: { artifacts: { kind: A_KINDS.some((k) => k[0] === savedF.artifacts?.kind) ? savedF.artifacts.kind : "", maker: str(savedF.artifacts?.maker) }, widgets: { kind: W_KINDS.some((k) => k[0] === savedF.widgets?.kind) ? savedF.widgets.kind : "", maker: str(savedF.widgets?.maker) },
         images: { maker: str(savedF.images?.maker) }, videos: { maker: str(savedF.videos?.maker) },
         files: { kind: F_KINDS.some((k) => k[0] === savedF.files?.kind) ? savedF.files.kind : "", origin: ORIGINS.some((o) => o[0] === savedF.files?.origin) ? savedF.files.origin : "" } },
       // What this DGC keeps (the host says; until it has, every tab is offered). Files are always.
@@ -379,7 +381,8 @@
         const cards = state.artifacts.items.map(fromArtifact).filter((a) => a.made_as === "card" || (a.made_as === "widget" && !state.widgets.live));
         const all = [...cards, ...(state.widgets.live ? state.widgets.rows.map(fromWidget) : []), ...(state.charts.live ? state.charts.rows.map(fromChart) : [])];
         note("widgets", all);
-        return all.filter((a) => byMaker(a, f.maker) && found(a)).sort(newest);
+        const kindOk = (a) => !f.kind || (f.kind === "chart") === (a.source === "chart");
+        return all.filter((a) => kindOk(a) && byMaker(a, f.maker) && found(a)).sort(newest);
       }
       if (tab === "images" || tab === "videos") {
         const all = state[tab].rows.map(tab === "images" ? fromImage : fromVideo);
@@ -421,6 +424,8 @@
         + `<span class="dgc-folder-k">${esc(key)}</span><span class="dgc-folder-v">${esc(value)}</span>${CHEVRON}</button>`;
       let html = "";
       if (tab === "artifacts") html += button("kind", "Kind", (A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[1], "Show one kind: pages, sheets, docs, decks or dashboards");
+      // (Kind on Widgets only where this DGC lists charts: with none, every row is a widget.)
+      if (tab === "widgets" && state.charts.live) html += button("kind", "Kind", (W_KINDS.find((k) => k[0] === f.kind) || W_KINDS[0])[1], "Show the widgets you use again, or the charts a chat drew");
       if (tab === "files") html += button("kind", "Kind", (F_KINDS.find((k) => k[0] === f.kind) || F_KINDS[0])[1], "Show one kind of file")
         + button("origin", "From", (ORIGINS.find((o) => o[0] === f.origin) || ORIGINS[0])[1], "Show the files you uploaded, or the ones ChatDGC made");
       else html += button("maker", "By", makerWord(tab), "Show what one maker made: Work, Chat, your Pips, or one of them by name");
@@ -582,7 +587,7 @@
       const who = tab === "files" ? "" : whoWords(tab);
       if (tab === "artifacts") return q ? `No artifact named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || f.maker ? `No ${(A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.`
         : "Pages, sheets, docs, decks and dashboards DGC makes for you show here.";
-      if (tab === "widgets") return q ? `No widget named like “${q}”.` : who ? `No widgets ${who} yet.` : state.charts.live ? "Widgets ChatDGC makes for you, the charts its replies draw, and the cards a reply draws in Work or a Pip’s chat, show here."
+      if (tab === "widgets") return q ? `No ${f.kind === "chart" ? "chart" : "widget"} named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || who ? `No ${(W_KINDS.find((k) => k[0] === f.kind) || W_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.` : state.charts.live ? "Widgets ChatDGC makes for you, the charts its replies draw, and the cards a reply draws in Work or a Pip’s chat, show here."
         : "Widgets ChatDGC makes for you, and the cards a reply draws in Work or a Pip’s chat, show here. A chart in a chat stays in its chat.";
       if (tab === "images") return q ? `No image made from words like “${q}”.` : who ? `No images ${who} yet.` : "Images DGC makes or keeps for you show here.";
       if (tab === "videos") return q ? `No video made from words like “${q}”.` : who ? `No videos ${who} yet.` : "Videos DGC makes for you show here.";
@@ -656,6 +661,7 @@
       e.stopPropagation();
       const which = button.dataset.filter, tab = state.tab, f = state.filters[tab];
       if (which === "kind" && tab === "artifacts") menu(button, "Kind", A_KINDS.map((k) => ({ id: `v:${k[0]}`, label: k[1], checked: f.kind === k[0] })), (id) => choose("kind", id.slice(2)));
+      else if (which === "kind" && tab === "widgets") menu(button, "Kind", W_KINDS.map((k) => ({ id: `v:${k[0]}`, label: k[1], checked: f.kind === k[0] })), (id) => choose("kind", id.slice(2)));
       else if (which === "kind") {
         // The kinds of file there are (the host counts them), and the one chosen.
         const work = new Set(state.work.live ? state.work.rows.map(workKind) : []);
@@ -868,7 +874,7 @@
     };
   }
 
-  root.DgcLibrary = Object.freeze({ mount, age, chartMark, TABS: TAB_IDS });
+  root.DgcLibrary = Object.freeze({ mount, age, TABS: TAB_IDS });
 
   // ---- in its own editor tab (the page src/chatdgc.ts serves): the same Library, full width ---------------------------------------
   const page = typeof document !== "undefined" ? document.getElementById("library-root") : null;

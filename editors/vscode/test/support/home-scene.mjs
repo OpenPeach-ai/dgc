@@ -66,12 +66,14 @@ const PROJECT_CHATS = [{ id: "chat_3", title: "Packing list", updated_at: "2026-
     whole kept state, in place of `tab`. theme: "dark-modern" | "light-modern" | "hc"; tabs: ChatDGC is here (seen before);
     library: Work's Library row; srcRoot: another tree's sources; pages: the host's kept "made" cards, as its attribute's JSON. */
 export async function openHome(browser, { state = homeState(), width = 300, height = 760, theme = "dark-modern", homeShow = "", tabs = true, library = true,
-  sessions = SESSIONS, tab = "home", saved, grid = false, open = "needs", api = 69, scale = 1, motion = "no-preference", srcRoot, video, pages = "", forced = false, touch = false } = {}) {
+  sessions = SESSIONS, tab = "home", saved, grid = false, open = "needs", api = 69, scale = 1, motion = "no-preference", srcRoot, video, pages = "", forced = false, touch = false, clock = null } = {}) {
   const { html, mainJs, markdownJs, themes, pipsJs, pipsCss, sprite } = await sources(srcRoot);
   // video: a folder to record the page into (the pictures' short films), at the page's own size.
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, reducedMotion: motion, forcedColors: forced ? "active" : "none", hasTouch: touch,   // (forced: Windows High Contrast; touch: a finger, no pointer)
     ...(video ? { recordVideo: { dir: video, size: { width, height } } } : {}) });
   const page = await context.newPage();
+  // clock: the page's timers and Date under the test's hand from the first script on (page.clock.runFor).
+  if (clock) await page.clock.install(typeof clock === "object" ? clock : {});
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   // The Pips bundle's own CSS belongs to the Pips page's shadow root (its host's data-style-uri), never to this page.

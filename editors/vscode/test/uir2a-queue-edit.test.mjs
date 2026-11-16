@@ -157,3 +157,31 @@ for (const width of [300, 700]) {
     } finally { await x.close(); }
   });
 }
+
+// 79.2 (16 Nov): the extension keeps a queued message's restore copy across a window reload; it now carries the @ marks
+// where they stood and the Artifact choice, and Restore puts both back, as Edit does.
+test("79.2 Work: a queued message handed back after a window reload is restored with its words, its mark and its Artifact choice", async (t) => {
+  if (skipOrFail(t)) return;
+  const x = await openWorkQueue(browser);
+  let restoreCopy, id;
+  try {
+    const q = await x.queue("Also add a note to the changelog", { skill: true, output: "slides" });
+    id = q.id; restoreCopy = q.sent.restore;
+    assert.equal(restoreCopy.output, "slides", "the copy the extension keeps has the Artifact choice");
+    assert.ok(Array.isArray(restoreCopy.parts) && restoreCopy.parts.some((p) => p && typeof p === "object" && p.label === "fixture"), "and the mark where it stood");
+  } finally { await x.page.close(); }
+  // The window reloads: its backend died with the queue, and the next host hands the message back as not sent.
+  const y = await openWorkQueue(browser);
+  try {
+    await y.send({ type: "prompts_unsent", items: [{ requestId: id, session: "", text: "Also add a note to the changelog", draft: restoreCopy }] });
+    await y.page.waitForTimeout(150);
+    const restore = y.page.locator('#log .msg.user.rejected button[aria-label="Restore unsent message"]');
+    assert.equal(await restore.count(), 1, "it is back in the transcript as not sent, with Restore");
+    await restore.click(); await y.page.waitForTimeout(80);
+    const b = await y.box();
+    assert.match(b.text, /^Also add a note to the changelog/);
+    assert.deepEqual(b.pills, ["fixture"], "its mark is back where it was");
+    assert.match(b.output, /Slides/, "and its Artifact choice");
+    assert.deepEqual(y.errors, []);
+  } finally { await y.page.close(); }
+});

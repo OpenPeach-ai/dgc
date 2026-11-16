@@ -84,7 +84,8 @@ const QUEUED_PROMPTS_LIMIT = 17;                     // the webview's own bound 
 const QUEUED_PROMPT_DRAFT_CHARS = 256 * 1024;        // a bigger restore draft is kept as its text only
 type QueuedPrompt = {
   requestId: string; session: string; text: string;
-  draft: { text: string; attachments: any[] }; queued: boolean;
+  /** parts: the @ marks where they stood (strings and marks); output: the Artifact choice. The webview checks both again. */
+  draft: { text: string; attachments: any[]; parts?: any[]; output?: string }; queued: boolean;
   /** Acknowledged as steering ("steered") and not applied yet: as unsent as a queued prompt. */
   steering?: boolean;
 };
@@ -1668,6 +1669,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** The choice changed (here, or in the Pips view): the Work sessions, Home, and every open Pips view follow it. */
+  /** DGC just used tokens (a turn ended in this window's side bar or one of its tabs, or a ChatDGC reply did): Home's
+   *  token card asks the ledger again soon (media/shared/homecards.js usageChanged). */
+  usageMoved(): void {
+    if (this.home && this.webviewReady) this.post({ type: "homeUsageStale" });
+  }
+
   projectFolderChanged(): void {
     this.pipsEditor?.projectFolderChanged();
     this.pipsTab?.projectFolderChanged();
@@ -4481,6 +4488,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const attachments = restore.attachments.slice(0, 64).map((item: any) => item && typeof item === "object" && item.img
         ? { ...item, data: pictures[picture++] } : item);
       draft = { text: restore.text.slice(0, 1_000_000), attachments };
+      // The marks and the Artifact choice, bounded (a mark is four short strings): a reload puts them back.
+      const short = (v: any, n: number) => typeof v === "string" && v.length <= n;
+      if (Array.isArray(restore.parts) && restore.parts.length <= 256
+          && restore.parts.every((p: any) => short(p, 1_000_000) || (p && typeof p === "object" && ["kind", "label", "wire", "identity"].every((k) => short(p[k], 8192))))) {
+        draft.parts = restore.parts.map((p: any) => (typeof p === "string" ? p : { kind: p.kind, label: p.label, wire: p.wire, identity: p.identity }));
+      }
+      if (short(restore.output, 40)) draft.output = restore.output;
     }
     this.unstartedPrompts.set(requestId, { requestId, session: this.currentSessionId, text: text.slice(0, 1_000_000),
                                            draft, queued: false });
@@ -5317,6 +5331,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "turn_end": {
         this.mcpUrls.clear();
+        (this.tab?.host ?? this).usageMoved();
         this.activeSlot().announced = false;
         const monitorTurn = this.monitorTurnActive;
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;

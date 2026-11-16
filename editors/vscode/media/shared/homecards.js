@@ -171,7 +171,7 @@
     const doc = host.ownerDocument, view = doc.defaultView;
     const still = () => !!view.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     let layout = { order: [...DEFAULT], settings: {} }, heard = false;
-    let usage = null, usageAt = 0, weather = null, weatherAt = 0, weatherAsked = 0, weatherWait = 30 * 60000, weatherRetried = "";
+    let usage = null, usageAt = 0, usageStale = false, usageTimer = 0, weather = null, weatherAt = 0, weatherAsked = 0, weatherWait = 30 * 60000, weatherRetried = "";
     // What the Library lists, for the Widgets and Artifacts cards: null until the host has said; when each was asked.
     const made = { widgets: null, artifacts: null }, madeAt = { widgets: 0, artifacts: 0 };
     const ui = { open: TYPES.includes(kept?.()?.open) ? kept().open : "", arranging: false, lifted: "", token: { metric: "tokens", hot: "", range: "30d" }, weatherEdit: false };
@@ -390,14 +390,13 @@
       return true;
     }
     function tileOf(id, r, d, form) {
-      // (A chart a ChatDGC reply drew wears the chart mark its Library row wears, and says which chat it is in.)
-      const picture = id === "widgets" ? (r.chart ? (d.widgets?.chart ? d.widgets.chart(r.chart_type) : "") : d.widgets?.mark ? d.widgets.mark(r.id) : "") : (d.artifacts?.sheet ? d.artifacts.sheet(r.type) : "");
+      const picture = id === "widgets" ? (d.widgets?.mark ? d.widgets.mark(r.id) : "") : (d.artifacts?.sheet ? d.artifacts.sheet(r.type) : "");
       // (Under Widgets a reply's card says so, and where it was drawn; ChatDGC's own widget names its chat.)
-      const sub = id === "widgets" ? (r.card ? ["A reply’s card", A_MADE[r.surface] || "", madeWhen(r.created_at)] : r.chart ? [`A chart in “${r.chat_title || "a chat"}”`, madeWhen(r.created_at)] : [`in “${r.chat_title || "a chat"}”`, r.project_name || "", madeWhen(r.created_at)]).filter(Boolean).join(" · ") : [A_KIND[r.type] || "Artifact", A_MADE[r.surface] || "", madeWhen(r.at)].filter(Boolean).join(" · ");
-      const title = r.title || (id === "widgets" ? (r.chart ? "Chart" : "Interactive") : A_KIND[r.type] || "Artifact");
+      const sub = id === "widgets" ? (r.card ? ["A reply’s card", A_MADE[r.surface] || "", madeWhen(r.created_at)] : [`in “${r.chat_title || "a chat"}”`, r.project_name || "", madeWhen(r.created_at)]).filter(Boolean).join(" · ") : [A_KIND[r.type] || "Artifact", A_MADE[r.surface] || "", madeWhen(r.at)].filter(Boolean).join(" · ");
+      const title = r.title || (id === "widgets" ? "Interactive" : A_KIND[r.type] || "Artifact");
       const inner = `<span class="hc-tile-pic">${picture}</span><span class="hc-tile-tx"><span class="hc-tile-t">${esc(title)}</span><span class="hc-tile-s">${esc(sub)}</span></span>`;
       // On a Small card the square itself opens the card whole; from Medium up each one opens what it is.
-      return form === "s" ? `<span class="hc-mtile" data-tile="${esc(r.id)}">${inner}</span>` : `<button type="button" class="hc-mtile" data-tile="${esc(r.id)}" title="${esc(id === "widgets" && r.chart ? `Open its chat at ${title}` : id === "widgets" && !r.card ? `Open ${title} beside you` : `Open ${title} in an editor tab`)}">${inner}</button>`;
+      return form === "s" ? `<span class="hc-mtile" data-tile="${esc(r.id)}">${inner}</span>` : `<button type="button" class="hc-mtile" data-tile="${esc(r.id)}" title="${esc(id === "widgets" && !r.card ? `Open ${title} beside you` : `Open ${title} in an editor tab`)}">${inner}</button>`;
     }
     function stackCard(id, form, d) {
       const name = CARDS[id].name, said = made[id], rows = rowsOf(id), all = id === "widgets" ? "All widgets" : "All artifacts";
@@ -434,7 +433,7 @@
       if (id === "folders") return (d.folders?.rows || []).slice(0, 3).map((r) => (d.folders.mark ? d.folders.mark(r.folder, 28, "") : "")).join("") || `<span class="hc-sub">No folders yet</span>`;
       if (id === "clock") return `<span class="hc-pvt">${new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date())}</span>`;
       if (id === "weather") return weather?.ok && placeOf() ? `${wx(weather.now.code, weather.now.day, 20)}<span class="hc-pvt">${Math.round(layout.settings.weather.unit === "f" ? (weather.now.temp * 9) / 5 + 32 : weather.now.temp)}°</span>` : `${wx(1, true, 20)}<span class="hc-pvw">A place you choose</span>`;
-      if (id === "widgets") return rowsOf(id).slice(0, 3).map((r) => (r.chart ? (d.widgets?.chart ? d.widgets.chart(r.chart_type) : "") : d.widgets?.mark ? d.widgets.mark(r.id) : "")).join("") || `<span class="hc-pvw">${esc(CARDS[id].line)}</span>`;
+      if (id === "widgets") return rowsOf(id).slice(0, 3).map((r) => (d.widgets?.mark ? d.widgets.mark(r.id) : "")).join("") || `<span class="hc-pvw">${esc(CARDS[id].line)}</span>`;
       if (id === "artifacts") return rowsOf(id).slice(0, 3).map((r) => `<span class="hc-ico">${d.artifacts?.sheet ? d.artifacts.sheet(r.type) : ""}</span>`).join("") || `<span class="hc-pvw">${esc(CARDS[id].line)}</span>`;
       return `<span class="hc-pvw hc-note-line">${esc(notesApp?.top()?.title || "Your notes")}</span>`;
     }
@@ -593,7 +592,9 @@
     function ask() {
       if (!heard || !host.checkVisibility?.()) return;
       const now = Date.now(), on = (id) => layout.order.includes(id) || !!library;
-      if (on("token") && now - usageAt > 5 * 60000) { usageAt = now; post?.({ type: "homeUsageGet" }); }
+      // The token report: once a minute while Home shows, and soon after a turn ends or Home comes back (usageChanged,
+      // shown). Every five minutes left it a million tokens behind the ledger in a busy goal (seen 16 Nov).
+      if (on("token") && now - usageAt > (usageStale ? 15000 : 60000)) { usageAt = now; usageStale = false; view.clearTimeout(usageTimer); post?.({ type: "homeUsageGet" }); }
       // The weather: every half hour; after a miss, again after a minute (five when the service refused): one miss as
       // the editor started, or while it was busy, left "Can't reach the weather" on the card for half an hour.
       if (layout.order.includes("weather") && placeOf() && now - Math.max(weatherAt, weatherAsked) > weatherWait) { weatherAsked = now; post?.({ type: "homeWeatherGet" }); }
@@ -932,7 +933,7 @@
         const turner = t.closest(".hc-prev, .hc-next, .hc-dot"), tile = t.closest("button[data-tile]");
         if (turner) { turn(id, card.dataset.form, turner.classList.contains("hc-prev") ? "prev" : turner.classList.contains("hc-next") ? "next" : turner.dataset.page); if (!card.contains(doc.activeElement)) card.querySelector(".hc-stack")?.focus({ preventScroll: true }); return; }
         if (t.closest("[data-library]")) { act?.("library", id); return; }
-        if (tile) { const row = rowsOf(id).find((r) => r.id === tile.dataset.tile); if (row) act?.(id === "widgets" && row.chart ? "chart" : id === "widgets" && !row.card ? "widget" : "artifact", row.card ? { ...row, type: "page" } : row); return; }
+        if (tile) { const row = rowsOf(id).find((r) => r.id === tile.dataset.tile); if (row) act?.(id === "widgets" && !row.card ? "widget" : "artifact", row.card ? { ...row, type: "page" } : row); return; }
       }
       // Notes answers its own presses, on Home and opened (media/shared/notes.js).
       if (id === "note") return;
@@ -1018,7 +1019,7 @@
     // The side bar's edge dragged: a new form, and the cards glide to their places.
     let width = widthNow(), was = gridForm(width), sized = null;
     if (view.ResizeObserver) { sized = new view.ResizeObserver(() => { const w = widthNow(); if (!w || w === width) return; const notesTurn = ui.open === "note" && (w >= 560) !== (width >= 560); width = w; const g = gridForm(w); if (g !== was || g === "l" || notesTurn) { if (g !== was && !ui.open) ui.weatherEdit = false; was = g; draw(true); } }); sized.observe(host); }
-    const tick = view.setInterval(() => { if (host.checkVisibility?.() && (layout.order.includes("clock") || layout.order.includes("recent") || layout.order.includes("note") || (layout.order.includes("weather") && weather && weather.ok === false))) draw(); }, 20000);
+    const tick = view.setInterval(() => { ask(); if (host.checkVisibility?.() && (layout.order.includes("clock") || layout.order.includes("recent") || layout.order.includes("note") || (layout.order.includes("weather") && weather && weather.ok === false))) draw(); }, 20000);
     post?.({ type: "homeCardsReady" });      // (answered with the cards and, for the Notes card, the list of notes)
     drawNow();
 
@@ -1066,8 +1067,14 @@
       open, close, opened: () => ui.open, arranging: () => ui.arranging, order: () => [...layout.order],
       closeLibrary: () => closeLibrary(false),
       /** Home is in front again: what it reads is read again when it is old. */
-      shown() { ask(); },
-      dispose() { doc.removeEventListener("keydown", onKey); view.removeEventListener("resize", onResize); sized?.disconnect(); view.clearInterval(tick); view.clearTimeout(placeTimer); notesApp?.dispose(); pickClose(); closeLibrary(false); },
+      shown() { if (Date.now() - usageAt > 30000) usageStale = true; ask(); },
+      /** DGC used tokens just now (a turn ended, here or in another tab): the card asks again soon, at most once in
+       *  15 s; while Home is out of sight it asks when Home is shown. */
+      usageChanged() {
+        usageStale = true; ask();
+        if (usageStale) { view.clearTimeout(usageTimer); usageTimer = view.setTimeout(ask, Math.max(0, usageAt + 15000 - Date.now()) + 50); }
+      },
+      dispose() { doc.removeEventListener("keydown", onKey); view.removeEventListener("resize", onResize); sized?.disconnect(); view.clearInterval(tick); view.clearTimeout(usageTimer); view.clearTimeout(placeTimer); notesApp?.dispose(); pickClose(); closeLibrary(false); },
     };
   }
 

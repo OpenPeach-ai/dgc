@@ -2033,23 +2033,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           void asker.libraryPanel?.webview.postMessage({ type: "charts", charts: this.chartsListed(ev), offset: asker.offset || 0, total: Number(ev.total) || 0, next: ev.next_offset ?? null });
           return;
         }
-        if (asker?.kind === "homeCharts") {
-          // Home's Widgets card, its second half: the charts, among the widgets by when each was made (the newest
-          // first), then the cards replies drew. One answer, so the card's count is the Library's from the start.
-          const held = this.homeWidgetsHeld; this.homeWidgetsHeld = undefined;
-          const charts = this.chartsListed(ev).map((c) => ({ id: String(c.id), title: String(c.title), chart: true, chart_type: String(c.chart_type), chat_id: String(c.chat_id), chat_title: String(c.chat_title),
-                                                            project_name: String(c.project_name || ""), created_at: String(c.created_at) }));
-          const mine = [...(held?.widgets || []), ...charts].sort((a: any, b: any) => String(b.created_at).localeCompare(String(a.created_at)));
-          this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...mine, ...this.homeCards], more: !!held?.more || (ev.next_offset !== null && ev.next_offset !== undefined) });
-          return;
-        }
         if (asker?.kind === "homeWidgets") {
           // Home's Widgets card: the newest sixty, each with what its tile says and what opens it.
           const widgets = (Array.isArray(ev.widgets) ? ev.widgets : []).filter((w: any) => WIDGET_ID.test(String(w?.id || "")) && CONVERSATION_ID.test(String(w?.chat_id || "")))
             .map((w: any) => ({ id: String(w.id), title: widgetName(w.title), chat_id: String(w.chat_id), chat_title: String(w.chat_title || "").slice(0, 200), project_name: String(w.project_name || "").slice(0, 120), created_at: String(w.created_at || "") }));
           const more = ev.next_offset !== null && ev.next_offset !== undefined;
-          // (The charts its replies drew are Widgets too, where this ChatDGC lists them: asked for before Home is told.)
-          if (this.chartLibrary()) { this.homeWidgetsHeld = { widgets, more }; this.ask({ kind: "homeCharts" }, { type: "chatdgc_widgets", op: "charts", limit: 60, offset: 0 }); return; }
+          // (The charts its replies drew are the Library's, under Widgets with its Kind filter; Home's card is the
+          // widgets you use again, never a chart: his call, 16 Nov.)
           this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...widgets, ...this.homeCards], more });
           return;
         }
@@ -2141,6 +2131,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (ev.state === "ended" && requestId) this.requests.delete(requestId);
         if (conversation) { if (ev.state === "started") this.answering.add(conversation); else this.answering.delete(conversation); }
         this.homeChanged();                         // the side bar's dock shows which chats are answering
+        if (ev.state === "ended") { try { this.host?.postHome({ type: "homeUsageStale" }); } catch { /* the side bar is closed */ } }   // Home's tokens
         for (const tab of showing(conversation)) this.post(tab, { type: "turn", state: ev.state, replyId: ev.reply_id });
         return;
       case "chatdgc_waiting":
@@ -2330,7 +2321,6 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         if (asker?.libraryPanel) { void asker.libraryPanel.webview.postMessage({ type: "error", message }); return; }
         if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.([]); return; }
-        if (asker?.kind === "homeCharts") { const held = this.homeWidgetsHeld; this.homeWidgetsHeld = undefined; this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...(held?.widgets || []), ...this.homeCards], more: !!held?.more }); return; }      // the widgets alone, quietly
         if (asker && !asker.tab && asker.kind !== "list") { void vscode.window.showErrorMessage(message); return; }
         if (asker?.tab) { this.post(asker.tab, { type: "error", message, opening: asker.kind === "open" }); return; }
         if (asker?.kind === "homeWidgets") { this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...this.homeCards] }); return; }      // Home's card says none of ChatDGC's, quietly
@@ -3238,7 +3228,6 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   /** The cards a reply drew, as Home's Widgets card lists them beside ChatDGC's widgets (read when the card asks). */
   private homeCards: Array<{ id: string; title: string; card: boolean; surface: string; created_at: string }> = [];
   /** ChatDGC's widgets, held while its charts are asked for (Home is told of both at once). */
-  private homeWidgetsHeld?: { widgets: any[]; more: boolean };
   async homeCardsMessage(message: any): Promise<void> {
     switch (message?.type) {
       case "homeWidgetsGet": {
@@ -3270,12 +3259,6 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const open = this.widgetPanels.get(id);
         if (open) open.reveal(undefined, false);
         else this.ask({ kind: "widgetGet" }, { type: "chatdgc_widgets", op: "get", conversation_id: chat, widget_id: id });
-        return;
-      }
-      case "homeChartOpen": {
-        // A chart's tile on Home's Widgets card: its chat, at the reply that drew it. Only a chart DGC listed.
-        const known = this.libraryCharts.get(`${String(message.chat_id || "")}:${String(message.id || "")}`);
-        if (known && this.chartLibrary()) this.openAt(known.chat, known.message, known.index);
         return;
       }
       case "homeLibraryOpen":

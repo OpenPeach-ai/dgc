@@ -2563,33 +2563,22 @@ test("uir2c: Widgets' charts are asked of a ChatDGC that lists them, checked, an
   assert.equal(sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").at(-1).offset, 60);
 });
 
-test("uir2c: Home's Widgets card counts the charts too, as the Library's Widgets tab lists them, and a chart's tile opens its chat at the chart", async () => {
+// His call (16 Nov): Home's Widgets card is the widgets you use again; a chart is the Library's (Widgets, Kind: Charts).
+test("Home's Widgets card is the widgets alone: where ChatDGC lists charts it never asks for them or counts one, and no chart opens from Home", async () => {
   const WG = "wg_" + "5".repeat(16);
   host.offers = { version: 1, widget_library: 1, chart_library: 1 };
+  const chartsBefore = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").length;
+  host.home.length = 0;
   await chat.homeCardsMessage({ type: "homeWidgetsGet" });
   const list = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "list").at(-1);
   chat.onEvent({ type: "chatdgc_widgets", request_id: list.request_id, op: "list", total: 1, next_offset: null, widgets: [{ id: WG, title: "EMI calculator", chat_id: ID(7), chat_title: "Loans", created_at: "2026-11-14T05:10:00Z" }] });
-  const charts = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").at(-1);
-  assert.ok(charts, "the charts are asked for next");
-  assert.equal(host.home.filter((m) => m.type === "homeWidgets").length, 0, "one answer, once both are known: the count never jumps");
-  chat.onEvent({ type: "chatdgc_widgets", request_id: charts.request_id, op: "charts", total: 1, next_offset: null,
-    widgets: [{ chat_id: ID(8), chat_title: "Tiles", message_id: MSG(3), id: `${MSG(3)}:0`, title: "Frost rating by tile", kind: "chart", chart_type: "bar", created_at: "2026-11-16T05:10:00Z" }] });
+  assert.equal(sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").length, chartsBefore, "the charts are not asked for");
   const home = host.home.filter((m) => m.type === "homeWidgets").at(-1);
-  assert.deepEqual(home.widgets.map((w) => [w.title, w.chart === true]), [["Frost rating by tile", true], ["EMI calculator", false]], "the newest first: the chart, then the widget");
-  assert.equal(home.widgets[0].chat_title, "Tiles");
+  assert.ok(home, "Home is told at once");
+  assert.deepEqual(home.widgets.filter((w) => !w.card).map((w) => [w.title, w.chart === true]), [["EMI calculator", false]], "the widget alone");
   const before = world.panels.length;
-  await chat.homeCardsMessage({ type: "homeChartOpen", id: `${MSG(9)}:0`, chat_id: ID(8) });
-  assert.equal(world.panels.length, before, "a chart Home was never told of opens nothing");
   await chat.homeCardsMessage({ type: "homeChartOpen", id: `${MSG(3)}:0`, chat_id: ID(8) });
-  assert.equal(world.panels.length, before + 1, "its chat opens");
-  // A ChatDGC whose charts can't be listed just now: the widgets alone, quietly.
-  host.home.length = 0;
-  await chat.homeCardsMessage({ type: "homeWidgetsGet" });
-  const again = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "list").at(-1);
-  chat.onEvent({ type: "chatdgc_widgets", request_id: again.request_id, op: "list", total: 0, next_offset: null, widgets: [] });
-  const failing = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").at(-1);
-  chat.onEvent({ type: "chatdgc_error", request_id: failing.request_id, message: "The charts couldn't be read." });
-  assert.deepEqual(host.home.filter((m) => m.type === "homeWidgets").at(-1).widgets, []);
+  assert.equal(world.panels.length, before, "a chart never opens from Home");
 });
 
 test("uir2c: Files' Work attachments: listed by a name of the host's own, never a path; a picture opens in the picture viewer, a file in the editor; nothing is done for one it never listed", async () => {
@@ -2730,4 +2719,13 @@ test("uir2c 2b: a chat file's menu asks DGC for the file by its id in this chat:
   assert.equal(asks(), before + 1); assert.equal(JSON.stringify(last("chatdgc_library_file")).includes("/etc/passwd"), false);
   assert.deepEqual([world.clipboard, world.commands.length], [clip, ran]);
   assert.equal(panel.webview.posted.some((m) => /dgc-chatdgc-files/.test(JSON.stringify(m))), false, "the page is never told where a copy is");
+});
+
+// Finding 73 (16 Nov): Home's token card asks the ledger again soon after DGC used tokens; a ChatDGC reply's end says so.
+test("a ChatDGC reply's end tells Home its token count moved; its start does not", async () => {
+  host.home.length = 0;
+  chat.onEvent({ type: "chatdgc_turn", conversation_id: ID(4), state: "started", reply_id: MSG(5) });
+  assert.equal(host.home.filter((m) => m.type === "homeUsageStale").length, 0, "nothing used yet");
+  chat.onEvent({ type: "chatdgc_turn", conversation_id: ID(4), state: "ended", reply_id: MSG(5) });
+  assert.equal(host.home.filter((m) => m.type === "homeUsageStale").length, 1, "Home asks again soon");
 });

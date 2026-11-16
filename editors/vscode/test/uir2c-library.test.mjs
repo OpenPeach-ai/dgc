@@ -174,24 +174,31 @@ test("with Work's attachments listed, an empty Files says they show here; the ta
   } finally { await closeIt(x); }
 });
 
-test("Home's Widgets card shows a chart as the Library does (the chart mark, “A chart in” its chat) and counts it; its tile asks for its chat at the chart", async (t) => {
+// His call (16 Nov): charts stay in the Library's Widgets, with a Kind filter, and are never on Home's Widgets card.
+test("Widgets' Kind: All shows the widgets and the charts, Widgets the widgets alone, Charts the charts alone; with no charts listed there is no Kind", async (t) => {
   if (skipOrFail(t)) return;
-  const grid = await import("./support/home-grid-scene.mjs");
-  const chart = { id: LIB_CHARTS[0].id.replace(/^ago.*/, ""), title: "Frost rating by tile", chart: true, chart_type: "bar", chat_id: LIB_CHARTS[0].chat_id, chat_title: "Tiles", created_at: new Date(Date.now() + 5000).toISOString() };   // (the newest: its tile is the one a Medium card shows)
-  const x = await grid.openGrid(browser, { width: 440, layout: ["widgets"], widgets: [chart, ...grid.WIDGETS.slice(0, 2)] });
+  const x = await open("side", { width: 300, charts: LIB_CHARTS });
   try {
-    await x.page.waitForSelector('.hc-card[data-card="widgets"] .hc-mtile'); await x.page.waitForTimeout(150);
-    const order = await x.page.evaluate(() => [...document.querySelectorAll('.hc-card[data-card="widgets"] .hc-mtile')].map((n) => n.querySelector(".hc-tile-t").textContent));
-    const said = await x.page.evaluate((id) => { const card = document.querySelector('.hc-card[data-card="widgets"]'), tile = [...card.querySelectorAll(".hc-mtile")].find((n) => n.dataset.tile === id);
-      if (!tile) return { missing: true };
-      return { title: tile.querySelector(".hc-tile-t").textContent, sub: tile.querySelector(".hc-tile-s").textContent, mark: !!tile.querySelector(".hc-tile-pic .lib-chart-mark"), tip: tile.getAttribute("title"), words: card.innerText.replace(/\s+/g, " ") }; }, chart.id);
-    assert.equal(said.missing, undefined, `the chart has a tile (${order.join(", ")})`);
-    assert.equal(said.title, "Frost rating by tile"); assert.match(said.sub, /^A chart in “Tiles” · /); assert.equal(said.mark, true, "the chart mark its Library row wears");
-    assert.equal(said.tip, "Open its chat at Frost rating by tile");
-    const pages = await x.page.evaluate(() => { const card = document.querySelector('.hc-card[data-card="widgets"]'); return { dots: card.querySelectorAll(".hc-dot").length, said: card.querySelector(".hc-stack")?.getAttribute("aria-label") || "" }; });
-    assert.ok(pages.dots === 3 || /of 3/.test(pages.said), `the card counts the chart with the two widgets: three, one at a time (${JSON.stringify(pages)})`);
-    await x.page.evaluate((id) => [...document.querySelectorAll('.hc-card[data-card="widgets"] .hc-mtile')].find((n) => n.dataset.tile === id).click(), chart.id); await x.page.waitForTimeout(80);
-    assert.deepEqual((await x.posted("homeChartOpen")).at(-1), { type: "homeChartOpen", id: chart.id, chat_id: chart.chat_id });
-    assert.equal((await x.posted("homeWidgetOpen")).length, 0);
-  } finally { await x.page.close(); }
+    await x.libTab("widgets"); await x.rest(150);
+    const all = (await x.lib()).rows, ids = (list) => list.map((r) => r.title);
+    assert.ok(all.some((r) => r.type === "chart") && all.some((r) => r.type !== "chart"), `premise: both kinds are listed (${ids(all).join(", ")})`);
+    const kind = (await x.lib()).filters.find((f) => f.id === "kind");
+    assert.ok(kind, "a Kind filter beside By"); assert.equal(kind.value, "All");
+    assert.deepEqual((await x.menu("kind")).map((k) => k.label), ["All", "Widgets", "Charts"]);
+    await x.pick("kind", "Charts");
+    assert.deepEqual(ids((await x.lib()).rows), ids(all.filter((r) => r.type === "chart")), "Charts: the charts alone");
+    await x.pick("kind", "Widgets");
+    assert.deepEqual(ids((await x.lib()).rows), ids(all.filter((r) => r.type !== "chart")), "Widgets: the widgets and cards alone");
+    await x.search("frost");
+    assert.equal((await x.lib()).rows.length, 0, "the chart named Frost is not a widget");
+    assert.match((await x.lib()).status, /^No widget named like “frost” with these filters\.$/);
+    await x.search(""); await x.pick("kind", "All");
+    assert.deepEqual(ids((await x.lib()).rows), ids(all), "All: both again, in the same order");
+    assert.deepEqual(x.errors, []);
+  } finally { await closeIt(x); }
+  const older = await open("side", { width: 300, files: [], widgets: [], artifacts: [] });
+  try {
+    await older.libTab("widgets"); await older.rest(150);
+    assert.deepEqual((await older.lib()).filters.map((f) => f.id), ["maker"], "a DGC that lists no charts: every row is a widget, so no Kind");
+  } finally { await closeIt(older); }
 });

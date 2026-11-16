@@ -2020,7 +2020,7 @@
       // (pinned: whether a folder is on the dock; a page with no dock offers no pin.)
       folders: { rows: projectFolders ? projectFolders.rows : [], mark: folderTile, ...(window.DgcDock ? { pinned: folderDocked } : {}) },
       // What the Library lists: a widget's Folio in the palette it wears, an artifact's sheet by its kind (as the dock and the Library show them).
-      widgets: { mark: (id) => { wearMarks("widget", [{ id: String(id) }]); return markHtml("widget", String(id), false); }, chart: (kind) => window.DgcLibrary?.chartMark?.(kind) || "" },
+      widgets: { mark: (id) => { wearMarks("widget", [{ id: String(id) }]); return markHtml("widget", String(id), false); } },
       artifacts: { sheet: (type) => window.DgcFileSheet?.html?.(String(type || "file")) || "" },
     };
   }
@@ -2036,7 +2036,6 @@
     // Home's Widgets and Artifacts cards: the side bar's Library, on that tab (his call, 15 Nov; it was the editor's page).
     else if (what === "library") { showSideTab("library"); libraryMount()?.view(arg === "widgets" ? "widgets" : "artifacts"); }
     else if (what === "widget") vscode.postMessage({ type: "homeWidgetOpen", id: String(arg?.id || ""), chat_id: String(arg?.chat_id || "") });
-    else if (what === "chart") vscode.postMessage({ type: "homeChartOpen", id: String(arg?.id || ""), chat_id: String(arg?.chat_id || "") });
     else if (what === "artifact") vscode.postMessage({ type: "artifactOpen", id: String(arg?.id || ""), artifactType: String(arg?.type || ""), title: String(arg?.title || "") });
     else if (what === "open") {
       const key = String(arg || ""), kind = key.slice(0, key.indexOf(":")), id = key.slice(key.indexOf(":") + 1);
@@ -3767,6 +3766,7 @@
         if (parts.length && parts.map(p => typeof p === 'string' ? p : p.wire).join('') === text) clean.parts = parts;
       }
       if (value.goal === true) clean.goal = true;
+      if (typeof value.output === "string" && (value.output === "auto" || OUTPUT_CHOICES.some(([id]) => id === value.output))) clean.output = value.output;
       return clean;
     } catch { return null; }
   }
@@ -3933,10 +3933,14 @@
         sysLine("Send or clear the current draft before restoring this message."); return;
       }
       // A queued or refused prompt put back is one step of the box's history, like a paste.
+      // (A message handed back after a window reload brings its @ marks where they stood and its Artifact choice: 79.2.
+      // One DGC refused keeps the words and its selections as chips under the box, as before.)
       recordComposerEdit(() => {
         setComposerValue(pending.text); attachments.push(...pending.attachments);
+        if (pending.fromReload) restoreDraftParts(pending.parts, pending.text);
         setGoalDraftArmed(pending.goal === true);
       });
+      if (pending.fromReload && outputOffered && pending.output && pending.output !== "auto" && offeredOutputs().some(([value]) => value === pending.output)) setOutput(pending.output);
       unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== id);
       renderAtts(); onInput(); persistDraft(); input.focus();
     };
@@ -3978,6 +3982,7 @@
     fillUserBubble(bubble, String(item?.text || "").slice(0, 1_000_000), draft.attachments);
     node.appendChild(bubble);
     return { text: draft.text, attachments: draft.attachments, goal: draft.goal === true, node,
+             ...(draft.parts ? { parts: draft.parts } : {}), ...(draft.output ? { output: draft.output } : {}), fromReload: true,
              session: typeof item?.session === "string" ? item.session : "" };
   }
   const promptId = (item) => typeof item?.requestId === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(item.requestId) ? item.requestId : "";
@@ -11014,8 +11019,13 @@ function permissionChoices(ev) {
     if (streaming && delivery === "steer") stampPrompt(m, sentAt);
     // The restore draft rides along for the extension, which keeps it while the message is queued (a
     // reload loses this webview's copy); an image's bytes are already in `images`, so they are left out.
-    const restore = { text: pastes.length ? kept : text,
-      attachments: attachments.map((a) => a.img ? { label: a.label, img: true, bytes: a.bytes } : a) };
+    // (With the @ marks where they stood and the Artifact choice: a window reload's restore puts both back, as Edit does.
+    // The marks spell the box's own words, spaces and all; the words sent are trimmed. The restore keeps the box's.)
+    const marks = (pastes.length ? null : draftParts()) || [], spelled = marks.map((p) => (typeof p === "string" ? p : p.wire)).join("");
+    const withMarks = marks.some((p) => typeof p !== "string") && spelled.trim() === text.trim();
+    const restore = { text: pastes.length ? kept : withMarks ? spelled : text,
+      attachments: attachments.map((a) => a.img ? { label: a.label, img: true, bytes: a.bytes } : a),
+      ...(withMarks ? { parts: marks } : {}), output: outputOffered ? outputPick : "auto" };
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined, restore,
       delivery,
       ...(displayMentions.length ? {display_mentions: displayMentions} : {}),
@@ -13854,6 +13864,7 @@ function permissionChoices(ev) {
     if (msg.type === "pipsMacNote") { openPipsMacNote(); return; }
     if (msg.type === "pipSessionNote") { sessionNoteShow(msg); return; }
     if (msg.type === "homeUsage") { home?.usage(msg); return; }
+    if (msg.type === "homeUsageStale") { home?.usageChanged?.(); return; }
     if (msg.type === "homeWeather") { home?.weather(msg); return; }
     if (msg.type === "homeWeatherPlaces") { home?.places(msg); return; }
     if (msg.type === "homeWidgets") { home?.made("widgets", msg); return; }
