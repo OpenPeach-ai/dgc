@@ -208,6 +208,8 @@ class PipChatMemoryTests(unittest.TestCase):
         manifest['run_kind'] = 'draft'
         manifest.pop('conversation')
         manifest.pop('chat_setup', None)    # (every chat pins its setup since 13 Nov; this test is about the memory pin)
+        for pin in ('email_draft', 'calendar_draft', 'connector_draft', 'action_grants'):
+            manifest.pop(pin, None)         # (and its drafts since 16 Nov, one kind of Pip)
         with (patch('dgc.agent.Agent.__init__', side_effect=AssertionError('No draft Agent for memory pin')),
               patch.dict(os.environ, {'DGC_SESSION_POLICY': pips._json(pips.native_policy())}),
               self.assertRaisesRegex(RegistryError, 'audit or conversation')):

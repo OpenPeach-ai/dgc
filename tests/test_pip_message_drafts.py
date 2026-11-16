@@ -110,8 +110,12 @@ class MessageDraftTests(unittest.TestCase):
         self.store.set_paused(self.source['id'],True,'local-console');self.store.finish(run['id'],result={'text':'Draft','message_draft':self.message})
         self.assertEqual(drafts.history(self.store,self.source['id'])['drafts'],[])
     def test_legacy_and_project_manifest_cannot_inject_draft(self):
-        # A Personal task drafts too now (an Always-allow grant may run it); an audit never does.
-        for manifest in [{'run_kind':'conversation','source_policy':{'mode':'committed_only'},'email_draft':{'schema_version':1}},{'run_kind':'audit','source_policy':{'mode':'personal'},'email_draft':{'schema_version':1}}]:
+        # A Personal task drafts too now (an Always-allow grant may run it); an audit never does. Changed on purpose (one
+        # kind of Pip, 16 Nov): a project folder Pip's chat drafts as a Personal Pip's does; its audits never do.
+        self.assertTrue(drafts.validate_pin({'run_kind':'conversation','source_policy':{'mode':'committed_only'},'email_draft':{'schema_version':1}}))
+        for manifest in [{'run_kind':'audit','source_policy':{'mode':'committed_only'},'email_draft':{'schema_version':1}},
+                         {'run_kind':'personal_task','source_policy':{'mode':'committed_only'},'email_draft':{'schema_version':1}},
+                         {'run_kind':'audit','source_policy':{'mode':'personal'},'email_draft':{'schema_version':1}}]:
             with self.assertRaises(RegistryError):drafts.validate_pin(manifest)
         self.assertFalse(drafts.validate_pin({'run_kind':'conversation'}))
         for message in [{**self.message,'account':'ca_other'},{**self.message,'bcc':['spy@example.test']},{**self.message,'subject':'Injected\r\nBcc: x@example.test'}]:

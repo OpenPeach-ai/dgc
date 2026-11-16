@@ -186,8 +186,8 @@ class ChatSetupTests(unittest.TestCase):
         # A task never carries one. (A chat in a project folder now may, 13 Nov: every Pip sets itself up in its chat;
         # what it may change is checked against the registry when the reply is saved, test_one_pips.FolderSetsItselfUp.)
         with self.assertRaises(RegistryError):setup.validate_pin({**run['manifest'], 'run_kind': 'personal_task'})
-        with self.assertRaises(RegistryError):
-            setup.validate({'changes': {'computer_plan': {'schema_version': 1}}, 'reason': 'r'}, project=True)
+        # (A chat in a project folder asked for a computer was refused here; since 16 Nov, one kind of Pip, it asks as a
+        # Personal Pip does: test_one_kind_pips.TheGatesThatFollow.test_a1_a2_its_chat_may_ask_for_web_reads_and_a_computer.)
         with self.assertRaises(RegistryError):
             setup.validate_pin({**run['manifest'], 'chat_setup': {**run['manifest']['chat_setup'], 'allowed': 'yes'}})
 

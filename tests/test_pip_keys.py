@@ -120,14 +120,18 @@ class AskForKey(Keys):
         with self.assertRaisesRegex(RegistryError, "Name the key"):
             self.ask(name="  ")
 
-    def test_only_a_personal_pip_and_only_you_on_this_computer(self):
+    def test_any_pip_and_only_you_on_this_computer(self):
         self.ask()
         with self.assertRaises(RegistryError) as raised:
             self.control("save_pip_key", actor="device_1", pip_id=self.pip["id"], key_id=self.card()["id"], value=SECRET)
         self.assertEqual(raised.exception.code, "local_only")
+        # Changed on purpose (one kind of Pip, 16 Nov): "Only a Personal Pip has keys of its own" is gone; a Pip with a
+        # folder has its own keys too, and only you give it one, on this computer.
         project = self.store.create(self.workspace["id"], "Reviewer", "Review", "editor-user")
-        with self.assertRaisesRegex(RegistryError, "Personal Pip"):
-            self.control("list_pip_keys", pip_id=project["id"])
+        self.assertEqual(self.control("list_pip_keys", pip_id=project["id"])["keys"], [])
+        with self.assertRaises(RegistryError) as raised:
+            self.control("list_pip_keys", actor="device_1", pip_id=project["id"])
+        self.assertEqual(raised.exception.code, "local_only")
 
 
 class SaveKey(Keys):

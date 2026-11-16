@@ -120,10 +120,15 @@ def _source(store, run_id):
     _id(run_id,'run');run=store.run(run_id);job=store._job(run['pip_id'])
     from .pip_archive import require_live
     require_live(store,job['id'])
-    if (store.registry.get(job['workspace_id'])['kind']!='personal' or job['source_policy']!={'mode':'personal'}
-            or run['status']!='succeeded' or run['manifest'].get('run_kind') not in ('personal_task','conversation')
-            or run['manifest'].get('source_policy')!={'mode':'personal'}):
-        raise RegistryError('source_unavailable','Choose a completed Personal result before preparing an external action.')
+    # Any Pip's completed chat reply or Personal task that had the outside world (one kind of Pip, 16 Nov): a Personal
+    # Pip's always does; a Pip with a folder's chat did when it had its box (its apps and plugins) or its drafting pins.
+    manifest=run['manifest'];personal=job['source_policy']=={'mode':'personal'}
+    world=personal or manifest.get('computer') is not None or any(k in manifest for k in ('email_draft','calendar_draft','connector_draft'))
+    if ((store.registry.get(job['workspace_id'])['kind']=='personal')!=personal
+            or run['status']!='succeeded' or manifest.get('run_kind') not in ('personal_task','conversation')
+            or (manifest.get('run_kind')=='personal_task' and not personal)
+            or (manifest.get('source_policy')=={'mode':'personal'})!=personal or not world):
+        raise RegistryError('source_unavailable','Choose a completed reply or result of this Pip before preparing an external action.')
     from .pip_personal_results import validate as result_valid
     if run['manifest']['run_kind']=='personal_task':result_valid(run['result'])
     else:
@@ -370,7 +375,7 @@ def accept(store, action_id, expected_digest, actor, config, *, prepare=None, by
 
 def history(store, pip_id, before_id=None, limit=20):
     _id(pip_id,'pip');job=store._job(pip_id)
-    if job['source_policy']!={'mode':'personal'}:raise RegistryError('local_only','Message reviews belong to Personal Pips.')
+    # Any Pip's external-action reviews (one kind of Pip, 16 Nov).
     if type(limit) is not int or not 1<=limit<=20:raise RegistryError('invalid_limit','Read 1–20 external-action reviews at a time.')
     params=[pip_id];where='pip_id=?'
     if before_id is not None:

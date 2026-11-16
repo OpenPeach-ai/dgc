@@ -118,8 +118,10 @@ def _discover(config,*,inspect=None,clock=time.monotonic):
 def pin(manifest):
     value=manifest.get('connector_draft')
     if value is None:return None
-    if manifest.get('run_kind') not in ('conversation','personal_task') or manifest.get('source_policy')!={'mode':'personal'}:
-        raise RegistryError('invalid_connector_context','Connector drafting belongs to a Personal Pip.')
+    # Every Pip's chat (one kind of Pip, 16 Nov); an unattended task is a Personal Pip's own kind of run.
+    if (manifest.get('run_kind') not in ('conversation','personal_task')
+            or (manifest.get('run_kind')=='personal_task' and manifest.get('source_policy')!={'mode':'personal'})):
+        raise RegistryError('invalid_connector_context','Connector drafting belongs to a Pip\'s chat or a Personal task.')
     return validate_snapshot(value)
 
 

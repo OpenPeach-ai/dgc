@@ -564,7 +564,16 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # against its digest.
 # API 102 (0.52): a Pip's reply carries `artifacts` [{id, type, title, op}]: the pages, docs, sheets, decks and dashboards
 # it made or changed (op made | changed), counted by DGC, for the chat to show each as a card to open.
-PIPS_API_VERSION = 102
+# API 103 (0.52, one kind of Pip, the backend half): no new command or field. A Pip with a folder has what a Personal Pip
+# has: its chat hears the Personal chat's instructions and has its tools (plus its project reads), drafts an email, an
+# event or an app action (list_pip_message_drafts, list_pip_calendar_drafts, list_pip_connector_drafts,
+# list_pip_app_actions and its Always allow grants take its id), sees as chosen (get_pip_eyes, set_pip_eyes), has its
+# own keys (list/save/decline/remove_pip_key), borrows the user's Chrome (list/allow/decline/stop_pip_borrow), connects
+# apps (list/start/check/decline/disconnect_pip_app_link) and plugins (list/allow/decline_pip_plugin); web_plan, app_plan
+# and computer_plan are any Pip's (create_pip's `computer`, propose_pip_update, a setup card, its own chat's
+# draft_pip_change); Remove computer (computer_plan null) takes a folder Pip's box away and Give a computer gives it back;
+# an @ project's copy needs a box, not a computer plan.
+PIPS_API_VERSION = 103
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}

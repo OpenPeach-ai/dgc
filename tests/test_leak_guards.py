@@ -145,7 +145,11 @@ class TheInstruction(unittest.TestCase):
         import inspect
         self.assertIn("leak_guard.INSTRUCTION", inspect.getsource(Agent._system_prompt) if hasattr(Agent, "_system_prompt")
                       else inspect.getsource(Agent))
-        self.assertIn(leak_guard.INSTRUCTION, pip_chat.SYSTEM)
+        # Every Pip's chat hears it with its world (pips.execute_native's _world_words); pip_chat.SYSTEM, the old project
+        # chat prompt that carried a copy, is gone (one kind of Pip, 16 Nov).
+        from dgc import pips
+        self.assertIn("leak_guard import INSTRUCTION as LEAK_WORDS", inspect.getsource(pips.execute_native))
+        self.assertFalse(hasattr(pip_chat, "SYSTEM"))
 
 
 if __name__ == "__main__":

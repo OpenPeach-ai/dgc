@@ -103,8 +103,10 @@ class EverySurfaceAsksForThem(unittest.TestCase):
 class APipSaysWhatItWillDo(unittest.TestCase):
     def test_a_long_job_opens_with_what_it_will_do_and_a_message_on_the_way_never_drops_the_first_ask(self):
         from dgc import pip_chat
-        self.assertIn("start with one short line saying what you'll do", pip_chat.SYSTEM)
-        self.assertIn("still finish and answer what they first asked", pip_chat.SYSTEM)
+        # (pip_chat.SYSTEM, the old project chat prompt, is gone: every Pip's chat hears pip_chat.WORKING, one kind of
+        # Pip, 16 Nov; test_one_kind_pips checks the assembled prompt of both.)
+        self.assertIn("start with one short line saying what you'll do", pip_chat.WORKING)
+        self.assertIn("still finish and answer what they first asked", pip_chat.WORKING)
 
 
 if __name__ == "__main__":

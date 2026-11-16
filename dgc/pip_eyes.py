@@ -213,9 +213,7 @@ def _pip_model(store, pip_id: str, config) -> str:
 
 def status(store, pip_id: str, config) -> dict:
     """For the Pip's page: its model, whether it sees, and how it sees when it can't."""
-    pip = store._job(pip_id)
-    if pip["source_policy"] != {"mode": "personal"}:
-        raise RegistryError("invalid_request", "Only Personal Pips use a computer and photos.")
+    store._job(pip_id)                      # any Pip: a folder Pip's box and photos too (one kind of Pip, 16 Nov)
     model = _pip_model(store, pip_id, config)
     own = saved(store.db, pip_id)
     can = sees(config, model)
@@ -229,9 +227,7 @@ def set_choice(store, pip_id: str, choice, actor: str, config) -> dict:
         raise RegistryError("local_only", "Choose how a Pip sees on this computer.")
     if choice not in CHOICES:
         raise RegistryError("invalid_request", "Choose ask, relay or off.")
-    pip = store._job(pip_id)
-    if pip["source_policy"] != {"mode": "personal"}:
-        raise RegistryError("invalid_request", "Only Personal Pips use a computer and photos.")
+    store._job(pip_id)                      # any Pip (one kind of Pip, 16 Nov)
     vision = None
     if choice == "relay":
         vision = pick(config, _pip_model(store, pip_id, config))
@@ -251,7 +247,7 @@ def _now() -> str:
 # --------------------------------------------------------------------------- a run, its card and its answer
 
 def pin(registry, row, manifest: dict, config) -> dict:
-    """At a Personal Pip's run start: how it sees, for its worker (``computer_eyes``). The worker checks its
+    """At a Pip's chat or task start: how it sees, for its worker (``computer_eyes``). The worker checks its
     own model for sight; this carries the user's choice, the model that would look for it, and, for the
     run that answers the card, that answer and the photos it was about."""
     if manifest.get("run_kind") not in ("conversation", "personal_task"):

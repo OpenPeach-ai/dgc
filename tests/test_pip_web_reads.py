@@ -214,24 +214,25 @@ class PersonalJobTests(unittest.TestCase):
         self.store.accept(job["id"], removal["id"], 2, "local-console")
         self.assertIsNone(self.store.get(job["id"]).get("web_plan"))
 
-    def test_project_pips_and_model_proposals_cannot_gain_web_reads(self):
+    def test_project_pips_gain_web_reads_and_model_proposals_cannot(self):
+        # Changed on purpose (one kind of Pip, 16 Nov): "Web reads currently require a personal Pip" is gone; a Pip with a
+        # folder is given web reads by the same reviewed change. A model's proposal still can't add them.
         project = self.store.create(self.workspace["id"], "Reviewer", "Review the source", "local-console")
-        with self.assertRaises(RegistryError) as raised:
-            self.store.propose(project["id"], 1, {"web_plan": PLAN}, "local-console")
-        self.assertEqual(raised.exception.code, "unsupported_web_plan")
+        proposal = self.store.propose(project["id"], 1, {"web_plan": PLAN}, "local-console")
+        self.assertEqual(proposal["definition"]["web_plan"], PLAN)
         job = self.personal()
         with self.assertRaises(RegistryError):
             self.store.propose(job["id"], 1, {"web_plan": PLAN}, "main-chat", origin_session_id="chat-one")
 
-    def test_conversational_setup_carries_reviewed_web_reads_for_personal_scope_only(self):
+    def test_conversational_setup_carries_reviewed_web_reads_for_any_scope(self):
         base = {"target_root": str(self.root), "name": "Morning brief", "goal": "Summarize the pages",
                 "pip_type": "rook", "work_kind": "personal_task", "scope": "personal", "schedule": None,
                 "run_now": False, "reason": "User asked for a morning brief", "request_key": "web-setup",
                 "web_plan": PLAN}
         request = pip_setup.validate_request(base)
         self.assertEqual(request["web_plan"], PLAN)
-        with self.assertRaises(RegistryError):
-            pip_setup.validate_request({**base, "scope": "project", "work_kind": "source_review"})
+        # Changed on purpose (one kind of Pip, 16 Nov): a project Pip's setup card carries its web reads too.
+        self.assertEqual(pip_setup.validate_request({**base, "scope": "project", "work_kind": "source_review"})["web_plan"], PLAN)
 
     def test_controller_reads_the_pages_and_the_real_worker_sees_only_their_text(self):
         import subprocess

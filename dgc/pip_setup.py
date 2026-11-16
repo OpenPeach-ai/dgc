@@ -163,19 +163,18 @@ def validate_request(value):
     if value.get('scope','project') not in ('project','personal'):_fail('Choose project or personal scope.')
     if 'app_plan' in value:
         from .pip_app_access import validate as validate_apps
-        request['app_plan'] = validate_apps(value['app_plan'])
-        if not personal:_fail('App reads currently require personal scope.')
+        request['app_plan'] = validate_apps(value['app_plan'])      # any Pip's (one kind of Pip, 16 Nov: A1)
     if 'web_plan' in value:
         from .pip_web_reads import validate as validate_web
-        request['web_plan'] = validate_web(value['web_plan'])
-        if not personal:_fail('Web reads currently require personal scope.')
+        request['web_plan'] = validate_web(value['web_plan'])       # any Pip's (A1)
     if 'computer' in value:
         # Its own computer (pip_computer), asked for in the chat: "a Pip with its own computer that checks
         # iPhone prices" made one without (battle test, 2026-10-09).
+        # Any Pip's (one kind of Pip, 16 Nov: A2): a Pip with a folder has its box where this machine runs boxes, and
+        # with computer false it has none (pips.has_box).
         if type(value['computer']) is not bool:
             _fail('computer is true or false.')
-        if value['computer'] and not personal:
-            _fail('A computer is for a Personal Pip.', 'unsupported_computer_plan')
+        request['computer'] = value['computer']
     pulse = value['pip_type'] == 'pulse' and not personal
     if type(value['pip_type']) is not str or value['pip_type'] not in _AUDIT | {'quill', 'pulse'}:
         _fail('Conversational setup supports source reviewers, Quill and reviewed Pulse plans.')
@@ -306,9 +305,9 @@ def _definition(store, request, workspace_id, saved_policy=None):
         extra['source_policy'] = validate_policy(policy)
     if 'app_plan' in request:extra['app_plan']=request['app_plan']
     if 'web_plan' in request:extra['web_plan']=request['web_plan']
-    if personal and 'pip_id' not in request:
+    if 'pip_id' not in request:
         from .pips import _new_computer
-        computer = _new_computer(True, request.get('computer'))
+        computer = _new_computer(personal, request.get('computer'))
         if computer is not None: extra['computer_plan'] = computer
     if 'pip_id' in request:
         from .pip_adaptation import can_propose
@@ -740,6 +739,9 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
                 if personal:
                     from .pip_levels import start as start_level
                     start_level(registry, pip_id)
+                elif request.get('computer') is False:
+                    from .pips import _set_box_off
+                    _set_box_off(registry.db, pip_id, True)       # a Pip with a folder set up without a computer (A2)
             registry.db.execute('INSERT INTO pip_versions VALUES(?,?,?,?,?,?)', (pip_id, version, _json(body['definition']), actor, request['reason'], now))
             if 'pip_id' in request:
                 registry.db.execute("UPDATE pips SET current_version=?,status='active',updated_at=? WHERE id=? AND current_version=?",

@@ -101,8 +101,10 @@ def validate_pin(manifest,*,kind='email'):
     _spec(kind)
     value=manifest.get(kind+'_draft')
     if value is None:return False
-    if value!={'schema_version':1} or type(value.get('schema_version')) is not int or manifest.get('run_kind') not in ('conversation','personal_task') or manifest.get('source_policy')!={'mode':'personal'}:
-        raise RegistryError('invalid_request','Drafting belongs only to its pinned Personal conversation.')
+    # Every Pip's chat drafts (one kind of Pip, 16 Nov); an unattended task is a Personal Pip's own kind of run.
+    if (value!={'schema_version':1} or type(value.get('schema_version')) is not int or manifest.get('run_kind') not in ('conversation','personal_task')
+            or (manifest.get('run_kind')=='personal_task' and manifest.get('source_policy')!={'mode':'personal'})):
+        raise RegistryError('invalid_request','Drafting belongs only to its pinned conversation or Personal task.')
     return True
 
 
@@ -163,7 +165,7 @@ def get(store,draft_id,*,kind='email'):
 
 def history(store,pip_id,before_id=None,limit=20,*,kind='email'):
     table,prefix,content,actor_kind=_spec(kind)
-    if store._job(pip_id)['source_policy']!={'mode':'personal'}:raise RegistryError('local_only','Drafts are Personal only.')
+    store._job(pip_id)                      # any Pip's drafts (one kind of Pip, 16 Nov)
     if type(limit) is not int or not 1<=limit<=20:raise RegistryError('invalid_limit','Choose 1–20 drafts.')
     params=[pip_id];where='pip_id=?'
     if before_id:

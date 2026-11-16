@@ -47,8 +47,6 @@ NOT_FOR_PIPS = {
     "qwen": "Qwen Code isn't offered for Pips: DGC hasn't checked that it runs with only DGC's tools.",
     "copilot": "Copilot CLI isn't offered for Pips: DGC hasn't checked that it runs with only DGC's tools.",
 }
-PROJECT_PIPS = ("Project Pips need a local or API model: their source checks run only in DGC's own loop. "
-                "Personal Pips can use your subscription.")
 MAX_REQUEST = 4 * 1024 * 1024        # one MCP request line from the CLI
 MAX_LINE = 4 * 1024 * 1024           # one line of the CLI's own output
 MAX_TEXT = 4 * 1024 * 1024           # what one turn may say

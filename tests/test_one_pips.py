@@ -161,14 +161,16 @@ class FolderSetsItselfUp(unittest.TestCase):
         run = self.turn(job, key="routine_morning", text="This message is from DGC, not the user.")
         self.assertFalse(run["manifest"]["chat_setup"]["direct"])
 
-    def test_it_never_drafts_web_reads_or_a_computer(self):
+    def test_it_drafts_web_reads_and_a_computer_as_a_personal_pip_does(self):
+        # Changed on purpose (one kind of Pip, 16 Nov): it drafted only its name, goal, schedule and model ("never web
+        # reads or a computer"). Now its chat sets itself up as a Personal Pip's does; web reads and a computer still
+        # wait for the user's review (pip_chat_setup.commit), and its branch and files stay on its page.
         from dgc import pip_chat_setup
-        with self.assertRaises(Exception):
-            pip_chat_setup.validate({"changes": {"computer_plan": {"schema_version": 1}}, "reason": "r"}, project=True)
-        with self.assertRaises(Exception):
-            pip_chat_setup.validate({"changes": {"web_plan": {"schema_version": 1, "reads": [
-                {"kind": "search", "query": "x"}]}}, "reason": "r"}, project=True)
-        self.assertEqual(pip_chat_setup.validate({"changes": {"goal": "Review it"}, "reason": "r"}, project=True)["changes"],
+        asked = pip_chat_setup.validate({"changes": {"computer_plan": {"schema_version": 1}, "web_plan": {
+            "schema_version": 1, "reads": [{"kind": "search", "query": "x"}]}}, "reason": "r"})
+        self.assertEqual(set(asked["changes"]), {"computer_plan", "web_plan"})
+        self.assertEqual(pip_chat_setup.validate({"changes": {"goal": "Review it"}, "reason": "r"})["changes"],
                          {"goal": "Review it"})
-        schema = pip_chat_setup.schema(project=True)["function"]["parameters"]["properties"]["changes"]["properties"]
-        self.assertEqual(set(schema), {"name", "goal", "schedule", "model_choice"})
+        schema = pip_chat_setup.schema()["function"]["parameters"]["properties"]["changes"]["properties"]
+        self.assertEqual(set(schema), {"name", "goal", "schedule", "model_choice", "web_plan", "computer_plan"})
+        self.assertIn(pip_chat_setup.FOLDER_NOTE, pip_chat_setup.notice(direct=True, project=True))

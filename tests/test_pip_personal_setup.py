@@ -57,10 +57,11 @@ class PersonalSetupTests(unittest.TestCase):
         with patch.object(pips, 'computer_by_default', return_value=False):
             self.assertNotIn('computer', self.draft(request_key='unsupported1'), 'none where this machine runs none')
             self.assertTrue(self.draft(computer=True, request_key='asked1')['computer'], 'asked for, it is given')
-        for bad in ({'computer': 'yes', 'request_key': 'bad1'},
-                    {'computer': True, 'scope': 'project', 'work_kind': 'source_review', 'pip_type': 'lens', 'request_key': 'bad2'}):
-            with self.subTest(bad=bad), self.assertRaises(RegistryError):
-                self.draft(**bad)
+        with self.subTest(bad='yes'), self.assertRaises(RegistryError):
+            self.draft(computer='yes', request_key='bad1')
+        # Changed on purpose (one kind of Pip, 16 Nov): a Pip with a folder asked for with a computer is given one too.
+        self.assertTrue(self.draft(computer=True, scope='project', work_kind='source_review', pip_type='lens',
+                                   request_key='asked2')['computer'])
         with patch.object(pips, 'computer_by_default', return_value=True):
             project = self.draft(scope='project', work_kind='source_review', pip_type='lens', request_key='project1')
             self.assertNotIn('computer', project, 'a project Pip never gets one by default')

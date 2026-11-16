@@ -90,10 +90,12 @@ class PipComputerTests(unittest.TestCase):
         self.assertIsNone(self.store.get(pip["id"]).get("computer_plan"), "a proposal grants nothing")
         with self.assertRaises(RegistryError):
             self.store.propose(pip["id"], 1, {"computer_plan": PLAN}, "main-chat", origin_session_id="chat-one")
+        # Changed on purpose (one kind of Pip, 16 Nov): "A computer is for Personal Pips" is gone; a Pip with a folder
+        # is given one by the same reviewed change (and Remove computer takes its box away, pips.has_box).
         project = self.store.create(self.workspace["id"], "Reviewer", "Review", "local-console")
-        with self.assertRaises(RegistryError) as raised:
-            self.store.propose(project["id"], 1, {"computer_plan": PLAN}, "local-console")
-        self.assertEqual(raised.exception.code, "unsupported_computer_plan")
+        given = self.store.propose(project["id"], 1, {"computer_plan": PLAN}, "local-console")
+        self.assertEqual(given["definition"]["computer_plan"], PLAN)
+        self.assertIsNone(self.store.get(project["id"]).get("computer_plan"), "a proposal grants nothing")
         self.store.accept(pip["id"], proposal["id"], 1, "local-console")
         self.assertEqual(self.store.get(pip["id"])["computer_plan"], PLAN)
 

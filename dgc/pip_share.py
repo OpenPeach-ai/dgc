@@ -38,7 +38,7 @@ def export(store, pip_id) -> dict:
         pip["event_trigger"] = job["event_trigger"]
     if job.get("model_choice") not in (None, {"mode": "default"}):
         pip["model_choice"] = job["model_choice"]   # a named model; the default stays the importer's own
-    if personal and job.get("web_plan") is not None:
+    if job.get("web_plan") is not None:      # any Pip's web reads (one kind of Pip, 16 Nov)
         pip["web_plan"] = job["web_plan"]
     if not personal:
         pip["source_ref"] = job.get("source_ref") or "HEAD"

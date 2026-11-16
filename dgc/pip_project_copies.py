@@ -1,4 +1,4 @@
-"""@ a project in a Personal Pip's chat (pips-21): a private copy on its computer, and what changed back as one change.
+"""@ a project in a Pip's chat (pips-21): a private copy on its computer, and what changed back as one change.
 
 Asked: "@ a project in a Personal Pip's chat: DGC puts a private copy in its box, the Pip works freely there, and what
 changed comes back as one card with the diff: Apply or Discard, plus Continue in Work. Applying is always your click."
@@ -336,11 +336,12 @@ def choices(registry) -> dict:
 
 # --------------------------------------------------------------------------------------------- the copy
 
-def _personal_with_computer(store, pip_id) -> dict:
+def _with_box(store, pip_id) -> dict:
+    """The Pip whose box a project's copy goes in: any Pip with its own box (one kind of Pip, 16 Nov: a Pip with a folder
+    has one without a computer plan, pips.has_box)."""
+    from .pips import has_box
     job = store._job(pip_id)
-    if job["source_policy"] != {"mode": "personal"}:
-        raise RegistryError("invalid_request", "A project's copy is for a Personal Pip.")
-    if job.get("computer_plan") is None:
+    if not has_box(job):
         raise RegistryError("needs_computer", f"Give {job['name']} a computer first: the project's copy goes in its "
                                               "computer's Files, where it can work on it freely.")
     return job
@@ -401,7 +402,7 @@ def prepare(store, pip_id, marks, request_key) -> list:
         return []
     if len({m.get("identity") for m in named}) > MAX_PROJECTS:
         raise RegistryError("invalid_request", f"Name at most {MAX_PROJECTS} projects in one message.")
-    _personal_with_computer(store, pip_id)
+    _with_box(store, pip_id)
     registry, db = store.registry, store.db
     refresh(store, pip_id)            # what the Pip changed so far is known before deciding to keep or remake a copy
     told, seen = [], set()

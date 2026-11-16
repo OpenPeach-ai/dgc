@@ -270,11 +270,14 @@ class ItsChatUsesItsBox(FolderPipWorld, unittest.TestCase):
 
     def test_without_its_box_its_chat_is_as_it_was(self):
         # (Q8, 14 Nov: its own tools, remember, routines, its goal, skills and working notes, are in FOLDER_CHAT_TOOLS;
-        # without its box it still has no computer, apps or web.)
+        # without its box it still has no computer, apps or web.) Changed on purpose (one kind of Pip, 16 Nov): its chat
+        # is the Personal chat, so it says what a Personal Pip without a computer says, and reads its folder; its
+        # drafts (an email, an event, an app action) are in FOLDER_CHAT_TOOLS too.
         seen = self.turn(None)
         self.assertNotIn("computer", seen["tools"])
         self.assertTrue(seen["tools"] <= pips.FOLDER_CHAT_TOOLS)
-        self.assertIn("cannot edit files, run commands/tests, fetch the web", seen["system"])
+        self.assertIn("You have no computer: you cannot open web pages or search the web", seen["system"])
+        self.assertIn("you cannot edit its files or run its commands or tests", seen["system"])
 
 
 if __name__ == "__main__":

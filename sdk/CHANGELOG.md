@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Editor protocol (for apps on the wire):** `chatdgc_widgets` takes op `charts` (the charts ChatDGC replies drew; `ready.capabilities.chatdgc.chart_library`); `list_session_attachments` / `get_session_attachment` list and give back what you attached in Work sessions (`ready.capabilities.session_attachments`).
+- **Pips API 103: one kind of Pip, the backend half.** No new command or field: a Pip with a folder has what a Personal Pip has (its chat's instructions and tools plus its project reads; drafts and Always allow; eyes; its own keys; borrowing your Chrome; app links; plugins; web, app and computer plans; Remove and Give a computer; an `@` project's copy in its box). Commands that answered `invalid_request` for a Pip with a folder before 103 take its id.
 - **Pips API 102: what a Pip's reply made.** A reply carries `artifacts` `[{id, type, title, op}]`; no new command.
 - **Pips API 101: a Pip sends files in its chat.** A reply's `files` `[{index, name, bytes, mime}]` beside its `images`; `get_pip_message_file {pip_id, message_id, index}` reads any message's file (where it is kept, local only). Python and TypeScript clients refuse it before API 101.
 - **Pips API 100: `@` outputs in a Pip's chat.** `send_pip_message` takes `output` (`document`, `slides`, `spreadsheet`, `page`, `dashboard`; `auto` or none: nothing asked), as Work's Output menu; a reply that didn't make one carries `output_missing`. Python and TypeScript clients refuse it before API 100.
