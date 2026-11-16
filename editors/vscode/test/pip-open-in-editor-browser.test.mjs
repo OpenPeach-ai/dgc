@@ -185,10 +185,11 @@ for (const theme of ["dark", "light"]) {
       // taking the Pip's name: it is not drawn there (the chat's own menu has it), and the name keeps what it had.
       for (const width of [340, 300]) {
         await x.p.setViewportSize({ width, height: 700 }); await x.p.hover(`[data-job="${PIP}"]`); await x.p.waitForTimeout(250);
-        const narrow = await x.p.evaluate((pip) => { const root = window.__pipsRoot || document, b = root.querySelector(`[data-open-pip-chat="${pip}"]`), pin = root.querySelector(`[data-pin-pip="${pip}"]`), name = root.querySelector(`[data-job="${pip}"] .pip-row-name`);
+        const narrow = await x.p.evaluate((pip) => { const root = window.__pipsRoot || document, b = root.querySelector(`[data-open-pip-chat="${pip}"]`), pin = root.querySelector(`[data-pip-more="${pip}"]`), name = root.querySelector(`[data-job="${pip}"] .pip-row-name`);
           return { open: !!b && b.checkVisibility() && b.getBoundingClientRect().width > 0, pin: !!pin && pin.checkVisibility(), nameRoom: Math.round(pin.getBoundingClientRect().left - name.getBoundingClientRect().left) }; }, PIP);
         assert.equal(narrow.open, false, `${width}px: not drawn`);
-        assert.equal(narrow.pin, true, `${width}px: its pin stays`);
+        // (in a list under 400px the row's buttons are in its ⋯, which stands where the pin stood: 16 Nov)
+        assert.equal(narrow.pin, true, `${width}px: its ⋯ is there, with Open in editor and the pin in it`);
         assert.ok(narrow.nameRoom >= 60, `${width}px: the name keeps its room (${narrow.nameRoom}px to the pin)`);
       }
       assert.deepEqual(x.errors, []);

@@ -2,7 +2,8 @@ import * as vscode from "vscode";
 import { createHash } from "crypto";
 import { mkdtempSync, rmSync } from "fs";
 import { homedir, tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
+import { FILE_ACTS, fileKind, projectFileAct } from "./fileActs";
 import { CANVAS_DOC_VIEW, CanvasDocEditor } from "./canvasDoc";
 import { tabIcon } from "./tabIcon";
 import { keepRunningAfterClose } from "./closingTab";
@@ -34,7 +35,7 @@ export const CHATDGC_LIBRARY = "dgc.chatdgcLibrary";
 const SIDE_LIBRARY = new Set(["ready", "list", "image", "open", "use", "save", "saveToProject", "toProject", "remove",
   "artifactList", "artifactOpen", "artifactExport", "artifactRemove", "widgets", "widgetOpen", "widgetChat", "widgetRemove",
   "workImages", "workImage", "workImageOpen", "workImageReveal", "workImageSave", "workImageToProject",
-  "videoList", "videoOpen", "videoReveal", "videoSave", "itemAct", "itemCopied"]);
+  "videoList", "videoOpen", "videoReveal", "videoSave", "itemAct", "itemCopied", "charts", "workFiles", "workFilePic"]);
 /** An item's menu in the Library (media/library.js): the eight things an item can be asked to do. */
 const ITEM_ACTS = new Set(["open", "editor", "save", "copy", "path", "reveal", "rename", "remove"]);
 /** The most an image may weigh to be handed to the page for the clipboard. */
@@ -45,6 +46,10 @@ const LIBRARY_KINDS = new Set(["image", "pdf", "document", "spreadsheet", "prese
 const ATTACHMENT_ID = /^att_[a-f0-9]{32}$/;
 /** An image DGC made in Work: a picture file DGC saved (images_library), previewed up to this size. */
 const WORK_IMAGE = /\.(png|jpe?g|webp|gif)$/i;
+/** A picture attached in a Work session, as DGC hands it back: one of the picture kinds a page may draw, and no larger
+ *  than a session keeps. */
+const WORK_PICTURE_DATA = /^data:image\/(png|jpeg|gif|webp|bmp);base64,([A-Za-z0-9+/=]+)$/;
+const MAX_WORK_PICTURE = 48 * 1024 * 1024;
 const MAX_WORK_THUMB = 8 * 1024 * 1024;
 const CONVERSATION_ID = /^chat_[a-f0-9]{32}$/;
 const MESSAGE_ID = /^msg_[a-f0-9]{32}$/;
@@ -110,6 +115,12 @@ export interface ChatDGCHost {
   /** Its backend lists every image DGC made (images_library, 0.51): the Library shows Work's beside ChatDGC's. */
   imagesOffered?(): boolean;
   imagesLibrary?(cmd: Record<string, unknown>): Promise<any>;
+  /** Its backend lists what you attached in Work sessions (ready.capabilities.session_attachments, 16 Nov): the
+   *  Library's Files shows them. `sessionAttachments` lists (list_session_attachments), `sessionAttachment` gives one
+   *  back by the session file and the id its listing gave (get_session_attachment). */
+  sessionAttachmentsOffered?(): boolean;
+  sessionAttachments?(cmd: Record<string, unknown>): Promise<any>;
+  sessionAttachment?(path: string, id: string): Promise<any>;
   /** Its backend makes videos (ready.capabilities.videos, 0.51): a card's Stop, and the Library's Videos. */
   videosOffered?(): boolean;
   videosStop?(job: string): Promise<Record<string, unknown> | undefined>;
@@ -167,7 +178,7 @@ interface Tab {
   folder?: string;
 }
 
-type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel; path?: string;
+type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel; path?: string; offset?: number;
                widgetPanel?: vscode.WebviewPanel };
 
 export function chatTitle(text: string): string {
@@ -327,8 +338,8 @@ function chatdgcPage(asset: (name: string) => string, cspSource: string): string
 <button type="button" id="cd-widgets" class="cd-head-btn" title="This chat's widgets" aria-label="Widgets in this chat" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-play-circle" aria-hidden="true"></span><span class="cd-head-btn-label">Widgets</span><span id="cd-widgets-count" class="cd-head-btn-count"></span></button>
 <button type="button" id="cd-work" class="cd-head-btn cd-work" data-changes="1" hidden><span id="cd-work-icon" class="codicon codicon-arrow-right" aria-hidden="true"></span><span id="cd-work-label" class="cd-head-btn-label">Continue in Work</span></button>
 <button type="button" id="cd-keys-open" class="cd-icon" title="Keyboard shortcuts (Ctrl+/)" aria-label="Keyboard shortcuts"><span class="codicon codicon-keyboard" aria-hidden="true"></span></button>
-<button type="button" id="cd-menu" class="cd-icon" title="Rename, pin, archive, export or delete" aria-label="Chat options" hidden><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>
-<button type="button" id="cd-new" class="cd-icon" title="New chat" aria-label="New chat"><span class="codicon codicon-edit" aria-hidden="true"></span></button></header>
+<button type="button" id="cd-menu" class="cd-icon" title="Rename, pin, archive, export or delete" aria-label="Chat options" hidden></button>
+<button type="button" id="cd-new" class="cd-icon" title="New chat" aria-label="New chat"><span class="codicon codicon-add" aria-hidden="true"></span></button></header>
 <main id="cd-scroll" class="cd-scroll"><div class="cd-column">
 <button type="button" id="cd-earlier" class="cd-earlier" hidden>Show earlier messages</button>
 <div id="cd-log" class="cd-log" role="log" aria-label="Conversation"></div>
@@ -367,7 +378,7 @@ function chatdgcPage(asset: (name: string) => string, cspSource: string): string
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys dgc-dialog" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/inline.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library in its own editor tab. The page holds only where it goes: the ONE Library module (media/library.js, the
@@ -379,7 +390,7 @@ export function libraryDocument(asset: (name: string) => string, cspSource: stri
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}">
 <title>Library</title></head><body class="lib-body">
 <main id="library-root" aria-label="Library"></main>
-<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/shared/pagehead.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/shared/pagehead.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
 }
 
 
@@ -604,6 +615,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
    *  the host's own record of each (its type, its title, its file), never on what the page says of an item. */
   private readonly libraryArtifacts = new Map<string, any>();
   private readonly libraryFiles = new Map<string, any>();
+  /** The charts the Library (and Home's Widgets card) was shown, by "<chat>:<chart>": the reply each is in. Only these open. */
+  private readonly libraryCharts = new Map<string, { chat: string; message: string; index: number }>();
+  /** What you attached in Work sessions, as the Library was shown them: the host's own name for each (`wa_…`, which is
+   *  all the page is given) and DGC's (the session's file and the attachment's id in it). Only these are ever asked for. */
+  private readonly workRefs = new Map<string, { path: string; id: string; kind: "image" | "file"; name: string; project: string }>();
 
   /** A chat's model made pictures: an open Library lists them. */
   imagesMade(): void {
@@ -765,7 +781,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   private libraryAsk(panel: vscode.WebviewPanel, kind: string, cmd: Record<string, unknown>): void {
     const requestId = this.nextId(kind);
-    this.requests.set(requestId, { kind, libraryPanel: panel } as Asker);
+    this.requests.set(requestId, { kind, libraryPanel: panel, ...(Number.isInteger(cmd.offset) ? { offset: cmd.offset as number } : {}) } as Asker);
     this.deliver({ kind }, { ...cmd, request_id: requestId });
   }
 
@@ -1067,6 +1083,26 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           ? { query: message.query.slice(0, 200) } : {}), limit: 60, offset });
         return;
       }
+      case "charts": {
+        // The charts ChatDGC's replies drew, for Widgets: only a ChatDGC that lists them is asked.
+        void panel.webview.postMessage({ type: "chartsOffered", on: this.chartLibrary() });
+        if (!this.chartLibrary()) return;
+        const offset = Number.isInteger(message.offset) && message.offset >= 0 ? message.offset : 0;
+        this.libraryAsk(panel, "charts", { type: "chatdgc_widgets", op: "charts", ...(typeof message.query === "string" && message.query.trim()
+          ? { query: message.query.slice(0, 200) } : {}), limit: 60, offset });
+        return;
+      }
+      case "workFiles":
+        await this.workFiles(panel, message);
+        return;
+      case "workFilePic": {
+        // A Work picture's own small picture, for its row.
+        const ref = typeof message.ref === "string" ? message.ref : "", known = this.workRefs.get(ref);
+        if (!known || known.kind !== "image") return;
+        try { const got = await this.workFile(known); if (got.data) void panel.webview.postMessage({ type: "workFileData", ref, data: got.data }); else void panel.webview.postMessage({ type: "workFileData", ref }); }
+        catch { void panel.webview.postMessage({ type: "workFileData", ref }); }
+        return;
+      }
       case "widgetOpen":
         if (widget) {
           const open = this.widgetPanels.get(widget.id);
@@ -1092,6 +1128,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         void panel.webview.postMessage({ type: "workImagesOffered", on: !!this.host?.imagesOffered?.() && !!this.host?.imagesLibrary });
         void panel.webview.postMessage({ type: "artifactsOffered", on: !!this.artifactsOffer() });
         void panel.webview.postMessage({ type: "videosOffered", on: !!this.host?.videosOffered?.() && !!this.host?.videosLibrary });
+        void panel.webview.postMessage({ type: "chartsOffered", on: this.chartLibrary() });
+        void panel.webview.postMessage({ type: "workFilesOffered", on: this.workFilesOffered() });
         if (this.libraryView) { void panel.webview.postMessage({ type: "view", view: this.libraryView }); this.libraryView = ""; }
         // falls through: the files are asked for as a list is
       case "list": {
@@ -1220,6 +1258,17 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       else if (act === "remove") await this.fromLibrary(panel, { type: "widgetRemove", widget });
       return;
     }
+    if (kind === "chart") {
+      // (A chart is its reply's: it opens its chat there, and nothing else.)
+      const known = this.libraryCharts.get(`${String(item.chat_id || "")}:${String(item.id || "")}`);
+      if (known && act === "open") this.openAt(known.chat, known.message, known.index);
+      return;
+    }
+    if (kind === "workfile") {
+      const known = this.workRefs.get(typeof item.ref === "string" ? item.ref : "");
+      if (known) await this.workFileAct(panel, act, known, String(item.ref), say, copyText);
+      return;
+    }
     if (kind === "image" || kind === "video") {
       const asked = typeof item.path === "string" ? item.path : "";
       const path = kind === "image" ? (this.workImagePaths.has(asked) ? asked : "") : (asked && videoPathAllowed(asked) === asked ? asked : "");
@@ -1276,6 +1325,142 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       if (act === "copy" && known.type === "image" && ref.conversation_id) {
         this.libraryAsk(panel, "libraryCopy", { type: "chatdgc_file", conversation_id: ref.conversation_id, attachment_id: ref.attachment_id });
       }
+    }
+  }
+
+  /** This ChatDGC lists the charts its replies drew (chatdgc_widgets op "charts"). */
+  private chartLibrary(): boolean {
+    try { return Number(this.host?.chatdgcOffers?.()?.chart_library) >= 1; } catch { return false; }
+  }
+  /** The charts DGC listed, as the pages are given them: each a reply's own (its id is its reply's, then which of the
+   *  reply's charts), in a chat. Remembered, so only these open. */
+  private chartsListed(ev: any): Array<Record<string, unknown>> {
+    const out: Array<Record<string, unknown>> = [];
+    if (this.libraryCharts.size >= 5000) this.libraryCharts.clear();
+    for (const c of Array.isArray(ev?.widgets) ? ev.widgets : []) {
+      const chat = String(c?.chat_id || ""), message = String(c?.message_id || ""), id = String(c?.id || ""), nth = /^(msg_[a-f0-9]{32}):(\d{1,4})$/.exec(id);
+      if (!CONVERSATION_ID.test(chat) || !MESSAGE_ID.test(message) || !nth || nth[1] !== message) continue;
+      this.libraryCharts.set(`${chat}:${id}`, { chat, message, index: Number(nth[2]) });
+      out.push({ chat_id: chat, chat_title: String(c.chat_title || "").slice(0, 200), message_id: message, id, title: String(c.title || "").slice(0, 200) || "Chart", kind: "chart",
+                 chart_type: String(c.chart_type || "").slice(0, 24), created_at: String(c.created_at || "").slice(0, 64),
+                 ...(PROJECT_ID.test(String(c.project_id || "")) ? { project_id: String(c.project_id), project_name: String(c.project_name || "").slice(0, 120) } : {}) });
+    }
+    return out;
+  }
+  /** A chat in its tab, scrolled to one reply (and to one of its charts): the tab it is already in, or a new one, told
+   *  once its chat has opened. */
+  private openAt(conversation: string, message: string, chart?: number): void {
+    if (!CONVERSATION_ID.test(conversation) || !MESSAGE_ID.test(message)) return;
+    const say = { type: "showMessage", id: message, ...(Number.isInteger(chart) ? { chart } : {}) };
+    const tab = [...this.tabs].find((t) => t.conversation === conversation);
+    if (tab?.opened) { tab.panel.reveal(); this.post(tab, say); return; }
+    const before = new Set(this.tabs);
+    this.open(conversation);
+    const fresh = [...this.tabs].find((t) => !before.has(t)) ?? [...this.tabs].find((t) => t.conversation === conversation);
+    if (fresh) (fresh.waitingSend ??= []).push(say);
+  }
+
+  /** Its backend lists what you attached in Work sessions. */
+  private workFilesOffered(): boolean {
+    try { return !!this.host?.sessionAttachmentsOffered?.() && !!this.host?.sessionAttachments && !!this.host?.sessionAttachment; } catch { return false; }
+  }
+  /** The Library's Files, Work's part (list_session_attachments): the pictures you attached and the files you named
+   *  with @ in Work sessions. The page is given each by a name of this host's own (`ref`), with its name, its kind,
+   *  the session it is in and its project's name: never the session's file or a folder. */
+  private async workFiles(panel: vscode.WebviewPanel, message: any): Promise<void> {
+    void panel.webview.postMessage({ type: "workFilesOffered", on: this.workFilesOffered() });
+    if (!this.workFilesOffered()) return;
+    const seq = Number.isSafeInteger(message?.seq) ? message.seq : 0;
+    const offset = Number.isInteger(message?.offset) && message.offset >= 0 ? message.offset : 0;
+    const query = typeof message?.query === "string" ? message.query.trim().slice(0, 200) : "";
+    try {
+      const ev = await this.host!.sessionAttachments!({ ...(query ? { query } : {}), limit: 60, offset });
+      if (this.workRefs.size >= 5000) this.workRefs.clear();
+      const words = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : "";
+      const files: Array<Record<string, unknown>> = [];
+      for (const item of (Array.isArray(ev?.items) ? ev.items : []).slice(0, 60)) {
+        const path = words(item?.path, 4096), id = words(item?.id, 32), kind = item?.kind === "image" ? "image" : item?.kind === "file" ? "file" : "";
+        // (One of DGC's own session files, and an attachment's place in it: nothing else is ever asked for again.)
+        const session = /[\\/]sessions[\\/][^\\/]+[\\/]([A-Za-z0-9_-]{1,128})\.json$/.exec(path);
+        if (!kind || !session || /(^|[\\/])\.\.([\\/]|$)/.test(path) || !/^\d{1,6}:\d{1,4}$/.test(id)) continue;
+        const name = (words(item.name, 200).split(/[\\/]/).pop() || "").replace(/[\u0000-\u001f]/g, "") || (kind === "image" ? "Picture" : "file");
+        const ref = `wa_${createHash("sha256").update(`${path}\u0000${id}`).digest("hex").slice(0, 16)}`;
+        this.workRefs.set(ref, { path, id, kind, name, project: words(item.project, 4096) });
+        const at = Number(item.at);
+        files.push({ ref, kind, name, ...(kind === "image" ? { mime: words(item.mime, 64), bytes: Number.isFinite(Number(item.bytes)) && Number(item.bytes) > 0 ? Number(item.bytes) : 0 } : {}),
+                     created_at: Number.isFinite(at) && at > 0 ? new Date(at * 1000).toISOString() : "", session_name: words(item.session_name, 120), session_id: session[1], project_name: words(item.project_name, 120) });
+      }
+      void panel.webview.postMessage({ type: "workFiles", seq, offset, files, total: Number(ev?.total) || 0, next: Number.isInteger(ev?.next_offset) ? ev.next_offset : null });
+    } catch (err: any) {
+      void panel.webview.postMessage({ type: "workFiles", seq, offset, files: [], total: 0, next: null });
+      void panel.webview.postMessage({ type: "error", message: `What you attached in Work couldn't be listed: ${String(err?.message || err)}` });
+    }
+  }
+  /** One Work attachment, asked of DGC by what its listing gave and checked: the very attachment asked for, of the kind
+   *  listed; a picture as a picture's data, a file as a place inside its own project. Throws when it is neither. */
+  private async workFile(known: { path: string; id: string; kind: "image" | "file"; name: string; project: string }): Promise<{ data?: string; file?: string }> {
+    const ev = await this.host!.sessionAttachment!(known.path, known.id);
+    if (!ev || ev.id !== known.id || ev.kind !== known.kind) throw new Error(`${known.name} is no longer in its session.`);
+    if (known.kind === "image") {
+      if (typeof ev.data !== "string" || ev.data.length > MAX_WORK_PICTURE || !WORK_PICTURE_DATA.test(ev.data)) throw new Error(`${known.name} couldn't be read as a picture.`);
+      return { data: ev.data };
+    }
+    const file = typeof ev.file_path === "string" ? ev.file_path : "", project = known.project.replace(/[\\/]+$/, "");
+    const inside = !!project && (file.startsWith(`${project}/`) || file.startsWith(`${project}\\`)) && !/(^|[\\/])\.\.([\\/]|$)/.test(file) && !file.includes("\u0000");
+    if (!file || file.length > 4096 || !inside) throw new Error(`${known.name} is not in its project any more.`);
+    return { file };
+  }
+  /** An item's menu, for something you attached in a Work session. A picture is kept inside its session: Open shows a
+   *  copy of it in the editor's picture viewer, Save a copy… writes one where you choose, Copy hands it to the page for
+   *  the clipboard. A file is where it was, in its project: it opens in the editor, and has a path. Neither is renamed
+   *  or removed here: a session is a record. */
+  private async workFileAct(panel: vscode.WebviewPanel, act: string, known: { path: string; id: string; kind: "image" | "file"; name: string; project: string }, ref: string,
+                            say: (words: string) => void, copyText: (text: string, words: string) => Promise<void>): Promise<void> {
+    const picture = known.kind === "image";
+    if (act === "rename" || act === "remove" || (picture && (act === "editor" || act === "path" || act === "reveal")) || (!picture && act === "copy")) return;
+    try {
+      const got = await this.workFile(known);
+      if (picture) {
+        const match = WORK_PICTURE_DATA.exec(got.data || "");
+        if (!match) return;
+        const bytes = Buffer.from(match[2], "base64"), ending = match[1] === "jpeg" ? "jpg" : match[1];
+        const name = /\.[A-Za-z0-9]{1,5}$/.test(known.name) ? known.name : `${known.name}.${ending}`;
+        if (act === "copy") { void panel.webview.postMessage({ type: "itemCopy", key: `workfile:${ref}`, data: got.data }); return; }
+        if (act === "save") {
+          const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
+          const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Save", title: "Save a copy of this picture" });
+          if (!target || target.scheme !== "file") return;
+          await vscode.workspace.fs.writeFile(target, bytes);
+          say("Copy saved");
+          return;
+        }
+        // Open: a copy of its own, for this user alone, in the editor's picture viewer.
+        const folder = join(tmpdir(), "dgc-library-files", ref.slice(3));
+        await fs.mkdir(folder, { recursive: true, mode: 0o700 });
+        const target = join(folder, name.replace(/[\\/:*?"<>|]+/g, " "));
+        await fs.writeFile(target, bytes, { mode: 0o600 });
+        await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(target), { preview: true });
+        return;
+      }
+      const uri = vscode.Uri.file(got.file!);
+      switch (act) {
+        case "open": case "editor":
+          try { await vscode.window.showTextDocument(uri, { preview: act === "open" }); }
+          catch { await vscode.commands.executeCommand("vscode.open", uri); }       // not text: the editor's own viewer for it
+          return;
+        case "path": await copyText(got.file!, "Path copied"); return;
+        case "reveal": await vscode.commands.executeCommand("revealFileInOS", uri); return;
+        case "save": {
+          const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
+          const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, known.name), saveLabel: "Save", title: "Save a copy of this file" });
+          if (!target || target.scheme !== "file") return;
+          await vscode.workspace.fs.copy(uri, target, { overwrite: true });
+          say("Copy saved");
+          return;
+        }
+      }
+    } catch (err: any) {
+      void vscode.window.showWarningMessage(`${known.name}: ${String(err?.message || err)}`);
     }
   }
 
@@ -1844,11 +2029,28 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                                                          total: Number(ev.total) || 0, next: ev.next_offset ?? null });
           return;
         }
+        if (asker?.kind === "charts") {
+          void asker.libraryPanel?.webview.postMessage({ type: "charts", charts: this.chartsListed(ev), offset: asker.offset || 0, total: Number(ev.total) || 0, next: ev.next_offset ?? null });
+          return;
+        }
+        if (asker?.kind === "homeCharts") {
+          // Home's Widgets card, its second half: the charts, among the widgets by when each was made (the newest
+          // first), then the cards replies drew. One answer, so the card's count is the Library's from the start.
+          const held = this.homeWidgetsHeld; this.homeWidgetsHeld = undefined;
+          const charts = this.chartsListed(ev).map((c) => ({ id: String(c.id), title: String(c.title), chart: true, chart_type: String(c.chart_type), chat_id: String(c.chat_id), chat_title: String(c.chat_title),
+                                                            project_name: String(c.project_name || ""), created_at: String(c.created_at) }));
+          const mine = [...(held?.widgets || []), ...charts].sort((a: any, b: any) => String(b.created_at).localeCompare(String(a.created_at)));
+          this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...mine, ...this.homeCards], more: !!held?.more || (ev.next_offset !== null && ev.next_offset !== undefined) });
+          return;
+        }
         if (asker?.kind === "homeWidgets") {
           // Home's Widgets card: the newest sixty, each with what its tile says and what opens it.
           const widgets = (Array.isArray(ev.widgets) ? ev.widgets : []).filter((w: any) => WIDGET_ID.test(String(w?.id || "")) && CONVERSATION_ID.test(String(w?.chat_id || "")))
             .map((w: any) => ({ id: String(w.id), title: widgetName(w.title), chat_id: String(w.chat_id), chat_title: String(w.chat_title || "").slice(0, 200), project_name: String(w.project_name || "").slice(0, 120), created_at: String(w.created_at || "") }));
-          this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...widgets, ...this.homeCards], more: ev.next_offset !== null && ev.next_offset !== undefined });
+          const more = ev.next_offset !== null && ev.next_offset !== undefined;
+          // (The charts its replies drew are Widgets too, where this ChatDGC lists them: asked for before Home is told.)
+          if (this.chartLibrary()) { this.homeWidgetsHeld = { widgets, more }; this.ask({ kind: "homeCharts" }, { type: "chatdgc_widgets", op: "charts", limit: 60, offset: 0 }); return; }
+          this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...widgets, ...this.homeCards], more });
           return;
         }
         const w = ev.widget && typeof ev.widget === "object" ? ev.widget : null;
@@ -1872,6 +2074,18 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_library_file": {
         if (asker) this.requests.delete(requestId);
         if (asker?.kind === "fileOpen" && typeof ev.path === "string" && ev.path === asker.path) { void this.openMade(ev.path); return; }
+        if (asker?.kind === "fileEditor" && typeof ev.path === "string" && ev.path === asker.path) {
+          void vscode.window.showTextDocument(vscode.Uri.file(ev.path), { preview: false }).then(undefined, () => { void this.openMade(ev.path); });
+          return;
+        }
+        if (asker?.kind === "fileCopyText" && asker.tab && typeof ev.path === "string" && ev.path === asker.path) {
+          // The copy was made to be read: its text goes to the clipboard (src/fileActs.ts checks it is text), and it is taken away.
+          const tab = asker.tab, copy = ev.path;
+          void projectFileAct("copy", copy, { say: (words) => this.post(tab, { type: "fileSaid", words }), picture: () => {}, copyFolder: async () => "" })
+            .then(undefined, () => { void vscode.window.showWarningMessage("That file couldn't be read to copy it."); })
+            .then(() => { try { rmSync(dirname(copy), { recursive: true, force: true }); } catch { /* on dispose */ } });
+          return;
+        }
         if (ev.op === "save" && typeof ev.path === "string") {
           void vscode.window.showInformationMessage(`Saved ${ev.path.split(/[\\/]/).pop()}.`);
         } else void asker?.libraryPanel?.webview.postMessage({ type: "changed" });
@@ -2029,6 +2243,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       }
       case "chatdgc_file":
+        if (asker?.tab && asker.kind === "fileCopyPicture") {
+          // Copy, from a picture's menu in the chat: the picture, for the page to put on the clipboard.
+          this.requests.delete(requestId);
+          if (typeof ev.data === "string" && /^data:image\//.test(ev.data)) this.post(asker.tab, { type: "fileCopy", data: ev.data });
+          else void vscode.window.showWarningMessage(`That picture couldn't be read to copy it${ev.error ? `: ${String(ev.error).slice(0, 200)}` : "."}`);
+          return;
+        }
         if (asker?.libraryPanel && asker.kind === "libraryCopy") {
           // Copy, from an item's menu: the picture, for the page to put on the clipboard.
           this.requests.delete(requestId);
@@ -2109,6 +2330,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         if (asker?.libraryPanel) { void asker.libraryPanel.webview.postMessage({ type: "error", message }); return; }
         if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.([]); return; }
+        if (asker?.kind === "homeCharts") { const held = this.homeWidgetsHeld; this.homeWidgetsHeld = undefined; this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...(held?.widgets || []), ...this.homeCards], more: !!held?.more }); return; }      // the widgets alone, quietly
         if (asker && !asker.tab && asker.kind !== "list") { void vscode.window.showErrorMessage(message); return; }
         if (asker?.tab) { this.post(asker.tab, { type: "error", message, opening: asker.kind === "open" }); return; }
         if (asker?.kind === "homeWidgets") { this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...this.homeCards] }); return; }      // Home's card says none of ChatDGC's, quietly
@@ -2510,6 +2732,37 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         const opened = await vscode.env.openExternal(vscode.Uri.parse(link, true));
         if (!opened) void vscode.window.showWarningMessage("No mail app opened. Use Copy and paste it into your email instead.");
+        return;
+      }
+      case "fileAct": {
+        // A pick from a file's menu in the chat (media/shared/filemenu.js), on a file DGC keeps for this chat (what you
+        // attached, what a reply made). The page names the file by its id; DGC is asked for it, in this chat. Copy path
+        // and Reveal are never done: DGC keeps this copy for the chat (the menu shows both off, and says why).
+        const act = String(message.act || ""), fileId = String(message.fileId || "");
+        if (!conversation || !FILE_ACTS.has(act) || act === "path" || act === "reveal" || !/^att_[a-f0-9]{32}$/.test(fileId)) return;
+        const name = String(message.name || "file").replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ").trim().slice(0, 120) || "file";
+        const kind = fileKind(name);
+        if (act === "open" || act === "save") { await this.fromTab(tab, { type: act === "open" ? "fileOpen" : "fileSave", messageId: message.messageId, fileId, name }); return; }
+        if (act === "editor" && kind !== "text") return;
+        if (act === "copy" && kind === "other" && message.picture !== true) return;
+        if (act === "copy" && kind !== "text") {
+          // A picture: its bytes go to the page, whose clipboard it is.
+          this.ask({ tab, kind: "fileCopyPicture" }, { type: "chatdgc_file", conversation_id: conversation, attachment_id: fileId });
+          return;
+        }
+        // Open in editor, or Copy on a text file: DGC writes a private copy (as Open's), which is shown, or read and taken away.
+        let dir: string;
+        try {
+          if (!this.openedDir) this.openedDir = mkdtempSync(join(tmpdir(), "dgc-chatdgc-files-"));
+          dir = mkdtempSync(join(this.openedDir, act === "copy" ? "copy-" : "open-"));
+        } catch { return; }
+        if (act === "editor") {
+          const earlier = this.openedCopies.get(fileId);
+          if (earlier) try { rmSync(earlier, { recursive: true, force: true }); } catch { /* still open elsewhere: on dispose */ }
+          this.openedCopies.set(fileId, dir);
+        }
+        const path = join(dir, name);
+        this.ask({ tab, kind: act === "editor" ? "fileEditor" : "fileCopyText", path }, { type: "chatdgc_library_file", op: "save", conversation_id: conversation, attachment_id: fileId, path });
         return;
       }
       case "fileOpen":
@@ -2984,6 +3237,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
    *  what a card opens. Nothing here is the page's word for what to open: ids are checked as the Library's are. */
   /** The cards a reply drew, as Home's Widgets card lists them beside ChatDGC's widgets (read when the card asks). */
   private homeCards: Array<{ id: string; title: string; card: boolean; surface: string; created_at: string }> = [];
+  /** ChatDGC's widgets, held while its charts are asked for (Home is told of both at once). */
+  private homeWidgetsHeld?: { widgets: any[]; more: boolean };
   async homeCardsMessage(message: any): Promise<void> {
     switch (message?.type) {
       case "homeWidgetsGet": {
@@ -3015,6 +3270,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const open = this.widgetPanels.get(id);
         if (open) open.reveal(undefined, false);
         else this.ask({ kind: "widgetGet" }, { type: "chatdgc_widgets", op: "get", conversation_id: chat, widget_id: id });
+        return;
+      }
+      case "homeChartOpen": {
+        // A chart's tile on Home's Widgets card: its chat, at the reply that drew it. Only a chart DGC listed.
+        const known = this.libraryCharts.get(`${String(message.chat_id || "")}:${String(message.id || "")}`);
+        if (known && this.chartLibrary()) this.openAt(known.chat, known.message, known.index);
         return;
       }
       case "homeLibraryOpen":

@@ -13,6 +13,7 @@ import '../media/shared/dialog.css';
 import '../media/shared/portal.css';
 import './pipComputer.css';
 import '../media/shared/menu.js';
+import '../media/shared/icons.js';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
 import {esc,errorText,record,requestBroker,pipLogin,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer,pipComputerApps} from './pipsModel.js';
@@ -135,8 +136,8 @@ function headerMarkup(){
  return `<header class="pc-header${waiting||screenMode()&&using()?' pc-said':''}"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1 title="${esc(tabTitle())}"><span class="pc-pip-name">${esc(S.pip?.name||'Pip')}</span><span class="pc-sep"> · </span><span class="pc-portal" aria-hidden="true">${computerPortal(S.number||1,18)}</span><span class="pc-computer-name">${esc(computerName())}</span></h1><p class="pc-status" role="status">${esc(status)}</p></div></header>`;
 }
 // The bar's end: Stop computer, and "…" for what a narrow tab has no room to show (the shared menu).
-const DOTS='<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
-const CROSS='<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+const DOTS=window.DgcMenu.DOTS;
+const CROSS=window.DgcIcons.html('close',{size:12});
 const crossButton=(attr,label)=>`<button type="button" class="pc-x" ${attr} aria-label="${label}" title="${label}">${CROSS}</button>`;
 // What goes into "…", and from which tier (pipComputer.css hides the same things from the bar at the same tiers).
 const MORE=[['stop','Stop computer',3],['fit','Fit the screen to this tab',4],['actual','Real size (100%)',4],['size','Screen size',5],['keys','Keyboard',5],['clip','Clipboard',5],['files','Files',5]];

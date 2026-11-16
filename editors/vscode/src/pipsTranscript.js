@@ -1,3 +1,4 @@
+import '../media/shared/icons.js';
 import {esc,activityLabel,personalStatusLabel} from './pipsModel.js';
 import {cronDays} from './pipRoutines.js';
 import {postArtifact,docCardMarkup} from './pipRunPosts.js';   // a long reply's document: the card a run's post draws
@@ -12,7 +13,8 @@ const foldPictures=(key,inner,facts)=>globalThis.DgcPictureFold?globalThis.DgcPi
 // These controls mirror the main conversation's action row. They are SVG rather
 // than font glyphs so they also work inside the Pip client's isolated ShadowRoot.
 export function transcriptIcon(name) {
-  const paths={plug:'<path d="M6 2v3M10 2v3"/><path d="M4.5 5h7v2a3.5 3.5 0 0 1-7 0Z"/><path d="M8 10.5V14"/>',speaker:'<path d="M2.5 6h2.5l3.5-3v10L5 10H2.5Z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx="1"/>',copy:'<rect x="5" y="5" width="8" height="9" rx="1"/><path d="M10 5V2H2v9h3"/>',check:'<path d="m3 8 3 3 7-8"/>',edit:'<path d="m10 2 4 4-8 8H2v-4Z M8 4l4 4"/>',retry:'<path d="M13 6a5.5 5.5 0 1 0 .2 4M13 2v4H9"/>',info:'<circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 4.5v.2"/>',tool:'<path d="M6 2 3 8l3 6M10 2l3 6-3 6"/>',files:'<path d="M3 1.5h6l4 4v9H3Z M9 1.5V6h4 M5.5 9h5M5.5 11.5h3"/>',chevron:'<path d="m6 3 5 5-5 5"/>',reply:'<path d="M6.5 4 2.5 8l4 4"/><path d="M2.5 8h7a4 4 0 0 1 4 4v.5"/>',clock:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',yes:'<path d="M5.2 7.2 7.6 2.4c.9 0 1.6.7 1.6 1.6v2h3a1.2 1.2 0 0 1 1.2 1.4l-.8 4.6a1.2 1.2 0 0 1-1.2 1H5.2Z"/><path d="M5.2 7.2H2.6V13h2.6"/>'};
+  if(name==='copy')return globalThis.DgcIcons.html('copy',{size:14});      // Copy: the one glyph it has on every surface (media/shared/icons.js)
+  const paths={plug:'<path d="M6 2v3M10 2v3"/><path d="M4.5 5h7v2a3.5 3.5 0 0 1-7 0Z"/><path d="M8 10.5V14"/>',speaker:'<path d="M2.5 6h2.5l3.5-3v10L5 10H2.5Z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx="1"/>',check:'<path d="m3 8 3 3 7-8"/>',edit:'<path d="m10 2 4 4-8 8H2v-4Z M8 4l4 4"/>',retry:'<path d="M13 6a5.5 5.5 0 1 0 .2 4M13 2v4H9"/>',info:'<circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 4.5v.2"/>',tool:'<path d="M6 2 3 8l3 6M10 2l3 6-3 6"/>',files:'<path d="M3 1.5h6l4 4v9H3Z M9 1.5V6h4 M5.5 9h5M5.5 11.5h3"/>',chevron:'<path d="m6 3 5 5-5 5"/>',reply:'<path d="M6.5 4 2.5 8l4 4"/><path d="M2.5 8h7a4 4 0 0 1 4 4v.5"/>',clock:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',yes:'<path d="M5.2 7.2 7.6 2.4c.9 0 1.6.7 1.6 1.6v2h3a1.2 1.2 0 0 1 1.2 1.4l-.8 4.6a1.2 1.2 0 0 1-1.2 1H5.2Z"/><path d="M5.2 7.2H2.6V13h2.6"/>'};
   return `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]||''}</svg>`;
 }
 
@@ -151,14 +153,16 @@ export function yesChoice(choices){
 // (media/shared/doccard.css) with the small sheet of its kind (media/shared/filesheet.js).
 const fileBytes=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
 const PICTURE_ENDING={'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/webp':'webp','image/bmp':'bmp'};
-export function madeFilesMarkup(m){
+// `menu`: the file's menu is offered (media/shared/filemenu.js: a "…" on the card, a right-click, the keyboard).
+export function madeFilesMarkup(m,menu=false){
+  const fileMenu=menu?globalThis.DgcFileMenu:null;
   const sheets=globalThis.DgcFileSheet,made=Array.isArray(m.images)?m.images.slice(0,64).filter(i=>i&&Number.isInteger(i.index)&&i.index>=0&&PICTURE_ENDING[i.mime]):[];
   if(!sheets||!made.length)return '';
   return `<div class="msg-made-files" role="group" aria-label="Files in this reply">${made.map(i=>{
     const ending=PICTURE_ENDING[i.mime],name=`Picture ${i.index+1}.${ending}`,kind=sheets.of(ending,name),size=Number.isFinite(i.bytes)&&i.bytes>0?fileBytes(i.bytes):'';
-    return `<div class="dgc-doc-card msg-made-file" data-tone="img"><span class="dgc-doc-tile has-sheet" aria-hidden="true">${sheets.forFile(ending,name)}</span>`
+    return `<div class="dgc-doc-card msg-made-file" data-tone="img"${fileMenu?fileMenu.cardAttrs(name,'pip')+` data-file-key="photo:${esc(`${m.id}:${i.index}`)}"`:''}><span class="dgc-doc-tile has-sheet" aria-hidden="true">${sheets.forFile(ending,name)}</span>`
       +`<span class="dgc-doc-words"><span class="dgc-doc-name">${esc(name)}</span><span class="dgc-doc-meta">${esc(kind.tag)}${size?` \u00b7 ${esc(size)}`:''}</span></span>`
-      +`<span class="dgc-doc-acts"><button type="button" class="dgc-doc-dl" data-message-download="${esc(`${m.id}:${i.index}`)}" aria-label="Download ${esc(name)}" title="Download">${sheets.DOWNLOAD}</button></span></div>`;
+      +`<span class="dgc-doc-acts"><button type="button" class="dgc-doc-dl" data-message-download="${esc(`${m.id}:${i.index}`)}" aria-label="Download ${esc(name)}" title="Download">${sheets.DOWNLOAD}</button>${fileMenu?fileMenu.moreHtml(name):''}</span></div>`;
   }).join('')}</div>`;
 }
 
@@ -171,16 +175,16 @@ const MEDIA_KIND=mime=>/^video\//.test(String(mime||''))?'video':/^audio\//.test
 const messageFiles=m=>Array.isArray(m.files)?m.files.slice(0,50).filter(f=>f&&Number.isInteger(f.index)&&f.index>=0&&f.index<64&&typeof f.name==='string'&&f.name):[];
 const SAVE_COPY=name=>`aria-label="Save a copy of ${esc(name)}" title="Save a copy\u2026"`;
 export function sentFilesMarkup(m,name='the Pip'){
-  const sheets=globalThis.DgcFileSheet,list=messageFiles(m);
+  const sheets=globalThis.DgcFileSheet,list=messageFiles(m),fileMenu=globalThis.DgcFileMenu;
   if(!sheets||!list.length)return '';
   return `<div class="msg-made-files msg-sent-files" role="group" aria-label="Files ${esc(name)} sent">${list.map(f=>{
     const key=`${m.id}:${f.index}`,file=f.name,dot=file.lastIndexOf('.'),ending=dot>0?file.slice(dot+1).toLowerCase():'',kind=sheets.of(ending,file);
     const tag=kind.kind==='file'&&/^[a-z0-9]{1,5}$/.test(ending)?ending.toUpperCase():kind.tag,bytes=Number.isFinite(f.bytes)&&f.bytes>0?f.bytes:0,media=MEDIA_KIND(f.mime);
     return (media?`<div class="msg-sent-media" data-message-media="${esc(key)}" data-media="${media}" data-bytes="${bytes}" data-name="${esc(file)}" data-dom-own="1"></div>`:'')
-      +`<div class="dgc-doc-card msg-made-file msg-sent-file" data-tone="${esc(kind.kind)}"><span class="dgc-doc-tile has-sheet" aria-hidden="true">${sheets.html(kind.kind,{tag})}</span>`
+      +`<div class="dgc-doc-card msg-made-file msg-sent-file" data-tone="${esc(kind.kind)}"${fileMenu?fileMenu.cardAttrs(file,'pip')+` data-file-key="${esc(key)}"`:''}><span class="dgc-doc-tile has-sheet" aria-hidden="true">${sheets.html(kind.kind,{tag})}</span>`
       +`<span class="dgc-doc-words"><span class="dgc-doc-name" title="${esc(file)}">${esc(file)}</span><span class="dgc-doc-meta">${esc(tag)}${bytes?` \u00b7 ${esc(fileBytes(bytes))}`:''}</span></span>`
       +`<span class="dgc-doc-acts">${sheets.openPill()}<button type="button" class="dgc-doc-open" data-message-file="${esc(key)}" aria-label="Open ${esc(file)}">Open</button>`
-      +`<button type="button" class="dgc-doc-dl" data-message-file-save="${esc(key)}" ${SAVE_COPY(file)}>${sheets.DOWNLOAD}</button></span></div>`;
+      +`<button type="button" class="dgc-doc-dl" data-message-file-save="${esc(key)}" ${SAVE_COPY(file)}>${sheets.DOWNLOAD}</button>${fileMenu?fileMenu.moreHtml(file):''}</span></div>`;
   }).join('')}</div>`;
 }
 
@@ -211,9 +215,10 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // A Pip's reply shows the images it made (generate_image) the same way, below its words.
   const pictures=Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,64).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" data-pic-open alt="Image ${Number(i.index)+1}" title="Open the photo"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
   const size=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
+  const fileMenu=canOpenFiles?globalThis.DgcFileMenu:null;
   // Your own files (API 101: each opens, and saves a copy, as a file the Pip sent does; the chip is its Open).
   const files=user&&Array.isArray(m.files)&&m.files.length?`<div class="msg-files">${m.files.slice(0,50).map(f=>{const name=String(f.name||''),dot=name.lastIndexOf('.'),key=`${m.id}:${Number(f.index)}`,acts=canOpenFiles&&name&&Number.isInteger(f.index)&&f.index>=0&&f.index<64;
-    return `<span class="msg-file${acts?' can-open':''}" title="${esc(name)}"><span class="chat-file-ext" aria-hidden="true">${esc((dot>0?name.slice(dot+1):'txt').slice(0,4))}</span><span class="chat-file-name">${esc(name)}</span><span class="chat-file-size">${esc(size(Number(f.bytes)||0))}</span>${acts?`<button type="button" class="msg-file-open" data-message-file="${esc(key)}" aria-label="Open ${esc(name)}"></button><button type="button" class="msg-file-save" data-message-file-save="${esc(key)}" ${SAVE_COPY(name)}>${globalThis.DgcFileSheet?.DOWNLOAD||'\u2193'}</button>`:''}</span>`;}).join('')}</div>`:'';
+    return `<span class="msg-file${acts?' can-open':''}" title="${esc(name)}"${acts&&fileMenu?fileMenu.cardAttrs(name,'you')+` data-file-key="${esc(key)}"`:''}><span class="chat-file-ext" aria-hidden="true">${esc((dot>0?name.slice(dot+1):'txt').slice(0,4))}</span><span class="chat-file-name">${esc(name)}</span><span class="chat-file-size">${esc(size(Number(f.bytes)||0))}</span>${acts?`<button type="button" class="msg-file-open" data-message-file="${esc(key)}" aria-label="Open ${esc(name)}"></button><button type="button" class="msg-file-save" data-message-file-save="${esc(key)}" ${SAVE_COPY(name)}>${globalThis.DgcFileSheet?.DOWNLOAD||'\u2193'}</button>${fileMenu?fileMenu.moreHtml(name):''}`:''}</span>`;}).join('')}</div>`:'';
   // A message that is only images or files shows them, not DGC's stand-in text.
   const standIn=pictures&&m.text==='(sent an image)'||files&&m.text==='(sent a file)';
   const said=!user&&clip&&!clip.open?clip.text:m.text;
@@ -225,7 +230,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
     // A reply's pictures and videos fold away under one header row each, as in Work and ChatDGC (media/pictureFold.js).
     +(!user&&pictures?foldPictures(`pip:${m.id}:images`,pictures,{pictures:Math.min(64,m.images.length)}):'')
     // Each picture it made is a file too: a row with its kind, its size and Download (pips-08).
-    +(!user&&pictures&&canDownload?madeFilesMarkup(m):'')
+    +(!user&&pictures&&canDownload?madeFilesMarkup(m,canOpenFiles):'')
     // The files it sent from its computer (API 101): a player for a video or a sound, and each file's card.
     +(!user&&canOpenFiles?sentFilesMarkup(m,name):'')
     // API 71: the videos it started (generate_video), each its job's figure (media/videoPlayer.js), filled in by the

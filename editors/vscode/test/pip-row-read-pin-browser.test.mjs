@@ -25,7 +25,9 @@ const INBOX = "pip_" + "3".repeat(32), BOTH = "pip_" + "4".repeat(32);   // "Inb
 
 const measure = (id) => {
   const root = window.__pipsRoot || document, slot = root.querySelector(`[data-job="${id}"]`).closest(".pip-row-slot");
-  const box = (n) => n && n.getBoundingClientRect(), pin = box(slot.querySelector(".job-pin")), dot = box(slot.querySelector(".pip-new-dot"));
+  const box = (n) => n && n.getBoundingClientRect(), shown = (n) => !!n && n.getClientRects().length > 0, dot = box(slot.querySelector(".pip-new-dot"));
+  // (in a list under 400px the row's buttons are in its ⋯, which stands where the pin stood: 16 Nov)
+  const pin = box(shown(slot.querySelector(".job-more")) ? slot.querySelector(".job-more") : slot.querySelector(".job-pin"));
   const word = slot.querySelector(".pip-read-word"), w = word && getComputedStyle(word).display !== "none" ? box(word) : null;
   const mid = (r) => (r.top + r.bottom) / 2, copy = slot.querySelector(".pip-row-copy"), c = box(copy);
   const textRight = c.right - parseFloat(getComputedStyle(copy).paddingRight);
@@ -40,7 +42,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     const { p, close } = await openChat(browser, { width, height: 900, theme, where: width > 400 ? "tab" : "side", many: true, home: true });
     try {
       await p.evaluate(([a, b]) => window.postMessage({ type: "dock", pinned: [`pip:${a}`, `pip:${b}`] }, "*"), [INBOX, BOTH]);
-      await p.waitForSelector(`[data-pin-pip="${INBOX}"][aria-pressed="true"]`);
+      await p.waitForSelector(`[data-pin-pip="${INBOX}"][aria-pressed="true"]`, { state: "attached" });
       for (const id of [INBOX, BOTH]) {
         await p.waitForSelector(`[data-job="${id}"]`);
         await p.mouse.move(0, 0); await p.waitForTimeout(150);

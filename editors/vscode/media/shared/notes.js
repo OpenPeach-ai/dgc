@@ -16,10 +16,12 @@
   if (root.DgcNotes) return;
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const svg = (d, s = 13, w = 1.8) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  // (New, Back, More and Delete are the one glyph each has on every surface, media/shared/icons.js: { shared: action }.)
+  const svg = (d, s = 13, w = 1.8) => (d && d.shared ? (root.DgcIcons ? root.DgcIcons.html(d.shared, { size: s }) : "") : svgOwn(d, s, w));
+  const svgOwn = (d, s = 13, w = 1.8) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const I = { lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', unlocked: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>',
-    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', all: '<path d="M4 6h16M4 12h16M4 18h10"/>', bin: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
-    plus: '<path d="M12 5v14M5 12h14"/>', back: '<path d="M15 18l-6-6 6-6"/>', more: '<circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/>',
+    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', all: '<path d="M4 6h16M4 12h16M4 18h10"/>', bin: { shared: "delete" },
+    plus: { shared: "add" }, back: { shared: "back" }, more: { shared: "more" },
     find: '<circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/>', compose: '<path d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5"/><path d="M17.6 3.6a1.9 1.9 0 0 1 2.8 2.8L12 14.8l-3.6.8.8-3.6z"/>', chev: '<path d="M6 9l6 6 6-6"/>', sort: '<path d="M7 5v14M4 16l3 3 3-3M14 7h6M14 12h4M14 17h2"/>',
     move: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM10 13h5M13 10.5l2.5 2.5-2.5 2.5"/>', pen: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>',
     del: '<path d="M21 5H9l-6 7 6 7h12zM12 9l6 6M18 9l-6 6"/>', tab: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M9 5v4"/>', dup: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
@@ -785,7 +787,7 @@
     function fillCard(section, st) {
       if (st.mode !== "card") build(section, st, "card");
       const r = st.r, note = cardNote();
-      set(r.top, headOf("Notes", "", `<button type="button" class="hc-btn hc-icon hc-note-new" data-fk="new"${full() ? ` disabled title="${S.most} notes is the most. Delete one to add another."` : ' title="New note: what you typed stays in Notes"'} aria-label="New note">${svg(I.compose, 13)}</button>`));
+      set(r.top, headOf("Notes", "", `<button type="button" class="hc-btn hc-icon hc-note-new" data-fk="new"${full() ? ` disabled title="${S.most} notes is the most. Delete one to add another."` : ' title="New note: what you typed stays in Notes"'} aria-label="New note">${svg(I.plus, 13)}</button>`));
       set(r.foot, '<span class="hc-sp"></span><button type="button" class="hc-lnk nt-openapp" data-fk="openapp" title="Open Notes: every note, folders, search and locks">Open Notes</button>');
       pane(st, note, { card: true });
       const empty = !!note && st.body === "doc" && !st.editor.text();

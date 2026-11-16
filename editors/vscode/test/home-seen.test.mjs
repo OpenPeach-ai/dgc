@@ -29,7 +29,9 @@ after(async () => { await browser?.close(); });
 const QUIET = DOCK_SESSIONS.map(({ running, waiting, ...s }) => s);
 /** Recent's rows marked New (each by what it opens: "hub:chat:<id>", "hub:work:<id>"), its New marks, and the Home tab's number. */
 const now = (p) => p.evaluate(() => ({ fresh: [...document.querySelectorAll('.hc-grid .hc-card[data-card="recent"] .hc-li.hc-new')].map((r) => r.dataset.open),
-  marks: document.querySelectorAll('.hc-grid .hc-card[data-card="recent"] .hc-newmark').length, badge: document.getElementById("side-tab-home-count").hidden ? 0 : Number(document.getElementById("side-tab-home-count").textContent) }));
+  marks: document.querySelectorAll('.hc-grid .hc-card[data-card="recent"] .hc-newmark').length, // (How many new things Home's tab says it has: in its words, "N new", never in its number, which is what needs you. 16 Nov.)
+  badge: Number((/(\d+) new$/.exec(document.getElementById("side-tab-home").getAttribute("aria-label") || "") || [])[1] || 0) }));
+const number = (p) => p.evaluate(() => { const b = document.getElementById("side-tab-home-count"); return b.hidden ? "" : b.textContent; });   // ("": no number, whether nothing shows or only the dot for new things)
 const chats = (x, more) => x.send({ type: "chatdgc_list", available: true, items: CHATS, open: ["chat_1", "chat_2"], answering: [], ...more });
 
 test("a chat's reply: into its tab in front in the focused window it is never New; into a background tab it is New until that tab is watched", async (t) => {
@@ -38,21 +40,22 @@ test("a chat's reply: into its tab in front in the focused window it is never Ne
   try {
     const p = x.page;
     await chats(x, {}); await x.settle();
-    const base = (await now(p)).badge;
+    const base = (await now(p)).badge, was = await number(p);
     assert.deepEqual((await now(p)).fresh, []);
     // Both answer; the user is on chat_1's tab.
     await chats(x, { answering: ["chat_1", "chat_2"], watched: ["chat_1"] }); await x.settle();
     await chats(x, { answering: [], watched: ["chat_1"] }); await x.settle();
     let n = await now(p);
     assert.deepEqual(n.fresh, ["hub:chat:chat_2"], "the reply the user watched arrive is not New; the one in the background is");
-    assert.equal(n.marks, 1); assert.equal(n.badge, base + 1, "Home's number counts the one");
+    assert.equal(n.marks, 1); assert.equal(n.badge, base + 1, "Home's words count the one as new");
+    assert.equal(await number(p), was, "and its number, what needs you, does not move");
     // The window is elsewhere: nothing is watched, and New stays.
     await chats(x, { watched: [] }); await x.settle();
     assert.deepEqual((await now(p)).fresh, ["hub:chat:chat_2"], "a list that watches nothing clears nothing");
     // The user opens chat_2's tab (or comes back to it): read.
     await chats(x, { watched: ["chat_2"] }); await x.settle();
     n = await now(p);
-    assert.deepEqual(n.fresh, [], "its tab is in front now: the New mark goes"); assert.equal(n.marks, 0); assert.equal(n.badge, base, "and Home's number drops");
+    assert.deepEqual(n.fresh, [], "its tab is in front now: the New mark goes"); assert.equal(n.marks, 0); assert.equal(n.badge, base, "and Home's count of new things drops");
     // It stays read across the next list.
     await chats(x, { watched: [] }); await x.settle();
     assert.deepEqual((await now(p)).fresh, []);
@@ -92,7 +95,7 @@ test("a Work session's reply: New while its tab is in the background, read the m
     assert.deepEqual((await now(p)).fresh, [`hub:work:${id}`]);
     await x.send({ type: "sessions_list", items: QUIET.map((s) => (s.id === id ? { ...s, watched: true } : s)), error: "", news }); await x.settle();
     n = await now(p);
-    assert.deepEqual(n, { fresh: [], marks: 0, badge: base }, "watched: the mark goes and the number drops");
+    assert.deepEqual(n, { fresh: [], marks: 0, badge: base }, "watched: the mark goes and the count of new things drops");
     assert.ok((await x.posted("homeSessionSeen")).length <= 1, "the host is not told again and again");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }

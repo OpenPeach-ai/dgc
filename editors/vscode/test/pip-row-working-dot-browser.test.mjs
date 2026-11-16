@@ -39,13 +39,14 @@ const measure = (pip) => {
   const copy = row.querySelector(".pip-row-copy"), c = copy.getBoundingClientRect();
   const read = slot.querySelector(".pip-row-read"), word = slot.querySelector(".pip-read-word");
   return { state: row.dataset.state, label: (row.querySelector(".pip-row-copy small")?.textContent || "").trim(), row: { left: r.left, right: r.right, top: r.top, bottom: r.bottom }, dot,
-    dotInk: dot ? after.backgroundColor : "", pin: box(slot.querySelector(".job-pin")), open: box(slot.querySelector(".job-open")), count: box(slot.querySelector(".pip-row-marks-live .pip-row-count") || row.querySelector(".pip-row-marks:not(.pip-row-room) .pip-row-count") || slot.querySelector(".pip-row-count")),
+    dotInk: dot ? after.backgroundColor : "", pin: box(slot.querySelector(".job-pin")) || box(slot.querySelector(".job-more")), open: box(slot.querySelector(".job-open")), count: box(slot.querySelector(".pip-row-marks-live .pip-row-count") || row.querySelector(".pip-row-marks:not(.pip-row-room) .pip-row-count") || slot.querySelector(".pip-row-count")),
     read: box(read), readWord: box(word), newDot: box(slot.querySelector(".pip-row-marks-live .pip-new-dot") || slot.querySelector(".pip-new-dot")),
     words: c.right - parseFloat(getComputedStyle(copy).paddingRight), sideways: document.documentElement.scrollWidth > innerWidth + 1,
-    sizes: ["job-pin", "job-open"].map((k) => { const n = slot.querySelector("." + k); if (!seen(n)) return null; const b = n.getBoundingClientRect(); return [Math.round(b.width), Math.round(b.height), parseFloat(getComputedStyle(n).borderTopLeftRadius)]; }).filter(Boolean) };
+    sizes: ["job-pin", "job-open", "job-more"].map((k) => { const n = slot.querySelector("." + k); if (!seen(n)) return null; const b = n.getBoundingClientRect(); return [Math.round(b.width) + (k === "job-more" ? 4 : 0), Math.round(b.height), parseFloat(getComputedStyle(n).borderTopLeftRadius)]; }).filter(Boolean) };
 };
 const overlap = (a, b) => !!a && !!b && a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
-/** Nothing at the row's end lies on anything else there, the dot least of all; the words end before all of it. */
+/** Nothing at the row's end lies on anything else there, the dot least of all; the words end before all of it.
+ *  (in a list under 400px the row's buttons are in its ⋯, which stands where the pin stood: 16 Nov); "the pin" here is then that ⋯, 4px slimmer than the pin. */
 function clear(m, what, { controls }) {
   assert.equal(m.state, "working", `${what}: the row is a working Pip's`);
   assert.ok(m.dot, `${what}: the dot that says it is working is drawn`);
@@ -74,7 +75,7 @@ for (const theme of ["dark", "light"]) for (const width of [300, 440, 700]) {
       for (const [pip] of ROWS) await p.waitForSelector(`[data-job="${pip}"][data-state="working"]`);
       // One of them is pinned to the dock, so its pin always shows.
       await p.evaluate((a) => window.postMessage({ type: "dock", pinned: [`pip:${a}`] }, "*"), ROWS[2][0]);
-      await p.waitForSelector(`[data-pin-pip="${ROWS[2][0]}"][aria-pressed="true"]`);
+      await p.waitForSelector(`[data-pin-pip="${ROWS[2][0]}"][aria-pressed="true"]`, { state: "attached" });
       for (const [pip, what] of ROWS) {
         await p.locator(`[data-job="${pip}"]`).scrollIntoViewIfNeeded();
         await p.mouse.move(1, 1); await p.waitForTimeout(180);
@@ -107,7 +108,7 @@ for (const width of [300, 440, 700]) {
     try {
       await p.waitForSelector(`[data-job="${PIP}"][data-state="working"]`);
       await p.evaluate((a) => window.postMessage({ type: "dock", pinned: [`pip:${a}`] }, "*"), ROWS[2][0]);
-      await p.waitForSelector(`[data-pin-pip="${ROWS[2][0]}"][aria-pressed="true"]`);
+      await p.waitForSelector(`[data-pin-pip="${ROWS[2][0]}"][aria-pressed="true"]`, { state: "attached" });
       for (const [pip, what] of ROWS) {
         await p.waitForSelector(`[data-job="${pip}"][data-state="working"]`);
         await p.locator(`[data-job="${pip}"]`).scrollIntoViewIfNeeded(); await p.waitForTimeout(120);

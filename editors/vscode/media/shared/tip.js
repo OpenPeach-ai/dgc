@@ -52,7 +52,10 @@
       node.style.left = "0px"; node.style.top = "0px";
       const zero = node.getBoundingClientRect(), a = el.getBoundingClientRect();
       let top = a.top - zero.height - GAP, side = "above";
-      if (top < top0) { top = a.bottom + GAP; side = "below"; }
+      // (Under it, a label clears what its control names with data-tip-under: a row's name is labelled under its whole
+      // row, never over the line under the name.)
+      const under = el.dataset.tipUnder ? el.closest(el.dataset.tipUnder) : null;
+      if (top < top0) { top = (under || el).getBoundingClientRect().bottom + GAP; side = "below"; }
       if (side === "below" && top + zero.height > bottom0 && a.top - zero.height - GAP >= 0) { top = Math.max(top0, a.top - zero.height - GAP); side = "above"; }
       const left = Math.max(left0, Math.min(Math.round(a.left + a.width / 2 - zero.width / 2), right0 - zero.width));
       node.style.left = `${Math.round(left - zero.left)}px`; node.style.top = `${Math.round(top - zero.top)}px`;

@@ -89,8 +89,8 @@ test("the Library's Widgets tab: every widget wears its Folio, the first palette
       for (const m of marks) {
         assert.match(m.cls, /^folio folio--[a-z]+$/, "span.folio.folio--<palette>");
         assert.deepEqual([m.set, m.parts, m.hidden], ["folio", "III", "true"], "three empty <i>; its name beside it says which widget");
-        // (Library v2: the row is narrow under 560 px, where its mark is 30 px; from there it is 36 px.)
-        assert.deepEqual([m.w, m.h], width < 560 ? [30, 30] : [36, 36], `its size in the row (${width})`);
+        // (One row height at every width, 16 Nov: its mark is 36 px in a narrow side bar too; it was 30 under 560 px.)
+        assert.deepEqual([m.w, m.h], [36, 36], `its size in the row (${width})`);
         assert.ok(m.inside && m.clearOfWords && m.shown, `inside its row and clear of its name (${width})`);
         assert.deepEqual([m.name, m.state], ["folio-tilt", "paused"], "at rest (--folio-play: paused)");
       }

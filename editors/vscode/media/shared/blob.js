@@ -12,18 +12,17 @@
   // ---- the small menu: rows, then (for a session) its twelve palettes ---------------------------------------------------
   const ICONS = {
     open: '<path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5V13H3V4.5h4"/>',
-    pin: '<path d="M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z"/>',
-    unpin: '<path d="M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z"/><path d="M2.5 2.5l11 11"/>',
     left: '<path d="M9.5 3.5 5 8l4.5 4.5"/>', right: '<path d="M6.5 3.5 11 8l-4.5 4.5"/>',
     work: '<path d="M5.4 3.2 3 4.4 1.6 13l2.4-1.2zM9.7 2 7.3 3.2 5.9 13l2.4-1.2zM14.2 3.2l-2.4 1.2L10.4 11.8l2.4-1.2z" fill="currentColor" stroke="none"/>',
     chat: '<path d="M4 2.5h8A2.5 2.5 0 0 1 14.5 5v4A2.5 2.5 0 0 1 12 11.5H7.5L4.5 14v-2.5H4A2.5 2.5 0 0 1 1.5 9V5A2.5 2.5 0 0 1 4 2.5z"/>',
     pip: '<path d="M8 2.2c2.6 2 4.7 4.3 4.7 7A4.7 4.7 0 0 1 3.3 9.2c0-2.7 2.1-5 4.7-7z"/><path d="M6.3 9.3v1M9.7 9.3v1"/>',
-    settings: '<circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
-    trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
-    archive: '<path d="M2 3.5h12v3H2zM3.2 6.5V13h9.6V6.5M6.5 9.2h3"/>',
     reset: '<path d="M3 8a5 5 0 1 0 1.6-3.7M3 3v2.8h2.8"/>',
   };
-  const icon = (name, filled = false) => `<svg viewBox="0 0 16 16" width="15" height="15" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+  // A row's icon. An action that has one glyph on every surface (Open in editor, Settings, Delete, Archive, Pin, Unpin:
+  // media/shared/icons.js) draws that glyph, at a menu row's 15; the rest are this menu's own marks.
+  const SHARED = { "open-in-editor": "open-in-editor", settings: "settings", trash: "delete", archive: "archive", pin: "pin", unpin: "unpin", add: "add", close: "close", copy: "copy", save: "save" };
+  const own = (name, filled = false) => `<svg viewBox="0 0 16 16" width="15" height="15" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+  const icon = (name, filled = false) => (SHARED[name] && root.DgcIcons ? root.DgcIcons.html(SHARED[name], { size: 15 }) : own(name, filled));
 
   /** The twelve palettes as still marks of the session's kind (Motes for a chat, Voxels for a Work session), six to a
    *  line, the one it wears marked. */

@@ -1719,7 +1719,7 @@ test("the Library's Images: every image DGC made or kept, on every surface, aske
     assert.deepEqual(await names(), ['a red fox <b>in</b> snow', "The barn owl"], "a made image by its words, a kept one by its title");
     assert.equal(await page.evaluate(() => document.querySelectorAll("#library-list img:not([data-pic]), #library-list b, #library-list i").length + (window.__owned || 0)), 0, "names are words");
     assert.deepEqual(await metas(), ["made by Snow <i>scenes</i> · 30m · 768×320 · 45 KB · ComfyUI on gpu-box · app", "kept by Bird counter · 2h · 768×320 · 45 KB"]);
-    assert.match(await page.locator("#library-list .lib-row").nth(1).getAttribute("title"), /For the bird count/, "why it was kept, one hover away");
+    assert.match(await page.locator("#library-list .lib-row").nth(1).locator(".lib-row-name").getAttribute("data-more"), /For the bird count/, "why it was kept, one hover away (its name's label)");
     assert.deepEqual((await posted("workImage")).map((m) => m.path), [fox.path, owl.path], "each preview asked for by its path");
     await send({ type: "workImageData", path: fox.path, data: "data:image/png;base64,iVBORw0KGgo=" });
     assert.equal(await page.locator("#library-list .lib-row-thumb img").first().getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
@@ -3660,7 +3660,8 @@ test("files a reply made: a card with what each is, Open and Save a copy…, liv
     assert.match(await card(1).locator(".cd-file-note").textContent(), /no Chrome or Edge was found/);
     assert.equal(await card(2).locator(".cd-file-meta").textContent(), "Deleted from your Library");
     assert.equal(await card(2).locator("button").count(), 0, "nothing to open");
-    assert.deepEqual(await card(0).locator("button").allTextContents(), ["Open", "Save a copy…"]);
+    assert.deepEqual(await card(0).locator("button:not(.dgc-file-more)").allTextContents(), ["Open", "Save a copy…"]);
+    assert.match(await card(0).locator("button.dgc-file-more").getAttribute("aria-label"), /^More for /, "and the file's menu, on its ⋯ (16 Nov)");
     if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-made-files.png") });
     await card(0).locator("button", { hasText: "Open" }).click();
     await card(1).locator("button", { hasText: "Save a copy…" }).click();
@@ -4169,7 +4170,8 @@ test("an image a reply made shows as its picture, and a paid generator's card sa
     assert.equal(await s.page.locator(`.cd-file-image img[data-att="${picture}"]`).getAttribute("src"), png);
     assert.equal(await s.page.locator(".cd-file-image .cd-file-badge").textContent(), "PNG");
     // It's in DGC's own folder: Save to project… puts a copy in the open project (assets/ unless you pick).
-    assert.deepEqual(await s.page.locator(".cd-file-image .cd-file-actions button").allTextContents(), ["Open", "Save a copy…", "Save to project…"]);
+    assert.deepEqual(await s.page.locator(".cd-file-image .cd-file-actions button:not(.dgc-file-more)").allTextContents(), ["Open", "Save a copy…", "Save to project…"]);
+    assert.equal(await s.page.locator(".cd-file-image .cd-file-actions button.dgc-file-more").count(), 1, "and the file's menu, on its ⋯ (16 Nov)");
     await s.page.locator(".cd-file-project").click();
     assert.deepEqual(await s.posted("fileSave"), [{ type: "fileSave", messageId: M(2), fileId: picture, name: "a-red-fox.png", project: true }]);
     // The picture's frame is the picture: the row-wide button around it draws nothing, so no grey band beside it.

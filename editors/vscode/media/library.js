@@ -6,11 +6,13 @@
 // to the same host (src/chatdgc.ts fromLibrary), so a change reaches both.
 //
 //   Artifacts  the pages, sheets, docs, decks and dashboards DGC made. Filters: the kind, and who made it.
-//   Widgets    ChatDGC's widgets, and the cards a reply drew in Work or a Pip's chat. Filter: who made it.
+//   Widgets    ChatDGC's widgets, the cards a reply drew in Work or a Pip's chat, and the charts ChatDGC's replies drew
+//              (where this DGC lists them). Filter: who made it.
 //   Images     every image DGC made or kept (images_library, every surface: Work, ChatDGC, the Pips). Filter: who.
 //   Videos     every video DGC made (videos_library). Filter: who.
-//   Files      what you attached in ChatDGC or it made, in every chat and project. Filters: the kind of file, and
-//              whether you uploaded it or ChatDGC made it.
+//   Files      what you attached in ChatDGC or it made, in every chat and project, and what you attached in Work
+//              sessions (where this DGC lists them). Filters: the kind of file, and whether you uploaded it or
+//              ChatDGC made it.
 //
 // Every row says who made it, by name ("made by Tile checker · 2h"; an image the model kept on purpose says "kept by"),
 // and the name leads back: a Pip to its chat, a session and a chat to their tabs. A row opens its item. Every item has
@@ -54,11 +56,13 @@
   const BARE = { app: "by an app", sdk: "by an app", cli: "in the terminal", project: "in a project" };
   const LINKED = new Set(["pip", "session", "chat", "project"]);
   const CHEVRON = '<svg class="dgc-folder-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path class="dgc-folder-chevron-a" d="M4.5 6.5 L8 10"/><path class="dgc-folder-chevron-b" d="M8 10 L11.5 6.5"/></svg>';
-  const PIN = (on) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z"/></svg>`;
-  const DOTS = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
+  // Pin and Unpin, More: the one glyph each has on every surface (media/shared/icons.js).
+  const PIN = (on) => window.DgcIcons.html(on ? "unpin" : "pin");
+  const DOTS = window.DgcIcons.html("more");
   const PAGE = 200;         // artifacts and widgets drawn at a time ("Show more" draws the next)
   // An item's menu: the eight things, in his order (15 Nov), the same for every kind.
-  const ITEM_ACTS = [["open", "Open"], ["editor", "Open in editor"], ["save", "Save a copy…"], ["copy", "Copy"], ["path", "Copy path"], ["reveal", "Reveal in file manager"], ["rename", "Rename…"], ["remove", "Remove…"]];
+  // (The first six are every file's, on every surface: media/shared/filemenu.js. A chat's file card has those and no more.)
+  const ITEM_ACTS = [...window.DgcFileMenu.ACTS, ["rename", "Rename…"], ["remove", "Remove…"]];
   // What only a kind has, kept under the eight (by the ids of actions() below).
   const ITEM_MORE = ["chat", "player", "use", "project", "add", "pin"];
   const A_WORD = { doc: "doc", slides: "deck", sheet: "sheet", page: "page", dashboard: "dashboard" };
@@ -85,6 +89,26 @@
       if (act === "rename") return "A widget keeps the name its chat gave it.";
       return "";
     }
+    if (item.source === "chart") {
+      // A chart is drawn in its reply: it opens its chat there, and is nothing else by itself.
+      if (act === "editor") return "A chart is drawn in its chat: it has no file an editor can open.";
+      if (act === "save") return "A chart is saved from its chat: open it there and use the chart's own Save as image.";
+      if (act === "copy") return "Copy takes a doc's text or an image. Open the chart in its chat to copy its numbers.";
+      if (act === "path" || act === "reveal") return "A chart is kept inside its chat, not as a file.";
+      if (act === "rename") return "A chart keeps the title its reply gave it.";
+      if (act === "remove") return "A chart is part of its reply: it goes when its chat is deleted.";
+      return "";
+    }
+    if (item.source === "workfile") {
+      // What you attached in a Work session: a picture is kept inside the session, a file is where it was, in its project.
+      const picture = r.kind === "image";
+      if (act === "editor") return picture ? "This picture is kept inside its session. Open shows it; Save a copy… makes a file." : "";
+      if (act === "copy") return picture ? "" : "Copy takes an image or a doc's text. Use Copy path or Save a copy… for this file.";
+      if (act === "path" || act === "reveal") return picture ? "This picture is kept inside its session, not as a file. Save a copy… makes a file." : "";
+      if (act === "rename") return picture ? "A picture you attached has no name of its own to change." : "This file is your project's: rename it there.";
+      if (act === "remove") return "What you attached stays in its session: a session is a record.";
+      return "";
+    }
     if (item.source === "image") return act === "rename" ? "An image is listed by the words it was made from. Its file keeps its name." : "";
     if (item.source === "video") {
       if (act === "copy") return "A video is too big for the clipboard. Use Copy path or Save a copy….";
@@ -103,30 +127,13 @@
     const r = item.raw;
     if (item.source === "artifact") return { kind: "artifact", id: String(r.id || "") };
     if (item.source === "widget") return { kind: "widget", id: String(r.id || ""), chat_id: String(r.chat_id || "") };
+    if (item.source === "chart") return { kind: "chart", id: String(r.id || ""), chat_id: String(r.chat_id || "") };
+    if (item.source === "workfile") return { kind: "workfile", ref: String(r.ref || "") };
     if (item.source === "image" || item.source === "video") return { kind: item.source, path: String(r.path || "") };
     return r.source === "project" ? { kind: "file", id: String(r.id || ""), source: "project", project_id: String(r.project_id || "") } : { kind: "file", id: String(r.id || ""), source: "chat", chat_id: String(r.chat_id || "") };
   }
-  /** A picture the host handed over (a data: URI), as a PNG for the clipboard: every app pastes a PNG. */
-  function pngOf(doc, data) {
-    return new Promise((resolve, reject) => {
-      const comma = data.indexOf(","), mime = data.slice(5, data.indexOf(";"));
-      if (mime === "image/png") {
-        const raw = atob(data.slice(comma + 1)), bytes = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-        resolve(new Blob([bytes], { type: "image/png" })); return;
-      }
-      const img = new Image();
-      img.onerror = () => reject(new Error("not a picture"));
-      img.onload = () => {
-        try {
-          const canvas = doc.createElement("canvas"); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-          canvas.getContext("2d").drawImage(img, 0, 0);
-          canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("not a picture"))), "image/png");
-        } catch (error) { reject(error); }
-      };
-      img.src = data;
-    });
-  }
+  /** A picture the host handed over (a data: URI), as a PNG for the clipboard (media/shared/filemenu.js). */
+  const pngOf = (doc, data) => window.DgcFileMenu.pngOf(doc, data);
 
   /** How long ago, in a few characters, from a time DGC wrote ("now", "40m", "2h", "1d", "3w", "4mo", "2y"). */
   function age(at, now = Date.now()) {
@@ -185,15 +192,42 @@
     return { key: `file:${f.id}`, source: "file", type: String(f.type || "file"), title: text(f.name) || "file", at: when(f.created_at), by, verb: f.made === true ? "made" : "in",
       facts: [F_KIND[f.type] || "File", Number(f.size) ? sizeText(Number(f.size)) : "", project ? "" : text(f.project_name, 120)], raw: f };
   }
+  /** A chart a ChatDGC reply drew: it is in that reply, and opens its chat there. */
+  function fromChart(c) {
+    const kind = { bar: "Bar chart", line: "Line chart", area: "Area chart", pie: "Pie chart", scatter: "Scatter chart" }[String(c.chart_type || "")] || "Chart";
+    return { key: `chart:${c.chat_id}:${c.id}`, source: "chart", type: "chart", title: text(c.title) || "Chart", at: when(c.created_at), by: { kind: "chat", id: text(c.chat_id, 128), name: text(c.chat_title, 120) }, verb: "chart",
+      facts: [kind, text(c.project_name, 120)], raw: c };
+  }
+  /** The kind of file a Work attachment is, in the Files filter's words: a picture, or by its name's ending. */
+  function workKind(f) {
+    if (f.kind === "image") return "image";
+    const end = (/\.([A-Za-z0-9]{1,8})$/.exec(String(f.name || ""))?.[1] || "").toLowerCase();
+    return end === "pdf" ? "pdf" : ["doc", "docx", "odt", "rtf", "md", "txt"].includes(end) ? "document" : ["xls", "xlsx", "ods", "csv", "tsv"].includes(end) ? "spreadsheet" : ["ppt", "pptx", "odp", "key"].includes(end) ? "presentation" : "code";
+  }
+  /** Something you attached in a Work session (a picture, or a file you named with @): the host names it by a word
+   *  of its own (`ref`), never by where it is kept. */
+  function fromWorkFile(f) {
+    return { key: `workfile:${f.ref}`, source: "workfile", type: workKind(f), title: text(f.name) || "file", at: when(f.created_at), by: { kind: "session", id: text(f.session_id, 128), name: text(f.session_name, 120) }, verb: "work",
+      where: text(f.project_name, 120), facts: [F_KIND[workKind(f)] || "File", Number(f.bytes) ? sizeText(Number(f.bytes)) : ""], raw: f };
+  }
   /** A row's second line, before the time: [words, the name that leads back or ""]. */
   function byWords(item) {
     const by = item.by;
+    if (item.verb === "chart") return by.name ? ["A chart in ", by.name] : ["A chart in a chat", ""];
+    if (item.verb === "work") return by.name ? ["in Work · ", by.name] : ["in Work", ""];
     if (by.name) return [item.verb === "in" ? "in " : `${item.verb} by `, by.name];
     if (item.verb === "in") return [by.kind === "chat" ? "in a chat" : BARE[by.kind] || "", ""];
     const bare = KINDS[by.kind]?.bare || BARE[by.kind] || "";
     return [bare ? `${item.verb} ${bare}` : "", ""];
   }
 
+  /** A chart's mark: a small tile with the chart's own kind drawn in it (bars, a line, a pie), in the text's colour. */
+  function chartMark(kind) {
+    const inner = kind === "line" || kind === "area" || kind === "scatter" ? '<path d="M6 16.5 L10 11.5 L13.5 14 L18 7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 18.5 H18.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".55"/>'
+      : kind === "pie" || kind === "donut" ? '<path d="M12 5.5 A6.5 6.5 0 1 0 18.5 12 H12 Z" fill="currentColor" opacity=".55"/><path d="M13.5 4 A6.5 6.5 0 0 1 20 10.5 H13.5 Z" fill="currentColor"/>'
+      : '<rect x="6" y="12" width="3" height="6.5" rx="1" fill="currentColor" opacity=".55"/><rect x="10.5" y="8.5" width="3" height="10" rx="1" fill="currentColor"/><rect x="15" y="5.5" width="3" height="13" rx="1" fill="currentColor" opacity=".8"/>';
+    return `<svg class="lib-chart-mark" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><rect class="lib-chart-ground" x="1" y="1" width="22" height="22" rx="5"/>${inner}</svg>`;
+  }
   /**
    * Draws the Library into `host` and keeps it up to date.
    *   host:   the element it fills (it becomes .dgc-lib)
@@ -241,6 +275,10 @@
       images: { rows: [], next: null, loaded: false, seq: 0, error: "" },
       videos: { rows: [], next: null, loaded: false, seq: 0, error: "" },
       files: { rows: [], next: null, loaded: false, counts: {}, asked: [] },
+      // The charts ChatDGC's replies drew (in Widgets) and what you attached in Work sessions (in Files): listed only
+      // by a DGC whose host says it lists them (chartsOffered, workFilesOffered); until then neither is asked for.
+      charts: { rows: [], next: null, loaded: false, live: false, asking: 0, sig: null },
+      work: { rows: [], next: null, loaded: false, live: false, seq: 0, sig: null },
       error: "",
     };
     // What each tab last asked the host for (its words and filters): shown again unchanged, it is not asked again.
@@ -278,12 +316,25 @@
 
     // ---- asking the host --------------------------------------------------------------------------------------------------------
     const sigOf = (tab) => JSON.stringify(tab === "artifacts" ? [] : tab === "widgets" ? [state.query, state.widgets.live] : tab === "files" ? [state.query, state.filters.files] : [state.query, surfaceOf(state.filters[tab].maker)]);
+    /** The charts ChatDGC's replies drew, for Widgets, and what you attached in Work sessions, for Files (by name: their
+     *  kind and "uploaded" are the page's to filter by): asked for with their tab, only of a DGC that lists them. */
+    function askCharts(on = false) {
+      if (!state.charts.live || (on && state.charts.next == null)) return;
+      state.charts.asking = on ? state.charts.next || 0 : 0; if (on) state.charts.next = null; else state.charts.sig = state.query;
+      post({ type: "charts", query: state.query, offset: state.charts.asking });
+    }
+    function askWork(on = false) {
+      if (!state.work.live || (on && state.work.next == null)) return;
+      const from = on ? state.work.next || 0 : 0; if (on) state.work.next = null; else state.work.sig = state.query;
+      post({ type: "workFiles", seq: on ? state.work.seq : ++state.work.seq, query: state.query, offset: from });
+    }
     /** Asks the host for the tab's rows: from the top (a new search, a filter, a refresh), or `on` from where it stopped. */
     function ask(tab, on = false) {
       if (!started) { started = true; state.files.asked.push({ offset: 0, sig: JSON.stringify(["", { kind: "", origin: "" }]) }); post({ type: "ready" }); }
       if (!on) sig[tab] = sigOf(tab);
       if (tab === "artifacts" || tab === "widgets") { if (!on || !state.artifacts.loaded) post({ type: "artifactList" }); }
-      if (tab === "widgets" && state.widgets.live) { state.widgets.asking = on ? state.widgets.rows.length : 0; post({ type: "widgets", query: state.query, offset: state.widgets.asking }); }
+      if (tab === "widgets" && state.widgets.live && (!on || state.widgets.next != null || !state.widgets.loaded)) { state.widgets.asking = on ? state.widgets.rows.length : 0; post({ type: "widgets", query: state.query, offset: state.widgets.asking }); }
+      if (tab === "widgets") askCharts(on);
       if (tab === "images" || tab === "videos") {
         const t = state[tab], surface = surfaceOf(state.filters[tab].maker), offset = on ? t.next || 0 : 0;
         t.error = ""; if (on) t.next = null;
@@ -292,8 +343,10 @@
       }
       if (tab === "files") {
         const f = state.filters.files, offset = on ? state.files.next || 0 : 0;
+        askWork(on);
         // (The host lists the files with its answer to "ready": that list, still on its way, is not asked for twice.)
         if (!on && state.files.asked.some((a) => a.offset === 0 && a.sig === sigOf("files"))) return;
+        if (on && state.files.next == null) return;
         if (on) state.files.next = null;
         state.files.asked.push({ offset, sig: sigOf("files") });
         post({ type: "list", query: state.query, kind: f.kind, ...(f.origin ? { origin: f.origin } : {}), offset });
@@ -304,6 +357,9 @@
       if (!showing) return;
       const tab = state.tab;
       if (force || sig[tab] !== sigOf(tab) || (tab === "artifacts" && !state.artifacts.loaded)) ask(tab);
+      // (Its charts, or Work's attachments, not yet asked for with these words: a DGC said it lists them after the tab's own list came.)
+      else if (tab === "widgets" && state.charts.live && state.charts.sig !== state.query) askCharts();
+      else if (tab === "files" && state.work.live && state.work.sig !== state.query) askWork();
     }
 
     // ---- the rows of the tab on screen -----------------------------------------------------------------------------------------
@@ -321,7 +377,7 @@
         // ChatDGC's own widgets are listed by ChatDGC; each is also a Page among the artifacts, which is left out here
         // (it would be the same widget twice) unless this ChatDGC lists none.
         const cards = state.artifacts.items.map(fromArtifact).filter((a) => a.made_as === "card" || (a.made_as === "widget" && !state.widgets.live));
-        const all = [...cards, ...(state.widgets.live ? state.widgets.rows.map(fromWidget) : [])];
+        const all = [...cards, ...(state.widgets.live ? state.widgets.rows.map(fromWidget) : []), ...(state.charts.live ? state.charts.rows.map(fromChart) : [])];
         note("widgets", all);
         return all.filter((a) => byMaker(a, f.maker) && found(a)).sort(newest);
       }
@@ -331,7 +387,11 @@
         // (The host found them by their words and their surface; a maker by name is one of that surface's.)
         return all.filter((a) => byMaker(a, f.maker));
       }
-      return state.files.rows.map(fromFile);
+      const own = state.files.rows.map(fromFile);
+      if (!state.work.live || f.origin === "made") return own;
+      // Beside ChatDGC's: what you attached in Work sessions, of the kind chosen; the newest of both first.
+      const work = state.work.rows.map(fromWorkFile).filter((w) => !f.kind || w.type === f.kind);
+      return work.length ? [...own, ...work].sort(newest) : own;
     }
 
     // ---- drawing ----------------------------------------------------------------------------------------------------------------
@@ -345,6 +405,9 @@
         tab.hidden = !offered.includes(id);
         tab.setAttribute("aria-selected", String(on)); tab.tabIndex = on ? 0 : -1;
       }
+      // (Files' own label says Work's attachments too, where this DGC lists them.)
+      const filesTab = els.tabs.querySelector('[data-tab="files"]'), filesTip = state.work.live ? "Files: what you attached in ChatDGC or in a Work session, and what ChatDGC made, in every chat and space. Incognito chats keep none." : TABS[4][4];
+      if (filesTab && filesTab.dataset.said !== filesTip) { filesTab.dataset.said = filesTip; filesTab.title = filesTip; }
       els.list.setAttribute("aria-labelledby", `library-tab-${state.tab}`);
       const noun = TABS.find((t) => t[0] === state.tab)[1].toLowerCase();
       els.search.placeholder = `Search ${noun}`;
@@ -384,6 +447,13 @@
           pinRow({ kind: "widget", id: String(r.id || ""), title: item.title, sub: `Widget · in “${r.chat_title || "a chat"}”`, ref: { chat_id: String(r.chat_id || "") } }),
           { id: "remove", icon: "trash", label: "Delete the widget…", danger: true, run: ask("remove") }];
       }
+      if (item.source === "chart") return [{ id: "open", icon: "comment-discussion", label: "Open its chat at this chart", run: ask("open") }];
+      if (item.source === "workfile") {
+        const picture = r.kind === "image";
+        return [{ id: "open", icon: "go-to-file", label: picture ? "Open the picture" : "Open it in the editor", run: ask("open") },
+          { id: "save", icon: "desktop-download", label: "Save a copy…", run: ask("save") },
+          ...(picture ? [] : [{ id: "reveal", icon: "folder-opened", label: "Reveal in file manager", run: ask("reveal") }])];
+      }
       if (item.source === "image") {
         return [{ id: "open", icon: "go-to-file", label: "Open the image", run: ask("open") },
           { id: "reveal", icon: "folder-opened", label: "Reveal in file manager", run: ask("reveal") },
@@ -394,7 +464,7 @@
         return [{ id: "open", icon: "play", label: "Play it here", run: (li) => play(li, r) },
           { id: "player", icon: "link-external", label: "Open it in your player", run: () => post({ type: "videoOpen", path: r.path }) },
           { id: "reveal", icon: "folder-opened", label: "Reveal in file manager", run: ask("reveal") },
-          { id: "project", icon: "desktop-download", label: "Save to project…", run: () => post({ type: "videoSave", path: r.path }) }];
+          { id: "project", icon: "file-symlink-file", label: "Save to project…", run: () => post({ type: "videoSave", path: r.path }) }];
       }
       const project = r.source === "project";
       return [{ id: "open", icon: project ? "folder" : "comment-discussion", label: project ? `Open the space ${r.project_name || ""}`.trim() : "Open the chat it's in", run: ask("open") },
@@ -414,7 +484,8 @@
     }
     /** An item's one menu: the eight (what it cannot do is off, with why), then what only its kind has. */
     function itemRows(item) {
-      const more = actions(item).filter((a) => ITEM_MORE.includes(a.id)).sort((a, b) => ITEM_MORE.indexOf(a.id) - ITEM_MORE.indexOf(b.id));
+      // (What only its kind has, in the order of the row's own icon buttons: where those don't fit, this is where they are.)
+      const more = actions(item).filter((a) => ITEM_MORE.includes(a.id));
       return [ITEM_ACTS.map(([id, label]) => { const why = whyNot(item, id); return { id, label, ...(why ? { why } : {}), ...(id === "remove" ? { danger: true } : {}) }; }),
         more.map((a) => ({ id: `more:${a.id}`, label: a.label }))];
     }
@@ -437,13 +508,14 @@
     }
     function thumb(item) {
       const box = doc.createElement("span"); box.className = "lib-row-thumb"; box.setAttribute("aria-hidden", "true");
-      const picture = item.source === "image" || (item.source === "file" && item.type === "image" && item.raw.source === "chat");
+      if (item.source === "chart") { box.innerHTML = chartMark(item.raw.chart_type); box.classList.add("lib-row-chart"); return box; }
+      const picture = item.source === "image" || (item.source === "file" && item.type === "image" && item.raw.source === "chat") || (item.source === "workfile" && item.raw.kind === "image");
       if (picture) {
         const known = pics.get(item.key);
         if (!known?.error) {
           const img = doc.createElement("img"); img.alt = ""; img.dataset.pic = item.key; img.decoding = "async";
           if (known?.data) img.src = known.data;
-          else if (!known) { pics.set(item.key, "asked"); post(item.source === "file" ? { type: "image", file: item.raw } : { type: "workImage", path: item.raw.path }); }
+          else if (!known) { pics.set(item.key, "asked"); post(item.source === "file" ? { type: "image", file: item.raw } : item.source === "workfile" ? { type: "workFilePic", ref: String(item.raw.ref || "") } : { type: "workImage", path: item.raw.path }); }
           box.append(img); return box;
         }
       }
@@ -453,7 +525,7 @@
       if ((item.source === "widget" || item.made_as) && marks) { box.innerHTML = marks.mark("widget", String(item.raw.id || "")); box.classList.add("lib-row-mark"); return box; }
       const sheets = root.DgcFileSheet;
       const html = !sheets || item.source === "video" || item.source === "image" || item.source === "widget" ? ""
-        : item.source === "artifact" ? sheets.html(item.type) : sheets.forFile(item.type, item.title);
+        : item.source === "artifact" ? sheets.html(item.type) : item.source === "chart" ? "" : sheets.forFile(item.type, item.title);
       if (html) { box.innerHTML = html; box.firstElementChild?.classList.add("dgc-sheet-sm"); box.classList.add("lib-row-sheet"); }
       else { const dot = doc.createElement("span"); dot.className = `codicon codicon-${item.source === "video" ? "device-camera-video" : item.source === "widget" ? "symbol-misc" : item.type === "image" ? "file-media" : "file"}`; box.append(dot); }
       return box;
@@ -463,10 +535,11 @@
       if (item.source === "widget") li.dataset.widget = String(item.raw.id || "");
       const [words, name] = byWords(item), ago = age(item.at, now), acts = actions(item);
       const facts = item.facts.filter(Boolean);
-      li.title = `${item.title}\n${[`${words}${name}`, ago, ...facts].filter(Boolean).join(" · ")}${item.tip ? `\n${item.tip}` : ""}`;
-      li.setAttribute("aria-label", `${item.title}, ${words}${name}${ago ? `, ${ago === "now" ? "just now" : `${ago} ago`}` : ""}. ${acts[0].label}.`);
+      li.setAttribute("aria-label", `${item.title}, ${words}${name}${item.where ? ` · ${item.where}` : ""}${ago ? `, ${ago === "now" ? "just now" : `${ago} ago`}` : ""}${facts.length ? `. ${facts.join(", ")}` : ""}${item.tip ? `. ${item.tip.replace(/\n/g, ". ")}` : ""}. ${acts[0].label}.`);
       const main = doc.createElement("span"); main.className = "lib-row-main";
-      const title = doc.createElement("span"); title.className = "lib-row-name"; title.textContent = item.title;
+      // (The row has no label of its own: its words are on it. A name too long for its line ends in "…" and says itself
+      // whole when pointed at, see nameTip below; what a kept picture is for, and its file's name, are said there too.)
+      const title = doc.createElement("span"); title.className = "lib-row-name"; title.textContent = item.title; if (item.tip) title.dataset.more = item.tip;
       const meta = doc.createElement("span"); meta.className = "lib-row-meta";
       const by = doc.createElement("span"); by.className = "lib-row-by"; by.textContent = words; meta.append(by);
       // (At the narrowest side bar "made by Tile checker" is "by Tile checker" and "made in Work" is "in Work": the
@@ -480,6 +553,8 @@
         if (link.tagName === "BUTTON") { link.type = "button"; link.dataset.maker = item.key; link.title = { pip: `Open ${name}’s chat`, session: `Open the session “${name}”`, chat: `Open the chat “${name}”`, project: `Open the space ${name}` }[item.by.kind] || name; }
         meta.append(link);
       }
+      // (Where a Work attachment's session is: its project, after the session's name. It gives way first when the line is short.)
+      if (item.where) { const t = doc.createElement("span"); t.className = "lib-row-where"; t.textContent = ` · ${item.where}`; meta.append(t); }
       if (ago) { const t = doc.createElement("span"); t.className = "lib-row-when"; t.textContent = ` · ${ago}`; meta.append(t); }
       if (facts.length) { const t = doc.createElement("span"); t.className = "lib-row-facts"; t.textContent = ` · ${facts.join(" · ")}`; meta.append(t); }
       main.append(title, meta);
@@ -501,15 +576,18 @@
       if (state.error) return state.error;
       if (t.error) return t.error;
       if (found.length) return "";
-      const loaded = tab === "artifacts" ? state.artifacts.loaded : tab === "widgets" ? state.artifacts.loaded && (!state.widgets.live || state.widgets.loaded) : t.loaded;
+      const loaded = tab === "artifacts" ? state.artifacts.loaded : tab === "widgets" ? state.artifacts.loaded && (!state.widgets.live || state.widgets.loaded) && (!state.charts.live || state.charts.loaded)
+        : tab === "files" ? t.loaded && (!state.work.live || state.work.loaded) : t.loaded;
       if (!loaded) return "Loading…";
       const who = tab === "files" ? "" : whoWords(tab);
       if (tab === "artifacts") return q ? `No artifact named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || f.maker ? `No ${(A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.`
         : "Pages, sheets, docs, decks and dashboards DGC makes for you show here.";
-      if (tab === "widgets") return q ? `No widget named like “${q}”.` : who ? `No widgets ${who} yet.` : "Widgets ChatDGC makes for you, and the cards a reply draws in Work or a Pip’s chat, show here. A chart in a chat stays in its chat.";
+      if (tab === "widgets") return q ? `No widget named like “${q}”.` : who ? `No widgets ${who} yet.` : state.charts.live ? "Widgets ChatDGC makes for you, the charts its replies draw, and the cards a reply draws in Work or a Pip’s chat, show here."
+        : "Widgets ChatDGC makes for you, and the cards a reply draws in Work or a Pip’s chat, show here. A chart in a chat stays in its chat.";
       if (tab === "images") return q ? `No image made from words like “${q}”.` : who ? `No images ${who} yet.` : "Images DGC makes or keeps for you show here.";
       if (tab === "videos") return q ? `No video made from words like “${q}”.` : who ? `No videos ${who} yet.` : "Videos DGC makes for you show here.";
       return q ? `No file named like “${q}”.` : f.kind || f.origin ? `No ${(F_KINDS.find((k) => k[0] === f.kind) || F_KINDS[0])[2]}${f.origin === "made" ? " made by ChatDGC" : f.origin === "uploaded" ? " uploaded" : ""} yet.`
+        : state.work.live ? "Files you attach in ChatDGC or in a Work session, and files in your spaces, show here. Incognito chats keep none."
         : "Files you attach in ChatDGC, and files in your spaces, show here. What you attach in a Work session stays in that session. Incognito chats keep none.";
     }
     function draw() {
@@ -532,12 +610,25 @@
       if (state.error || state[tab].error) els.status.dataset.kind = "error"; else delete els.status.dataset.kind;
       const noun = TABS.find((t) => t[0] === tab)[1].toLowerCase();
       els.list.setAttribute("aria-label", `Your ${noun}`);
-      els.load.hidden = !(tab === "artifacts" ? all.length > state.shown : tab === "widgets" ? all.length > state.shown || state.widgets.next != null : state[tab].next != null);
+      els.load.hidden = !(tab === "artifacts" ? all.length > state.shown : tab === "widgets" ? all.length > state.shown || state.widgets.next != null || state.charts.next != null : tab === "files" ? state.files.next != null || state.work.next != null : state[tab].next != null);
       els.load.title = `Show more of your ${noun}`;
       // (An empty list keeps where it was scrolled to, so the first rows of the tab just chosen are what puts it back.)
       if (toTop && els.list.children.length) { els.list.scrollTop = 0; toTop = false; }
     }
     const byKey = (key) => drawn.find((item) => item.key === key);
+    /** A name's label, decided as the pointer (or the keyboard) reaches it: the whole name when its line cut it, with
+     *  what else is known of it (why a picture was kept, its file's name); none when the name is all there. The label
+     *  is the name's own, so it shows against its own row; under the row when there is no room over it (data-tip-under
+     *  names what it must clear: the row). */
+    function nameTip(e) {
+      const name = e.target.closest?.(".lib-row-name"); if (!name || !els.list.contains(name)) return;
+      const cut = name.scrollWidth > name.clientWidth + 1, more = name.dataset.more || "";
+      const label = cut ? `${name.textContent}${more ? `\n${more}` : ""}` : more;
+      if (name.dataset.tipSaid === label) return;        // (said already: the label's own code may have lifted `title` while it shows)
+      name.dataset.tipSaid = label;
+      if (label) { name.title = label; name.dataset.tipUnder = ".lib-row"; } else name.removeAttribute("title");
+    }
+    els.list.addEventListener("pointerover", nameTip, true);
 
     // ---- what is pressed ------------------------------------------------------------------------------------------------------
     function show(tab, focus = false) {
@@ -567,7 +658,8 @@
       if (which === "kind" && tab === "artifacts") menu(button, "Kind", A_KINDS.map((k) => ({ id: `v:${k[0]}`, label: k[1], checked: f.kind === k[0] })), (id) => choose("kind", id.slice(2)));
       else if (which === "kind") {
         // The kinds of file there are (the host counts them), and the one chosen.
-        const counts = state.files.counts, kinds = F_KINDS.filter((k) => !k[0] || Number(counts[k[0]]) > 0 || f.kind === k[0]);
+        const work = new Set(state.work.live ? state.work.rows.map(workKind) : []);
+        const counts = state.files.counts, kinds = F_KINDS.filter((k) => !k[0] || Number(counts[k[0]]) > 0 || work.has(k[0]) || f.kind === k[0]);
         menu(button, "Kind of file", kinds.map((k) => ({ id: `v:${k[0]}`, label: k[1], checked: f.kind === k[0] })), (id) => choose("kind", id.slice(2)));
       } else if (which === "origin") menu(button, "From", ORIGINS.map((o) => ({ id: `v:${o[0]}`, label: o[1], checked: f.origin === o[0] })), (id) => choose("origin", id.slice(2)));
       else {
@@ -646,7 +738,7 @@
     els.load.addEventListener("click", () => {
       const tab = state.tab;
       if (tab === "artifacts") state.shown += PAGE;
-      else if (tab === "widgets") { state.shown += PAGE; if (state.widgets.next != null) ask("widgets", true); }
+      else if (tab === "widgets") { state.shown += PAGE; if (state.widgets.next != null || state.charts.next != null) ask("widgets", true); }
       else ask(tab, true);
       draw();
     });
@@ -674,14 +766,38 @@
           // No artifacts in this DGC: no Artifacts tab. Widgets is ChatDGC's own list and the cards among the
           // artifacts: its tab is there while this DGC keeps either.
           if (msg.on !== true) { state.artifacts.items = []; state.artifacts.loaded = true; }
-          offer("artifacts", msg.on === true); offer("widgets", msg.on === true || state.widgets.live);
+          offer("artifacts", msg.on === true); offer("widgets", msg.on === true || state.widgets.live || state.charts.live);
           return;
         case "widgetsOffered":
           state.widgets.live = msg.on === true;
           if (!state.widgets.live) { state.widgets.rows = []; state.widgets.loaded = true; }
-          offer("widgets", state.widgets.live || state.offered.artifacts);
+          offer("widgets", state.widgets.live || state.offered.artifacts || state.charts.live);
           if (started) { draw(); fresh(); }
           return;
+        case "chartsOffered": case "workFilesOffered": {
+          // This DGC lists them (or no longer does): the tab on screen is asked again, with them.
+          const t = msg.type === "chartsOffered" ? state.charts : state.work, on = msg.on === true;
+          if (t.live === on) return;
+          t.live = on; if (!on) { t.rows = []; t.next = null; t.loaded = false; }
+          if (msg.type === "chartsOffered") offer("widgets", state.widgets.live || state.offered.artifacts || on);
+          if (started) draw();
+          // (Listed from now: the tab on screen is asked for them, and only for them.)
+          t.sig = null; if (started) fresh();
+          return;
+        }
+        case "charts": {
+          if (!state.charts.live) return;
+          const found = (Array.isArray(msg.charts) ? msg.charts : []).filter((c) => c && typeof c.id === "string" && typeof c.chat_id === "string");
+          state.charts.rows = Number(msg.offset) > 0 ? [...state.charts.rows, ...found.filter((c) => !state.charts.rows.some((x) => x.id === c.id && x.chat_id === c.chat_id))] : found;
+          state.charts.next = next(msg.next); state.charts.loaded = true; draw(); return;
+        }
+        case "workFiles": {
+          if (!state.work.live || Number(msg.seq) !== state.work.seq) return;        // an answer to a search since replaced
+          const found = (Array.isArray(msg.files) ? msg.files : []).filter((f) => f && typeof f.ref === "string" && f.ref);
+          state.work.rows = Number(msg.offset) > 0 ? [...state.work.rows, ...found.filter((f) => !state.work.rows.some((x) => x.ref === f.ref))] : found;
+          state.work.next = next(msg.next); state.work.loaded = true; draw(); return;
+        }
+        case "workFileData": setPic(`workfile:${String(msg.ref || "")}`, msg); return;
         case "workImagesOffered": if (msg.on !== true) { state.images.rows = []; state.images.loaded = true; } offer("images", msg.on === true); return;
         case "videosOffered": if (msg.on !== true) { state.videos.rows = []; state.videos.loaded = true; } offer("videos", msg.on === true); return;
         case "artifacts":
@@ -730,12 +846,12 @@
         }
         // Made, changed or removed somewhere: every tab is asked again when it next shows, the one on screen now.
         case "artifactChanged": sig.artifacts = sig.widgets = null; if (showing && (state.tab === "artifacts" || state.tab === "widgets")) ask(state.tab); return;
-        case "changed": case "refresh": for (const id of TAB_IDS) sig[id] = null; fresh(true); draw(); return;
+        case "changed": case "refresh": for (const id of TAB_IDS) sig[id] = null; state.charts.sig = state.work.sig = null; fresh(true); draw(); return;
         case "error":
           // (The host could not answer something the Library asked: said in the status line, the lists left as they are.)
           state.files.asked.length = 0;
           state.error = String(msg.message || "The Library couldn't be read.").slice(0, 300);
-          state.artifacts.loaded = state.files.loaded = state.widgets.loaded = true; draw(); state.error = ""; return;
+          state.artifacts.loaded = state.files.loaded = state.widgets.loaded = state.charts.loaded = state.work.loaded = true; draw(); state.error = ""; return;
         default: return;
       }
     }
@@ -744,7 +860,7 @@
     return {
       message,
       /** It is on screen: what it shows is asked for again (made, changed or removed since). */
-      shown() { showing = true; for (const id of TAB_IDS) sig[id] = null; draw(); fresh(true); },
+      shown() { showing = true; for (const id of TAB_IDS) sig[id] = null; state.charts.sig = state.work.sig = null; draw(); fresh(true); },
       hidden() { showing = false; },
       /** Shows one of its tabs (Home's Widgets and Artifacts cards). */
       view(tab) { message({ type: "view", view: tab }); },
@@ -752,7 +868,7 @@
     };
   }
 
-  root.DgcLibrary = Object.freeze({ mount, age, TABS: TAB_IDS });
+  root.DgcLibrary = Object.freeze({ mount, age, chartMark, TABS: TAB_IDS });
 
   // ---- in its own editor tab (the page src/chatdgc.ts serves): the same Library, full width ---------------------------------------
   const page = typeof document !== "undefined" ? document.getElementById("library-root") : null;

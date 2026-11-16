@@ -39,7 +39,7 @@ body.vscode-light{color-scheme:light;--need:#A86A12;--need-text:#8F5600;--sel:co
 :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible{outline:1px solid var(--focus);outline-offset:1px}
 button{cursor:pointer;border:0}button:disabled{opacity:.5;cursor:default}
 a{color:var(--link);text-underline-offset:3px}a:hover{color:var(--link);text-decoration-thickness:2px}
-code{font-family:var(--mono);font-size:11px;padding:1px 5px;border-radius:4px;background:var(--surface2)}
+code{font-family:var(--mono);font-size:11px;padding:1px 5px;border-radius:var(--r-code,4px);background:var(--code-chip, color-mix(in srgb, currentColor 10%, transparent))}
 svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 
 /* ---- The shell: labeled navigation, with a compact icon rail in narrow tabs ---- */
@@ -265,7 +265,7 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 .plugin-key .key-sign-in{margin:12px 0}.sign-in-scopes{border:1px solid var(--border);border-radius:10px;padding:4px 14px 2px;margin:12px 0 0;min-width:0}.sign-in-scopes legend{padding:0 6px;font-weight:500;font-size:13px}.sign-in-scopes>.note{margin:6px 0 2px}.sign-in-scopes .review-choice{padding:8px 0;gap:10px}.sign-in-scopes .review-choice strong{display:inline;font-weight:500}.sign-in-scopes .review-choice span span{margin-top:1px}.sign-in-scopes .review-choice:last-child{border-bottom:0}.sign-in-scopes .review-choice.always{opacity:.85}.sign-in-scopes .review-choice input{width:16px;min-width:16px;height:16px;padding:0;flex:none}.sign-in-scopes code{font-size:11px;color:var(--muted);margin-left:8px}
 .scope-tag{display:inline-block;margin-left:8px;padding:0 7px;border-radius:999px;background:var(--sel);color:var(--muted);font-size:11px;font-style:normal;font-weight:400}.scope-tag.asked{background:color-mix(in srgb,var(--need) 18%,transparent);color:var(--need-text)}
 .plugin-key .scope-summary{margin:12px 0 0}.plugin-key .scope-change,.plugin-key .scope-note{margin:8px 0 0}
-.banner .signin-code{font-size:14px;letter-spacing:.08em;user-select:all;padding:1px 6px;border-radius:6px;background:var(--surface2)}
+.banner .signin-code{font-size:14px;letter-spacing:.08em;user-select:all;padding:1px 6px;border-radius:var(--r-code,4px);background:var(--code-chip, color-mix(in srgb, currentColor 10%, transparent))}
 
 /* ---- A Model box: the models at its card's own host in a list under the box; any name can still be typed ---- */
 .field>.model-box,.model-choice>.model-box{position:relative;display:flex;align-items:center}

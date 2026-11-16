@@ -42,7 +42,7 @@ test("a chat's “…” has Archive: it asks the host, with no question", async
     await x.page.hover("#chats-list .chat-row:nth-child(2)");
     await x.page.click("#chats-list .chat-row:nth-child(2) .session-more");
     assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll(".dgc-menu [role='menuitem']")].map((r) => [r.dataset.id, r.querySelector(".dgc-menu-label").textContent, !!r.querySelector(".dgc-pop-icon svg path")])),
-      [["open", "Open in editor", true], ["pin", "Pin to the dock", true], ["archive", "Archive", true]]);
+      [["open", "Open in editor", true], ["pin", "Pin to the dock", true], ["archive", "Archive", true], ["delete", "Delete chat…", true]]);
     await x.page.click(".dgc-menu [data-id='archive']");
     assert.deepEqual(await sent(x), [{ type: "chatdgcArchive", id: "chat_2", title: "Rent or buy: the numbers" }]);
     assert.deepEqual(x.errors, []);

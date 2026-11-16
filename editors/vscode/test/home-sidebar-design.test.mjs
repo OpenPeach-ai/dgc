@@ -59,7 +59,9 @@ for (const theme of THEMES) for (const width of WIDTHS) {
         const cardEdges = cards.length ? [["cards, left", Math.round((Math.min(...cards.map((c) => c.left)) - inner.left) * 10) / 10], ["cards, right", Math.round((inner.right - Math.max(...cards.map((c) => c.right))) * 10) / 10]] : [];
         const left = [".hc-back", ".dgc-hub-head h2", ".hc-earlier", "#sessions-search", "#chats-search", ".dgc-pagehead-title", "#sessions-list .session-blob", "#chats-list > .chat-row .session-blob",
           "#projects-title", "#chats-sub", "#sessions-all"].flatMap((s) => at(s, "left"));
-        const right = [".dgc-hub-clear", "#sessions-new", "#chats-new", "#sessions-list .session-age", "#chats-list > .chat-row .session-age", ".project-count"].flatMap((s) => at(s, "right"));
+        // (16 Nov: under 400px a row's icon buttons are in its “…”, which is on every row after its age): there the “…” is what ends on the edge, on every row that has one.
+        const narrow = innerWidth < 400, ends = narrow ? ["#sessions-list .session-row .session-more", "#chats-list > .chat-row .session-more", ".project-row .session-more"] : ["#sessions-list .session-age", "#chats-list > .chat-row .session-age", ".project-count"];
+        const right = [".dgc-hub-clear", "#sessions-new", "#chats-new", ...ends].flatMap((s) => at(s, "right"));
         const bar = document.querySelector("#side-tabs .dgc-tabs-bar").getBoundingClientRect();
         // A blob is 20 px in a 24 px box that stands on the edge, as a codicon's glyph stands in its own.
         return { left: [...left, ...cardEdges.slice(0, 1)], right: [...right, ...cardEdges.slice(1)], bar: [Math.round(bar.left * 10) / 10, Math.round((innerWidth - bar.right) * 10) / 10], sideways: host.scrollWidth > host.clientWidth + 1 };

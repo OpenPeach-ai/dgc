@@ -51,7 +51,7 @@ const hidden = (a) => said(a.unseen.filter((x) => !/label\.switch > input/.test(
 
 // ---- a touch screen: nothing that acts is shown only to a pointer's hover ---------------------------------------------
 for (const theme of ["dark", "light"]) {
-  test(`touch: Home's folder tiles show New session and the pin without a hover (${theme})`, async (t) => {
+  test(`touch: Home's folder tiles show New work and the pin without a hover (${theme})`, async (t) => {
     if (skipOrFail(t)) return;
     const { top, end } = await walk("home-grid", { width: 700, theme, touch: true }, ["top", "end"]);
     assert.equal(await Promise.resolve(top.width), 700);

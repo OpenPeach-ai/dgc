@@ -70,7 +70,9 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     try {
       const hub = await x.hub(), bar = await x.tabs();
       assert.deepEqual(hub.groups.map((g) => [g.name, g.count]), [["Needs you", "1"], ["New", "3"]], "Mail watch needs you; Morning brief, Garden notes and Billing review have news");
-      assert.equal(bar.tabs.find((b) => b.id === "home").count, "4");
+      // (Home's number is what needs you; the three with news are in its words, never in the number: 16 Nov.)
+      assert.equal(bar.tabs.find((b) => b.id === "home").count, "1");
+      assert.equal(bar.tabs.find((b) => b.id === "home").label, "Home: 1 needs you, 3 new");
       const heads = await x.page.evaluate(() => { const probe = document.createElement("i"); document.body.append(probe); probe.style.color = "var(--text)"; const text = getComputedStyle(probe).color; probe.remove();
         return { text, heads: [...document.querySelectorAll("#home-hub .dgc-hub-head h2")].map((h) => { const s = getComputedStyle(h); return [s.fontSize, s.fontWeight, s.color, s.textTransform]; }) }; });
       for (const head of heads.heads) assert.deepEqual(head, ["12px", "500", heads.text, "none"], "a group's name: 12px medium, sentence case");

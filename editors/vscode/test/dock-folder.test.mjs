@@ -1,7 +1,7 @@
 // A Work folder on the dock (asked 13 Nov: "how can i Pin a folder directory on to the dock?"). A folder is pinned from
 // a Project Folder dropdown's row and from a Folders card's tile (the dropdown's first line that pinned the chosen folder went on 14 Nov: each row's own pin does it); on the dock it is his folder icon
 // in the folder's own kept palette with the folder's name on its label, still unless something in it runs; a click
-// opens Work on that folder; its menu has New session here, Open in new window and Unpin; it shows in every window; a
+// opens Work on that folder; its menu has New work here, Open in new window and Unpin; it shows in every window; a
 // folder that is gone is dimmed and says "Not found". The host's side (src/dock.ts, bundled against a stub `vscode`)
 // first, then the page in real Chromium on the real side bar.
 import { after, before, test } from "node:test";
@@ -114,7 +114,7 @@ test("pin from a Folders card tile; on the Work page the Project Folder menu has
     const p = x.page, tile = p.locator('.hc-card[data-card="folders"] .hc-tile[data-name="rust_ire"]'), pin = tile.locator(".hc-pin");
     assert.equal(Number(await pin.evaluate((n) => getComputedStyle(n).opacity)), 0);
     await tile.hover(); await x.rest();
-    assert.equal(await shown(pin), 1, "pointed at: the tile's pin shows beside New session here");
+    assert.equal(await shown(pin), 1, "pointed at: the tile's pin shows beside New work here");
     assert.equal(await pin.getAttribute("aria-label"), "Pin to the dock: rust_ire");
     await pin.click(); await x.rest(200);
     assert.deepEqual(await folderPins(x), [["rust_ire", "/home/me/rust_ire"]]);
@@ -169,7 +169,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
   });
 }
 
-test("a click on a pinned folder opens the Work tab on that folder; its menu: New session here, Open in new window, Unpin; a gone folder opens nothing", async (t) => {
+test("a click on a pinned folder opens the Work tab on that folder; its menu: New work here, Open in new window, Unpin; a gone folder opens nothing", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { width: 460, pins: [], tab: "home" });
   try {
@@ -184,8 +184,8 @@ test("a click on a pinned folder opens the Work tab on that folder; its menu: Ne
     assert.equal((await x.posted("dockOpen")).length, 0, "the page opens it itself: there is no editor tab to open");
     await tile.click({ button: "right" }); await x.settle();
     const menu = (await dockNow(p)).menu;
-    assert.deepEqual(menu.slice(0, 3), ["New session here", "Open in new window", "Unpin"]);
-    await p.locator(".dgc-pop .dgc-menu-row", { hasText: "New session here" }).click(); await x.settle();
+    assert.deepEqual(menu.slice(0, 3), ["New work here", "Open in new window", "Unpin"]);
+    await p.locator(".dgc-pop .dgc-menu-row", { hasText: "New work here" }).click(); await x.settle();
     assert.deepEqual((await x.posted("newSessionInEditor")).at(-1), { type: "newSessionInEditor", folder: GARDEN });
     await tile.click({ button: "right" }); await x.settle();
     await p.locator(".dgc-pop .dgc-menu-row", { hasText: "Open in new window" }).click(); await x.settle();
@@ -196,7 +196,7 @@ test("a click on a pinned folder opens the Work tab on that folder; its menu: Ne
     await goneTile.click(); await x.settle();
     assert.equal((await x.posted("projectFolderChoose")).length, before, "a gone folder opens nothing");
     await goneTile.click({ button: "right" }); await x.settle();
-    assert.deepEqual((await dockNow(p)).menu.slice(0, 3), ["New session here (off)", "Open in new window (off)", "Unpin"]);
+    assert.deepEqual((await dockNow(p)).menu.slice(0, 3), ["New work here (off)", "Open in new window (off)", "Unpin"]);
     await p.locator(".dgc-pop .dgc-menu-row", { hasText: "Unpin" }).click(); await x.settle();
     assert.deepEqual(await folderPins(x), [["garden-notes", GARDEN]], "Unpin takes it off the dock");
     // By the keyboard: Enter opens, as every dock item.

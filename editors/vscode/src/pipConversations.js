@@ -1,3 +1,4 @@
+import '../media/shared/icons.js';
 // Several conversations per Pip (Pips API 79, pip_conversations). One Pip keeps its name, memory, computers and
 // routines, with as many conversations as you start. Its name in the chat's top bar opens them as a menu: New
 // conversation, then each one, the newest first, with a dot when it has something unread, a ring while the Pip is
@@ -52,9 +53,9 @@ const ageWords = age => age === 'now' ? 'just now' : age.replace(/^(\d+)(mo|m|h|
   return `${n} ${unit}${n === '1' ? '' : 's'} ago`;
 });
 
-const PLUS = '<svg class="conv-plus" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3.25v9.5M3.25 8h9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+const PLUS = globalThis.DgcIcons.html('add', {size: 14, cls: 'conv-plus'});      // New and More: the one glyph each has everywhere (media/shared/icons.js)
 const CHEVRON = open => `<svg class="conv-chevron" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="${open ? 'm4 6 4 4 4-4' : 'm6 4 4 4-4 4'}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-const DOTS = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
+const DOTS = globalThis.DgcIcons.html('more');
 
 /** How many computers it has, in words. */
 export const computersWords = n => `It has ${n} computer${n === 1 ? '' : 's'}.`;

@@ -95,7 +95,8 @@ test("the Pips that need you and the ones with news are cards on Home, each with
     assert.deepEqual(m.map((c) => c.answers), [["Review"], ["Open"]], "an older DGC keeps no dismiss: one answer each");
     const loaded = await page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-plush-rig > image:first-child")].every((i) => new URL(i.getAttribute("href"), document.baseURI).pathname === "/ext/media/pips/plush-bodies.webp"));
     assert.equal(loaded, true, "the real faces");
-    assert.equal(await page.evaluate(() => document.getElementById("side-tab-home-count").textContent), "2", "Home's number");
+    assert.equal(await page.evaluate(() => document.getElementById("side-tab-home-count").textContent), "1", "Home's number: the one that needs you");
+    assert.equal(await page.getAttribute("#side-tab-home", "aria-label"), "Home: 1 needs you, 1 new", "the one with news is in its words");
     await page.click('#home-hub .dgc-hub-card:has-text("India Market Brief") [data-hub-act="open"]');
     await page.waitForFunction(() => !document.getElementById("pips-host").hidden);
     assert.equal(await page.evaluate(() => document.getElementById("sessions-host").hidden), true, "the Pips view opens in Home's place");
@@ -204,11 +205,12 @@ test("100 Pips, 17 waiting and 20 with news: eight cards of each and a line for 
       const group = (id) => { const g = document.querySelector(`#home-hub .dgc-hub-group[data-group="${id}"]`); return { count: g.querySelector(".dgc-hub-n").textContent, cards: g.querySelectorAll(".dgc-hub-card").length, rest: g.querySelector(".dgc-hub-rest")?.textContent || "",
         titles: [...new Set([...g.querySelectorAll(".dgc-card-title")].map((x) => x.textContent))] }; };
       const tabs = document.getElementById("side-tabs").getBoundingClientRect();
-      return { needs: group("needs"), fresh: group("new"), home: document.getElementById("side-tab-home-count").textContent, tabsBottom: Math.round(tabs.bottom), all: document.querySelectorAll("#home-hub .dgc-hub-card").length };
+      return { needs: group("needs"), fresh: group("new"), home: document.getElementById("side-tab-home-count").textContent, heard: document.getElementById("side-tab-home").getAttribute("aria-label"), tabsBottom: Math.round(tabs.bottom), all: document.querySelectorAll("#home-hub .dgc-hub-card").length };
     });
     assert.deepEqual(m.needs, { count: "17", cards: 8, rest: "Show 9 more", titles: ["1 thing is waiting for you"] }, "what waits for you first: eight cards, and the rest a click away");
     assert.deepEqual(m.fresh, { count: "20", cards: 8, rest: "Show 12 more", titles: ["1 run failed"] }, "then the 20 with news, the same way");
-    assert.equal(m.home, "37", "Home's number counts every one of them");
+    assert.equal(m.home, "17", "Home's number counts every one that waits");
+    assert.equal(m.heard, "Home: 17 need you, 20 new", "and its words count every one with news");
     // Before the cap a list of all 37 was two screens long before anything else: sixteen cards at most until you ask.
     assert.equal(m.all, 16);
     assert.ok(m.tabsBottom <= 84, `the tabs stay at the top, under the header row: ${m.tabsBottom}px`);

@@ -26,6 +26,7 @@
 @import url("./shared/pipswelcome.css");
 @import url("./shared/folderpick.css");
 @import url("./shared/links.css");
+@import url("./shared/inline.css");
 @import url("./shared/effort.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
@@ -241,6 +242,18 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 /* Its "..." is open: the row keeps its actions while the menu has the pointer and the keyboard. */
 #sessions-host .session-row:has(.session-more[aria-expanded="true"]) :is(.session-age, .session-live) { visibility:hidden; }
 #sessions-host .session-row:has(.session-more[aria-expanded="true"]) .session-actions { display:inline-flex; }
+/* A narrow side bar (under 400px): a row's icon buttons don't fit beside its name (pointed at, the four of them lay over
+   near half of it), so they are in the row's "…" menu, and the "…" is on every row, after its age: nothing needs the
+   pointer on the row first, and Tab reaches it (his rule for every list, 16 Nov). A pinned row keeps its pin in sight.
+   A row with no "…" (an archived one: Restore and Delete) keeps its own two buttons, in sight too. */
+@media (max-width: 399px) {
+  #sessions-host .session-row .session-actions { display:inline-flex !important; position:static !important; transform:none !important; padding-left:0 !important; min-width:0 !important; background:none !important; -webkit-mask-image:none !important; mask-image:none !important; }
+  #sessions-host .session-row:has(.session-more) .session-actions > :not(.session-more):not(.dgc-pin[aria-pressed="true"]) { display:none !important; }
+  #sessions-host .session-row:is(:hover, :focus-within) :is(.session-age, .session-live, .project-count),
+  #sessions-host .session-row:has(.session-more[aria-expanded="true"]) :is(.session-age, .session-live, .project-count) { visibility:visible; }
+  /* (Its age stays beside the "…" while the row is pointed at: on the hover wash it is a step firmer, as the line under the name is.) */
+  #sessions-host .session-row:is(:hover, :focus-within) :is(.session-age, .project-count) { color:color-mix(in srgb, var(--text) 80%, transparent); }
+}
 #sessions-host .session-tab-words { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 #sessions-host .session-open, #sessions-host .session-delete { flex:none; display:inline-flex; align-items:center; justify-content:center; width:var(--control-sm); height:var(--control-sm);
   padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--home-quiet); cursor:pointer; }
@@ -772,6 +785,10 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
    first took a fraction of a pixel from the name, and that is enough for an ellipsis on it. */
 .chip.made-file:has(> .chip-caption) .chip-label { flex-shrink: 0; max-width: 60%; }
 .made-files > li { min-width: 0; max-width: 100%; }
+/* A file's chip with its "…" beside it (media/shared/filemenu.js): one item of the row, never split over two lines. */
+:is(.made-files, .prompt-atts) > li.file-card { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; }
+:is(.made-files, .prompt-atts) > li.file-card > .chip { min-width: 0; }
+.made-image-acts { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .chip.made-file .chip-caption { border-left: 1px solid var(--border); padding-left: 6px; }
 /* A shown image: the picture with its caption under it. One alone may use the card's width, as a
    viewed one does; several sit in a row of tiles. */
@@ -901,7 +918,9 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 @media (prefers-reduced-motion: reduce) { .ts-chev { transition: none; } }
 .code-language { display: block; color: var(--muted); font: var(--t-xs)/1.45 var(--mono); margin-bottom: var(--sp-3); user-select: none; }
 .text b { font-weight: var(--w-bold); color: var(--text-strong); } .text i { font-style: italic; }
-.text code { font-family: var(--mono); font-size: .88em; background: var(--surface2); color: var(--text); padding: .12em .4em; border-radius: var(--r-sm); }
+/* Inline code, a path or a command in a line of words: the 4px corner (--r-code, his call of 16 Nov; at the bubble's 10 a
+   19px-tall chip is a pill). One token on every surface; a fenced block keeps its own. */
+.text code { font-family: var(--mono); font-size: .88em; background: var(--code-chip, color-mix(in srgb, currentColor 10%, transparent)); color: var(--text); padding: .12em .4em; border-radius: var(--r-code, 4px); }
 /* What the model says between tool groups is the thread a reader follows through the turn --
    "let me read the remaining core files, and why" is a real answer, not an aside. It used to
    be dimmed and a step smaller, which read as unimportant. Same colour and size as any other
@@ -1818,7 +1837,7 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 .perm-call-inputs dt { color: var(--muted); }
 .perm-call-inputs dd { margin: 0; color: var(--text); white-space: pre-wrap; max-height: 14em; overflow: auto; }
 .set-hint { text-transform: none; letter-spacing: 0; font-weight: var(--w-reg); color: var(--muted); }
-.set-hint code { font-family: var(--mono); background: var(--surface2); color: var(--muted); padding: 0 var(--sp-1); border-radius: var(--r-sm); }
+.set-hint code { font-family: var(--mono); background: var(--code-chip, color-mix(in srgb, currentColor 10%, transparent)); color: var(--muted); padding: 0 var(--sp-1); border-radius: var(--r-code, 4px); }
 /* Outside the composer box. --muted,
    never --faint: --faint is VS Code's disabledForeground, rgba(97,97,97,.5) in the light themes,
    which reads 2.13:1 under Light Modern and 2.09:1 under Light+. This line tells the reader what
@@ -1862,7 +1881,7 @@ button.act.danger { color: var(--err-text); }
 .surface-detail-head h2, .surface-subtitle { margin: var(--sp-2) 0 var(--sp-1); color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.2 var(--sans); }
 .surface-markdown { color: var(--text); font: var(--w-reg) var(--t-sm)/1.6 var(--sans); overflow-wrap: anywhere; }
 .surface-markdown pre { overflow-x: auto; padding: var(--sp-2) var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--code); white-space: pre-wrap; font-family: var(--mono); }
-.surface-markdown code { font-family: var(--mono); background: var(--surface2); padding: 0 var(--sp-1); border-radius: var(--r-sm); }
+.surface-markdown code { font-family: var(--mono); background: var(--code-chip, color-mix(in srgb, currentColor 10%, transparent)); padding: 0 var(--sp-1); border-radius: var(--r-code, 4px); }
 .surface-form { display: flex; flex-direction: column; gap: var(--sp-3); }
 .surface-form label { display: flex; flex-direction: column; gap: var(--sp-1); color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 .surface-form input, .surface-form select, .surface-form textarea, .surface-inline-form input, .surface-inline-form select { color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-2); width: 100%; resize: vertical; }

@@ -56,7 +56,7 @@ const list = () => {
       size: s && [s.width, s.height], right: s && Math.round(s.right * 2) / 2, afterRow: !!s && s.left >= r.right - 0.5, inHome: !!s && s.right <= home.right + 0.5,
       centred: !!s && Math.abs((s.top + s.bottom) / 2 - (r.top + r.bottom) / 2) <= 1.5, nameWidth: box(name).width, nameCut: name.scrollWidth > name.clientWidth + 1,
       filter: getComputedStyle(line ? line.firstElementChild : row).filter, switchFilter: sw ? getComputedStyle(sw).filter : "", opacity: getComputedStyle(line ? line.firstElementChild : row).opacity }; });
-  const things = [...root.querySelectorAll(".simple-home [role=switch], .simple-home .pip-row-marks, .simple-home .job-pin, .simple-home .pip-row-name, .simple-home .pip-row-copy small, .simple-home .pip-row .avatar")].filter(seen);
+  const things = [...root.querySelectorAll(".simple-home [role=switch], .simple-home .pip-row-marks, .simple-home .job-pin, .simple-home .job-more, .simple-home .pip-row-name, .simple-home .pip-row-copy small, .simple-home .pip-row .avatar")].filter(seen);
   const over = []; for (let i = 0; i < things.length; i++) for (let j = i + 1; j < things.length; j++) { const a = box(things[i]), b = box(things[j]);
     if (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5 && !things[i].contains(things[j]) && !things[j].contains(things[i])) over.push(`${things[i].className} / ${things[j].className}`); }
   return { rows, over, sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1, alert: root.querySelector("[role=alert]")?.textContent.trim() || "" };
@@ -68,7 +68,7 @@ function checkList(m, width) {
   assert.equal(new Set(switched.map((r) => r.right)).size, 1, "the switches line up down the list's right edge");
   assert.deepEqual(m.over, [], "nothing lies on anything else");
   assert.equal(m.sideways, false, "nothing scrolls sideways");
-  assert.deepEqual(m.rows.filter((r) => r.nameCut && r.nameWidth < (width > 400 ? 300 : 90)).map((r) => r.name), [], "a long name keeps room to be read before it is cut short");
+  assert.deepEqual(m.rows.filter((r) => r.nameCut && r.nameWidth < (width > 400 ? 300 : 58)).map((r) => r.name), [], "a long name keeps room to be read before it is cut short (under 400px its row's ⋯ is always there and takes the room the pin took when it showed: 16 Nov; it was 90 with no pin)");
   for (const r of m.rows) { assert.equal(r.filter, r.off ? "grayscale(1)" : "none", `${r.name}: black and white only when off`); if (r.has) assert.equal(r.switchFilter, "none", "the switch stays as clear"); }
 }
 

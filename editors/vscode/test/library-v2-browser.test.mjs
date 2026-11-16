@@ -230,7 +230,8 @@ for (const place of ["side", "tab"]) {
       for (const r of l.rows) assert.equal(r.thumb, "img", `${r.title} shows its picture`);
       assert.deepEqual(l.rows.map((r) => [r.by, r.maker, r.when]), [["kept by", "Tile checker", "12m"], ["made by", "Rent or buy: the numbers", "45m"], ["made by", "Fix totals", "3h"], ["made in the terminal", "", "4d"]]);
       assert.deepEqual(l.rows.map((r) => r.makerIs), ["BUTTON", "BUTTON", "BUTTON", ""], "a name with somewhere to go back to is a link");
-      assert.match(l.rows[0].tip, /The chart for the supplier call/, "why it was kept is said on the row");
+      assert.match(l.rows[0].tip, /The chart for the supplier call/, "why it was kept is said on the row: its name's label, and what a screen reader hears");
+      assert.match(l.rows[0].said, /The chart for the supplier call/);
       assert.equal((await asked(x, "workImage")).length, 4, "each picture is read from the host");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }

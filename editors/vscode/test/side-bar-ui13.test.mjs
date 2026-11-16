@@ -550,7 +550,10 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [640, 3
       const fresh = hub.groups.find((g) => g.id === "new").cards.map((c) => c.key);
       assert.deepEqual(fresh.slice(0, 2), [key, "chat:chat_2"], "in the same place: under New with the chat's, the newest first");
       assert.match(card.who, /^mark:/, "with the session's own mark");
-      assert.equal((await x.tabs()).tabs.find((tab) => tab.id === "home").count, String(hub.cards.length), "Home's number counts it");
+      // (What is new is in Home's words, never in its number, which is what needs you: 16 Nov.)
+      { const home = (await x.tabs()).tabs.find((tab) => tab.id === "home"), needs = hub.groups.find((g) => g.id === "needs")?.cards.length || 0;
+        assert.match(home.label, new RegExp(`${hub.cards.length - needs} new$`), `Home's words count it (${home.label})`);
+        assert.equal(home.count, needs ? String(needs) : "", "and its number stays what needs you"); }
       // The same list again (the host repeats what is still news) changes nothing.
       await x.send({ type: "sessions_list", items: quietSessions, error: "", news: [{ id, at, preview: said }] });
       await settle(p);

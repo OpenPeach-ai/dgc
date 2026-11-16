@@ -49,9 +49,9 @@ for (const theme of ["dark", "light"]) for (const [where, width] of PLACES) {
       assert.equal(f.choices["max-width"], f.replies[0]["max-width"], "choices and replies share one measure");
       assert.ok(f.choices.right <= right + 1 && f.replies.every((r) => r.right <= right + 1));
       // Corners on the shared scale: yours is the sent bubble's 10 on every corner, as in Work and ChatDGC (16 Nov; it was
-      // 20 with a 7.5 tail); the Pip's keeps 20 with its tail; 10 for a row; and nothing in the chat casts a shadow.
+      // 20 with a 7.5 tail); the Pip's reply has the same 10 and no tail (16 Nov); 10 for a row; and nothing in the chat casts a shadow.
       for (const b of f.prompts) assert.deepEqual([b["border-top-left-radius"], b["border-bottom-right-radius"], b["box-shadow"]], ["10px", "10px", "none"], say(b));
-      for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["border-bottom-left-radius"], r["box-shadow"], r["border-top-width"]], ["20px", "7.5px", "none", "0px"], say(r));
+      for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["border-bottom-left-radius"], r["box-shadow"], r["border-top-width"]], ["10px", "10px", "none", "0px"], say(r));
       for (const c of f.choices.rows) assert.equal(c["border-top-left-radius"], "10px");
       assert.equal(f.form["border-top-left-radius"], "6px", "the box keeps the composer's corner (the buttons' 6 px since 14 Nov)");
       // The 4 px unit: a bubble's padding, the gap inside a message, the space between turns.
@@ -130,7 +130,7 @@ for (const theme of ["dark", "light"]) for (const [where, width] of PLACES) {
       for (const r of f.replies) assert.ok(near(r.left, left) && r.right <= right + 1);
       assert.ok(near(f.doc.left, left) && f.doc.right <= right + 1, "the document card sits in the column");
       for (const c of f.chips) assert.ok(c.left >= left - 1 && c.right <= right + 1 && c.ink.ratio >= 4.5, `a chip is in the column and ${c.ink.ratio}:1`);
-      for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["box-shadow"], r["padding-top"], r["padding-left"]], ["20px", "none", "8px", "12px"]);
+      for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["box-shadow"], r["padding-top"], r["padding-left"]], ["10px", "none", "8px", "12px"]);
       for (const x of f.times) assert.ok(x.ink.ratio >= 4.5 && x["font-size"] === "11px", `a time is ${x.ink.ratio}:1 at ${x["font-size"]}`);
       for (const i of [f.doc.name, f.doc.meta, f.placeholder, ...f.replies.map((r) => r.ink), ...f.prompts.map((b) => b.ink)]) assert.ok(i.ratio >= 4.5, `${i.ratio}:1`);
       for (const c of [...f.controls, ...f.topbar]) assert.ok(c.ink.ratio >= 3, `${c.id} is ${c.ink.ratio}:1`);

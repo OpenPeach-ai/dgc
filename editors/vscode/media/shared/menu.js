@@ -14,7 +14,8 @@
 
   const CHECK = '<svg class="dgc-menu-check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   /**
-   * Grouped rows as HTML. `groups`: [{ name?, rows: [{ id, icon?, label, sub?, hint?, checked?, classes?, attrs? }] }].
+   * Grouped rows as HTML. `groups`: [{ name?, rows: [{ id, icon?, svg?, label, sub?, hint?, checked?, classes?, attrs? }] }].
+   * `svg`: the row's glyph already drawn (DgcIcons.html), for a view that can't reach the icon font (the Pips view).
    * A group with a name gets a small heading; groups are parted by a hairline. `role` is "menuitem" for actions and
    * "menuitemradio" for a picker (then `checked` marks the chosen row, and `check` adds a check mark it shows). `sub` is
    * one quiet line under the row's name, which may wrap (a Pip's level says what it means). `data` names the data-* key
@@ -31,7 +32,8 @@
         const attrs = row.attrs ? ` ${row.attrs}` : "";
         const label = `<span class="dgc-menu-label">${esc(row.label)}</span>`;
         return `<button type="button" role="${role}" class="${classes}" data-${data}="${esc(row.id)}"${checked}${attrs}>`
-          + (row.icon ? `<span class="dgc-menu-icon codicon codicon-${esc(row.icon)}" aria-hidden="true"></span>` : "")
+          + (row.svg ? `<span class="dgc-menu-icon" aria-hidden="true">${row.svg}</span>`
+            : row.icon ? `<span class="dgc-menu-icon codicon codicon-${esc(row.icon)}" aria-hidden="true"></span>` : "")
           + (sub ? `<span class="dgc-menu-words">${label}<span class="dgc-menu-sub">${esc(row.sub)}</span></span>` : label)
           + hintHtml(row.hint) + (check && role === "menuitemradio" ? CHECK : "") + "</button>";
       }).join("")).join("");
@@ -41,7 +43,7 @@
   // in a .dgc-menu-item with its row, never inside it (a button can't hold a button); Right reaches it from its row, Left
   // goes back. `pill` is a small word at a row's right end: Main and Fallback in a model picker. The pill and the ⋯ share
   // that end: the pill at rest, the ⋯ while the row is hovered or focused, so every row's pill lines up at the edge.
-  const DOTS = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
+  const DOTS = '<svg class="dgc-icon" data-icon="more" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
   const more = (label, attrs = "", open = false) =>
     `<button type="button" class="dgc-menu-more" aria-label="${esc(label)}" aria-haspopup="true" aria-expanded="${open ? "true" : "false"}"${attrs ? ` ${attrs}` : ""}>${DOTS}</button>`;
   const pill = (text, kind = "") => `<span class="dgc-menu-pill${kind ? ` dgc-menu-pill-${esc(kind)}` : ""}">${esc(text)}</span>`;

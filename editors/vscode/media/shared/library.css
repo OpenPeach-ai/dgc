@@ -65,18 +65,24 @@
 /* ---- the rows: a small picture or the kind's sheet, the title on one line, and who made it under it ---- */
 .dgc-lib .lib-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .dgc-lib .lib-list:empty { display: none; }
-.dgc-lib .lib-row { position: relative; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; min-width: 0; min-height: 48px; margin: 0 calc(-1 * var(--lib-bleed, 8px)); padding: 4px calc(var(--lib-bleed, 8px) - 1px);
+.dgc-lib .lib-row { position: relative; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; min-width: 0; min-height: 54px; margin: 0 calc(-1 * var(--lib-bleed, 8px)); padding: 4px calc(var(--lib-bleed, 8px) - 1px);
   border: 1px solid transparent; border-radius: var(--btn-r); cursor: pointer; user-select: none; }
 .dgc-lib .lib-row:hover { background: var(--row-hover); }
 .dgc-lib .lib-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 /* (Flex, not grid: a sheet a little taller than its place stays centred on the row's words.) */
-.dgc-lib .lib-row-thumb { flex: none; display: flex; align-items: center; justify-content: center; width: 32px; height: 38px; line-height: 0; color: var(--muted); }
+/* (One row height at every width, 54px, his call of 16 Nov: the narrow side bar's rows were 48 and lost height
+   beside the wide ones. The picture and the sheet are the same size everywhere too.) */
+.dgc-lib .lib-row-thumb { flex: none; display: flex; align-items: center; justify-content: center; width: 36px; height: 44px; line-height: 0; color: var(--muted); }
 .dgc-lib .lib-row-thumb > * { flex: none; }
-.dgc-lib .lib-row-thumb img { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; background: var(--field); }
+.dgc-lib .lib-row-thumb img { width: 36px; height: 36px; border-radius: 4px; object-fit: cover; background: var(--field); }
 .dgc-lib .lib-row-thumb img:not([src]) { visibility: hidden; }
 .dgc-lib .lib-row-thumb .codicon { font-size: 18px; }
-.dgc-lib .lib-row-sheet > .dgc-sheet { scale: .86; transform-origin: center; }
-.dgc-lib .lib-row-mark [data-mark] { --size: 30px; }
+.dgc-lib .lib-row-sheet > .dgc-sheet { scale: 1; transform-origin: center; }
+.dgc-lib .lib-row-mark [data-mark] { --size: 36px; }
+/* A chart a ChatDGC reply drew: a small tile with its kind drawn in it (bars, a line, a pie), in the text's own colour. */
+.dgc-lib .lib-row-chart { color: var(--text); }
+.dgc-lib .lib-chart-mark { display: block; }
+.dgc-lib .lib-chart-ground { fill: var(--wash); stroke: var(--hair-strong, var(--border)); stroke-width: 1; }
 .dgc-lib .lib-row-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .dgc-lib .lib-row-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
 .dgc-lib .lib-row-meta { display: flex; align-items: baseline; min-width: 0; color: var(--text-2); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric: tabular-nums; white-space: pre; }
@@ -91,6 +97,7 @@
 @media (hover: none) { .dgc-lib button.lib-row-maker { text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); } }
 .dgc-lib button.lib-row-maker:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .dgc-lib .lib-row-when { flex: none; }
+.dgc-lib .lib-row-where { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* (Its kind, version, size: said where there is room; always in the row's label.) */
 .dgc-lib .lib-row-facts { display: none; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* What a row can do. One icon button each (28 px, the 6 px corner), or one ⋯ holding the same list. */
@@ -102,22 +109,11 @@
 .dgc-lib .lib-act:focus-visible, .dgc-lib .lib-row-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .dgc-lib .lib-act[data-act="remove"]:hover { color: var(--err-text); }
 .dgc-lib .lib-pin[aria-pressed="true"] { color: var(--text); }
-/* The row's ⋯ lies over the row's end while the row is pointed at or holds the focus: the title and the maker's line
-   keep their whole width and nothing moves under the pointer. Its ground is the row's own (the hover wash over the
-   page), so the words it covers do not show through. Where nothing can be pointed at it is always there, and the row
-   keeps room for it. */
-.dgc-lib .lib-row-more { position: absolute; top: 50%; right: 3px; translate: 0 -50%; display: none; background: linear-gradient(var(--row-hover), var(--row-hover)), var(--lib-ground, var(--bg)); }
-.dgc-lib .lib-row-more:hover, .dgc-lib .lib-row-more[aria-expanded="true"] { background: linear-gradient(var(--wash), var(--wash)), linear-gradient(var(--row-hover), var(--row-hover)), var(--lib-ground, var(--bg)); }
-.dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-more, .dgc-lib .lib-row-more[aria-expanded="true"] { display: inline-flex; }
-/* While the ⋯ shows, the row's words end before it (live round 1, finding 49: at 170 px it lay over a title, which
-   stopped mid-word with no "…"): the title and the line under it give up the ⋯'s room, so a title too long for what is
-   left ends in "…" before the button. Nothing else moves: a title that fits stays where it was. (The ⋯ is 28 px wide,
-   3 px from the row's end; the words stop 2 px before it.) */
-.dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-main, .dgc-lib .lib-row:has(.lib-row-more[aria-expanded="true"]) .lib-row-main { padding-right: calc(28px + 3px + 2px - (var(--lib-bleed, 8px) - 1px)); }
-@media (hover: none) {
-  .dgc-lib .lib-row-more { position: static; translate: none; display: inline-flex; background: transparent; box-shadow: none; }
-  .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-main, .dgc-lib .lib-row:has(.lib-row-more[aria-expanded="true"]) .lib-row-main { padding-right: 0; }
-}
+/* The row's ⋯ is on every row at every width, after its words (and after its icon buttons, where those fit): nothing
+   needs the pointer on the row first, and Tab reaches it (his pictures, 16 Nov: in a narrow side bar the icons went and
+   the ⋯ showed only on the row pointed at, so Pin could not be reached). Where the icon buttons don't fit (under 560px)
+   they are in its menu, in their own order. */
+.dgc-lib .lib-row-more { flex: none; display: inline-flex; margin-right: calc(3px - (var(--lib-bleed, 8px) - 1px)); background: transparent; }
 /* A video playing in its row takes a line of its own under it. */
 .dgc-lib .lib-row > figure.made-video { flex: 1 0 100%; min-width: 0; margin: var(--sp-2) 0 var(--sp-1); cursor: auto; }
 .dgc-lib .lib-load { appearance: none; align-self: flex-start; margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); cursor: pointer; }
@@ -127,16 +123,10 @@
 
 /* ---- wide (its editor tab, or a wide side bar): each action its own button, and more said on the row ---- */
 @media (min-width: 560px) {
-  .dgc-lib .lib-row { gap: 0 var(--sp-3); min-height: 54px; }
-  .dgc-lib .lib-row-thumb { width: 36px; height: 44px; }
-  .dgc-lib .lib-row-thumb img { width: 36px; height: 36px; }
-  .dgc-lib .lib-row-sheet > .dgc-sheet { scale: 1; }
-  .dgc-lib .lib-row-mark [data-mark] { --size: 36px; }
+  .dgc-lib .lib-row { gap: 0 var(--sp-3); }
   .dgc-lib .lib-row-actions { display: inline-flex; }
-  /* The row's ⋯ is there too, after its buttons, always: the whole menu (the same one a right-click opens). */
-  .dgc-lib .lib-row .lib-row-more, .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-more { position: static; translate: none; display: inline-flex; margin-left: calc(2px - var(--sp-3)); background: transparent; }
-  .dgc-lib .lib-row .lib-row-more:hover, .dgc-lib .lib-row .lib-row-more[aria-expanded="true"] { background: var(--wash); }
-  .dgc-lib .lib-row:is(:hover, :focus-within) .lib-row-main, .dgc-lib .lib-row:has(.lib-row-more[aria-expanded="true"]) .lib-row-main { padding-right: 0; }
+  /* The row's ⋯ comes after its buttons: the whole menu (the same one a right-click opens). */
+  .dgc-lib .lib-row .lib-row-more { margin-left: calc(2px - var(--sp-3)); margin-right: 0; }
   .dgc-lib .lib-row-facts { display: block; }
   .dgc-lib .lib-row-name { font-weight: var(--w-med); }
 }

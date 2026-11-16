@@ -221,7 +221,7 @@ body.pc-screen-mode{padding:0}
 .pc-setup-bar>span{display:block;height:100%;border-radius:3px;background:var(--accent-fill);transition:width .4s ease}
 .pc-setup small{opacity:.75}
 @media (prefers-reduced-motion:reduce){.pc-setup-bar>span{transition:none}}
-.pc-install code{font-family:var(--mono);font-size:12px;background:var(--surface);padding:2px 6px;border-radius:4px;user-select:all}
+.pc-install code{font-family:var(--mono);font-size:12px;background:var(--code-chip, color-mix(in srgb, currentColor 10%, transparent));padding:2px 6px;border-radius:var(--r-code,4px);user-select:all}
 .pc-hosts{margin:2px 0 0;font-size:11px;color:var(--vscode-descriptionForeground)}
 .pc-hosts.pc-blocked{color:var(--vscode-errorForeground,#f48771)}
 /* Careful mode: the whole text a hold would put on a page, exactly as it would go. */

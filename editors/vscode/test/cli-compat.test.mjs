@@ -83,6 +83,9 @@ const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" },
                        { method: "askAgentsModel", guard: "agentsModelOffered" },
                        { method: "readAgentsModel", guard: "agentsModelOffered" },
                        { method: "resetSessionAgentsModel", guard: "agentsModelOffered" },
+                       // The Library's Files, Work's part (0.52): listed and opened only when ready.capabilities.session_attachments says so.
+                       { method: "sessionAttachments", guard: "sessionAttachmentsCapable" },
+                       { method: "sessionAttachment", guard: "sessionAttachmentsCapable" },
                        { method: "undoSettingChange", guard: "settingsUndoCapable" }].map(g => g.method);
 const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps: "mcpAppsSupported",
                               watchRouter: "routerCapable", watchImages: "imagesCapable",
@@ -91,7 +94,8 @@ const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps:
                               videosLibrary: "videosCapable", cancelWakeup: "wakeupsCapable", goalRuns: "goalRunsCapable",
                               sessionArchive: "sessionArchiveCapable", undoSettingChange: "settingsUndoCapable",
                               askAgentsModel: "agentsModelOffered", readAgentsModel: "agentsModelOffered",
-                              resetSessionAgentsModel: "agentsModelOffered" };
+                              resetSessionAgentsModel: "agentsModelOffered",
+                              sessionAttachments: "sessionAttachmentsCapable", sessionAttachment: "sessionAttachmentsCapable" };
 
 /** Is this node inside a method with the given name? */
 function insideMethod(node, name) {

@@ -29,9 +29,9 @@ test("H1: Home's number says which is which: quiet with only news, and its words
   const news = await openHomeCards(browser, { quiet: true, sessions: CALM });
   try {
     const b = await news.badge();
-    assert.equal(b.text, "4", "the four things made");
+    assert.equal(b.text, "", "the four things made are new, not waiting: no number (16 Nov: the number is what needs you)");
     assert.equal(b.label, "Home: 4 new", "a screen reader hears that they are new, not waiting"); assert.equal(b.title, "4 new");
-    assert.equal(b.newsOnly, true, "nothing waits for you: the number is quiet");
+    assert.equal(b.newsOnly, true, "nothing waits for you: a quiet dot");
     const needs = await news.page.evaluate(() => document.querySelector('.hc-card[data-card="needs"]').innerText.replace(/\s+/g, " "));
     assert.match(needs, /Nothing needs you/, "and the Needs you card agrees with it");
   } finally { await news.page.close(); }
@@ -40,7 +40,7 @@ test("H1: Home's number says which is which: quiet with only news, and its words
     const b = await busy.badge();
     assert.match(b.label, /^Home: \d+ needs? you, \d+ new$/); assert.equal(b.newsOnly, false, "something waits: the number is the filled one");
     const [, needs, fresh] = /^Home: (\d+) needs? you, (\d+) new$/.exec(b.label).map(Number);
-    assert.equal(String(needs + fresh), b.text, "its two counts are the number");
+    assert.ok(fresh > 0, "premise: there are new things too"); assert.equal(String(needs), b.text, "the number is what needs you; the new things are in its words");
     assert.notEqual(b.ground, (await (async () => { const q = await openHomeCards(browser, { quiet: true, sessions: CALM }); try { return (await q.badge()).ground; } finally { await q.page.close(); } })()), "and the two are drawn apart");
   } finally { await busy.page.close(); }
 });
@@ -145,7 +145,7 @@ test("L2: under Widgets a reply's card is a card, with a widget's mark: never a 
   const x = await openLibraryTab(browser, { artifacts: [...LIB_ARTIFACTS, card], width: 300 });
   try {
     const tab = async (name) => { await x.page.click(`.lib-tab[data-tab="${name}"]`); await x.page.waitForTimeout(250);
-      return x.page.evaluate(() => [...document.querySelectorAll("#library-list .lib-row")].map((r) => ({ name: r.querySelector(".lib-row-name").textContent, tip: r.title, mark: r.querySelector(".lib-row-mark") ? "mark" : r.querySelector(".lib-row-sheet") ? "sheet" : "", label: r.getAttribute("aria-label") }))); };
+      return x.page.evaluate(() => [...document.querySelectorAll("#library-list .lib-row")].map((r) => ({ name: r.querySelector(".lib-row-name").textContent, tip: r.getAttribute("aria-label") || "", mark: r.querySelector(".lib-row-mark") ? "mark" : r.querySelector(".lib-row-sheet") ? "sheet" : "", label: r.getAttribute("aria-label") }))); };
     const widgets = await tab("widgets"), row = widgets.find((r) => r.name === card.title);
     assert.ok(row, "the card is under Widgets");
     assert.equal(row.mark, "mark", "wearing a widget's mark, not the Page sheet");

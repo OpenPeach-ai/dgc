@@ -110,7 +110,7 @@ test("a Project Pip’s chat paints as a Personal Pip’s, in the same page", as
   assert.equal(project.you.color, "rgb(215, 215, 218)", "your message: the page's own text colour");
   assert.match(project.you.backgroundColor, /^color\(srgb 0\.\d+ 0\.\d+ 0\.\d+\)$/, "on the shared grey, solid");
   { const [r, g, b] = project.you.backgroundColor.match(/0\.\d+/g).map(Number); assert.ok(Math.max(r, g, b) - Math.min(r, g, b) < 0.02, `a grey, not a purple: ${project.you.backgroundColor}`); }
-  assert.equal(project.reply.borderTopLeftRadius, "20px", "its reply: short rounded bubbles, on the shared corner scale (20 in the 0.52 look; it was 17, then 16)");
+  assert.equal(project.reply.borderTopLeftRadius, "10px", "its reply: the sent bubble's 10 on every corner, no tail (16 Nov; it was 20 with a 7.5 tail)");
   assert.equal(project.parts, 2, "a bubble for each short message the Pip parted with ---");
   assert.equal(project.buttons, 0, "the buttons wait for the pointer");
   assert.equal(project.time, 1, "the time shows without it");

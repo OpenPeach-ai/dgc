@@ -2517,3 +2517,217 @@ test("L2: Home's Artifacts and Widgets cards list what the Library's tabs list: 
     assert.equal(widgets.offered, true);
   }
 });
+
+// ---- uir2c (16 Nov): the Library lists the charts ChatDGC's replies drew and what you attached in Work sessions ------------------
+const PNG_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAOklEQVR42mP4/OUHTRHDqAWjFpCFamL+w9GoBaRZgCwxasGoBXjVj1owasGoBWRYQIn4qAWjFgwBCwCv+U93BeXqBQAAAABJRU5ErkJggg==";
+test("uir2c: Widgets' charts are asked of a ChatDGC that lists them, checked, and Open opens the chat at the chart's reply; one it never listed opens nothing", async () => {
+  const wait = () => new Promise((r) => setTimeout(r, 8));
+  chat.openLibrary();
+  const lib = world.panels.at(-1);
+  lib.say({ type: "ready" }); await wait();
+  assert.equal(lib.webview.posted.filter((m) => m.type === "chartsOffered").at(-1)?.on, false, "this ChatDGC lists none: said so");
+  lib.say({ type: "charts", query: "", offset: 0 }); await wait();
+  assert.equal(sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").length, 0, "and it is never asked");
+  host.offers = { version: 1, widget_library: 1, chart_library: 1 };
+  lib.say({ type: "ready" }); await wait();
+  assert.equal(lib.webview.posted.filter((m) => m.type === "chartsOffered").at(-1).on, true);
+  lib.say({ type: "charts", query: " frost ", offset: 0 }); await wait();
+  const asked = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").at(-1);
+  assert.deepEqual({ query: asked.query, limit: asked.limit, offset: asked.offset }, { query: " frost ", limit: 60, offset: 0 });
+  const good = { chat_id: ID(7), chat_title: "Tiles", message_id: MSG(3), id: `${MSG(3)}:1`, title: "Frost rating by tile", kind: "chart", chart_type: "bar", created_at: "2026-11-16T05:10:00Z" };
+  chat.onEvent({ type: "chatdgc_widgets", request_id: asked.request_id, op: "charts", total: 4, next_offset: 60, widgets: [good,
+    { ...good, id: `${MSG(4)}:0` },                                   // an id that isn't its own reply's
+    { ...good, chat_id: "../etc", id: `${MSG(3)}:2` }, { ...good, message_id: "nope", id: "nope:0" }, null] });
+  const said = lib.webview.posted.filter((m) => m.type === "charts").at(-1);
+  assert.deepEqual(said.charts, [{ chat_id: ID(7), chat_title: "Tiles", message_id: MSG(3), id: `${MSG(3)}:1`, title: "Frost rating by tile", kind: "chart", chart_type: "bar", created_at: "2026-11-16T05:10:00Z" }], "only a chart that is a reply's own");
+  assert.deepEqual([said.offset, said.next], [0, 60]);
+  // Open: the chat's tab, and the page is told which reply and which of its charts.
+  const before = world.panels.length;
+  lib.say({ type: "itemAct", act: "open", item: { kind: "chart", id: `${MSG(4)}:0`, chat_id: ID(7) } }); await wait();
+  lib.say({ type: "itemAct", act: "open", item: { kind: "chart", id: `${MSG(3)}:1`, chat_id: ID(8) } }); await wait();
+  assert.equal(world.panels.length, before, "a chart the Library was never shown opens nothing");
+  lib.say({ type: "itemAct", act: "remove", item: { kind: "chart", id: `${MSG(3)}:1`, chat_id: ID(7) } }); await wait();
+  assert.equal(world.panels.length, before, "and a chart is only ever opened");
+  lib.say({ type: "itemAct", act: "open", item: { kind: "chart", id: `${MSG(3)}:1`, chat_id: ID(7) } }); await wait();
+  assert.equal(world.panels.length, before + 1, "its chat opens in a tab");
+  const tab = world.panels.at(-1);
+  tab.say({ type: "ready" });
+  assert.equal(last("chatdgc_open").conversation_id, ID(7));
+  opened(tab, { id: ID(7), title: "Tiles", temporary: false });
+  assert.deepEqual(tab.last("showMessage"), { type: "showMessage", id: MSG(3), chart: 1 }, "once it has opened: scroll to that reply's second chart");
+  // Open again, the chat already in a tab: that tab, told again.
+  lib.say({ type: "itemAct", act: "open", item: { kind: "chart", id: `${MSG(3)}:1`, chat_id: ID(7) } }); await wait();
+  assert.equal(world.panels.length, before + 1); assert.equal(tab.webview.posted.filter((m) => m.type === "showMessage").length, 2);
+  // The side bar's Library tab asks the same way.
+  await chat.sideLibrary({ type: "charts", query: "", offset: 60 }); await wait();
+  assert.equal(sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").at(-1).offset, 60);
+});
+
+test("uir2c: Home's Widgets card counts the charts too, as the Library's Widgets tab lists them, and a chart's tile opens its chat at the chart", async () => {
+  const WG = "wg_" + "5".repeat(16);
+  host.offers = { version: 1, widget_library: 1, chart_library: 1 };
+  await chat.homeCardsMessage({ type: "homeWidgetsGet" });
+  const list = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "list").at(-1);
+  chat.onEvent({ type: "chatdgc_widgets", request_id: list.request_id, op: "list", total: 1, next_offset: null, widgets: [{ id: WG, title: "EMI calculator", chat_id: ID(7), chat_title: "Loans", created_at: "2026-11-14T05:10:00Z" }] });
+  const charts = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").at(-1);
+  assert.ok(charts, "the charts are asked for next");
+  assert.equal(host.home.filter((m) => m.type === "homeWidgets").length, 0, "one answer, once both are known: the count never jumps");
+  chat.onEvent({ type: "chatdgc_widgets", request_id: charts.request_id, op: "charts", total: 1, next_offset: null,
+    widgets: [{ chat_id: ID(8), chat_title: "Tiles", message_id: MSG(3), id: `${MSG(3)}:0`, title: "Frost rating by tile", kind: "chart", chart_type: "bar", created_at: "2026-11-16T05:10:00Z" }] });
+  const home = host.home.filter((m) => m.type === "homeWidgets").at(-1);
+  assert.deepEqual(home.widgets.map((w) => [w.title, w.chart === true]), [["Frost rating by tile", true], ["EMI calculator", false]], "the newest first: the chart, then the widget");
+  assert.equal(home.widgets[0].chat_title, "Tiles");
+  const before = world.panels.length;
+  await chat.homeCardsMessage({ type: "homeChartOpen", id: `${MSG(9)}:0`, chat_id: ID(8) });
+  assert.equal(world.panels.length, before, "a chart Home was never told of opens nothing");
+  await chat.homeCardsMessage({ type: "homeChartOpen", id: `${MSG(3)}:0`, chat_id: ID(8) });
+  assert.equal(world.panels.length, before + 1, "its chat opens");
+  // A ChatDGC whose charts can't be listed just now: the widgets alone, quietly.
+  host.home.length = 0;
+  await chat.homeCardsMessage({ type: "homeWidgetsGet" });
+  const again = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "list").at(-1);
+  chat.onEvent({ type: "chatdgc_widgets", request_id: again.request_id, op: "list", total: 0, next_offset: null, widgets: [] });
+  const failing = sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").at(-1);
+  chat.onEvent({ type: "chatdgc_error", request_id: failing.request_id, message: "The charts couldn't be read." });
+  assert.deepEqual(host.home.filter((m) => m.type === "homeWidgets").at(-1).widgets, []);
+});
+
+test("uir2c: Files' Work attachments: listed by a name of the host's own, never a path; a picture opens in the picture viewer, a file in the editor; nothing is done for one it never listed", async () => {
+  const vs = globalThis.__DGC_TEST_VSCODE, wfs = vs.workspace.fs, kept = { copy: wfs.copy, writeFile: wfs.writeFile, status: vs.window.setStatusBarMessage };
+  const copied = [], wait = () => new Promise((r) => setTimeout(r, 12));
+  wfs.copy = async (from, to) => { copied.push([from.fsPath, to.fsPath]); };
+  vs.window.setStatusBarMessage = () => ({ dispose() {} });
+  const SESSION_FILE = "/home/me/.dgc/sessions/abc123/20261115-194400-a1b2c3d4.json", PROJECT = "/home/me/projects/lime_tiles";
+  const listed = [], got = [];
+  const items = [{ path: SESSION_FILE, id: "2:0", kind: "image", name: "Picture 1.png", mime: "image/png", bytes: 120, at: 1794800000, session_name: "Fix totals", project: PROJECT, project_name: "lime_tiles" },
+    { path: SESSION_FILE, id: "4:0", kind: "file", name: "order_total.py", at: 1794700000, session_name: "Fix totals", project: PROJECT, project_name: "lime_tiles" },
+    { path: "/etc/passwd", id: "0:0", kind: "file", name: "passwd", at: 1, session_name: "", project: "/etc", project_name: "etc" },      // not a session of DGC's
+    { path: SESSION_FILE, id: "../1", kind: "file", name: "x", at: 1, session_name: "", project: PROJECT, project_name: "lime_tiles" }];
+  let answer = (path, id) => (id === "2:0" ? { type: "session_attachment", id, kind: "image", name: "Picture 1.png", mime: "image/png", data: PNG_URI }
+    : { type: "session_attachment", id, kind: "file", name: "order_total.py", file_path: `${PROJECT}/billing/order_total.py` });
+  try {
+    chat.openLibrary();
+    const lib = world.panels.at(-1);
+    lib.say({ type: "ready" }); await wait();
+    assert.equal(lib.webview.posted.filter((m) => m.type === "workFilesOffered").at(-1)?.on, false, "a DGC that lists none: said so");
+    lib.say({ type: "workFiles", seq: 1, query: "", offset: 0 }); await wait();
+    assert.equal(lib.webview.posted.filter((m) => m.type === "workFiles").length, 0, "and nothing is listed");
+    host.sessionAttachmentsOffered = () => true;
+    host.sessionAttachments = async (cmd) => { listed.push(cmd); return { type: "session_attachments", items, total: 4, next_offset: null }; };
+    host.sessionAttachment = async (path, id) => { got.push([path, id]); return answer(path, id); };
+    lib.say({ type: "ready" }); await wait();
+    assert.equal(lib.webview.posted.filter((m) => m.type === "workFilesOffered").at(-1).on, true);
+    lib.say({ type: "workFiles", seq: 2, query: "order", offset: 0 }); await wait();
+    assert.deepEqual(listed.at(-1), { query: "order", limit: 60, offset: 0 });
+    const said = lib.webview.posted.filter((m) => m.type === "workFiles").at(-1);
+    assert.equal(said.seq, 2);
+    assert.deepEqual(said.files.map((f) => [f.kind, f.name, f.session_name, f.session_id, f.project_name]), [["image", "Picture 1.png", "Fix totals", "20261115-194400-a1b2c3d4", "lime_tiles"], ["file", "order_total.py", "Fix totals", "20261115-194400-a1b2c3d4", "lime_tiles"]],
+      "the two that are in DGC's own sessions, each with the session it is in");
+    assert.doesNotMatch(JSON.stringify(said), /\/home\/me|sessions\/|\.json/, "no path reaches the page: the session's file and the project's folder stay here");
+    assert.match(said.files[0].ref, /^wa_[0-9a-f]{16}$/); assert.match(said.files[0].created_at, /^2026-/);
+    const [pic, file] = said.files.map((f) => f.ref);
+    const act = async (what, ref) => { lib.say({ type: "itemAct", act: what, item: { kind: "workfile", ref } }); await wait(); };
+    // One it was never shown: nothing is asked of DGC.
+    await act("open", "wa_" + "0".repeat(16)); await act("open", SESSION_FILE);
+    assert.deepEqual(got, []);
+    // A picture: its thumbnail, Open (the editor's picture viewer, from a copy of its own), Copy, Save a copy….
+    lib.say({ type: "workFilePic", ref: pic }); await wait();
+    assert.deepEqual(got.at(-1), [SESSION_FILE, "2:0"], "DGC is asked by the session and the id the listing gave");
+    assert.deepEqual(lib.webview.posted.filter((m) => m.type === "workFileData").at(-1), { type: "workFileData", ref: pic, data: PNG_URI });
+    world.commands.length = 0; world.written.length = 0;
+    await act("open", pic);
+    // (Its copy is written to this computer's own temporary folder, a real file: waited for, however busy the machine is.)
+    for (let i = 0; i < 200 && !world.commands.some((c) => c[0] === "vscode.open"); i++) await wait();
+    const openedPic = world.commands.find((c) => c[0] === "vscode.open");
+    assert.ok(openedPic, "a picture opens in the picture viewer");
+    assert.match(openedPic[1].fsPath, /dgc-library-files[\\/][0-9a-f]+[\\/]Picture 1\.png$/, "from a copy of its own, named as the picture is");
+    { const nfs = await import("node:fs"); const st = nfs.statSync(openedPic[1].fsPath); assert.ok(st.size > 50, "the picture's own bytes");
+      if (process.platform !== "win32") assert.equal(st.mode & 0o077, 0, "for this user alone"); nfs.rmSync(join(openedPic[1].fsPath, ".."), { recursive: true, force: true }); }
+    await act("copy", pic);
+    assert.deepEqual(lib.webview.posted.filter((m) => m.type === "itemCopy").at(-1), { type: "itemCopy", key: `workfile:${pic}`, data: PNG_URI });
+    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/Picture 1.png" }; world.written.length = 0;
+    await act("save", pic);
+    assert.equal(world.written.at(-1).path, "/home/me/Desktop/Picture 1.png", "Save a copy… writes where you chose");
+    await act("path", pic); await act("reveal", pic); await act("editor", pic);
+    assert.equal(world.clipboard, "", "a picture has no path to give");
+    // A file: Open and Open in editor show it in the editor; Copy path, Reveal, Save a copy….
+    world.shown.length = 0; world.commands.length = 0;
+    await act("open", file); await act("editor", file);
+    assert.deepEqual(world.shown.map((s) => s.path), [`${PROJECT}/billing/order_total.py`, `${PROJECT}/billing/order_total.py`], "a file opens in the editor, where it is in its project");
+    await act("path", file);
+    assert.equal(world.clipboard, `${PROJECT}/billing/order_total.py`);
+    assert.equal(lib.webview.posted.filter((m) => m.type === "itemSaid").at(-1).words, "Path copied");
+    await act("reveal", file);
+    assert.deepEqual(world.commands.at(-1).slice(0, 1), ["revealFileInOS"]); assert.equal(world.commands.at(-1)[1].fsPath, `${PROJECT}/billing/order_total.py`);
+    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/order_total.py" };
+    await act("save", file);
+    assert.deepEqual(copied.at(-1), [`${PROJECT}/billing/order_total.py`, "/home/me/Desktop/order_total.py"]);
+    await act("remove", file); await act("rename", file); await act("copy", file);
+    // What DGC answers is checked: another attachment's answer, a file outside its project, a picture that isn't one.
+    world.shown.length = 0; world.commands.length = 0; world.clipboard = "";
+    answer = (path, id) => ({ type: "session_attachment", id, kind: "file", name: "passwd", file_path: "/etc/passwd" });
+    await act("open", file); await act("path", file);
+    assert.deepEqual([world.shown.length, world.clipboard], [0, ""], "a file outside its own project is never opened or named");
+    assert.match(world.warnings.at(-1), /order_total\.py/);
+    answer = (path, id) => ({ type: "session_attachment", id, kind: "image", name: "Picture 1.png", mime: "image/png", data: "data:text/html;base64,PGI+" });
+    const posts = lib.webview.posted.length;
+    await act("copy", pic); await act("open", pic); for (let i = 0; i < 12; i++) await wait();
+    assert.equal(lib.webview.posted.slice(posts).filter((m) => m.type === "itemCopy").length, 0, "what isn't a picture is never handed to the page");
+    assert.equal(world.commands.filter((c) => c[0] === "vscode.open").length, 0);
+    // The side bar's Library tab asks the same way.
+    await chat.sideLibrary({ type: "workFiles", seq: 5, query: "", offset: 0 }); await wait();
+    assert.equal(host.home.filter((m) => m.type === "sideLibrary" && m.message.type === "workFiles").at(-1).message.seq, 5);
+  } finally { wfs.copy = kept.copy; vs.window.setStatusBarMessage = kept.status; world.saveTo = undefined; }
+});
+
+test("uir2c 2b: a chat file's menu asks DGC for the file by its id in this chat: Open and Open in editor from a private copy, Copy a text file's text, a picture handed to the page; Copy path and Reveal ask nothing", async () => {
+  const { existsSync, statSync, writeFileSync, mkdirSync } = createRequire(import.meta.url)("node:fs");
+  const wait = () => new Promise((r) => setTimeout(r, 8));
+  chat.open(ID(5));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(5), title: "Budget" });
+  const F = (c) => `att_${c.repeat(32)}`;
+  const asks = () => sent.filter((c) => c.type === "chatdgc_library_file" || c.type === "chatdgc_file").length;
+  const pick = (act, fileId, name, more = {}) => panel.say({ type: "fileAct", act, messageId: MSG(2), fileId, name, ...more });
+  /** DGC writes the copy where the host asked, and says so. */
+  const written = (text) => { const asked = last("chatdgc_library_file"); mkdirSync(dirname(asked.path), { recursive: true }); writeFileSync(asked.path, text);
+    chat.onEvent({ type: "chatdgc_library_file", request_id: asked.request_id, op: "save", path: asked.path, bytes: text.length }); return asked; };
+  // Open: a private copy, in its own app (a Markdown file in an editor tab).
+  pick("open", F("a"), "Notes.md");
+  let asked = written("# Notes\n"); await wait();
+  assert.deepEqual([asked.op, asked.conversation_id, asked.attachment_id], ["save", ID(5), F("a")]);
+  assert.equal(statSync(dirname(dirname(asked.path))).mode & 0o777, 0o700, "into a private folder of this window's");
+  assert.equal(world.shown.at(-1).path, asked.path);
+  // Open in editor: the same copy, in an editor tab that stays; only for a file with text.
+  const shownBefore = world.shown.length;
+  pick("editor", F("a"), "Notes.md"); asked = written("# Notes\n"); await wait();
+  assert.deepEqual([world.shown.length, world.shown.at(-1).path, world.shown.at(-1).options?.preview], [shownBefore + 1, asked.path, false]);
+  let before = asks();
+  pick("editor", F("b"), "Budget.xlsx"); await wait();
+  assert.equal(asks(), before, "a workbook has no text an editor can show: nothing is asked");
+  // Copy: a text file's text, read from a private copy that is then taken away.
+  pick("copy", F("a"), "Notes.md"); asked = written("# Notes\n\nCheck the totals.\n"); await wait(); await wait();
+  assert.equal(world.clipboard, "# Notes\n\nCheck the totals.\n");
+  assert.equal(panel.last("fileSaid").words, "Text copied");
+  assert.equal(existsSync(asked.path), false, "the copy made to read it is gone");
+  // Copy on a picture: DGC is asked for it, and the page gets the picture for its clipboard.
+  pick("copy", F("c"), "chart.png");
+  const want = last("chatdgc_file");
+  assert.deepEqual([want.conversation_id, want.attachment_id], [ID(5), F("c")]);
+  chat.onEvent({ type: "chatdgc_file", request_id: want.request_id, conversation_id: ID(5), attachment_id: F("c"), data: "data:image/png;base64,iVBORw0KGgo=" }); await wait();
+  assert.equal(panel.last("fileCopy").data, "data:image/png;base64,iVBORw0KGgo=");
+  // Save a copy…: where you choose.
+  world.saveTo = { scheme: "file", fsPath: "/home/u/notes.md", path: "/home/u/notes.md" };
+  pick("save", F("a"), "Notes.md"); await wait();
+  assert.deepEqual([last("chatdgc_library_file").op, last("chatdgc_library_file").path], ["save", "/home/u/notes.md"]);
+  // Copy path, Reveal, and anything that isn't one of the six: DGC keeps this copy for the chat. Nothing is asked.
+  before = asks(); const clip = world.clipboard, ran = world.commands.length;
+  for (const act of ["path", "reveal", "remove", "rename", "cut"]) pick(act, F("a"), "Notes.md");
+  pick("open", "att_nope", "Notes.md"); pick("open", "../../etc/passwd", "passwd");
+  pick("copy", F("a"), "Notes.md", { path: "/etc/passwd" });      // (a path the page adds is not looked at: this one is asked by its id)
+  await wait();
+  assert.equal(asks(), before + 1); assert.equal(JSON.stringify(last("chatdgc_library_file")).includes("/etc/passwd"), false);
+  assert.deepEqual([world.clipboard, world.commands.length], [clip, ran]);
+  assert.equal(panel.webview.posted.some((m) => /dgc-chatdgc-files/.test(JSON.stringify(m))), false, "the page is never told where a copy is");
+});

@@ -1578,7 +1578,12 @@
       const pictures = sent.filter((item) => item.kind === "image" && !item.removed && /^att_[a-f0-9]{32}$/.test(item.id || ""));
       if (pictures.length) {
         const row = el("div", "cd-thumbs");
-        for (const item of pictures) row.append(thumb(item));
+        for (const item of pictures) {
+          // A picture you attached: its "…" stands on its corner (the file's menu, as on a card).
+          const card = el("span", "cd-thumb-card"); card.append(thumb(item));
+          keptFile(card, message, item, "you");
+          row.append(card);
+        }
         node.append(row);
       }
       // A file marked in its sentence is there, not in a second chip above it.
@@ -1594,7 +1599,7 @@
       if (others.length) {
         const list = el("ul", "cd-chips cd-sent");
         list.setAttribute("aria-label", "Attached");
-        list.append(...others.map((item) => chip(item)));
+        list.append(...others.map((item) => { const li = chip(item); keptFile(li, message, item, "you"); return li; }));
         node.append(list);
       }
       if (message.vision?.text) {
@@ -1949,7 +1954,7 @@
       : count ? `up to ${count} results` : "";
     return [app, action, detail, "through Composio"].filter(Boolean).join(" · ");
   }
-  // A file the reply made (made.py), as ChatGPT hands you report.docx: what it is, Open, and Save a copy….
+  // A file the reply made (made.py), such as report.docx: what it is, Open, Save a copy…, and the file's menu.
   const MADE = { docx: ["Word document", "DOCX"], pdf: ["PDF", "PDF"], xlsx: ["Excel workbook", "XLSX"],
                  pptx: ["PowerPoint presentation", "PPTX"], csv: ["CSV", "CSV"], md: ["Markdown", "MD"],
                  png: ["Image", "PNG"], jpg: ["Image", "JPG"], webp: ["Image", "WEBP"] };
@@ -2001,9 +2006,37 @@
         buttons.append(project);
       }
       box.append(buttons);
+      keptFile(box, message, file, "dgc", buttons);
     }
     return box;
   }
+  // ---- a file's menu on its card in the chat (media/shared/filemenu.js, the Library's own): a "…" on the card and a
+  // right-click on it, with the keyboard. Open · Open in editor · Save a copy… · Copy · Copy path · Reveal in file
+  // manager; what a kind can't do is shown off, with why. Every file here is one DGC keeps for the chat (what you
+  // attached, what a reply made): the host is told the file's id and which of the six, never a place on disk.
+  const keptFiles = new WeakMap();
+  function keptFile(card, message, file, side, into = null) {
+    const FM = window.DgcFileMenu;
+    if (!FM || file.removed || !/^att_[a-f0-9]{32}$/.test(String(file.id || ""))) return;
+    const name = String(file.name || "file");
+    keptFiles.set(card, { name, message: message.id, id: file.id, picture: file.kind === "image" });
+    FM.mark(card, { name, side, into });
+  }
+  // Inline touches in what you type and what you read (media/shared/inline.js), as in Work and a Pip's chat: a colour's
+  // swatch, shortcuts as keys, a time with a zone in this computer's time, codes that copy on a click. A chat has no
+  // project: a commit's hash and an issue's number stay words.
+  window.DgcInline?.watch(document, { rules: [{ sel: ".text.cd-body", times: true }, { sel: ".cd-bubble" }], copy: (text) => vscode.postMessage({ type: "copy", text }) });
+  window.DgcFileMenu?.listen(log, (card) => {
+    const FM = window.DgcFileMenu, f = keptFiles.get(card);
+    if (!f) return null;
+    // (A picture is one whatever its name says: one you pasted may have none.)
+    const why = (act) => (f.picture ? (act === "editor" ? FM.whyPicture(act, "chat") : act === "path" || act === "reveal" ? FM.KEPT : "") : FM.whyKept(f.name, act));
+    return { name: f.name, why, onPick: (act) => {
+      fileActFrom = card.querySelector(".dgc-file-more");
+      vscode.postMessage({ type: "fileAct", act, messageId: f.message, fileId: f.id, name: f.name, ...(f.picture ? { picture: true } : {}) });
+    } };
+  });
+  var fileActFrom = null;               // the "…" whose pick the host answers (a picture to copy, a word to say)
 
   // ---- artifacts a reply made or changed (message.artifacts: a deck, a sheet, a dashboard, a page): a card each, which
   // opens it in its panel or exports it. They're kept with the reply, so they come back with the chat; what each one
@@ -3558,11 +3591,13 @@
     announce(`Queued: it goes when the reply finishes${list.length > 1 ? `, after ${list.length - 1} more` : ""}.`);
   }
   /** One queued message back in the box, below anything typed there. */
-  function giveBack(item) {
-    const typed = input.value.trim();
+  // `replace`: the message takes the draft's place (the queue's Edit, after its row asked: Replace draft). The draft it
+  // replaced, its words and its files, is one Undo away.
+  function giveBack(item, { replace = false } = {}) {
+    const typed = replace ? "" : input.value.trim();
     edit(() => {
       if (!typed && item.parts) field.writeParts(item.parts); else input.value = typed ? `${typed}\n\n${item.text}` : item.text;
-      state.pending = [...state.pending, ...item.pending];
+      state.pending = replace ? [...item.pending] : [...state.pending, ...item.pending];
     });
     // After a reload the host has forgotten what was let through; a marked file is let through again.
     for (const pending of item.pending) if (pending.fromPill && pending.path) vscode.postMessage({ type: "mentionFile", path: pending.path });
@@ -3614,7 +3649,10 @@
         queued().splice(0, queued().length, ...arranged);
         saveQueue(); queueView();
       } : null,
-      edit: (id) => { const taken = take(id); saveQueue(); queueView(); if (taken) giveBack(taken); input.focus(); },
+      // Edit: back to the box. A draft already there (words, or a file) is asked about first, on the row (Keep draft /
+      // Replace draft, media/messagequeue.js), as Work's queue and a Pip's ask.
+      edit: (id) => { const taken = take(id); saveQueue(); queueView(); if (taken) giveBack(taken, { replace: true }); input.focus(); input.setSelectionRange(input.value.length, input.value.length); },
+      draft: () => !!(input.value.trim() || state.pending.length),
       remove: (id) => { take(id); saveQueue(); queueView(); input.focus(); },
       copy: (id) => vscode.postMessage({ type: "copy", text: byId.get(id)?.text || "" }),
     });
@@ -3916,6 +3954,7 @@
       chips(); controls();
     }
   });
+  $("cd-menu").innerHTML = window.DgcIcons.html("more");      // the chat's ⋯: the one More glyph (media/shared/icons.js)
   $("cd-menu").addEventListener("click", () => vscode.postMessage({ type: "menu" }));
   $("cd-earlier").addEventListener("click", (e) => {
     const first = state.messages[0];
@@ -4522,6 +4561,19 @@
         if (artifactsOffer && state.messages.some((m) => Array.isArray(m.artifacts) && m.artifacts.length)) vscode.postMessage({ type: "artifactViews" });
         return;
       }
+      case "showMessage": {
+        // Opened from the Library or Home at one reply (and one of its charts): there, a little above the middle, and
+        // marked for a moment. Earlier than what is loaded, the pages before it are read first.
+        const id = typeof msg.id === "string" ? msg.id : "";
+        if (!/^msg_[a-f0-9]{32}$/.test(id)) return;
+        reach(id, () => {
+          const reply = log.querySelector(`.cd-msg[data-id="${CSS.escape(id)}"]`);
+          if (!reply) { showNotice("That reply isn't in this version of the chat.", "info"); return; }
+          const charts = reply.querySelectorAll(".cd-chart, figure.chart, .dgc-chart"), chart = Number.isInteger(msg.chart) ? charts[msg.chart] : null;
+          glide(chart || reply); flash(chart || reply);
+        });
+        return;
+      }
       case "earlier": {
         const older = Array.isArray(msg.messages) ? msg.messages : [];
         const height = scroller.scrollHeight, top = scroller.scrollTop;
@@ -4952,6 +5004,11 @@
         announce("Earlier messages summarized.");
         sendNext();                                   // what you sent while it summarized goes now
         return;
+      case "fileCopy":
+        // Copy on a picture: the host read it and hands it over; the clipboard is the page's to write.
+        window.DgcFileMenu?.copyPicture(document, String(msg.data || "")).then((ok) => window.DgcFileMenu.said(fileActFrom, ok ? "Image copied" : "Couldn't copy here"));
+        return;
+      case "fileSaid": window.DgcFileMenu?.said(fileActFrom, String(msg.words || "").slice(0, 60)); return;
       case "image": {
         if (!/^att_[a-f0-9]{32}$/.test(String(msg.id || ""))) return;
         const ok = typeof msg.data === "string" && IMAGE_DATA.test(msg.data);

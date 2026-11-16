@@ -78,7 +78,7 @@ test("every page loads the shared menu: Work and ChatDGC before their own script
 // ---- window.DgcMenu itself
 function page(markup) {
   const dom = new JSDOM(`<!doctype html><body>${markup}</body>`, { runScripts: "outside-only", pretendToBeVisual: true });
-  dom.window.eval(read("media/shared/menu.js"));
+  dom.window.eval(read("media/shared/menu.js") + "\n" + read("media/shared/icons.js"));
   return dom;
 }
 const key = (dom, target, k) => {
@@ -258,7 +258,7 @@ test("the ⋯ fades in, but goes at once when the pointer leaves: a Main or Fall
 test("a long name stays on one line and slides to show its end while its row is pointed at or focused; a short one never moves (9 Nov)", async () => {
   const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"><button class="dgc-menu-row" id="long"><span class="dgc-menu-label">deepseek-v4.1-flash:cloud</span></button><button class="dgc-menu-row" id="short"><span class="dgc-menu-label">glm</span></button></div></body>`,
     { runScripts: "outside-only", pretendToBeVisual: true });
-  dom.window.eval(read("media/shared/menu.js"));
+  dom.window.eval(read("media/shared/menu.js") + "\n" + read("media/shared/icons.js"));
   const $ = (id) => dom.window.document.getElementById(id);
   const label = (id) => $(id).querySelector(".dgc-menu-label");
   for (const [id, scroll, client] of [["long", 260, 180], ["short", 40, 180]]) {
@@ -287,7 +287,7 @@ test("a long name stays on one line and slides to show its end while its row is 
 test("a menu that redraws its rows keeps the pointed or focused long name sliding from where it was (9 Nov)", async () => {
   // Seen live: a Pip's menu redraws every second or so, and each redraw stopped the slide (a new row, at rest).
   const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"></div></body>`, { runScripts: "outside-only", pretendToBeVisual: true });
-  dom.window.eval(read("media/shared/menu.js"));
+  dom.window.eval(read("media/shared/menu.js") + "\n" + read("media/shared/icons.js"));
   const doc = dom.window.document, menu = doc.getElementById("m");
   const draw = () => {
     menu.innerHTML = `<button class="dgc-menu-row" data-chat-model="default"><span class="dgc-menu-label">Default (deepseek-v4.1-flash:cloud)</span></button>`;
@@ -312,7 +312,7 @@ test("a menu that redraws its rows keeps the pointed or focused long name slidin
 test("a row the menu focused by itself (on opening) doesn't slide; one reached by the keyboard does; a start no longer wanted is dropped (9 Nov)", async () => {
   const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"><button class="dgc-menu-row" id="r"><span class="dgc-menu-label">deepseek-v4.1-flash:cloud</span></button></div></body>`,
     { runScripts: "outside-only", pretendToBeVisual: true });
-  dom.window.eval(read("media/shared/menu.js"));
+  dom.window.eval(read("media/shared/menu.js") + "\n" + read("media/shared/icons.js"));
   const row = dom.window.document.getElementById("r"), label = row.querySelector(".dgc-menu-label");
   Object.defineProperty(label, "scrollWidth", { value: 260 });
   Object.defineProperty(label, "clientWidth", { value: 180 });
@@ -338,7 +338,7 @@ test("a row the menu focused by itself (on opening) doesn't slide; one reached b
 test("a row redrawn under a pointer that doesn't move keeps its long name sliding (found by where the pointer is) (9 Nov)", async () => {
   // Seen live: choosing a fallback redraws Work's menu, and a redrawn row isn't hovered until the pointer moves.
   const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"></div></body>`, { runScripts: "outside-only", pretendToBeVisual: true });
-  dom.window.eval(read("media/shared/menu.js"));
+  dom.window.eval(read("media/shared/menu.js") + "\n" + read("media/shared/icons.js"));
   const doc = dom.window.document, menu = doc.getElementById("m");
   const draw = () => {
     menu.innerHTML = `<button class="dgc-menu-row" data-i="2"><span class="dgc-menu-label">deepseek-v4.1-flash:cloud</span></button>`;
@@ -362,7 +362,7 @@ test("while a long name slides, its tooltip stays away (it would cover the row a
     const dom = new JSDOM(`<!doctype html><body><div id="m" class="dgc-menu"><button class="dgc-menu-row" id="r"><span class="dgc-menu-label" title="deepseek-v4.1-flash:cloud">deepseek-v4.1-flash:cloud</span></button></div></body>`,
       { runScripts: "outside-only", pretendToBeVisual: true });
     dom.window.matchMedia = (query) => ({ matches: reduced && /prefers-reduced-motion: reduce/.test(query) });
-    dom.window.eval(read("media/shared/menu.js"));
+    dom.window.eval(read("media/shared/menu.js") + "\n" + read("media/shared/icons.js"));
     const row = dom.window.document.getElementById("r"), label = row.querySelector(".dgc-menu-label");
     Object.defineProperty(label, "scrollWidth", { value: 260 });
     Object.defineProperty(label, "clientWidth", { value: 180 });

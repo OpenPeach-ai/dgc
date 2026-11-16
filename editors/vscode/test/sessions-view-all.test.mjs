@@ -50,8 +50,9 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
           more: document.getElementById("sessions-more").checkVisibility(), popover: !!document.querySelector(".sessions-popover:not([hidden])"), sideways: host.scrollWidth > host.clientWidth + 1 };
       });
       for (const row of m.rows) {
-        assert.deepEqual([row.nameLeft, row.ageRight, row.oneLine, row.ageAfterName, row.sameLine], [12, 12, 1, true, true], `its blob on the left edge with its title after it, age on the right one, one line, blob and age at the row's middle: ${JSON.stringify(row)}`);
-        assert.deepEqual(row.actions, [false, false], "a row at rest is its title and its age: no buttons");
+        // (16 Nov: under 400px a row's icon buttons are in its “…”, which is on every row after its age), so the age ends 26px before the edge there.
+        assert.deepEqual([row.nameLeft, row.ageRight, row.oneLine, row.ageAfterName, row.sameLine], [12, width < 400 ? 38 : 12, 1, true, true], `its blob on the left edge with its title after it, age on the right one, one line, blob and age at the row's middle: ${JSON.stringify(row)}`);
+        assert.deepEqual(row.actions, [false, false], "a row at rest is its title and its age: no Open in editor and no Delete on it");
       }
       assert.match(m.rows[0].said, /^\d{4}-\d\d-\d\d \d\d:\d\d · 3 messages$/, "pointing at the age says the date and how long it is");
       assert.deepEqual(m.all, { text: "View all (20)", tag: "BUTTON", color: true, filled: false, left: 12, under: true }, "a quiet line under the six");
@@ -63,11 +64,13 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       await x.page.hover("#sessions-list .session-row:nth-child(2)");
       const pointed = await x.page.evaluate(() => { const row = document.querySelector("#sessions-list .session-row:nth-child(2)"), seen = (s) => row.querySelector(s).checkVisibility({ visibilityProperty: true, opacityProperty: true });
         return [seen(".session-age"), seen(".session-open"), seen(".session-delete")]; });
-      assert.deepEqual(pointed, [false, true, true]);
+      // (Under 400px nothing changes when the row is pointed at: its age stays, and its “…” has Delete and Open in editor.)
+      assert.deepEqual(pointed, width < 400 ? [true, false, false] : [false, true, true]);
       assert.equal(await nameWidth(), resting, "no jump");
       assert.deepEqual(low(await homeContrast(x.page)), [], "pointed at");
-      await x.page.click("#sessions-list .session-row:nth-child(2) .session-delete");
-      await x.page.click("#sessions-list .session-row:nth-child(2) .session-open");
+      const fromMenu = async (word) => { await x.page.click("#sessions-list .session-row:nth-child(2) .session-more"); await x.page.locator(".dgc-pop .dgc-menu-row", { hasText: word }).click(); };
+      if (width < 400) { await fromMenu("Delete session…"); await fromMenu("Open in editor"); }
+      else { await x.page.click("#sessions-list .session-row:nth-child(2) .session-delete"); await x.page.click("#sessions-list .session-row:nth-child(2) .session-open"); }
       await x.page.click("#sessions-list .session-row:nth-child(3) .session-name");
       assert.deepEqual(await sent(x), [{ type: "deleteSession", id: "2026-s01", title: "Visits page alignment" }, { type: "openSessionInEditor", id: "2026-s01", title: "Visits page alignment" },
         { type: "openSessionInEditor", id: "2026-s02", title: "In one short sentence: what does nextWatering in src/app.js return?" }]);
@@ -127,8 +130,9 @@ test("expanded, the list follows a refreshed list, deletes from it, loads more a
     await x.page.click("#sessions-all");
     await x.send({ type: "sessions_list", items: sessions.filter((s) => s.id !== "2026-s03"), error: "", more: true, searchable: true });
     assert.deepEqual([await x.page.locator("#sessions-list .session-row").count(), await x.page.textContent("#sessions-all")], [19, "Show fewer"], "the new list, still whole");
-    await x.page.hover("#sessions-list .session-row >> nth=10");
-    await x.page.click("#sessions-list .session-row >> nth=10 >> .session-delete");
+    // (This side bar is under 400px wide: a row's Delete is in its “…”.)
+    await x.page.click("#sessions-list .session-row >> nth=10 >> .session-more");
+    await x.page.locator(".dgc-pop .dgc-menu-row", { hasText: "Delete session…" }).click();
     assert.equal((await sent(x)).at(-1).type, "deleteSession", "the extension confirms a delete, as before");
     // Load more is at the list's end, before Show fewer.
     const order = await x.page.evaluate(() => ["sessions-list", "sessions-more", "sessions-all"].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)));

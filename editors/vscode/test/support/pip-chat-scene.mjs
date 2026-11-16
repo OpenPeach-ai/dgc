@@ -19,7 +19,7 @@ export async function client(root = new URL("../..", import.meta.url).pathname) 
   // Replies are drawn by the page's own Markdown script (dist/markdown.js), loaded before the client as the editor does.
   const md = await build({ entryPoints: [`${root}/src/markdown.ts`], bundle: true, write: false, format: "iife", globalName: "DgcMarkdown", platform: "browser" });
   // Work's page gives the side bar's Pips their tokens (media/main.css imports them); only what a Pip's chat reads.
-  const work = ["shared/tokens.css", "shared/menu.css", "shared/composer.css", "shared/doccard.css"].map(read).join("\n");
+  const work = ["shared/tokens.css", "shared/menu.css", "shared/composer.css", "shared/doccard.css", "shared/blob.css"].map(read).join("\n");
   const made = { root, markdown: md.outputFiles[0].text, js: out.outputFiles.find((f) => f.path.endsWith(".js")).text,
     css: out.outputFiles.filter((f) => f.path.endsWith(".css")).map((f) => f.text).join("\n"), work };
   bundles.set(root, made);

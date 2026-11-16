@@ -15,7 +15,7 @@
   // keeps whole pills. Either way, what still does not fit goes behind "+N": never a second line.
   const FITS = ["full", "compact", "tight", "tighter"];
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const CLOSE = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>';
+  const CLOSE = (typeof window !== "undefined" ? window : globalThis).DgcIcons?.html("close", { size: 14 }) || "×";        // Close: the one glyph it has everywhere (media/shared/icons.js)
 
   /** The bar's own markup, for a page that has none: the line, its pills, and the popover they open. */
   function build(id, label, doc = document) {

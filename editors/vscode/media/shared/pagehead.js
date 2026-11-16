@@ -11,7 +11,7 @@
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   /** The three dots of every page's ⋯. */
-  const DOTS = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/></svg>';
+  const DOTS = root.DgcIcons ? root.DgcIcons.html("more") : (root.DgcMenu && root.DgcMenu.DOTS) || "…";     // the one More glyph (media/shared/icons.js)
   /** The class every page's ⋯ wears, whatever element it is (a button here; Pips' is the <summary> of its Controls). */
   const MORE = "dgc-pagehead-more";
 

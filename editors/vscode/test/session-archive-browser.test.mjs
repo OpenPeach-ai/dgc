@@ -46,11 +46,11 @@ test("a row's “…” has Archive, on a DGC that can: it asks the host, with n
   const x = await openHome(browser, { width: 300, tab: "work" });
   try {
     await openMenu(x, 2);
-    assert.deepEqual(await menuRows(x), [["open", "Open in editor", true], ["pin", "Pin to the dock", true]], "a DGC that can't archive: no Archive");
+    assert.deepEqual(await menuRows(x), [["open", "Open in editor", true], ["pin", "Pin to the dock", true], ["delete", "Delete session…", true]], "a DGC that can't archive: no Archive");
     await x.page.keyboard.press("Escape");
     await list(x);
     await openMenu(x, 2);
-    assert.deepEqual(await menuRows(x), [["open", "Open in editor", true], ["pin", "Pin to the dock", true], ["archive", "Archive", true]]);
+    assert.deepEqual(await menuRows(x), [["open", "Open in editor", true], ["pin", "Pin to the dock", true], ["archive", "Archive", true], ["delete", "Delete session…", true]]);
     await x.page.click(".dgc-menu [data-id='archive']");
     assert.deepEqual(await sent(x), [{ type: "archiveSession", id: "20261106-091200-b2", title: "Visits page alignment" }]);
     assert.equal(await x.page.evaluate(() => document.querySelectorAll("dialog[open]").length), 0, "no dialog: it can be undone");
@@ -69,7 +69,7 @@ test("another folder's session has no Archive, as it has no Delete", async (t) =
       archived: { items: [{ ...ARCHIVED[0], project: "~/code/shop", projectPath: "/home/me/code/shop", projectName: "shop" },
         { ...ARCHIVED[1], project: "~/code/garden", projectPath: "/home/me/code/garden", projectName: "garden", here: false }], more: false } });
     await openMenu(x, 1);
-    assert.deepEqual((await menuRows(x)).map((r) => r[0]), ["open", "pin", "archive"]);
+    assert.deepEqual((await menuRows(x)).map((r) => r[0]), ["open", "pin", "archive", "delete"]);
     await x.page.keyboard.press("Escape");
     await openMenu(x, 2);
     assert.deepEqual((await menuRows(x)).map((r) => r[0]), ["open", "pin"], "another folder's");

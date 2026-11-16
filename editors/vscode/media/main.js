@@ -918,10 +918,10 @@
     // While it runs, the purple dot stands where its age was.
     if (running) { age.hidden = true; end.append(liveDot(item.windowless ? "Running, no window" : "Running")); }
     const actions = el("span", "session-actions");
-    const open = sessionButton("session-open", "go-to-file", open_);
+    const open = sessionButton("session-open", window.DgcIcons.codicon("open-in-editor"), open_);
     open.title = elsewhere ? `Open in an editor tab here. It keeps working in ${item.projectName || "its own folder"}.` : "Open in an editor tab";
     open.setAttribute("aria-label", elsewhere ? `Open in Editor: ${title}, in ${item.projectName || item.project}` : `Open in Editor: ${title}`);
-    const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "deleteSession", id: item.id, title }));
+    const remove = sessionButton("session-delete", window.DgcIcons.codicon("delete"), () => vscode.postMessage({ type: "deleteSession", id: item.id, title }));
     remove.title = item.open ? "Close its tab to delete this session" : "Delete this session";
     remove.setAttribute("aria-label", `Delete session: ${title}`);
     // Pin it to the dock, and "..." for its colour, between Open in Editor and Delete.
@@ -933,7 +933,7 @@
     else if (elsewhere) { if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem)); else actions.append(open); }
     // Archive (in its "…") is, as Delete, for this window's folder's sessions, on a DGC that archives.
     else if (window.DgcDock) actions.append(open, pinButton(pinItem), moreButton("work", item.id, title, open_, pinItem,
-      sessionsArchive ? () => vscode.postMessage({ type: "archiveSession", id: item.id, title }) : null), remove);
+      sessionsArchive ? () => vscode.postMessage({ type: "archiveSession", id: item.id, title }) : null, remove), remove);
     else actions.append(open, remove);
     end.append(age);
     if (!gone) end.append(actions);
@@ -1100,7 +1100,7 @@
       const actions = el("span", "session-actions");
       const restore = sessionButton("session-restore", "discard", item.restore);
       restore.title = W.restore; restore.setAttribute("aria-label", `${W.restoreLabel}: ${item.title}`);
-      remove = sessionButton("session-delete", "trash", item.remove);
+      remove = sessionButton("session-delete", window.DgcIcons.codicon("delete"), item.remove);
       remove.title = W.remove; remove.setAttribute("aria-label", `${W.removeLabel}: ${item.title}`);
       actions.append(restore, remove); end.append(actions);
     }
@@ -1170,8 +1170,8 @@
   /** When a session or a chat was made, from its id or the list it is in (NaN: nothing says, so it counts as new). */
   const bornOf = (kind, id) => (kind === "widget" ? NaN : kind === "work" ? window.DgcMarks?.born(id, sessionItems.find((s) => s.id === id)?.when)
     : window.DgcMarks?.born("", (chatItems.find((c) => c.id === id) || {}).created_at || (chatItems.find((c) => c.id === id) || {}).updated_at));
-  const PIN_PATH = "M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z";
-  const pinSvg = (filled) => `<svg viewBox="0 0 16 16" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
+  // Pin and Unpin: the one glyph each has on every surface (media/shared/icons.js); pinned, it is the pin drawn solid.
+  const pinSvg = (filled) => window.DgcIcons.html(filled ? "unpin" : "pin");
   /** A row's pin: an outline until its thing is on the dock, then filled; a click pins or unpins. `item` is what the
    *  host keeps: { kind, id, title, sub?, look?, ref?, scope? }. */
   function pinButton(item) {
@@ -1200,21 +1200,25 @@
   function toggleFolderPin(folder) { const item = folderPinItem(folder); if (item.id && item.ref.folder) vscode.postMessage({ type: "dockToggle", item }); }
   /** A session's or a chat's "...": Open in editor, Pin to the dock, Archive (where it can be: `archive`), and its
    *  twelve colours. */
-  function rowMenu(button, kind, id, title, open, item, keyboard, archive) {
+  // `remove`: the row's own Delete button, when it has one. In a narrow side bar the row's icon buttons are in this menu
+  // (the ⋯ is the one button a narrow row keeps, his call of 16 Nov), so Delete is here too, in the icons' order; where
+  // the row's Delete is off (a session open in a tab) the menu's is off and says why.
+  function rowMenu(button, kind, id, title, open, item, keyboard, archive, remove) {
     const pinned = isDocked(kind, id);
     window.DgcBlob?.popup(button, { keyboard, label: title, place: "below",
-      rows: [{ id: "open", label: "Open in editor", icon: "open" }, { id: "pin", label: pinned ? "Unpin from the dock" : "Pin to the dock", icon: pinned ? "unpin" : "pin" },
-        ...(archive ? [{ id: "archive", label: "Archive", icon: "archive" }] : [])],
+      rows: [{ id: "open", label: "Open in editor", icon: "open-in-editor" }, { id: "pin", label: pinned ? "Unpin from the dock" : "Pin to the dock", icon: pinned ? "unpin" : "pin" },
+        ...(archive ? [{ id: "archive", label: "Archive", icon: "archive" }] : []),
+        ...(remove ? [{ id: "delete", label: kind === "chat" ? "Delete chat…" : "Delete session…", icon: "trash", danger: true, ...(remove.disabled ? { why: remove.title || "It can't be deleted now." } : {}) }] : [])],
       colour: { kind, ...colourOf(kind, id) },
-      onPick: (what) => { if (what === "open") open(); else if (what === "archive") archive?.(); else vscode.postMessage({ type: "dockToggle", item }); },
+      onPick: (what) => { if (what === "open") open(); else if (what === "archive") archive?.(); else if (what === "delete") { if (remove && !remove.disabled) remove.click(); } else vscode.postMessage({ type: "dockToggle", item }); },
       onColour: (n) => vscode.postMessage({ type: "dockColour", key: dockKey(kind, id), colour: n }) });
   }
-  function moreButton(kind, id, title, open, item, archive) {
+  function moreButton(kind, id, title, open, item, archive, remove) {
     const button = el("button", "session-more"); button.type = "button";
-    button.innerHTML = window.DgcMenu?.DOTS || "…";
+    button.innerHTML = window.DgcIcons.html("more");
     button.title = archive ? "More: pin it, archive it, or change its colour" : "More: pin it, or change its colour"; button.setAttribute("aria-label", `More for ${title}`);
     button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
-    button.onclick = (e) => { e.stopPropagation(); if (button.getAttribute("aria-expanded") === "true") window.DgcBlob?.close(true); else rowMenu(button, kind, id, title, open, item, e.detail === 0, archive); };
+    button.onclick = (e) => { e.stopPropagation(); if (button.getAttribute("aria-expanded") === "true") window.DgcBlob?.close(true); else rowMenu(button, kind, id, title, open, item, e.detail === 0, archive, remove); };
     button.ondblclick = (e) => e.stopPropagation();
     return button;
   }
@@ -1262,7 +1266,7 @@
         item.dot = running ? "live" : "";
         item.state = gone ? `Not found · ${row?.shown || folder}` : ["Folder", counts, running ? "running" : "", row?.here ? "this window’s folder" : ""].filter(Boolean).join(" · ");
         item.icon = `<span class="dgc-dock-folder">${folderTile(folder, 64, item.title)}</span>`;
-        item.menu = [[{ id: "here", label: "New session here", icon: "work", disabled: gone }, { id: "window", label: "Open in new window", icon: "open", disabled: gone }, { id: "unpin", label: "Unpin", icon: "unpin" }]];
+        item.menu = [[{ id: "here", label: "New work here", icon: "work", disabled: gone }, { id: "window", label: "Open in new window", icon: "open", disabled: gone }, { id: "unpin", label: "Unpin", icon: "unpin" }]];
       } else if (pin.kind === "chat") {
         const live = chatItems.find((c) => c.id === pin.id), running = answeringChats.has(pin.id), open = openChats.has(pin.id);
         if (live?.title) item.title = String(live.title);
@@ -1511,7 +1515,7 @@
     const age = el("span", "session-age"); age.textContent = chatAge(item.updated_at); age.title = chatWhen(item.updated_at);
     if (answering) { age.hidden = true; end.append(liveDot("Answering")); }
     end.append(age);
-    const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "chatdgcDelete", id: item.id, title }));
+    const remove = sessionButton("session-delete", window.DgcIcons.codicon("delete"), () => vscode.postMessage({ type: "chatdgcDelete", id: item.id, title }));
     remove.title = "Delete this chat";
     remove.setAttribute("aria-label", `Delete chat: ${title}`);
     const openIt = () => { vscode.postMessage({ type: "chatdgcOpen", id: item.id }); seenNews("chat", String(item.id || "")); };
@@ -1519,7 +1523,7 @@
     const pinItem = { kind: "chat", id: String(item.id || ""), title };
     const acts = el("span", "session-actions chat-acts");
     // (Archive is in its "…": the chat leaves the list, and is under "Archived (N)" at the list's end.)
-    if (window.DgcDock) acts.append(pinButton(pinItem), moreButton("chat", pinItem.id, title, openIt, pinItem, () => vscode.postMessage({ type: "chatdgcArchive", id: pinItem.id, title })), remove); else acts.append(remove);
+    if (window.DgcDock) acts.append(pinButton(pinItem), moreButton("chat", pinItem.id, title, openIt, pinItem, () => vscode.postMessage({ type: "chatdgcArchive", id: pinItem.id, title }), remove), remove); else acts.append(remove);
     end.append(acts);
     row.append(blobSpan("chat", pinItem.id, answering), main, end);
     row.onclick = (e) => { if (e.detail < 2) openIt(); };
@@ -1740,7 +1744,7 @@
         else if (maker.kind === "chat") vscode.postMessage({ type: "chatdgcOpen", id: maker.id });
         else if (maker.kind === "project") vscode.postMessage({ type: "chatdgcProjectOpen", id: maker.id });
       },
-      more: [{ id: "full", label: "Open the Library in the editor", icon: "open" }, { id: "settings", label: "Page preview settings", icon: "settings" }],
+      more: [{ id: "full", label: "Open the Library in the editor", icon: "open-in-editor" }, { id: "settings", label: "Page preview settings", icon: "settings" }],
       onMore: (what, tab) => { if (what === "full") vscode.postMessage({ type: "homeLibraryOpen", view: tab }); else vscode.postMessage({ type: "openSettings", section: "security" }); },
       kept: () => pageState().library, keep: (library) => { try { vscode.setState({ ...(vscode.getState() || {}), library }); } catch {} },
       marks: keeper ? { mark: (kind, id) => markHtml(kind, id, false), wear: (kind, list) => wearMarks(kind, list) } : null,
@@ -2017,7 +2021,7 @@
       // (pinned: whether a folder is on the dock; a page with no dock offers no pin.)
       folders: { rows: projectFolders ? projectFolders.rows : [], mark: folderTile, ...(window.DgcDock ? { pinned: folderDocked } : {}) },
       // What the Library lists: a widget's Folio in the palette it wears, an artifact's sheet by its kind (as the dock and the Library show them).
-      widgets: { mark: (id) => { wearMarks("widget", [{ id: String(id) }]); return markHtml("widget", String(id), false); } },
+      widgets: { mark: (id) => { wearMarks("widget", [{ id: String(id) }]); return markHtml("widget", String(id), false); }, chart: (kind) => window.DgcLibrary?.chartMark?.(kind) || "" },
       artifacts: { sheet: (type) => window.DgcFileSheet?.html?.(String(type || "file")) || "" },
     };
   }
@@ -2033,6 +2037,7 @@
     // Home's Widgets and Artifacts cards: the side bar's Library, on that tab (his call, 15 Nov; it was the editor's page).
     else if (what === "library") { showSideTab("library"); libraryMount()?.view(arg === "widgets" ? "widgets" : "artifacts"); }
     else if (what === "widget") vscode.postMessage({ type: "homeWidgetOpen", id: String(arg?.id || ""), chat_id: String(arg?.chat_id || "") });
+    else if (what === "chart") vscode.postMessage({ type: "homeChartOpen", id: String(arg?.id || ""), chat_id: String(arg?.chat_id || "") });
     else if (what === "artifact") vscode.postMessage({ type: "artifactOpen", id: String(arg?.id || ""), artifactType: String(arg?.type || ""), title: String(arg?.title || "") });
     else if (what === "open") {
       const key = String(arg || ""), kind = key.slice(0, key.indexOf(":")), id = key.slice(key.indexOf(":") + 1);
@@ -2067,12 +2072,12 @@
     else for (const key of mine) { const c = every.find((x) => x.key === key); if (c?.canRead) homePips?.read(key); else if (c?.canDismiss) homePips?.dismiss(key); }
     paintHub();
   }
-  /** Home's number: everything that waits or is new, whatever Show is on. It says which is which (H1, user test 15 Nov:
-   *  "two meanings, one badge"): with nothing waiting for you it is quiet (only news), and its words name both counts. */
+  /** Home's number: only what needs you (a card, a question, a held step). Things that are only new are never in the
+   *  number (his call, 16 Nov): alone they are a quiet dot. Its spoken name and its tooltip say both counts. */
   function paintHomeCount(total, needs = 0) {
     const badge = $("side-tab-home-count"), tab = $("side-tab-home");
     if (!badge || !tab) return;
-    const text = total > 99 ? "99+" : String(total), fresh = Math.max(0, total - needs);
+    const fresh = Math.max(0, total - needs), text = needs > 99 ? "99+" : needs ? String(needs) : "";
     if (badge.textContent !== text || badge.hidden !== !total) { badge.textContent = text; badge.hidden = !total; }
     badge.toggleAttribute("data-news-only", total > 0 && !needs);
     const words = [needs ? `${needs} ${needs === 1 ? "needs" : "need"} you` : "", fresh ? `${fresh} new` : ""].filter(Boolean).join(", ");
@@ -4067,9 +4072,9 @@
     const node = el("div", "tip");
     node.hidden = true; node.setAttribute("role", "tooltip"); node.id = "hover-tip";
     document.body.appendChild(node);
-    let timer = 0, warm = 0, target = null, native = "";
+    let timer = 0, warm = 0, target = null, native = "", alive = 0;
     function hide() {
-      clearTimeout(timer);
+      clearTimeout(timer); if (alive) { clearInterval(alive); alive = 0; }
       if (target && native) target.setAttribute("title", native);
       if (node.hidden === false) warm = Date.now();
       target = null; native = ""; node.hidden = true; node.className = "tip";
@@ -4086,7 +4091,9 @@
       // Above by default, below when there is no room, and never off the side of the panel.
       const anchorBox = el0.getBoundingClientRect(), box = node.getBoundingClientRect(), gap = 6;
       let top = anchorBox.top - box.height - gap, side = "above";
-      if (top < 4) { top = anchorBox.bottom + gap; side = "below"; }
+      // (Under it, a label clears what its control names with data-tip-under: a row's name is labelled under its whole
+      // row, never over the line under the name.)
+      if (top < 4) { const under = el0.dataset.tipUnder ? el0.closest(el0.dataset.tipUnder) : null; top = (under || el0).getBoundingClientRect().bottom + gap; side = "below"; }
       const left = Math.max(4, Math.min(Math.round(anchorBox.left + anchorBox.width / 2 - box.width / 2),
                                         window.innerWidth - box.width - 4));
       node.style.top = `${Math.round(top)}px`;
@@ -4116,6 +4123,10 @@
         if (el0.classList.contains("is-sliding")) return;
         if (native) el0.removeAttribute("title");
         paint(el0, (native || el0.dataset.tip || "").trim() || label);
+        // A control the page took away while its label was up (a list drawn again under the pointer) takes its label
+        // with it: a label never stays over rows it does not belong to.
+        if (alive) clearInterval(alive);
+        alive = setInterval(() => { if (target !== el0 || !el0.isConnected || !el0.getClientRects().length) { if (target === el0) hide(); else { clearInterval(alive); alive = 0; } } }, 300);
       }, delay);
     }
     // A control that changes its own `title` while its label is up or about to be (the agents pill
@@ -4993,8 +5004,12 @@
       row.setAttribute("aria-label", "Attachments");
       const images = [];
       items.forEach((item) => {
-        const li = el("li");
+        const li = el("li"), had = images.length;
         li.appendChild(promptAttachmentChip(item, images, bubble));
+        // A file you named, or a picture you attached: its card has the file's menu (fileCard below).
+        const place = filePlace(item);
+        if (images.length > had) fileCard(li, { name: images[had].name, side: "you", picture: images[had] });
+        else if (place) fileCard(li, { name: String(item.label || place), side: "you", path: place });
         row.appendChild(li);
       });
       if (images.length) bubble._images = images;
@@ -5087,6 +5102,59 @@
     chip.onclick = () => openPromptAttachment(item);
     return chip;
   }
+  // ---- a file's menu on its card in the chat (media/shared/filemenu.js, the Library's own): a "…" beside the chip and a
+  // right-click on it, with the keyboard. Open · Open in editor · Save a copy… · Copy · Copy path · Reveal in file
+  // manager; what a kind can't do is shown off, with why. A file in the project (one you named, one the turn made) is
+  // named to the host as the session named it, and the host finds it inside the project again; a picture kept inside
+  // the session is shown and saved from what the page already holds. Nothing here names a place on disk.
+  // (Function declarations and a lazy map: a transcript restored while the page starts draws cards before this line runs.)
+  function fileCardsMap() { return (fileCardsMap.map ||= new WeakMap()); }
+  /** The project file an attachment names ("" for pasted text, a skill, a link: those are not files). */
+  const filePlace = (item) => (item.pasted || item.skill || item.template || item.pipReference || item.img ? "" : String(item.resource?.relative_path || item.resource?.path || ""));
+  /** `card` (the chip's own list item, or a picture's figure) is a file's: { name, side, path } or { name, side, picture, where }. */
+  function fileCard(card, spec) {
+    const FM = window.DgcFileMenu;
+    if (!FM || !spec.name) return;
+    fileCardsMap().set(card, spec);
+    // A chip's "…" stands beside it; a picture's, on the line under it (beside Save to project…, where there is one).
+    const figure = card.querySelector(":scope > figure.made-image");
+    let into = null;
+    if (figure) { into = el("span", "made-image-acts"); const save = figure.querySelector(":scope > .made-image-save"); if (save) into.appendChild(save); figure.appendChild(into); }
+    else card.classList.add("file-card");
+    FM.mark(card, { name: spec.name, side: spec.side, into });
+  }
+  function fileCardSpec(card) {
+    const FM = window.DgcFileMenu, spec = fileCardsMap().get(card);
+    if (!spec) return null;
+    const more = card.querySelector(".dgc-file-more");
+    if (spec.picture) {
+      const record = spec.picture, kept = spec.kept || "inside its session";
+      // (A picture DGC made is in DGC's own folder; one you attached is inside the session. Neither is a file of yours yet.)
+      const why = (act) => (act === "editor" ? `This picture is kept ${kept}. Open shows it; Save a copy… makes a file.`
+        : act === "path" || act === "reveal" ? `This picture is kept ${kept}, not as a file of yours. Save a copy… makes a file.`
+        : (act === "save" || act === "copy") && !(record.state === "ready" && record.src) ? "The picture isn't here yet." : "");
+      return { name: spec.name, why, onPick: (act) => {
+        if (act === "open") (card.querySelector(".image-chip, .image-tile") || record.chip)?.click();
+        else if (act === "save") vscode.postMessage({ type: "saveImage", name: imageFileName(record.name) || record.name || "image.png", data: record.src });
+        else if (act === "copy") FM.copyPicture(document, record.src).then((ok) => FM.said(more, ok ? "Image copied" : "Couldn't copy here"));
+      } };
+    }
+    return { name: spec.name, why: (act) => FM.whyProject(spec.path, act), onPick: (act) => { fileCardsMap.from = more; vscode.postMessage({ type: "fileAct", act, file: { kind: "project", path: spec.path } }); } };
+  }
+  window.DgcFileMenu?.listen(log, fileCardSpec);
+  // Inline touches in what you type and what you read (media/shared/inline.js): a colour's swatch in the box, a sent
+  // bubble and a reply; shortcuts as keys; a time with a zone in this computer's time; a commit or an issue as a link once
+  // the host has asked the project's Git (the page never runs git); a colour, a hash and an API path copy on a click.
+  const inlineTouches = window.DgcInline?.watch(document, {
+    rules: [{ sel: "#log .text", times: true, refs: true }, { sel: "#log .msg.user .bubble", refs: true }],
+    copy: (text) => vscode.postMessage({ type: "copy", text }),
+    refs: { scope: () => "work", ask: (hashes) => vscode.postMessage({ type: "gitRefs", hashes }), open: (hash) => vscode.postMessage({ type: "gitCommitOpen", hash }) },
+  });
+  /** Copy on a picture in the project: the host read it and hands it over; the clipboard is the page's to write. */
+  function fileCopyFromHost(data) {
+    const FM = window.DgcFileMenu, more = fileCardsMap.from;
+    FM?.copyPicture(document, String(data || "")).then((ok) => FM.said(more, ok ? "Image copied" : "Couldn't copy here"));
+  }
   function producedFileChip(item) {
     const rel = String(item.rel || "");
     const name = String(item.name || rel.split("/").pop() || "file");
@@ -5171,6 +5239,7 @@
       figure.appendChild(caption);
       figure.appendChild(save);
       li.appendChild(figure);
+      fileCard(li, { name: imageFileName(twin.name) || twin.name || "Image", side: "dgc", picture: twin, kept: "in DGC's own folder" });
       row.appendChild(li);
     });
     requestImages(row._images.filter((twin) => twin.state === "pending"));
@@ -8670,7 +8739,7 @@ function permissionChoices(ev) {
   }
 
   // Standing goal — the objective and clock stay attached immediately above the composer.
-  let goalState = { text: "", status: "none", elapsed: 0, running: false }, goalObservedAt = Date.now();
+  let goalState = { text: "", status: "none", elapsed: 0, running: false }, goalObservedAt = Date.now(), goalStamp = 0;
   function currentGoalElapsed() {
     return goalState.elapsed + (goalState.status === "active" && goalState.running
       ? Math.max(0, (Date.now() - goalObservedAt) / 1000) : 0);
@@ -8709,10 +8778,18 @@ function permissionChoices(ev) {
     const status = text ? String(next?.status || "active") : "none";
     const priorElapsed = currentGoalElapsed();
     const explicit = Number(next?.elapsed_seconds);
-    goalState = { ...next, text, status, running: next?.running === true,
+    // One clock (finding 71). The host keeps the goal's last snapshot and sends it again with every state (a mode
+    // change, a thinking change, a reload), stamped with the moment it arrived (observed_at, ms). The clock counts from
+    // that moment, so the same snapshot sent again never moves it: taking its seconds as new put a running clock back
+    // to the time of the last goal event ("Goal 0:54", then "Goal 0:01" after Auto was turned on).
+    const stamp = Number(next?.observed_at), stamped = Number.isFinite(stamp) && stamp > 0, running = next?.running === true;
+    const again = stamped && !!text && text === goalState.text && status === goalState.status && running === goalState.running
+      && explicit === goalState.elapsed && (goalStamp === stamp || goalStamp === 0);      // the snapshot the clock already counts from
+    goalState = { ...next, text, status, running,
       elapsed: Number.isFinite(explicit) && explicit >= 0 ? explicit
         : (text === goalState.text ? priorElapsed : 0) };
-    goalObservedAt = Date.now();
+    if (!again) goalObservedAt = stamped ? Math.min(Date.now(), stamp) : Date.now();      // (never from the future, if two clocks disagree)
+    goalStamp = stamped ? stamp : 0;
     // A finished goal stops being a pinned goal. Leaving it on the rail with a play button meant
     // the obvious next click RESUMED work that was already done -- which is exactly what happened:
     // a completed objective was resumed and started over. The transcript keeps the record.
@@ -10302,6 +10379,7 @@ function permissionChoices(ev) {
         for (const item of items.slice(0, 8)) {
           const li = el("li");
           li.appendChild(PRODUCED_IMAGE.test(String(item.rel)) ? producedImage(item, row) : producedFileChip(item));
+          if (item.rel) fileCard(li, { name: String(item.name || String(item.rel).split("/").pop() || "file"), side: "dgc", path: String(item.rel) });
           row.appendChild(li);
         }
         // Pictures shown under the reply (show_file of an image) fold away as a made picture does.
@@ -13720,6 +13798,9 @@ function permissionChoices(ev) {
       }
       return;
     }
+    if (msg.type === "fileCopy") { fileCopyFromHost(msg.data); return; }
+    if (msg.type === "gitRefs") { inlineTouches?.refsAnswer({ scope: "work", remote: msg.remote === true, github: msg.github, known: msg.known }); return; }
+    if (msg.type === "fileSaid") { window.DgcFileMenu?.said(fileCardsMap.from, String(msg.words || "").slice(0, 60)); return; }
     if (msg.type === "fileThumb") {
       finishFileThumb(String(msg.requestId || ""), typeof msg.src === "string" && IMAGE_DATA.test(msg.src) ? msg.src : "");
       return;

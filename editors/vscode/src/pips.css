@@ -324,7 +324,7 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
    scrollbar drawn over the content (macOS's overlay scrollbars, where scrollbar-gutter reserves nothing) never covers
    a bubble or its time (reported 2026-11-03: "the scroll bar ... cuts the chat"). */
 .simple-pips.chat-open .simple-content.chat .conversation-log{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;padding-top:6px;margin-right:-12px;padding-right:12px}
-.chat-style .pip-message.assistant .answer{display:inline-block;max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:10px 14px}
+.chat-style .pip-message.assistant .answer{display:inline-block;max-width:88%;background:var(--pip-bubble);border-radius:var(--r-bubble,10px);padding:10px 14px}
 .chat-style .pip-message.assistant .answer p:first-child{margin-top:0}
 .chat-style .pip-message.assistant .answer p:last-child{margin-bottom:0}
 .chat-style .pip-message.user{border:0;background:transparent;padding:0;display:flex;flex-direction:column;align-items:flex-end}
@@ -340,7 +340,7 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 .pip-conversation.chat-style .pip-composer{border-radius:var(--r-box,6px)}
 .simple-pips .simple-bar .runner-status{font-size:0;gap:0}
 .simple-pips .simple-bar .runner-status .status-dot{width:8px;height:8px}
-.pip-message.typing{display:inline-flex;padding:13px 16px;border-radius:18px;background:var(--pip-bubble);margin-bottom:18px}
+.pip-message.typing{display:inline-flex;padding:13px 16px;border-radius:var(--r-bubble,10px);background:var(--pip-bubble);margin-bottom:18px}
 .typing-dots{display:inline-flex;gap:4px}
 .typing-dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:pip-typing 1.2s infinite ease-in-out}
 .typing-dots i:nth-child(2){animation-delay:.15s}
@@ -383,7 +383,7 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 @container(max-width:360px){.pip-picker{grid-template-columns:64px minmax(0,1fr);gap:10px}.pip-picker-face{width:64px;height:64px}.pip-picker-face .avatar{width:52px;height:50px}.pip-picker-list{left:-74px}.pip-picker.large{grid-template-columns:76px minmax(0,1fr)}.pip-picker.large .pip-picker-face{width:76px;height:76px}.pip-picker.large .pip-picker-face .avatar{width:62px;height:60px}.pip-picker.large .pip-picker-list{left:-86px}}
 /* Grok-style chat: short bubbles, the Pip at work with its name, and time marks. */
 .chat-style .pip-message.assistant .answer.split{display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:none;padding:0;max-width:none}
-.chat-style .pip-message.assistant .answer.split .reply-part{max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:9px 14px}
+.chat-style .pip-message.assistant .answer.split .reply-part{max-width:88%;background:var(--pip-bubble);border-radius:var(--r-bubble,10px);padding:9px 14px}
 .chat-style .reply-part>:first-child{margin-top:0}
 .chat-style .reply-part>:last-child{margin-bottom:0}
 .chat-style .pip-message.user .message-status[data-status=queued],.chat-style .pip-message.user .message-status[data-status=running]{display:none}
@@ -947,7 +947,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(86%,620px);padding:10px 14px;border-radius:var(--r-bubble,10px);line-height:1.55;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split{gap:7px}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,
-.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:min(90%,640px);padding:10px 14px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 6%,transparent);border-radius:17px 17px 17px 6px;background:var(--pip-bubble);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:min(90%,640px);padding:10px 14px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 6%,transparent);border-radius:var(--r-bubble,10px);background:var(--pip-bubble);box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .simple-pips.chat-open .pip-conversation.chat-style .message-body{line-height:1.55}
 .simple-pips.chat-open .pip-conversation.chat-style .message-body p{margin-bottom:10px}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message .response-actions{min-height:22px;margin-top:2px;gap:3px}
@@ -1251,13 +1251,13 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .simple-pips.chat-open .pip-conversation.chat-style .chat-time{margin:16px 0 12px;font-size:11px;color:var(--pc-quiet)}
 
 /* Bubbles: 8 x 12 inside, flat. Yours has the sent bubble's 10 on every corner (--r-bubble, as in Work and ChatDGC: his
-   call of 16 Nov); the Pip's keeps 20 with a 7.5 tail. Yours is the shared grey (as Work's and ChatDGC's); the Pip's is a
+   call of 16 Nov); the Pip's reply has the same 10 and no tail (16 Nov): its face and name above it say who is talking. Yours is the shared grey (as Work's and ChatDGC's); the Pip's is a
    wash of the text's own colour, with no line around it. */
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(calc(100% - 40px),600px);padding:8px 12px;border-radius:var(--r-bubble,10px);box-shadow:none}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split{gap:4px}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,
-.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:var(--pc-measure);padding:8px 12px;border:0;border-radius:var(--r-2xl,20px) var(--r-2xl,20px) var(--r-2xl,20px) var(--r-sm,7.5px);box-shadow:none}
-.simple-pips.chat-open .pip-conversation.chat-style .pip-message.typing{padding:12px;border-radius:var(--r-2xl,20px) var(--r-2xl,20px) var(--r-2xl,20px) var(--r-sm,7.5px);margin-bottom:16px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:var(--pc-measure);padding:8px 12px;border:0;border-radius:var(--r-bubble,10px);box-shadow:none}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.typing{padding:12px;border-radius:var(--r-bubble,10px);margin-bottom:16px}
 .simple-pips.chat-open .pip-conversation.chat-style .message-body p{margin-bottom:8px}
 .simple-pips.chat-open .pip-conversation.chat-style .message-body p:last-child{margin-bottom:0}
 /* A link is a mark, so it takes the one purple's link tone, not the editor's blue beside it. */
@@ -1337,7 +1337,7 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
    while the row is pointed at or holds the keyboard, and always once pinned. */
 .job-slot{position:relative;display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
 .dgc-pin{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin:0;padding:0;border:0;border-radius:var(--r-sm,7.5px);background:transparent;color:var(--home-quiet,var(--muted));cursor:pointer;min-width:0}
-.dgc-pin>svg{width:14px;height:14px}
+.dgc-pin>svg{width:16px;height:16px}
 .dgc-pin:hover{color:var(--text-strong,var(--vscode-foreground));background:var(--wash)}
 .dgc-pin[aria-pressed="true"]{color:var(--text,var(--vscode-foreground))}
 .dgc-pin:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}
@@ -1377,6 +1377,24 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .pip-row-slot.has-open:has(>.job-pin):has(.pip-row-marks-live):is(:hover,:focus-within) .pip-row-copy{padding-right:64px}
 @media(hover:none){.pip-row-slot>.job-open{opacity:1}.pip-row-slot.has-open:has(>.job-pin) .pip-row-copy{padding-right:50px}.pip-row-slot.has-open:has(>.job-pin):has(.pip-row-marks-live) .pip-row-copy{padding-right:64px}}
 @media(prefers-reduced-motion:reduce){.job-open{transition:none}}
+/* A narrow list (under 400px): the row's icon buttons (Open in editor, the pin) don't fit beside its name, so they are
+   in the row's "…" menu, and the "…" is on every row, where the pin stood: nothing needs the pointer on the row first,
+   and Tab reaches it (his rule for every list, 16 Nov). The name always keeps room for it. */
+.pip-row-slot>.job-more,.pip-row-menu{display:none}
+@container(max-width:399px){
+ .pip-row-slot.has-more>.job-open,.pip-row-slot.has-more>.job-pin{display:none}
+ .pip-row-slot>.job-more{display:inline-flex;position:absolute;top:50%;right:calc(8px + var(--pip-dot-room,0px));z-index:1;width:16px;height:28px;transform:translateY(-50%)}
+ .pip-row-slot:has(.pip-row-marked)>.job-more{right:calc(40px + var(--pip-dot-room,0px))}
+ .pip-row-slot:has(.pip-row-both)>.job-more{right:calc(66px + var(--pip-dot-room,0px))}
+ .pip-row-slot:has(.pip-row-marks-live)>.job-more{right:calc(50px + var(--pip-dot-room,0px))}
+ .pip-row-slot>.job-more:is(:hover,[aria-expanded="true"]){background:var(--wash,color-mix(in srgb,var(--vscode-foreground) 10%,transparent));color:var(--vscode-foreground)}
+ /* (It stands exactly where the pin stood, 4px slimmer: its three dots in 16px. A Pip's name and its folder's keep their room.) */
+ .pip-row-slot.has-more .pip-row-copy,.pip-row-slot.has-more:is(.is-pinned,:hover,:focus-within) .pip-row-copy,.pip-row-slot.has-more.has-open:has(>.job-pin):is(:hover,:focus-within) .pip-row-copy{padding-right:24px}
+ .pip-row-slot.has-more:has(.pip-row-marks-live) .pip-row-copy,.pip-row-slot.has-more:has(.pip-row-marks-live):is(.is-pinned,:hover,:focus-within) .pip-row-copy,.pip-row-slot.has-more.has-open:has(>.job-pin):has(.pip-row-marks-live):is(:hover,:focus-within) .pip-row-copy{padding-right:38px}
+ .pip-row-slot.menu-open{z-index:5}
+ .pip-row-menu{display:block;position:absolute;top:calc(50% + 14px);right:4px;z-index:30;box-sizing:border-box;width:max-content;min-width:176px;max-width:calc(100% - 8px)}
+ .pip-row-menu.up{top:auto;bottom:calc(50% + 14px)}
+}
 /* (In a side bar of 340 px and under, a row with its switch, its dot and its pin has no room for one more without
    taking the Pip's name: there Open in editor is in the chat's own menu.) */
 @container(max-width:340px){

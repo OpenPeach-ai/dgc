@@ -6,7 +6,7 @@
 //     each of the four tabs) and nothing hides behind it. A Pip's chat alone has none (dock-pip-chat.test.mjs)
 //   - a pin on every session and chat row, and on every Pip's row in the Pips view, pins and unpins; the dock's own menu
 //     unpins and moves
-//   - "+" is always last and offers a new Work session, ChatDGC chat, Personal Pip, and Settings
+//   - "+" is always last and offers New work, a ChatDGC chat, Personal Pip, and Settings
 //   - pointed at, the tiles grow toward the pointer and the one under it is named, with what it is doing
 //   - tiles shrink as items are added, down to 24 px; when 24 px tiles cannot fit, the dock steps aside and keeps its pins
 //   - Settings' three choices: Always, When I point at the bottom, Never
@@ -115,7 +115,8 @@ for (const width of [300, 700]) {
 // ---- pin and unpin -------------------------------------------------------------------------------------------------
 test("a pin on every session and chat row: it pins, stays filled while pinned, and a click unpins", async (t) => {
   if (skipOrFail(t)) return;
-  const x = await openDock(browser, { pins: [], width: 300, height: 760 });
+  // (440px: where a row's icon buttons show on the row. Under 400px they are in its “…”: uir2c-rows.test.mjs.)
+  const x = await openDock(browser, { pins: [], width: 440, height: 760 });
   try {
     let d = await dockNow(x.page);
     assert.deepEqual(keys(d), ["+"], 'nothing pinned: only "+"');
@@ -163,7 +164,7 @@ test("a pin on every session and chat row: it pins, stays filled while pinned, a
 
 test("the Pips view: each Pip's row has the same pin", async (t) => {
   if (skipOrFail(t)) return;
-  const x = await openDock(browser, { pins: [], width: 300, height: 700 });
+  const x = await openDock(browser, { pins: [], width: 440, height: 700 });       // (under 400px the pin is in the row's “…”)
   try {
     await x.page.click("#side-tab-pips");
     const row = x.page.locator("#pips-host [data-job]").first();
@@ -278,7 +279,7 @@ test("right-click on a dock item: Open, Unpin, Move left, Move right, and a sess
   } finally { await x.close(); }
 });
 
-test('"+" is always the last item and offers a new Work session, ChatDGC chat, Personal Pip, and Settings', async (t) => {
+test('"+" is always the last item and offers New work, a ChatDGC chat, Personal Pip, and Settings', async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { width: 300, height: 700 });
   try {
@@ -289,7 +290,7 @@ test('"+" is always the last item and offers a new Work session, ChatDGC chat, P
     await x.setting({ pins: PINS }); await x.settle();
     const plus = async () => { const d = await dockNow(x.page); await x.page.mouse.click(...centre(d.items.at(-1))); await x.settle(); return dockNow(x.page); };
     let d = await plus();
-    assert.deepEqual(d.menu, ["New Work session", "New ChatDGC chat", "New Personal Pip", "Settings"]);
+    assert.deepEqual(d.menu, ["New work", "New ChatDGC chat", "New Personal Pip", "Settings"]);
     assert.equal(await x.page.evaluate(() => document.querySelector("#dgc-dock .dgc-dock-add").getAttribute("aria-expanded")), "true");
     await x.page.click('.dgc-pop [data-id="work"]');
     assert.deepEqual((await posted(x, "dockNew")).at(-1), { type: "dockNew", what: "work" }, "a new Work session, at once");
@@ -448,7 +449,7 @@ test("tiles shrink as items are added, down to 24 px; then the dock steps aside 
 
 test("past the most, pinning one more asks which to take off (here: the scene's host notes the question)", async (t) => {
   if (skipOrFail(t)) return;
-  const x = await openDock(browser, { pins: manyPins(8), most: 8, width: 300, height: 760 });
+  const x = await openDock(browser, { pins: manyPins(8), most: 8, width: 440, height: 760 });       // (under 400px the pin is in the row's “…”)
   try {
     const session = `#sessions-list .session-row[data-id="${DOCK_SESSIONS[2].id}"]`;
     await x.page.hover(session); await x.page.click(`${session} .dgc-pin`); await x.settle();
@@ -582,7 +583,7 @@ test("the keyboard: Tab into the dock, arrows between items, Home and End, Enter
     // "+" by the keyboard.
     await x.page.keyboard.press("End"); await x.page.keyboard.press("Enter"); await x.settle();
     d = await dockNow(x.page);
-    assert.deepEqual(d.menu, ["New Work session", "New ChatDGC chat", "New Personal Pip", "Settings"]);
+    assert.deepEqual(d.menu, ["New work", "New ChatDGC chat", "New Personal Pip", "Settings"]);
     assert.equal(d.focus, "work");
     await x.page.keyboard.press("End"); await x.page.keyboard.press("Enter");
     assert.deepEqual((await posted(x, "dockNew")).at(-1), { type: "dockNew", what: "settings" });
@@ -689,7 +690,7 @@ test("a session's colour from its row's …: Open in editor, Pin to the dock, an
     const id = DOCK_SESSIONS[1].id, row = `#sessions-list .session-row[data-id="${id}"]`;
     await x.page.hover(row); await x.page.click(`${row} .session-more`); await x.settle();
     let d = await dockNow(x.page);
-    assert.deepEqual(d.menu, ["Open in editor", "Pin to the dock"]);
+    assert.deepEqual(d.menu, ["Open in editor", "Pin to the dock", "Delete session…"]);
     assert.deepEqual(d.swatches.map((s) => s.palette), TWELVE);
     assert.equal(await x.page.evaluate((sel) => document.querySelector(sel).querySelector(".session-actions").checkVisibility(), row), true, "the row keeps its actions while its menu is open");
     const menu = await x.page.evaluate(() => { const r = document.querySelector(".dgc-pop").getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom]; });
@@ -709,8 +710,9 @@ test("a session's colour from its row's …: Open in editor, Pin to the dock, an
     await x.page.click(`.dgc-pop .dgc-swatch[data-colour="${own}"]`); await x.settle();
     assert.equal((await dockNow(x.page)).items[0].mark.palette, own, "and back again, by choosing it");
     // By the keyboard: the … opens with its first row focused, and Escape returns to it.
-    await x.page.focus(row); for (let i = 0; i < 3; i++) await x.page.keyboard.press("Tab");
-    assert.equal(await x.page.evaluate(() => document.activeElement.className), "session-more", "Tab from the row: Open in Editor, the pin, then …");
+    // (Under 400px the “…” is the row's one button, the pinned row's pin before it; wider, Open in Editor and the pin come first.)
+    await x.page.focus(row); for (let i = 0; i < 3; i++) { await x.page.keyboard.press("Tab"); if (await x.page.evaluate(() => document.activeElement.className) === "session-more") break; }
+    assert.equal(await x.page.evaluate(() => document.activeElement.className), "session-more", "Tab from the row reaches its …");
     await x.page.keyboard.press("Enter"); await x.settle();
     assert.equal((await dockNow(x.page)).focus, "open");
     await x.page.keyboard.press("Escape");

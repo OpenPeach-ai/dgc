@@ -103,7 +103,7 @@ test("the side bar opens on Home, never on a chat, and this project's sessions a
 
 test("a click, Open in Editor and Enter open a session in a tab, as a chat opens in the Chat tab; nothing stays selected", async (t) => {
   if (skipOrFail(t)) return;
-  const s = await openPage();
+  const s = await openPage({ width: 440 });       // (where a row's Open in Editor is on the row; under 400px it is in its “…”)
   try {
     await s.page.click(".session-row:nth-child(2) .session-name");
     assert.deepEqual(await s.posted(), [{ type: "openSessionInEditor", id: "20261006-091200-b2", title: "Visits page alignment" }], "a click opens it");
@@ -113,8 +113,10 @@ test("a click, Open in Editor and Enter open a session in a tab, as a chat opens
     assert.deepEqual(await s.posted(), [{ type: "openSessionInEditor", id: "20261006-091200-b2", title: "Visits page alignment" }],
                      "a double-click opens it once, not twice");
     await s.clear();
-    await s.page.hover(".session-row:nth-child(1)");      // a row's buttons show when it is pointed at
-    await s.page.click(".session-row:nth-child(1) .session-open");
+    // (A row's buttons show when it is pointed at; under 400px they are in its “…”, when it has one.)
+    await s.page.hover(".session-row:nth-child(1)");
+    if (await s.page.locator(".session-row:nth-child(1) .session-open").isVisible()) await s.page.click(".session-row:nth-child(1) .session-open");
+    else { await s.page.click(".session-row:nth-child(1) .session-more"); await s.page.locator(".dgc-pop .dgc-menu-row", { hasText: "Open in editor" }).click(); }
     assert.deepEqual(await s.posted(), [{ type: "openSessionInEditor", id: "20261006-101500-a1", title: "ok, so my this directory runs my Company's ERP at app.ton" }],
       "the button opens it, once");
     await s.clear();
@@ -215,8 +217,10 @@ for (const [width, theme] of [[380, "dark-modern"], [260, "dark-modern"], [380, 
       assert.ok(Math.abs(m.head - m.text) <= 1, `the search box and the rows' blobs start on one edge (${m.head} vs ${m.text})`);
       await s.page.hover(".session-row:nth-child(1)");
       const buttons = await s.page.evaluate(() => { const view = document.getElementById("sessions-host").getBoundingClientRect();
-        return [...document.querySelectorAll(".session-row:nth-child(1) :is(.session-open, .session-delete)")].map((b) => { const r = b.getBoundingClientRect(); return b.checkVisibility() && r.left >= view.left && r.right <= view.right; }); });
-      assert.deepEqual(buttons, [true, true], "pointed at, a row's two buttons are inside the side bar");
+        // (Under 400px a row that has a “…” keeps only that on it; the others are in its menu.)
+        const more = document.querySelector(".session-row:nth-child(1) .session-more"), folded = innerWidth < 400 && !!more;
+        return [...document.querySelectorAll(`.session-row:nth-child(1) :is(${folded ? ".session-more" : ".session-open, .session-delete"})`)].map((b) => { const r = b.getBoundingClientRect(); return b.checkVisibility() && r.left >= view.left && r.right <= view.right; }); });
+      assert.ok(buttons.length >= 1 && buttons.every(Boolean), `pointed at, a row's buttons are inside the side bar (${buttons})`);
     } finally { await s.page.close(); }
   });
 }

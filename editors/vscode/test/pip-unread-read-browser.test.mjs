@@ -219,7 +219,9 @@ test("Clear clears Home's new cards and marks their messages read, so the Pips p
     await x.page.waitForSelector('#home-hub [data-hub-act="read"]');
     assert.equal(await x.head(), "Pips · 3 new");
     assert.deepEqual(await x.cards(), [["Mail watch", "new", "Two new mails from OKX.", ["2 new"]], ["Billing audit", "new", "2 findings in billing.py", ["1 new"]]]);
-    assert.equal(await x.page.textContent("#side-tab-home-count"), "2", "the Home tab counts the cards");
+    // (Two cards, both only new: Home's tab shows its quiet dot with no number, and says "2 new". 16 Nov.)
+    assert.deepEqual(await x.page.evaluate(() => { const b = document.getElementById("side-tab-home-count"); return [b.hidden, b.textContent, b.hasAttribute("data-news-only"), document.getElementById("side-tab-home").getAttribute("aria-label")]; }),
+      [false, "", true, "Home: 2 new"], "the Home tab says the two cards are new, and counts none as needing you");
     const button = x.page.locator("#home-hub .dgc-hub-clear");
     assert.equal(await button.textContent(), "Clear", "one control for everything that is new");
     assert.match(await button.getAttribute("title"), /What needs you stays/);
@@ -662,7 +664,8 @@ test("a tab's number is Needs attention's on one data set, and a Pip's number is
     assert.deepEqual(await x.cards(), [["Mail watch", "needs", "Hand this to Mail watch?", ["Handoff", "Sort the bills.", "2 new"]], ["Billing audit", "needs", "1 thing is waiting for you", ["1 new"]],
       ["New Pip", "needs", "Create the Pip “Bills”?", ["Watch my bills."]], ["Garden notes", "new", "Water the tomatoes at dawn.", ["1 new"]]],
       "a card in Needs you where something waits, in its own words when it is one thing DGC names (the new Pip has its own card: the three are the group's 3), and what is new said on each card");
-    assert.equal(await x.page.textContent("#side-tab-home-count"), "4", "the Home tab counts the cards");
+    assert.equal(await x.page.textContent("#side-tab-home-count"), "3", "the Home tab's number is the three cards that need you");
+    assert.equal(await x.page.getAttribute("#side-tab-home", "aria-label"), "Home: 3 need you, 1 new", "and its words name the one that is only new");
     await openPipsPage(x, "personal");
     await x.page.waitForFunction(() => document.getElementById("pips-host").shadowRoot.querySelector(".pip-tab-count"));
     const [personal, project] = await tabs(x);

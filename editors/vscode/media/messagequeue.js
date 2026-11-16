@@ -5,13 +5,15 @@
   "use strict";
   const line = (body) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
   const dots = (cells) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true" focusable="false">${cells.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1"/>`).join("")}</svg>`;
+  // Remove and More: the one glyph each has on every surface (media/shared/icons.js, loaded before this).
+  const shared = (action, own) => (typeof window !== "undefined" && window.DgcIcons ? window.DgcIcons.html(action) : own);
   const ICONS = {
     queue: line('<path d="M2.5 4h11"/><path d="M2.5 8h6"/><path d="M2.5 12h4"/><path d="M12 7v6"/><path d="m10 11 2 2 2-2"/>'),
     grip: dots([[5, 4], [11, 4], [5, 8], [11, 8], [5, 12], [11, 12]]),
     steer: line('<path d="M9.5 3.5 14 8l-4.5 4.5"/><path d="M14 8H6a3.5 3.5 0 0 0-3.5 3.5v1"/>'),
     edit: line('<path d="M10.5 3.2 12.8 5.5 5.6 12.7l-3 .7.7-3z"/>'),
-    remove: line('<path d="M2.8 4.3h10.4"/><path d="M6 4.3V3a.8.8 0 0 1 .8-.8h2.4A.8.8 0 0 1 10 3v1.3"/><path d="m4.2 4.3.6 8.3a1.2 1.2 0 0 0 1.2 1.2h4a1.2 1.2 0 0 0 1.2-1.2l.6-8.3"/>'),
-    more: dots([[3.5, 8], [8, 8], [12.5, 8]]),
+    remove: shared("delete", line('<path d="M2.8 4.3h10.4"/><path d="M6 4.3V3a.8.8 0 0 1 .8-.8h2.4A.8.8 0 0 1 10 3v1.3"/><path d="m4.2 4.3.6 8.3a1.2 1.2 0 0 0 1.2 1.2h4a1.2 1.2 0 0 0 1.2-1.2l.6-8.3"/>')),
+    more: shared("more", dots([[3.5, 8], [8, 8], [12.5, 8]])),
   };
   const make = (tag, className, text) => {
     const node = document.createElement(tag);

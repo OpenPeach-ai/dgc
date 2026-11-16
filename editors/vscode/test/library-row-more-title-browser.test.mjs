@@ -63,12 +63,17 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 2
   });
 }
 
-test("a row that is not pointed at keeps its whole width: its title is cut no sooner than its own row allows", async (t) => {
+test("a row's words end just before its ⋯, which is on every row (16 Nov): its title is cut no sooner than that, pointed at or not", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openLibraryTab(browser, { width: 300, theme: "dark-modern" });
   try {
     await x.libTab("images"); await x.page.mouse.move(1, 1); await x.settle();
     const rest = await x.page.evaluate(() => [...document.querySelectorAll("#library-home .lib-row")].map((r) => { const m = r.querySelector(".lib-row-main"); return [r.querySelector(".lib-row-name").textContent, Math.round(m.getBoundingClientRect().right - r.getBoundingClientRect().right), getComputedStyle(m).paddingRight]; }));
-    for (const [title, gap, pad] of rest) { assert.equal(pad, "0px", `“${title}” gives no room away while nothing is over it`); assert.ok(gap >= -9, `“${title}” runs to its row's end (${gap}px)`); }
+    // (The ⋯ is 28px, 3px from the row's end, and the words stop a gap before it: 10px at this width.)
+    for (const [title, gap, pad] of rest) { assert.equal(pad, "0px", `“${title}” gives no room away beyond the ⋯'s own`); assert.ok(gap >= -45 && gap <= -36, `“${title}” runs to its row's ⋯ (${gap}px)`); }
+    const first = await x.page.evaluate(() => { const r = document.querySelector("#library-home .lib-row"), m = r.querySelector(".lib-row-main").getBoundingClientRect(), d = r.querySelector(".lib-row-more").getBoundingClientRect(); return { gap: Math.round(d.left - m.right), w: Math.round(m.width) }; });
+    await x.page.hover("#library-home .lib-row"); await x.settle();
+    const hot = await x.page.evaluate(() => { const r = document.querySelector("#library-home .lib-row"), m = r.querySelector(".lib-row-main").getBoundingClientRect(); return Math.round(m.width); });
+    assert.ok(first.gap >= 2, "the words never run under the ⋯"); assert.equal(hot, first.w, "and pointing at the row moves nothing");
   } finally { await x.close(); }
 });

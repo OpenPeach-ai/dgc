@@ -178,7 +178,7 @@ function library(tab = "videos") {
   windows.push(w);
   const sent = [];
   w.acquireVsCodeApi = () => ({ getState: () => ({ library: { tab } }), setState() {}, postMessage: (m) => sent.push(m) });
-  for (const file of ["shared/blob.js", "shared/pagehead.js", "library.js"]) w.eval(readFileSync(src + "../media/" + file, "utf8"));
+  for (const file of ["shared/icons.js", "shared/filemenu.js", "shared/blob.js", "shared/pagehead.js", "library.js"]) w.eval(readFileSync(src + "../media/" + file, "utf8"));
   const message = (m) => w.dispatchEvent(new w.MessageEvent("message", { data: m }));
   const $ = (selector) => w.document.querySelector(selector);
   return { w, sent, message, $, latest: (type) => sent.filter((m) => m.type === type).at(-1),

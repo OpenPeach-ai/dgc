@@ -101,7 +101,7 @@ body.vscode-light .dgc-dock-dot[data-dot="live"], body.vscode-high-contrast-ligh
 .dgc-pin { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm); margin: 0; padding: 0;
   border: 0; border-radius: var(--r-sm); background: transparent; color: var(--home-quiet); cursor: pointer;
   transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out); }
-.dgc-pin > svg { width: 14px; height: 14px; }
+.dgc-pin > svg { width: 16px; height: 16px; }       /* a row button's glyph is 16 on every surface (media/shared/icons.js) */
 .dgc-pin:hover { color: var(--text-strong); background: var(--wash); }
 .dgc-pin[aria-pressed="true"] { color: var(--text); }
 .dgc-pin:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }

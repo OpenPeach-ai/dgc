@@ -279,6 +279,12 @@ body.cd-blank .cd-fine { display: none; }
 .cd-thumb { padding: 0; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface2); overflow: hidden; cursor: zoom-in; }
 .cd-thumb img { display: block; max-width: 220px; max-height: 160px; object-fit: cover; }
 .cd-thumb-big { cursor: zoom-out; }
+/* A picture you attached, with its "…" on its corner (media/shared/filemenu.js): on a solid ground, so it reads over any picture. */
+.cd-thumb-card { position: relative; display: inline-flex; max-width: 100%; }
+.cd-thumb-card > .dgc-file-more { position: absolute; top: 6px; right: 6px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.cd-thumb-card > .dgc-file-more:hover, .cd-thumb-card > .dgc-file-more[aria-expanded="true"] { background: var(--surface); }
+/* A file you attached: its chip, then its "…". */
+.cd-sent > .cd-chip[data-file-card] { gap: 2px; }
 .cd-thumb-big img { max-width: min(100%, 720px); max-height: 70vh; object-fit: contain; }
 /* An image the reply made: the picture on its own row above the card's name and buttons. */
 .cd-file-image { flex-wrap: wrap; }
@@ -441,7 +447,11 @@ body.cd-blank .cd-fine { display: none; }
 .rail-pop .cd-queue { padding: 0 var(--sp-3) var(--sp-2); border-bottom: 0; }
 .cd-queue { display: grid; gap: 2px; padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border); }
 .cd-queue-head { margin: 0; color: var(--muted); font: var(--w-med) var(--t-xs)/1.4 var(--sans); }
-.cd-queue-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; max-height: 132px; overflow-y: auto; }
+/* (A column of rows as tall as their own words: a row that asks about a draft wraps its question under it, and in a
+   grid with a most height the tracks were squeezed under the question's buttons.) */
+.cd-queue-list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; max-height: 132px; overflow-y: auto; }
+.cd-queue-list > .cd-queue-item { flex: none; }
+.cd-queue-list:has(.asking) { max-height: 200px; }
 .cd-queue-item { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; border-radius: var(--r-sm);
   color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 .cd-queue-item:hover { background: var(--surface); }

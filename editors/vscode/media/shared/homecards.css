@@ -277,6 +277,9 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-pin:hover { background: color-mix(in srgb, var(--text) 12%, var(--bg)); color: var(--text-strong); }
 /* Where nothing hovers (a touch screen) a folder's New session and its pin are always in sight (14 Nov). */
 @media (hover: none) { .hc-tile .hc-here, .hc-tile .hc-pin { opacity: 1; } }
+/* A narrow side bar (under 400px): the same, with a pointer too. Its two small buttons sit on the tile's own corners, so
+   they fit at any width, and nothing there needs the pointer on the tile first (his rule for every list, 16 Nov). */
+@media (max-width: 399px) { .hc-tile .hc-here, .hc-tile .hc-pin { opacity: 1; } }
 /* The Clock (14 Nov): Here and up to three more. Two to a row (one where a row has no room for two; four across in the
    card opened in a wide side bar), so four are two rows of two. A city's name is never cut: its offset and its day go to
    a second line first. An added zone's × is at its clock's top right, in sight while the clock is pointed at or has the
@@ -314,7 +317,7 @@ input.hc-zone { flex: 0 1 132px; width: 132px; min-width: 84px; font-size: var(-
 .hc-opt-tx { flex: 1 1 auto; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .hc-opt-name { overflow: hidden; color: var(--text); font-size: 12.5px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .hc-opt-sub { overflow: hidden; color: var(--hc-quiet, var(--muted)); font-size: var(--t-xs); line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
-.hc-opt-code { flex: none; padding: 1px 5px; border: 1px solid var(--hair-strong); border-radius: 4px; color: var(--hc-quiet, var(--muted)); font: var(--w-med) 10px/1.3 var(--mono); letter-spacing: .02em; white-space: nowrap; }
+.hc-opt-code { flex: none; padding: 1px 5px; border: 1px solid var(--hair-strong); border-radius: var(--r-code, 4px); color: var(--hc-quiet, var(--muted)); font: var(--w-med) 10px/1.3 var(--mono); letter-spacing: .02em; white-space: nowrap; }
 .hc-suggest-note { margin: 0; padding: 7px 8px; color: var(--hc-quiet, var(--muted)); font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
 .hc-cityform button:disabled { cursor: default; }
 .hc-cityform { display: flex; gap: 6px; min-width: 0; }

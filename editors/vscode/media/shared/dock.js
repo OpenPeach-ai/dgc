@@ -37,7 +37,7 @@
   const DRAG_PX = 5;                      // how far a press moves before it is a drag, not a click
   const OUT_PX = 36;                      // how far above or below the bar the pointer is out of the dock
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const PLUS = '<svg class="dgc-dock-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>';
+  const PLUS = root.DgcIcons ? root.DgcIcons.html("add", { cls: "dgc-dock-plus" }) : "";       // New: the one glyph it has everywhere (media/shared/icons.js)
 
   // The bar's measures at a tile size: tighter gaps and sides once the tiles are small.
   const gapAt = (s) => (s >= 30 ? 6 : 4), padAt = (s) => (s >= 30 ? 8 : 6);
@@ -252,7 +252,7 @@
       if (named) named.removeAttribute("aria-describedby");
       named = button || null;
       const item = named ? itemOf(named) : null;
-      const title = named?.dataset.add ? "New" : item?.title || "", state = named?.dataset.add ? "A session, a chat, a Pip, or Settings" : [item?.fresh && !item?.badge ? "New message" : "", item?.state || ""].filter(Boolean).join(" · ");
+      const title = named?.dataset.add ? "New" : item?.title || "", state = named?.dataset.add ? "Work, a chat, a Pip, or Settings" : [item?.fresh && !item?.badge ? "New message" : "", item?.state || ""].filter(Boolean).join(" · ");
       if (!named || !title || menuOpen()) { tip.hidden = true; named = null; return; }
       tip.querySelector("b").textContent = title; tip.querySelector("span").textContent = state;
       tip.hidden = false; named.setAttribute("aria-describedby", tip.id);
@@ -287,7 +287,7 @@
       const pop = root.DgcBlob?.popup;
       if (!pop) return;
       name(null); pointer = null; kick();
-      const made = [offers.work && { id: "work", label: "New Work session", icon: "work" }, offers.chat && { id: "chat", label: "New ChatDGC chat", icon: "chat" },
+      const made = [offers.work && { id: "work", label: "New work", icon: "work" }, offers.chat && { id: "chat", label: "New ChatDGC chat", icon: "chat" },
         offers.pip && { id: "pip", label: "New Personal Pip", icon: "pip" }].filter(Boolean);
       pop(button, { keyboard, label: "New", rows: [made, offers.settings ? [{ id: "settings", label: "Settings", icon: "settings" }] : []],
         onPick: (id) => o.onNew?.(id), onClose: watchLeave });

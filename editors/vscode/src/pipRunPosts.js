@@ -16,6 +16,7 @@
 // write starts a new one. The fold is worked out from the posts every time, so a reload or a replay draws it the
 // same. (Before, runs nobody answered folded into "N earlier runs" after a day: a log line where the Pip had spoken.
 // The all-clear fold takes the pile that line was for; what remains is news, each said once, and History keeps all.)
+import '../media/shared/icons.js';
 import {esc,record} from './pipsModel.js';
 import {elapsed} from './pipRunActivity.js';
 import '../media/msgtime.js';
@@ -243,8 +244,9 @@ export function routineTitle(text){const m=ROUTINE.exec(String(text||''));return
 // ---- Drawing it -----------------------------------------------------------------------------------------------
 const ICONS={sheet:'<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M2.5 6.2h11M2.5 9.8h11M6.5 2.5v11"/>',check:'<path d="m3.5 8.5 3 3 6-7"/>',x:'<path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/>',spin:'<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/>',doc:'<path d="M4 1.8h5.2L12 4.6v9.6H4Z"/><path d="M9 1.8v3h3M6 8h4M6 10.5h4"/>',warn:'<path d="M8 2 1.8 13h12.4Z"/><path d="M8 6.5v3.2M8 11.4v.2"/>',
   play:'<path d="M5 3.2v9.6L12.4 8Z"/>',fix:'<path d="M10.2 2.2a3.2 3.2 0 0 0-3.9 4.2L2.2 10.5l3.3 3.3 4.1-4.1a3.2 3.2 0 0 0 4.2-3.9l-2 2-2-.3-.3-2Z"/>',
-  chev:'<path d="m6 3.5 4.5 4.5L6 12.5"/>',stop:'<rect x="4.5" y="4.5" width="7" height="7" rx="1.2"/>'};
-const icon=(name,cls='run-post-icon')=>`<svg class="${cls}" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+  chev:'<path d="m6 3.5 4.5 4.5L6 12.5"/>'};
+// (Stop is the one glyph it has on every surface, media/shared/icons.js.)
+const icon=(name,cls='run-post-icon')=>name==='stop'?globalThis.DgcIcons.html('stop',{size:13,cls}):`<svg class="${cls}" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 const chev=icon('chev','run-post-chev');
 const where=f=>typeof f.path==='string'&&f.path?`${f.path}${Number.isSafeInteger(f.line)&&f.line>0?`:${f.line}`:''}`:'';
 const chip=(attrs,inner,cls='')=>`<button type="button" class="run-post-chip${cls?' '+cls:''}" ${attrs}>${inner}</button>`;

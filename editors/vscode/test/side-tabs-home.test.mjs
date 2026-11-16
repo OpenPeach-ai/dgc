@@ -93,14 +93,14 @@ for (const width of [300, 700]) {
       // Each tab names the panel it shows, and that panel says which tab it belongs to.
       assert.deepEqual(bar.tabs.map((x) => x.controls), ["home-hub", "work-home", "chats-home", "library-home", "pips-host"]);
       assert.deepEqual([bar.panel, bar.panelRole, bar.panelLabelledBy], ["home-hub", "tabpanel", "side-tab-home"]);
-      // Home shows its count: every card on it.
+      // Home shows its count: the cards that need you. What is only new is in its words, never in the number (16 Nov).
       const hub = await x.hub();
       assert.ok(hub.cards.length >= 4, "Home has its cards");
-      assert.equal(tab(bar, "home").count, String(hub.cards.length), "Home's number is how many cards wait or are new");
-      // (Its two counts by name, since 16 Nov: one number read as "things that need me" over a Needs you of 0. H1.)
       const heard = /^Home: (\d+) needs? you, (\d+) new$/.exec(tab(bar, "home").label);
-      assert.ok(heard, `and a screen reader hears which is which (${tab(bar, "home").label})`);
-      assert.equal(Number(heard[1]) + Number(heard[2]), hub.cards.length, "the two counts are the number");
+      assert.ok(heard, `a screen reader hears which is which (${tab(bar, "home").label})`);
+      assert.equal(Number(heard[1]) + Number(heard[2]), hub.cards.length, "its two counts are every card");
+      assert.equal(tab(bar, "home").count, heard[1], "Home's number is how many need you");
+      assert.equal(heard[1], hub.groups.find((g) => g.id === "needs").count, "the Needs you group's own count");
       assert.equal(bar.overflowX, false);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
@@ -310,8 +310,9 @@ for (const width of [300, 700]) {
         assert.ok(a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5, `${a.key} and ${b.key} do not overlap`);
       }
       assert.equal(new Set(cards.map((c) => Math.round(c.left))).size, width === 300 ? 1 : 2, width === 300 ? "one column in a narrow side bar" : "two columns in a wide one");
-      // Home's number counts every card.
-      assert.equal(tab(await x.tabs(), "home").count, "9");
+      // Home's number counts the four that need you; the five that are new are in its words.
+      assert.equal(tab(await x.tabs(), "home").count, "4");
+      assert.equal(tab(await x.tabs(), "home").label, "Home: 4 need you, 5 new");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
@@ -350,7 +351,9 @@ test("a card's answers: Open, Review, Mark read and Dismiss each do their one th
     await x.page.waitForFunction((key) => !document.querySelector(`.dgc-hub-card[data-key="${key}"]`), PIP_FAILED);
     const seen = (await x.posted("pipsRequest")).filter((m) => m.request.type === "mark_pip_news_seen");
     assert.deepEqual(seen.map((m) => m.request.pip_ids), [[pipId("e")]]);
-    assert.equal(tab(await x.tabs(), "home").count, String((await keys()).length), "Home's number follows");
+    { const h = await x.hub(), needs = h.groups.find((g) => g.id === "needs")?.cards.length || 0, t = tab(await x.tabs(), "home");
+      assert.equal(t.count, needs ? String(needs) : "", "Home's number is still what needs you");
+      assert.equal(t.label, `Home: ${[needs ? `${needs} ${needs === 1 ? "needs" : "need"} you` : "", h.cards.length - needs ? `${h.cards.length - needs} new` : ""].filter(Boolean).join(", ")}`, "and its words follow the card that went"); }
     // A Pip with things waiting: Review opens it in Pips, on the Pips tab.
     await act(PIP_WAITS, "open");
     await x.page.waitForFunction(() => document.getElementById("pips-host").checkVisibility());

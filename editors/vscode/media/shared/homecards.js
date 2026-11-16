@@ -46,7 +46,7 @@
     widgets: { name: "Widgets", line: "The widgets made for you, one at a time", group: "Made for you", large: true },
     artifacts: { name: "Artifacts", line: "Pages, documents, slides, sheets and dashboards", group: "Made for you", large: true },
     token: { name: "Token usage", line: "Tokens, requests and cache, day by day", group: "Usage and start", large: true },
-    quick: { name: "Quick start", line: "New session, chat or Pip", group: "Usage and start" },
+    quick: { name: "Quick start", line: "New work, chat or Pip", group: "Usage and start" },
     folders: { name: "Folders", line: "Your Work folders, each a tile", group: "Usage and start", large: true },
     clock: { name: "Clock", line: "The time here, and in up to three more cities", group: "Everyday" },
     weather: { name: "Weather", line: "Now and the next hours, for a place you choose", group: "Everyday" },
@@ -86,10 +86,11 @@
   }
   const mosaic = (palette, size, more = "") => `<span class="mosaic mosaic--${esc(palette)}" style="--size:${size}px${more}" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;
   const svg = (d, size = 12, w = 2.2) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
-  const PREV = svg('<path d="M15 18l-6-6 6-6"/>', 11, 2.6), NEXT = svg('<path d="M9 6l6 6-6 6"/>', 11, 2.6), BIN = svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', 12, 2);
-  const PIN_D = "M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z";
-  const pinSvg = (on, size = 12) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_D}"/></svg>`;
-  const PLUS = svg('<path d="M12 5v14M5 12h14"/>', 11, 2.6), CROSS = svg('<path d="M6 6l12 12M18 6L6 18"/>', 10, 2.8), BACK = svg('<path d="M15 18l-6-6 6-6"/>', 12, 2.4), TICK = svg('<path d="M5 12l5 5L20 7"/>', 11, 3);
+  const PREV = svg('<path d="M15 18l-6-6 6-6"/>', 11, 2.6), NEXT = svg('<path d="M9 6l6 6-6 6"/>', 11, 2.6), BIN = root.DgcIcons ? root.DgcIcons.html("delete", { size: 13 }) : "";
+  // The glyphs every surface shares (media/shared/icons.js: one action, one icon), at a card's own small sizes.
+  const shared = (action, size) => (root.DgcIcons ? root.DgcIcons.html(action, { size }) : "");
+  const pinSvg = (on, size = 12) => shared(on ? "unpin" : "pin", size);
+  const PLUS = shared("add", 12), CROSS = shared("close", 12), BACK = shared("back", 14), TICK = svg('<path d="M5 12l5 5L20 7"/>', 11, 3);
   // The Library's mark: his Iris books (media/icons/library-iris/library.css), exactly as he made them, beside the word.
   const LIBRARY_ICON = '<span class="library-iris" aria-hidden="true"><i></i><i></i><i></i></span>';
   const GRIP = '<svg class="hc-grip" width="12" height="16" viewBox="0 0 12 16" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="3" r="1.4"/><circle cx="9" cy="3" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="9" cy="8" r="1.4"/><circle cx="3" cy="13" r="1.4"/><circle cx="9" cy="13" r="1.4"/></g></svg>';
@@ -280,7 +281,7 @@
         return `<span class="hc-lbl">${name}</span><span class="hc-big">${total}</span><span class="hc-grow"></span>${note}<span class="hc-sub hc-cut">${r ? `${esc(r.name)}${r.age ? ` · ${esc(r.age)}` : ""}` : `No ${unit}s yet`}</span>`;
       }
       const n = rowsFor(form, tight), shown = x.rows.slice(0, n), rest = Math.max(0, x.rows.length - shown.length);
-      const right = id === "pips" ? `<button type="button" class="hc-lnk" data-tab="pips">All Pips</button>` : `<button type="button" class="hc-btn hc-solid hc-new-btn" data-new="${id === "work" ? "work" : "chat"}" title="${id === "work" ? "New session: it opens in an editor tab" : "New chat"}">${PLUS}${id === "work" ? "New" : "New chat"}</button>`;
+      const right = id === "pips" ? `<button type="button" class="hc-lnk" data-tab="pips">All Pips</button>` : `<button type="button" class="hc-btn hc-solid hc-new-btn" data-new="${id === "work" ? "work" : "chat"}" title="${id === "work" ? "New work: it opens in an editor tab" : "New chat"}">${PLUS}${id === "work" ? "New" : "New chat"}</button>`;
       return `${headOf(name, id === "work" && x.folder ? `<span class="hc-cap hc-cut">${esc(x.folder)}</span>` : "", right)}${shown.length ? `<div class="hc-list">${shown.map((r) => li(r)).join("")}</div>` : `<p class="hc-quiet">${esc(x.empty || `No ${unit}s yet.`)}</p>`}`
         + more(rest + (x.more ? 1 : 0), tab, x.more ? `More in ${id === "work" ? "Work" : id === "chats" ? "Chat" : "Pips"}` : `${rest} more`);
     }
@@ -296,7 +297,7 @@
       return `${headOf("Running now", rows.length ? '<span class="hc-livedot"></span>' : "")}${shown.length ? `<div class="hc-list">${shown.map((r) => li(r, '<span class="hc-btn hc-open-word">Open</span>')).join("")}</div>${rows.length > shown.length ? `<span class="hc-more-n">${rows.length - shown.length} more</span>` : ""}` : '<p class="hc-quiet">Nothing running. A session at work, or a chat answering, shows here.</p>'}`;
     }
     function quickCard(form, d) {
-      const q = d.quick || {}, items = [["work", "Session", "New session", q.work], ["chat", "Chat", "New chat", q.chat], ["pip", "Pip", "New Pip", q.pip]];
+      const q = d.quick || {}, items = [["work", "Work", "New work", q.work], ["chat", "Chat", "New chat", q.chat], ["pip", "Pip", "New Pip", q.pip]];
       return (form === "s" ? '<span class="hc-lbl">Quick start</span>' : headOf("Quick start")) + `<span class="hc-qs">${items.map(([id, short, long, mark]) => `<button type="button" class="hc-qb" data-quick="${id}" title="${long}">${mark || ""}<span>${form === "s" ? short : long}</span></button>`).join("")}</span>`;
     }
     function foldersCard(form, d) {
@@ -316,7 +317,7 @@
       const tile = (r) => { const where = whereOf(r), counts = [r.sessions ? plural(r.sessions, "session") : "", r.pips ? plural(r.pips, "Pip") : "", where ? `in ${where}` : ""].filter(Boolean).join(" · ") || "Nothing yet";
         return `<div class="hc-tile${r.exists === false ? " hc-gone" : ""}" data-name="${esc(r.name)}"><button type="button" class="hc-tile-open" data-folder="${esc(r.folder)}" title="${esc(r.exists === false ? `${r.shown || r.folder}: not found` : `${r.shown || r.folder} · ${counts}${r.here ? " · this window’s folder" : ""}: open its Work sessions`)}">${x.mark ? x.mark(r.folder, size, size >= 64 ? r.name : "") : ""}`
           + `${size >= 64 ? "" : `<span class="hc-tile-name">${esc(r.name)}</span>`}${form === "s" ? "" : `<span class="hc-tile-sub">${r.exists === false ? esc(where ? `Not found · in ${where}` : "Not found") : esc(counts)}</span>`}</button>`
-          + (r.exists === false ? "" : `<button type="button" class="hc-here" data-here="${esc(r.folder)}" title="New session here" aria-label="New session in ${esc(r.name)}">${PLUS}</button>`
+          + (r.exists === false ? "" : `<button type="button" class="hc-here" data-here="${esc(r.folder)}" title="New work here" aria-label="New work in ${esc(r.name)}">${PLUS}</button>`
             + (x.pinned ? ((on) => `<button type="button" class="hc-pin" data-pin-folder="${esc(r.folder)}" aria-pressed="${on}" title="${on ? "Unpin from the dock" : "Pin to the dock"}" aria-label="${on ? "Unpin from the dock" : "Pin to the dock"}: ${esc(r.name)}">${pinSvg(on)}</button>`)(!!x.pinned(r.folder)) : "")) + "</div>"; };
       const shown = rows.slice(0, most), rest = rows.length - shown.length;
       if (form === "s") return `<span class="hc-lbl">Folders${rest > 0 ? `<span class="hc-cnt">+${rest}</span>` : ""}</span><span class="hc-tiles hc-tiles-1">${shown.map(tile).join("")}</span>`;
@@ -389,13 +390,14 @@
       return true;
     }
     function tileOf(id, r, d, form) {
-      const picture = id === "widgets" ? (d.widgets?.mark ? d.widgets.mark(r.id) : "") : (d.artifacts?.sheet ? d.artifacts.sheet(r.type) : "");
+      // (A chart a ChatDGC reply drew wears the chart mark its Library row wears, and says which chat it is in.)
+      const picture = id === "widgets" ? (r.chart ? (d.widgets?.chart ? d.widgets.chart(r.chart_type) : "") : d.widgets?.mark ? d.widgets.mark(r.id) : "") : (d.artifacts?.sheet ? d.artifacts.sheet(r.type) : "");
       // (Under Widgets a reply's card says so, and where it was drawn; ChatDGC's own widget names its chat.)
-      const sub = id === "widgets" ? (r.card ? ["A reply’s card", A_MADE[r.surface] || "", madeWhen(r.created_at)] : [`in “${r.chat_title || "a chat"}”`, r.project_name || "", madeWhen(r.created_at)]).filter(Boolean).join(" · ") : [A_KIND[r.type] || "Artifact", A_MADE[r.surface] || "", madeWhen(r.at)].filter(Boolean).join(" · ");
-      const title = r.title || (id === "widgets" ? "Interactive" : A_KIND[r.type] || "Artifact");
+      const sub = id === "widgets" ? (r.card ? ["A reply’s card", A_MADE[r.surface] || "", madeWhen(r.created_at)] : r.chart ? [`A chart in “${r.chat_title || "a chat"}”`, madeWhen(r.created_at)] : [`in “${r.chat_title || "a chat"}”`, r.project_name || "", madeWhen(r.created_at)]).filter(Boolean).join(" · ") : [A_KIND[r.type] || "Artifact", A_MADE[r.surface] || "", madeWhen(r.at)].filter(Boolean).join(" · ");
+      const title = r.title || (id === "widgets" ? (r.chart ? "Chart" : "Interactive") : A_KIND[r.type] || "Artifact");
       const inner = `<span class="hc-tile-pic">${picture}</span><span class="hc-tile-tx"><span class="hc-tile-t">${esc(title)}</span><span class="hc-tile-s">${esc(sub)}</span></span>`;
       // On a Small card the square itself opens the card whole; from Medium up each one opens what it is.
-      return form === "s" ? `<span class="hc-mtile" data-tile="${esc(r.id)}">${inner}</span>` : `<button type="button" class="hc-mtile" data-tile="${esc(r.id)}" title="${esc(id === "widgets" && !r.card ? `Open ${title} beside you` : `Open ${title} in an editor tab`)}">${inner}</button>`;
+      return form === "s" ? `<span class="hc-mtile" data-tile="${esc(r.id)}">${inner}</span>` : `<button type="button" class="hc-mtile" data-tile="${esc(r.id)}" title="${esc(id === "widgets" && r.chart ? `Open its chat at ${title}` : id === "widgets" && !r.card ? `Open ${title} beside you` : `Open ${title} in an editor tab`)}">${inner}</button>`;
     }
     function stackCard(id, form, d) {
       const name = CARDS[id].name, said = made[id], rows = rowsOf(id), all = id === "widgets" ? "All widgets" : "All artifacts";
@@ -417,7 +419,7 @@
     /** A card's one line while Home is arranged, and its small preview in the library. */
     function caption(id, d) {
       return id === "needs" ? (d.needs?.count ? `${d.needs.count} waiting` : "Nothing waiting") : id === "running" ? ((d.running || []).length ? `${d.running.length} running` : "Nothing running") : id === "recent" ? "Work, chats and Pips"
-        : id === "token" ? "Tokens, requests, cache" : id === "quick" ? "New session · chat · Pip" : id === "work" ? plural(d.work?.total || 0, "session") : id === "chats" ? plural(d.chats?.total || 0, "chat") : id === "pips" ? plural(d.pips?.total || 0, "Pip")
+        : id === "token" ? "Tokens, requests, cache" : id === "quick" ? "New work · chat · Pip" : id === "work" ? plural(d.work?.total || 0, "session") : id === "chats" ? plural(d.chats?.total || 0, "chat") : id === "pips" ? plural(d.pips?.total || 0, "Pip")
         : id === "folders" ? plural((d.folders?.rows || []).length, "folder") : id === "clock" ? "The time here" : id === "weather" ? placeOf()?.name || "A place you choose"
         : id === "widgets" ? (made.widgets ? plural(rowsOf("widgets").length, "widget") : "The widgets made for you") : id === "artifacts" ? (made.artifacts ? plural(rowsOf("artifacts").length, "artifact") : "What was made for you") : plural(notesApp?.count() || 0, "note");
     }
@@ -432,7 +434,7 @@
       if (id === "folders") return (d.folders?.rows || []).slice(0, 3).map((r) => (d.folders.mark ? d.folders.mark(r.folder, 28, "") : "")).join("") || `<span class="hc-sub">No folders yet</span>`;
       if (id === "clock") return `<span class="hc-pvt">${new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date())}</span>`;
       if (id === "weather") return weather?.ok && placeOf() ? `${wx(weather.now.code, weather.now.day, 20)}<span class="hc-pvt">${Math.round(layout.settings.weather.unit === "f" ? (weather.now.temp * 9) / 5 + 32 : weather.now.temp)}°</span>` : `${wx(1, true, 20)}<span class="hc-pvw">A place you choose</span>`;
-      if (id === "widgets") return rowsOf(id).slice(0, 3).map((r) => (d.widgets?.mark ? d.widgets.mark(r.id) : "")).join("") || `<span class="hc-pvw">${esc(CARDS[id].line)}</span>`;
+      if (id === "widgets") return rowsOf(id).slice(0, 3).map((r) => (r.chart ? (d.widgets?.chart ? d.widgets.chart(r.chart_type) : "") : d.widgets?.mark ? d.widgets.mark(r.id) : "")).join("") || `<span class="hc-pvw">${esc(CARDS[id].line)}</span>`;
       if (id === "artifacts") return rowsOf(id).slice(0, 3).map((r) => `<span class="hc-ico">${d.artifacts?.sheet ? d.artifacts.sheet(r.type) : ""}</span>`).join("") || `<span class="hc-pvw">${esc(CARDS[id].line)}</span>`;
       return `<span class="hc-pvw hc-note-line">${esc(notesApp?.top()?.title || "Your notes")}</span>`;
     }
@@ -930,7 +932,7 @@
         const turner = t.closest(".hc-prev, .hc-next, .hc-dot"), tile = t.closest("button[data-tile]");
         if (turner) { turn(id, card.dataset.form, turner.classList.contains("hc-prev") ? "prev" : turner.classList.contains("hc-next") ? "next" : turner.dataset.page); if (!card.contains(doc.activeElement)) card.querySelector(".hc-stack")?.focus({ preventScroll: true }); return; }
         if (t.closest("[data-library]")) { act?.("library", id); return; }
-        if (tile) { const row = rowsOf(id).find((r) => r.id === tile.dataset.tile); if (row) act?.(id === "widgets" && !row.card ? "widget" : "artifact", row.card ? { ...row, type: "page" } : row); return; }
+        if (tile) { const row = rowsOf(id).find((r) => r.id === tile.dataset.tile); if (row) act?.(id === "widgets" && row.chart ? "chart" : id === "widgets" && !row.card ? "widget" : "artifact", row.card ? { ...row, type: "page" } : row); return; }
       }
       // Notes answers its own presses, on Home and opened (media/shared/notes.js).
       if (id === "note") return;

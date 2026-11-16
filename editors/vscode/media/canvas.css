@@ -58,7 +58,7 @@ body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-t
 .cv-doc li > p { margin: 0; }
 .cv-doc blockquote { margin: 0; padding: .1em 0 .1em 1em; border-left: 3px solid var(--cv-line); color: var(--cv-muted); }
 .cv-doc hr { border: 0; border-top: 1px solid var(--cv-line); margin: 1.6em 0; }
-.cv-doc code { padding: .1em .35em; border-radius: 4px; background: var(--cv-soft);
+.cv-doc code { padding: .1em .35em; border-radius: var(--r-code, 4px); background: var(--cv-soft);
   font: .88em/1.5 var(--vscode-editor-font-family, monospace); }
 .cv-doc pre { margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--cv-soft); overflow-x: auto;
   font: 13px/1.55 var(--vscode-editor-font-family, monospace); white-space: pre; }

@@ -465,22 +465,26 @@ test("Token usage: a column inks under the pointer and the arrow keys, with its 
   } finally { await x.close(); }
 });
 
-test("Recent: a new reply sits at the top in bold with its New mark, Home's number counts it, a click opens it and Clear marks them read", async (t) => {
+test("Recent: a new reply sits at the top in bold with its New mark, Home's words count it and its number never does, a click opens it and Clear marks them read", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openGrid(browser, { width: 460, news: NEWS, state: undefined });
   try {
     const p = x.page, badge = () => p.evaluate(() => { const b = document.getElementById("side-tab-home-count"); return b.hidden ? 0 : Number(b.textContent); });
-    const before = await badge();
+    // (Home's number is what needs you; what is new is in its words, "N new", never in the number: 16 Nov.)
+    const said = () => p.evaluate(() => { const m = /^Home: (?:(\d+) needs? you)?(?:, )?(?:(\d+) new)?$/.exec(document.getElementById("side-tab-home").getAttribute("aria-label") || "") || []; return { needs: Number(m[1] || 0), fresh: Number(m[2] || 0) }; });
+    const before = await badge(), heard = await said();
     const fresh = () => p.evaluate(() => [...document.querySelectorAll('.hc-card[data-card="recent"] .hc-li.hc-new')].map((r) => r.dataset.open));
     assert.ok((await fresh()).includes(`hub:work:${NEWS[0].id}`), "the reply nobody saw is among what is new");
-    assert.ok(before >= (await fresh()).length + 1, `Home's number counts what waits and what is new (${before})`);
+    assert.ok(heard.fresh >= (await fresh()).length, `Home's words count what is new (${heard.fresh} new)`);
+    assert.equal(before, heard.needs, `and its number is only what waits (${before})`);
     const all = await fresh();
     await p.click('.hc-card[data-card="recent"] .hc-clear'); await x.rest(300);
     assert.deepEqual(await fresh(), [], "Clear marks them read");
     assert.deepEqual((await x.posted("homeSessionSeen")).map((m) => m.id), [NEWS[0].id], "the host is told the reply was seen");
     const waits = await p.evaluate(() => Number(document.querySelector('#home-hub .dgc-hub-group[data-group="needs"] .dgc-hub-n')?.textContent || 0));
-    assert.ok(waits >= 1 && all.length >= 1 && before >= waits + all.length - 1, `before, Home's number counted what waits and what is new (${before}: ${waits} wait, ${all.length} new)`);
-    assert.equal(await badge(), waits, "now Home's number is only what still waits");
+    assert.ok(waits >= 1 && all.length >= 1 && before === waits, `before, Home's number was already only what waits (${before}: ${waits} wait, ${all.length} new)`);
+    assert.equal(await badge(), waits, "and it is the same now: Clear changes the words, never the number");
+    assert.ok((await said()).fresh <= heard.fresh - all.length + 1, "the cleared ones are out of Home's count of new things");
     const first = await p.evaluate(() => document.querySelector('.hc-card[data-card="recent"] .hc-li').dataset.open);
     await p.click('.hc-card[data-card="recent"] .hc-li'); await x.rest();
     const opened = first.startsWith("work:") ? (await x.posted("openSessionInEditor")).map((m) => `work:${m.id}`) : (await x.posted("chatdgcOpen")).map((m) => `chat:${m.id}`);
@@ -489,7 +493,7 @@ test("Recent: a new reply sits at the top in bold with its New mark, Home's numb
   } finally { await x.close(); }
 });
 
-test("the cards act: Quick start, a session's row, New, a folder's tile and New session here, a note typed, Fahrenheit, a second clock", async (t) => {
+test("the cards act: Quick start, a session's row, New, a folder's tile and New work here, a note typed, Fahrenheit, a second clock", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openGrid(browser, { width: 700, layout: EVERY, settings: SETTINGS, notes: NOTES, height: 1400 });
   try {
@@ -502,10 +506,10 @@ test("the cards act: Quick start, a session's row, New, a folder's tile and New 
     assert.equal((await x.posted("openSessionInEditor")).at(-1).id, DOCK_SESSIONS[1].id, "a session's row opens it");
     await p.click(`${sel("chats")} .hc-li`);
     assert.equal((await x.posted("chatdgcOpen")).at(-1).id, CHATS[0].id);
-    // Folders: a tile opens Work with the Project Folder set to it; pointed at, it offers New session here.
+    // Folders: a tile opens Work with the Project Folder set to it; pointed at, it offers New work here.
     await p.hover(`${sel("folders")} .hc-tile[data-name="garden-notes"]`); await x.rest(200);
     const here = p.locator(`${sel("folders")} .hc-tile[data-name="garden-notes"] .hc-here`);
-    assert.equal(await here.isVisible(), true); assert.equal((await here.getAttribute("title")) || (await here.innerText()), "New session here");
+    assert.equal(await here.isVisible(), true); assert.equal((await here.getAttribute("title")) || (await here.innerText()), "New work here");
     await here.click();
     assert.equal((await x.posted("newSessionInEditor")).at(-1).folder, "/home/me/garden-notes");
     await p.click(`${sel("folders")} .hc-tile[data-name="garden-notes"] .hc-tile-open`); await x.rest(300);

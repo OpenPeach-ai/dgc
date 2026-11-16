@@ -12,6 +12,7 @@
 //   the composer               Work's sub-agents pill, and the agent map for this Pip: the Pip in colour at the root,
 //                              its sub-agents under it in black and white, one click to a sub-agent's card
 // This file draws what DGC says and never decides anything. Words are the Pip's and the user's: text only.
+import '../media/shared/icons.js';
 import {esc as escape} from './pipsModel.js';
 import {took, AGENT_API, AGENT_LIVE, FIX_LIVE, agentsPage} from './pipFlow.js';
 
@@ -24,8 +25,8 @@ const VERDICT_WORDS = {fixed: 'fixed', already_fixed: 'already fixed', not_a_def
 const said = (inner, attrs = '') => `<div class="message-body text final pip-said"${attrs}>${inner}</div>`;
 const ICON = {
   shield: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8 13 3.6v4.1c0 3-2.1 5.3-5 6.5-2.9-1.2-5-3.5-5-6.5V3.6Z"/></svg>',
-  close: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>',
-  back: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 8H3M7 4 3 8l4 4"/></svg>',
+  close: globalThis.DgcIcons.html('close', {size: 14}),        // Close and Back: the one glyph each has everywhere (media/shared/icons.js)
+  back: globalThis.DgcIcons.html('back', {size: 14}),
   chevron: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg>',
 };
 

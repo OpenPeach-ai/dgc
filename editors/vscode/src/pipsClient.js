@@ -5,6 +5,15 @@ import '../media/shared/tokens.css';
 // One menu for every "+" and picker, as in Work and ChatDGC (window.DgcMenu).
 import '../media/shared/menu.css';
 import '../media/shared/menu.js';
+import '../media/shared/icons.js';
+// A file's menu on its card in the chat, as on a Library row (window.DgcFileMenu), opened by DGC's small menu
+// (window.DgcBlob: the side bar's page already has it; a chat's own tab gets it from here).
+import '../media/shared/blob.css';
+import '../media/shared/blob.js';
+import '../media/shared/filemenu.js';
+// Inline touches in what you type and what you read, as in Work and ChatDGC (window.DgcInline).
+import '../media/shared/inline.css';
+import '../media/shared/inline.js';
 import '../media/shared/pagehead.css';
 import '../media/shared/pagehead.js';   // window.DgcPageHead: the header row Work, Chat, Library and Pips all wear
 // The Project Folder dropdown, as over the Work sessions (window.DgcFolderPick).
@@ -300,7 +309,7 @@ const outputsOn=()=>S.apiVersion>=100&&!archived();
 const boxOutput=()=>{const parts=chatBox?.parts();return (parts||[]).find(part=>typeof part!=='string'&&part.kind==='artifact')?.identity||'';};
 function chatMentionSources(){
  const others=(S.jobs||[]).filter(p=>p.id!==S.selected&&p.status!=='archived'&&p.name).slice(0,100).map(p=>{const body=profile(p.profile).body;return{pip_id:p.id,name:p.name,pip_type:body||p.pip_type,kind:`${p.pip_type} Pip`,detail:`${pipPlace(p)} · v${p.current_version} · ${p.id.slice(-8)}`};}).filter(p=>Mentions.PIP_TYPES.includes(p.pip_type));
- return{plugins:personalPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:outputsOn()&&!boxOutput()?PIP_OUTPUTS:[],pips:others,pipsEmpty:'No other Pips here',files:personalPip()?[]:projectFiles,
+ return{plugins:everyPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:outputsOn()&&!boxOutput()?PIP_OUTPUTS:[],pips:others,pipsEmpty:'No other Pips here',files:personalPip()?[]:projectFiles,
   // This computer's projects (pips-21, API 91): naming one gives this Pip a private copy of it.
   projects:projectMentionsOn()?S.projectChoices:[]};
 }
@@ -309,12 +318,12 @@ if(Mentions){
  chatPop=owner.createElement('div');chatPop.id='chat-pop';chatPop.className='pop pop-over';chatPop.setAttribute('role','listbox');chatPop.setAttribute('aria-label','Suggestions');chatPop.setAttribute('data-dom-own','1');
  chatBox=Mentions.box(el,{maxLength:CHAT_MAX_CHARS,faceStyles:false,edit:change=>chatEdit(change),pillOptions:chatMarkLook,cleanedChanged:()=>drawChatTray(),
   pasteBack:part=>part.kind==='artifact'?outputsOn()&&!boxOutput()&&PIP_OUTPUTS.some(([value,label])=>value===part.identity&&label===part.label):part.kind==='plugin'?chatMentionSources().plugins.some(p=>p.id===part.identity):part.kind==='pip'?chatMentionSources().pips.some(p=>p.pip_id===part.identity)
-   :part.kind==='project'?!!S.pip?.computer_plan&&chatMentionSources().projects.some(p=>p.workspace_id===part.identity):part.kind==='file'&&!personalPip()});
+   :part.kind==='project'?hasBox()&&chatMentionSources().projects.some(p=>p.workspace_id===part.identity):part.kind==='file'&&!personalPip()});
  chatPicker=Mentions.picker(chatBox,chatPop,{edit:change=>chatEdit(change),sources:chatMentionSources,pipsDetail:'This Pip\u2019s workspace · no work starts',
   refresh(){if(!personalPip()&&!projectFilesAsked){projectFilesAsked=true;vscode.postMessage({type:'pipsFiles'});}if(projectMentionsOn())void loadProjectChoices();},
   projectsDetail:'A private copy for this Pip to work in',
   // A Pip with no computer has nowhere to keep the copy: it is told to get one first, and no mark goes in.
-  projectPick:()=>{if(S.pip?.computer_plan)return true;askForComputer();return false;},
+  projectPick:()=>{if(hasBox())return true;askForComputer();return false;},
   face:(it,i)=>{const index=it.pipRow?Mentions.PIP_TYPES.indexOf(it.pipRow.pip_type):-1;return index>=0?`<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:it.pipRow.name},'idle',`pickerPip${i}`,{includeStyles:false})}</span>`:'';},
   icon:it=>{if(it.projectRow)return `<span class="pi-icon pi-project-mark" aria-hidden="true">${FOLDER_ICON}</span>`;if(it.artifactKind)return `<span class="pi-icon pi-output-mark" aria-hidden="true">${outputIcon(it.artifactKind)}</span>`;if(!it.pluginId)return rowTerminal;const src=pluginLogoSrc(it.pluginId);return `<span class="pi-icon pi-plugin-mark" aria-hidden="true" data-plugin-mark="${esc(it.pluginId)}">${src?`<img alt="" src="${esc(src)}">`:transcriptIcon('plug')}</span>`;},
   drawn:()=>hydratePluginLogos(),
@@ -325,7 +334,7 @@ if(Mentions){
   // "/" at the start: this Pip's commands. /setup asks a few questions, then it sets itself up (Undo; API 77, and on
   // DGC's side still a Pip with no folder's). /learn and /goal are every Pip's: listed here, as they work typed.
   // (The menu itself is from API 77: an older DGC's box has none, as before.)
-  commands:()=>archived()||S.apiVersion<77?[]:[...(personalPip()?[{name:'setup',detail:'Set it up for a job: a few questions, then it changes itself (Undo)'}]:[]),
+  commands:()=>archived()||S.apiVersion<77?[]:[...(everyPip()?[{name:'setup',detail:'Set it up for a job: a few questions, then it changes itself (Undo)'}]:[]),
    ...(learnOn()?[{name:'learn',detail:'Make a skill from this chat: a draft you Save, Edit or Cancel'}]:[]),
    ...(goalsOn()?[{name:'goal',detail:'Give this conversation a goal: it keeps going until it is done or needs you'}]:[])]});
  if(chatBox.note)chatBox.note.id='chat-paste-note';   // what the bar's "paste" pill opens (ui-09: it was a row above the box)
@@ -714,7 +723,7 @@ function checkedChatOptions(value,max=S.chatControls?.context_max||32768){
 function chosenChatOptions(){return checkedChatOptions(chatPreferences.get(S.selected)||S.chatControls?.options);}
 // The main chat's two-zone composer, using only controls Pip chat supports.
 function routineIcon(){return '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v2.8h-2.8"/><path d="M8 5v3.2l2 1.3"/></svg>';}
-function composerIcon(name){const paths={edit:'<path d="m10 2 4 4-8 8H2v-4Z M8 4l4 4"/>',shield:'<path d="M8 1.5 13 3.5v4c0 3-2 5-5 7-3-2-5-4-5-7v-4Z"/><path d="m6 8 1.3 1.3L10 6.5"/>',context:'<path d="M7 2a6 6 0 1 0 7 7H7Z"/><path d="M9 1.5V7h5.5A6 6 0 0 0 9 1.5Z"/>',up:'<path d="M8 14V2M3 7l5-5 5 5"/>',chevron:'<path d="m4 10 4-4 4 4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx=".5"/>',image:'<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="6" cy="6.8" r="1.1"/><path d="m2.5 11.5 3.5-3.5 2.5 2.5 2-2 3 3"/>',zap:'<path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8Z"/>',next:'<path d="m6 4 4 4-4 4"/>',check:'<path d="m3.5 8.5 3 3 6-7"/>',back:'<path d="M13 8H3M7 4 3 8l4 4"/>',add:'<path d="M8 3v10M3 8h10"/>',mic:'<rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"/><path d="M3 8a5 5 0 0 0 10 0M8 13v1.5"/>'};return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">${paths[name]||''}</svg>`;}
+function composerIcon(name){if(name==='add')return window.DgcIcons.html('add');const paths={edit:'<path d="m10 2 4 4-8 8H2v-4Z M8 4l4 4"/>',shield:'<path d="M8 1.5 13 3.5v4c0 3-2 5-5 7-3-2-5-4-5-7v-4Z"/><path d="m6 8 1.3 1.3L10 6.5"/>',context:'<path d="M7 2a6 6 0 1 0 7 7H7Z"/><path d="M9 1.5V7h5.5A6 6 0 0 0 9 1.5Z"/>',up:'<path d="M8 14V2M3 7l5-5 5 5"/>',chevron:'<path d="m4 10 4-4 4 4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx=".5"/>',image:'<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="6" cy="6.8" r="1.1"/><path d="m2.5 11.5 3.5-3.5 2.5 2.5 2-2 3 3"/>',zap:'<path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8Z"/>',next:'<path d="m6 4 4 4-4 4"/>',check:'<path d="m3.5 8.5 3 3 6-7"/>',back:'<path d="M13 8H3M7 4 3 8l4 4"/>',add:'<path d="M8 3v10M3 8h10"/>',mic:'<rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"/><path d="M3 8a5 5 0 0 0 10 0M8 13v1.5"/>'};return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">${paths[name]||''}</svg>`;}
 function continuityMarkup(){
  const c=S.continuity;if(!c)return `<p class="composer-scope">${esc(S.pip?.name||'This Pip')} saves a summary of this chat after its next reply.</p>`;
  return `<details class="chat-continuity"><summary>Chat memory${c.summarized_messages?' · '+c.summarized_messages+' messages summarized':''}</summary><p class="muted">${esc(c.notice)}</p><p class="muted">${c.strategy==='mechanical'?'A short summary. Some details may be left out; your messages are still saved.':c.strategy==='model'?`A summary ${esc(S.pip?.name||'it')} keeps up to date.`:'It still sees every message; nothing needs summarizing yet.'}</p>${c.summary?`<pre>${esc(c.summary)}</pre>`:''}<p class="muted">Summarized by ${esc(c.provenance.model||'its model')}</p></details>`;
@@ -795,7 +804,7 @@ function chatControlsMarkup(canSend,busy){
  if(voiceMode?.active)return `<div class="composer-controls pip-voice">${talkBar.markup('conversation')}</div>`;
  if(S.mic!=='idle')return `<div class="composer-controls pip-voice">${voiceBar?voiceBar.markup():''}</div>`;
  const locked=archived()||!usable()||S.busy,current=S.pip.model_choice?.mode==='model'?S.pip.model_choice.model:'',selected=modelValue(S.pip.model_choice),chip=chipModel(S.pip.model_choice,current),shownModel=chip.text,available=S.apiVersion>=24&&!!S.chatControls,o=available?chosenChatOptions():null;
- const subs=subscriptionChoices(personalPip()),usage=subs.length?usageLine(selected):'';
+ const subs=subscriptionChoices(everyPip()),usage=subs.length?usageLine(selected):'';
  // D14: its own model is out and its fallback answers: the chip names the fallback, in olive, until its own model is back.
  const onFallback=S.fallbackOn&&!S.noProvider&&S.apiVersion>=76?S.fallbackOn:null;
  const unavailable=`<p class="composer-unavailable">${S.apiVersion<24?'Update DGC to change these settings.':'These settings didn’t load. Refresh, then send.'}</p>`;
@@ -875,7 +884,7 @@ function updateChatPreference(kind,value){
 }
 function reviewChatModel(value){
  if(!usable()||S.busy||archived()||!S.pip)return;
- let choice;try{choice=modelChoice(value,S.models,subscriptionChoices(personalPip()),routerOffer(),savedProviders());}catch(error){setError(error);return;}
+ let choice;try{choice=modelChoice(value,S.models,subscriptionChoices(everyPip()),routerOffer(),savedProviders());}catch(error){setError(error);return;}
  S.composerPanel='';const current=S.pip.model_choice||{mode:'default'};if(JSON.stringify(choice)===JSON.stringify(current)){render();return;}
  if(keepsAll()){const name=choice.mode==='provider'?`${choice.model} on ${providerOf(choice.provider)?.name||'that provider'}`:choice.mode==='model'?(S.models.find(m=>m.id===choice.model)?.name||choice.model):choice.mode==='subscription'?modelLabel(choice):choice.mode==='router'?routerLabel(choice):'the same model as DGC',usage=usageLine(modelValue(choice));void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${name}.${usage?' '+usage:''}`);return;}
  const version=S.pip.current_version,pip=S.selected;
@@ -1556,6 +1565,31 @@ function openMessageFile(key,save=false){
  if(!canOpenFiles()||!S.selected||!messageId||!/^\d+$/.test(index||''))return;
  vscode.postMessage({type:'pipsOpenFile',pip_id:S.selected,message_id:messageId,index:Number(index),...(save?{save:true}:{})});
 }
+// A file's menu on its card (media/shared/filemenu.js, the Library's own): the "…", a right-click, Shift+F10. Open · Open
+// in editor · Save a copy… · Copy · Copy path · Reveal in file manager; what a kind can't do is shown off, with why (DGC
+// keeps a chat's files by their digest: no path to copy, nothing to reveal). The host is told the message, the file's
+// number and which of the six (pipsFileAct); a picture to copy comes back as bytes for this page's clipboard.
+let fileActFrom=null;
+// Inline touches in what you type and what you read (media/shared/inline.js), as in Work and ChatDGC: a colour's swatch,
+// shortcuts as keys, a time with a zone in this computer's time, codes that copy on a click. For a Pip with a folder a
+// commit and an issue are links once the host has asked that folder's Git: the page names the Pip, never a folder.
+const inlineScope=()=>S.pip&&S.selected&&!personalPip()&&!remoteHost?S.selected:'';
+const inlineTouches=globalThis.DgcInline?.watch(root,{rules:[{sel:'.message-body',times:true,refs:true},{sel:'.pip-message.user .bubble',refs:true}],
+ copy:text=>vscode.postMessage({type:'copy',text}),
+ refs:{scope:inlineScope,ask:hashes=>{const pip=inlineScope();if(pip)vscode.postMessage({type:'pipsGitRefs',pip_id:pip,hashes});},open:hash=>{const pip=inlineScope();if(pip)vscode.postMessage({type:'pipsGitCommitOpen',pip_id:pip,hash});}}});
+if(inlineTouches)disposers.push(()=>inlineTouches.dispose());
+globalThis.DgcFileMenu?.listen(document,card=>{
+ const FM=globalThis.DgcFileMenu,raw=String(card.dataset.fileKey||''),photo=raw.startsWith('photo:'),[messageId,index]=(photo?raw.slice(6):raw).split(':'),name=card.dataset.fileName||'file';
+ if(!canOpenFiles()||!S.selected||!messageId||!/^\d+$/.test(index||''))return null;
+ const why=act=>photo?(act==='editor'?FM.whyPicture(act,'chat'):act==='path'||act==='reveal'?FM.KEPT:''):FM.whyKept(name,act);
+ return {name,why,onPick:act=>{fileActFrom={key:raw};vscode.postMessage({type:'pipsFileAct',act,pip_id:S.selected,message_id:messageId,index:Number(index),...(photo?{photo:true}:{})});}};
+});
+function fileActSaid(message){
+ const FM=globalThis.DgcFileMenu;if(!FM)return;
+ const more=fileActFrom?[...document.querySelectorAll('[data-file-card]')].find(c=>c.dataset.fileKey===fileActFrom.key)?.querySelector('.dgc-file-more'):null;
+ if(message.type==='pipsFileCopy')FM.copyPicture(window.document,String(message.data||'')).then(ok=>FM.said(more,ok?'Image copied':'Couldn\u2019t copy here'));
+ else FM.said(more,String(message.words||'').slice(0,60));
+}
 // A player per sent video or sound, kept across redraws (its slot is the page's own: data-dom-own) so one that is
 // playing is never reloaded. A small one loads when it is drawn; a large one waits for Play.
 const messageMedia=new Map(),mediaWaiting=new Map();let mediaSeq=0;
@@ -1894,7 +1928,7 @@ async function loadGrants(){
 }
 // The apps this Pip may read (pip_app_links): connected from its chat, taken back here.
 function appsMarkup(){
- if(remoteHost||S.apiVersion<43||!personalPip())return '';
+ if(remoteHost||S.apiVersion<43||!everyPip())return '';
  if(appsSettingsPip!==S.selected){appsSettingsPip=S.selected;void loadAppLinks();}
  const connected=(S.appLinks||[]).filter(l=>l.status==='connected'),off=S.busy||!usable()||!!appLinkBusy;
  return `<section class="section" aria-label="Apps"><h2>Apps${infoTip('pipAppsSays','Apps',connected.length?`It reads these when you ask. Anything it would send or change waits for your Allow. Disconnect stops ${esc(S.pip?.name||'this Pip')} using this account. The account itself stays signed in under Settings → Plugins.`:`Ask ${esc(S.pip?.name||'this Pip')} in its chat to connect an app, like Gmail or Google Calendar.`)}</h2>${connected.length
@@ -1904,7 +1938,7 @@ function appsMarkup(){
 let appsSettingsPip='';
 // A Personal Pip's page: which account each linked app is on. Disconnect, then asking the Pip again, gives the same choice.
 function linkedAppsMarkup(off){
- if(remoteHost||S.apiVersion<43||!personalPip())return '';
+ if(remoteHost||S.apiVersion<43||!everyPip())return '';
  if(appsSettingsPip!==S.selected){appsSettingsPip=S.selected;void loadAppLinks();}
  const connected=(S.appLinks||[]).filter(l=>l.status==='connected');if(!connected.length)return '';
  return `<section class="pip-page-group" aria-label="Linked apps"><h3 class="pip-page-label">Linked apps${infoTip('pipLinkedSays','Linked apps',`It reads and acts only on these accounts. To change one, Disconnect, then ask ${esc(S.pip?.name||'it')} again and choose.`)}</h3>${connected.map(l=>`<div class="pip-page-row static" data-linked-app="${esc(l.id)}"><span class="row-words"><strong>${esc(l.app)}</strong><small>${esc(l.label||'Its linked account')}</small></span><button type="button" class="quiet pill" data-app-link-disconnect="${esc(l.id)}"${off||appLinkBusy?' disabled':''}>Disconnect</button></div>`).join('')}</section>`;
@@ -1928,10 +1962,10 @@ function appsUseMarkup(off){
  const mine=appsUse.pip===S.selected;
  // (An app's own addresses, with Disconnect and "another address", are its app links: DGC keeps those to a Pip with no
  //  folder so far, so a Pip with a folder has each app's switch and its addresses by name.)
- // Plugins stay off this list for a Pip with a folder until DGC lets one use them (one-kind audit A4: the backend
- // still refuses it), so no switch here does nothing.
- const offered=mine&&appsUse.value?(personalPip()?appsUse.value:appsUse.value.filter(a=>a.kind!=='plugin')):null;
- return pipAppsMarkup(offered,{esc,links:personalPip()?S.appLinks||[]:[],connects:personalPip(),busy:off||appsUse.busy||!!appLinkBusy,error:mine?appsUse.error:'',pipName:S.pip?.name||'This Pip',confirm:appsUse.confirm,
+ // Plugins are on this list for a Pip with a folder from Pips API 103; an older DGC refuses them, so they stay off it
+ // there and no switch does nothing.
+ const offered=mine&&appsUse.value?(everyPip()?appsUse.value:appsUse.value.filter(a=>a.kind!=='plugin')):null;
+ return pipAppsMarkup(offered,{esc,links:everyPip()?S.appLinks||[]:[],connects:everyPip(),busy:off||appsUse.busy||!!appLinkBusy,error:mine?appsUse.error:'',pipName:S.pip?.name||'This Pip',confirm:appsUse.confirm,
   waiting:shownAppLinks(S.appLinks).filter(l=>l.another===true).map(l=>l.toolkit),logo:a=>(a.kind==='plugin'?pluginLogoCache:appLogoCache).get(a.id)||''});
 }
 async function setAppUse(app,on){
@@ -2179,6 +2213,11 @@ async function loadAdaptations(more=false){
  finally{if(token===scope()&&sequence===adaptationSeq){S.adaptationsLoading=false;render();}}
 }
 function personalPip(pip=S.pip){return pip?.source_policy?.mode==='personal';}
+// One kind of Pip, the second half (Pips API 103): what was only a Pip without a folder's is every Pip's: /setup,
+// app links, plugins, drafts and their Always allow, borrowing Chrome, its own keys, how it sees, Give / Remove
+// computer, and its web and app reads. An older DGC still refuses these for a Pip with a folder, so they stay hidden there.
+const KIND_API=103;
+function everyPip(pip=S.pip){return personalPip(pip)||S.apiVersion>=KIND_API&&!!pip&&onePips();}
 // One kind of Pip: what differs between two Pips is where each works. In a word: "Personal" (no folder), or its
 // folder's name.
 function pipPlace(pip=S.pip){return personalPip(pip)?'Personal':spaceName(pip?.workspace_id)||'A folder';}
@@ -2564,7 +2603,7 @@ async function finishedCheck(){
 }
 function computerMarkup(){const inner=computerInner();return inner&&`<div class="computer">${inner}</div>`;}
 function computerInner(){
- if(S.apiVersion<42||!(personalPip()||folderBox())||remoteHost)return '';
+ if(S.apiVersion<42||!(everyPip()||folderBox())||remoteHost)return '';
  if(computerState.pip!==S.selected){void loadComputer();return '<h3>Computer</h3><p class="muted">Loading…</p>';}
  const c=computerState.value,off=S.busy||!usable()||archived();
  if(!c)return `<h3>Computer</h3>${errorMarkup(computerState.error)||'<p class="muted">Loading…</p>'}`;
@@ -2693,7 +2732,7 @@ function skillsMarkup(){
  return `<h3>Skills</h3><p>Uses your DGC skills that fit everyday work: deep research, charts and planning, and the ones you add. A skill is instructions; it never gives the Pip new access.</p><div class="actions">${button('manage-skills','Manage skills…',false,'quiet')}</div>`;
 }
 function sourceSettingsMarkup(){
-  if(!personalPip())return '';
+  if(!everyPip())return '';
   const off=S.busy||!usable();
   return `<section class="section"><h2>What it uses</h2>${computerMarkup()}${webReadsMarkup()}${S.apiVersion>=43&&!S.pip.app_plan?'':`<h3>${S.apiVersion>=43?'Reads first':'Connected apps'}${infoTip('pipReadsSays',S.apiVersion>=43?'Reads first':'Connected apps','What it reads before each task. Connect an app once in DGC Settings, then choose it here.')}</h3>${S.pip.app_plan?readList(S.pip.app_plan):'<p class="muted">None yet.</p>'}<div class="actions">${button('choose-app-access',S.pip.app_plan?'Change…':'Choose an account…',off||S.apiVersion<29||remoteHost)}${S.apiVersion>=43?'':button('setup-apps','Set up in chat',off,'quiet')}${S.pip.app_plan?button('remove-app-access','Remove…',off,'quiet'):''}</div>`}${canReviewMessages()||!remoteHost&&S.apiVersion>=32?`<p class="drafts-links"><span class="muted">What it prepared:</span>${canReviewMessages()?button('message-reviews','Actions',S.busy,'link'):''}${!remoteHost&&S.apiVersion>=32?button('email-drafts','Emails',S.busy,'link'):''}${!remoteHost&&S.apiVersion>=35?button('calendar-drafts','Calendar events',S.busy,'link'):''}${!remoteHost&&S.apiVersion>=37?button('connector-drafts','App actions',S.busy,'link'):''}</p>`:''}${skillsMarkup()}</section>`;
 }
@@ -2815,7 +2854,7 @@ function jobSettingsMarkup(){
    +(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,when:at=>shortDate(at)}):'')
    +artifactsSectionMarkup(p,off,true)
    +sourceSettingsMarkup()+githubReadsMarkup()
-   +`<form id="model-form" class="section form"><h2>Model${infoTip('pipModelSays','Model',`The model this Pip uses. The list is the models from your DGC connection${subscriptionChoices(personalPip()).length?', and your own subscriptions':''}.`)}</h2>${modelPicker('pipModel','Model this Pip uses',draft.pipModel,personalPip(),true)}<div class="actions"><button type="submit" class="primary"${off||!S.modelDirty?' disabled':''}>Save model</button></div></form>`
+   +`<form id="model-form" class="section form"><h2>Model${infoTip('pipModelSays','Model',`The model this Pip uses. The list is the models from your DGC connection${subscriptionChoices(everyPip()).length?', and your own subscriptions':''}.`)}</h2>${modelPicker('pipModel','Model this Pip uses',draft.pipModel,everyPip(),true)}<div class="actions"><button type="submit" class="primary"${off||!S.modelDirty?' disabled':''}>Save model</button></div></form>`
    +appsMarkup()+grantsMarkup()+usageMarkup()
    +`<section class="section"><h2>Pause or archive${infoTip('pipPauseSays','Pause or archive',p.status==='paused'?'Paused. It does not run until you resume it.':'Pausing stops it from running. Archiving puts it away; you can restore it later.')}</h2><div class="actions">${button('toggle-pip',p.status==='paused'?'Resume':'Pause',off||S.apiVersion>=16&&!canLifecycle())}${S.apiVersion>=16&&canLifecycle()?button('archive-pip','Archive…',off,'quiet danger'):''}</div></section>`
    +`<details class="advanced section" data-details="advanced"><summary>Advanced${infoTip('pipAdvancedSays','Advanced','Most Pips never need these.')}</summary>${notifyMarkup()}${adaptationMarkup()}${personalPip()?'':projectSourceMarkup()}${shareMarkup()}</details>`;
@@ -3845,7 +3884,11 @@ function chatTime(at){
  return days===0?`Today ${time}`:days===1?`Yesterday ${time}`:`${when.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'})}, ${time}`;
 }
 function characterType(id){const i=SIMPLE_CHARACTERS.indexOf(id);return S.types.find(t=>t.id===id)||{id,name:id?id[0].toUpperCase()+id.slice(1):'Pip',character_index:i<0?4:i};}
-const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{back:'<path d="M10 3 5 8l5 5"/>',computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',more:'<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',openEditor:'<path d="M9.5 1.5H3.5v13h9V4.5Z"/><path d="M9.5 1.5v3h3"/><path d="M5.5 9.5h5M8.5 7.5l2 2-2 2"/>',share:'<path d="M8 2v8M5 5l3-3 3 3"/><path d="M3 9v4h10V9"/>',gear:'<path d="M2 4h6.5M12 4h2M2 8h2M7.5 8H14M2 12h8.5M14 12h0"/><circle cx="10" cy="4" r="1.6"/><circle cx="5.5" cy="8" r="1.6"/><circle cx="12" cy="12" r="1.6"/>',plus:'<path d="M8 3v10M3 8h10"/>',play:'<path d="M5.5 3.5v9l7-4.5z"/>'}[name]}</svg>`;
+// The Pips view's own drawings: only what Work has no glyph for (a computer, share, play). Every action Work draws too
+// (Open in editor, More, Back, Settings, New) is Work's one glyph, from media/shared/icons.js (16 Nov: one action, one
+// icon, on every surface), drawn inline because the side bar's view is in a shadow root the icon font's classes can't reach.
+const SHARED_ICON={back:'back',more:'more',openEditor:'open-in-editor',gear:'settings',plus:'add'};
+const simpleIcon=name=>SHARED_ICON[name]?window.DgcIcons.html(SHARED_ICON[name]):`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',share:'<path d="M8 2v8M5 5l3-3 3 3"/><path d="M3 9v4h10V9"/>',play:'<path d="M5.5 3.5v9l7-4.5z"/>'}[name]}</svg>`;
 function meetCoreMarkup(){
  return `<section class="meet-core" aria-label="Meet Core">${avatar('idle',characterType('core'),'meet-core')}<h2>Meet Core</h2><p>Core is your Primary Pip. It is your go-to for everyday tasks, looks after your other Pips, and checks in when it needs your help.</p><p class="muted">Core is also the character of DGC’s main chat: your Primary Pip uses it. It works across your projects, without their files.</p>${button('create-core',S.busy?'Creating…':'Create Core',S.busy||!usable(),'primary pill')}</section>`;
 }
@@ -4158,16 +4201,20 @@ function computerNamesRow(off){
  return computerNamesMarkup({esc,names,renaming:page?ui.renaming:0,renameText:ui.renameText,busy:!!off||ui.busy,error:page?ui.error:''});
 }
 function computerRowMarkup(p,off){
- if(S.apiVersion<42||remoteHost||!(personalPip()||folderBox())||archived())return '';
- // A Pip with a folder has the computer DGC gave it: it is opened here, never removed. How many it has, one more and
- // each one's name are as any Pip's.
- if(!personalPip())return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words"><strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and its own copy of your folder, separate from yours. What ${esc(p.name)} changes there comes back to you as a card.`)}</strong></span><button type="button" class="quiet" data-flow-watch="page"${off?' disabled':''}>Open</button>${computersRowMarkup(off)}</div></section>`;
- return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words">${p.computer_plan
-  ?`<strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and files, separate from yours. It starts when ${esc(p.name)} needs it.`)}</strong></span>${button('remove-computer','Remove…',off,'quiet')}`+computersRowMarkup(off)
+ if(S.apiVersion<42||remoteHost||!(everyPip()||folderBox())||archived())return '';
+ // A Pip with a folder on an older DGC has the computer DGC gave it: it is opened here, never removed. How many it
+ // has, one more and each one's name are as any Pip's.
+ if(!everyPip())return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words"><strong>Its own computer${infoTip('pipComputerSays','Its own computer',`A browser, a Terminal and its own copy of your folder, separate from yours. What ${esc(p.name)} changes there comes back to you as a card.`)}</strong></span><button type="button" class="quiet" data-flow-watch="page"${off?' disabled':''}>Open</button>${computersRowMarkup(off)}</div></section>`;
+ // Any Pip's (Pips API 103): Remove takes its computer away and Give gives one back. A Pip with a folder has its
+ // computer where DGC says it has (get_pip_computer's `granted`), so nothing is offered until that is read.
+ const folder=!personalPip();
+ if(folder&&(computerState.pip!==S.selected||!computerState.value))return '';
+ return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words">${hasBox()
+  ?`<strong>Its own computer${infoTip('pipComputerSays','Its own computer',folder?`A browser, a Terminal and its own copy of your folder, separate from yours. What ${esc(p.name)} changes there comes back to you as a card.`:`A browser, a Terminal and files, separate from yours. It starts when ${esc(p.name)} needs it.`)}</strong></span>${folder?`<button type="button" class="quiet" data-flow-watch="page"${off?' disabled':''}>Open</button>`:''}${button('remove-computer','Remove…',off,'quiet')}`+computersRowMarkup(off)
   :`<strong>Computer${infoTip('pipComputerSays','Computer',`Give ${esc(p.name)} its own computer, so it can look things up and fill in forms for you.`)}</strong></span>${button('give-computer','Give it a computer…',off,'quiet')}`}</div></section>`;
 }
 // What this Pip can do: the shield's dialog, now also the level menu's last row.
-function openWhatItCanDo(){if(!S.pip)return;openReview({title:`What ${S.pip.name} can do`,description:personalPip()?(S.pip.computer_plan?`${S.pip.name} has its own computer: ${S.apiVersion>=54?'a desktop with a browser, apps and a Terminal that reach public websites, and files':'a browser, a Terminal that reaches public websites, and files'}. It can also read the apps you connected. ${levelState.pip===S.pip.id&&levelState.value&&levelState.value.level!=='ask'?levelNotice(levelState.value):'Anything it would send, submit or change waits for your Allow, unless you chose Always allow.'}${S.apiVersion>=44?(carefulState.pip===S.pip.id&&carefulState.value?.careful===false?' Careful mode is off.':' Careful mode: it asks before it opens a new site, and before anything it read from your apps goes onto a website.'):''}`:`${S.pip.name} reads what you share here and the apps you connected. It can’t send, buy or change anything without your OK.`):`It reads ${currentTree()?'your current files':'the committed code'} of this project, and only reads. In chat it can’t run commands, open the running app, change files or permissions. Anything it runs or changes, you approve separately, in a handoff or its setup.`,readOnly:true,request:{}});}
+function openWhatItCanDo(){if(!S.pip)return;openReview({title:`What ${S.pip.name} can do`,description:everyPip()?(hasBox()?`${S.pip.name} has its own computer: ${S.apiVersion>=54?'a desktop with a browser, apps and a Terminal that reach public websites, and files':'a browser, a Terminal that reaches public websites, and files'}. It can also read the apps you connected. ${levelState.pip===S.pip.id&&levelState.value&&levelState.value.level!=='ask'?levelNotice(levelState.value):'Anything it would send, submit or change waits for your Allow, unless you chose Always allow.'}${S.apiVersion>=44?(carefulState.pip===S.pip.id&&carefulState.value?.careful===false?' Careful mode is off.':' Careful mode: it asks before it opens a new site, and before anything it read from your apps goes onto a website.'):''}`:`${S.pip.name} reads what you share here and the apps you connected. It can’t send, buy or change anything without your OK.`)+(personalPip()?'':` It also reads ${currentTree()?'your current files':'the committed code'} of its folder.`):`It reads ${currentTree()?'your current files':'the committed code'} of this project, and only reads. In chat it can’t run commands, open the running app, change files or permissions. Anything it runs or changes, you approve separately, in a handoff or its setup.`,readOnly:true,request:{}});}
 // How much it asks (Pips API 58): its level, the chosen level's one line, and what its level did by itself.
 const levelState={pip:'',value:null,error:'',busy:false,seq:0};
 // A Project Pip has one too from Pips API 80 (pips-11): its lines are about the handoffs it is sent.
@@ -4256,14 +4303,14 @@ async function decideTemplateChange(id,digest,decision){
 // How it sees (Pips API 53): whether its model can, and when it can't, your choice; on a Personal Pip's page.
 const eyesState={pip:'',value:null,error:'',busy:false,seq:0};
 async function loadEyes(){
- if(remoteHost||S.apiVersion<53||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<53||!everyPip()||!usable())return;
  const token=scope(),pip=S.selected,sequence=++eyesState.seq;
  try{const value=pipEyes((await send('get_pip_eyes',{pip_id:pip})).eyes,pip);if(token!==scope()||sequence!==eyesState.seq||S.selected!==pip)return;
   eyesState.pip=pip;eyesState.value=value;eyesState.error='';render();}
  catch(error){if(token===scope()&&sequence===eyesState.seq){eyesState.error=errorText(error);render();}}
 }
 async function setEyes(choice){
- if(eyesState.busy||!usable()||!personalPip())return;const token=scope(),pip=S.selected;eyesState.busy=true;eyesState.error='';render();
+ if(eyesState.busy||!usable()||!everyPip())return;const token=scope(),pip=S.selected;eyesState.busy=true;eyesState.error='';render();
  try{const value=pipEyes((await send('set_pip_eyes',{pip_id:pip,choice})).eyes,pip);if(token!==scope()||S.selected!==pip)return;eyesState.pip=pip;eyesState.value=value;S.notice=eyesNotice(choice,value);}
  catch(error){if(token===scope())eyesState.error=errorText(error);}
  finally{eyesState.busy=false;if(token===scope())render();}
@@ -4489,7 +4536,32 @@ function jobOpen(p){
   if(!canOpenChatTab()||p.status==='archived')return '';
   return `<button type="button" class="dgc-pin job-open" data-open-pip-chat="${esc(p.id)}" title="Open in editor" aria-label="Open in editor: ${esc(p.name)}">${simpleIcon('openEditor')}</button>`;
 }
-function homeRowInner(p,place=''){const pin=jobPin(p),tab=jobOpen(p),row=homeRow(p,place);return pin||tab?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}${tab?' has-open':''}">${row}${tab}${pin}</div>`:row;}
+// A narrow list (under 400px) has no room for the row's icon buttons beside its name: there the row keeps one "…", on
+// every row and reached by Tab, and Open in editor and the pin are in its menu, in the icons' order (his rule for every
+// list, 16 Nov; src/pips.css shows the "…" only there). Its rows are the very buttons' own asks (data-open-pip-chat,
+// data-pin-pip), so each does what its icon does.
+let rowMenuFor='';
+function jobMore(p,pin,tab){
+  if(!pin&&!tab)return '';
+  const open=rowMenuFor===p.id,pinned=dockPins.has(`pip:${p.id}`);
+  // (Each row wears Work's row menu's glyph for the same action: one action, one icon, his rule of 16 Nov.)
+  const glyph=(a)=>window.DgcIcons?.html(a,{size:15})||'';     // (a menu row's glyph is 15 px, as on Work's)
+  const rows=[...(tab?[{id:'open',label:'Open in editor',svg:glyph('open-in-editor'),attrs:`data-open-pip-chat="${esc(p.id)}"`}]:[]),...(pin?[{id:'pin',label:pinned?'Unpin from the dock':'Pin to the dock',svg:glyph(pinned?'unpin':'pin'),attrs:`data-pin-pip="${esc(p.id)}"`}]:[])];
+  return `<button type="button" class="dgc-pin job-more" data-pip-more="${esc(p.id)}" aria-haspopup="menu" aria-expanded="${open}" title="More" aria-label="More for ${esc(p.name)}">${window.DgcIcons.html('more')}</button>`
+    +(open?`<div class="pip-row-menu dgc-menu" id="pip-row-menu" role="menu" aria-label="More for ${esc(p.name)}">${globalThis.DgcMenu?.html([{rows}],{data:'pip-row-act'})||''}</div>`:'');
+}
+function closeRowMenu(focus=false){
+  if(!rowMenuFor)return;const id=rowMenuFor;rowMenuFor='';render();
+  if(focus)[...document.querySelectorAll('[data-pip-more]')].find(b=>b.dataset.pipMore===id)?.focus({preventScroll:true});
+}
+/** The row menu's place once drawn: over its "…" when there is no room under it. */
+function placeRowMenu(keyboard){
+  const menu=$('pip-row-menu');if(!menu)return;
+  const host=menu.closest('.pip-app-root')||document.documentElement,box=menu.getBoundingClientRect(),room=host.getBoundingClientRect();
+  if(box.bottom>Math.min(room.bottom,window.innerHeight)-4)menu.classList.add('up');
+  if(keyboard)menu.querySelector('.dgc-menu-row')?.focus({preventScroll:true});
+}
+function homeRowInner(p,place=''){const pin=jobPin(p),tab=jobOpen(p),row=homeRow(p,place),more=jobMore(p,pin,tab);return pin||tab?`<div class="pip-row-slot${dockPins.has(`pip:${p.id}`)?' is-pinned':''}${tab?' has-open':''}${more?' has-more':''}${rowMenuFor===p.id?' menu-open':''}">${row}${tab}${pin}${more}</div>`:row;}
 // Its on/off switch is beside the row, at the right end (never inside it: the row is a button). Off, the row reads black and white.
 function homeRowSlot(p,place=''){const toggle=pipSwitchMarkup(p);return toggle?`<div class="pip-row-line${pipOff(p)?' is-off':''}" data-pip-line="${esc(p.id)}">${homeRowInner(p,place)}${toggle}</div>`:homeRowInner(p,place);}
 function simpleHomeList(all,live){
@@ -5536,7 +5608,7 @@ function simplePipHeader(){
  // the header has room for one more (under that its measured widths leave none: src/pips.css). Not in the tab itself.
  const opens=onChat&&canOpenChatTab();
  const openIcon=opens?`<button type="button" id="pip-open-editor" class="topbar-icon open-editor-icon" data-open-chat-tab aria-label="Open in editor" title="Open in editor">${simpleIcon('openEditor')}</button>`:'';
- const actions=`<div class="topbar-actions">${pipSwitchMarkup(p)}${project||folderPip&&activeOwnRun()?runNowMarkup():''}${computer}${openIcon}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${folderPip?runNowMenuRow():''}${opens?'<button type="button" data-open-chat-tab>Open in editor</button><hr>':''}${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>`;
+ const actions=`<div class="topbar-actions">${pipSwitchMarkup(p)}${project||folderPip&&activeOwnRun()?runNowMarkup():''}${computer}${openIcon}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${folderPip?runNowMenuRow():''}${opens?`<button type="button" data-open-chat-tab><span class="dgc-menu-icon" aria-hidden="true">${window.DgcIcons?.html('open-in-editor',{size:15})||''}</span><span>Open in editor</span></button><hr>`:''}${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>`;
  // Its chat: back, its face and name at the left, fixed; the thread selector in the middle, always centred; the switch,
  // its computer and the menu at the right (live round 1, 14 Nov). What a Project Pip last did, or its folder, follows
  // its name where there is room.
@@ -5693,7 +5765,7 @@ function focusStillOwed(){
  return focusOwed;
 }
 async function chooseAppConnection(){
- if(remoteHost||S.apiVersion<29||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<29||!everyPip()||!usable())return;
  openReview({title:'Connected apps',description:'Choose which account it reads before each task. Listing accounts doesn’t read anything in them.',readOnly:true,body:'<p class="muted">Loading connections…</p>',request:{type:'list_pip_connections'}});
  const ticket=S.review;
  try{const answer=await send('list_pip_connections');if(S.review!==ticket||ticket.scope!==scope())return;
@@ -5703,7 +5775,7 @@ async function chooseAppConnection(){
  }catch(error){if(S.review===ticket){ticket.error=errorText(error);renderReview();}}
 }
 async function chooseAppAccount(server){
- if(remoteHost||S.apiVersion<29||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<29||!everyPip()||!usable())return;
  openReview({title:'Choose app access',description:'Loading account identities and supported read tools. No app contents are fetched.',readOnly:true,body:'<p class="muted">Checking the existing connection…</p>',request:{type:'list_pip_accounts',server}});
  const ticket=S.review;
  try{const [discovery,inspection]=await Promise.all([send('list_pip_accounts',{server}),send('inspect_pip_connection',{server})]);if(S.review!==ticket||ticket.scope!==scope())return;
@@ -5719,15 +5791,15 @@ function prepareAppReview(review){
  void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{app_plan:plan},reason:'User selected a connected account and exact read scope.'},result=>{S.pip={...S.pip,proposals:[...(S.pip.proposals||[]),result.proposal]};proposalReview(result.proposal.id);});
  }catch(error){$('app-picker-error').textContent=errorText(error);}
 }
-const canReviewMessages=()=>!remoteHost&&S.apiVersion>=31&&personalPip()&&usable();
+const canReviewMessages=()=>!remoteHost&&S.apiVersion>=31&&everyPip()&&usable();
 async function loadEmailDrafts(calendar=false){
  if(!calendar&&S.apiVersion>=37)void loadConnectorDrafts();
  if(!calendar&&S.apiVersion>=35)void loadEmailDrafts(true);
- if(remoteHost||S.apiVersion<(calendar?35:32)||!personalPip()||!usable())return;const token=scope(),sequence=calendar?++calendarDraftSeq:++emailDraftSeq;
+ if(remoteHost||S.apiVersion<(calendar?35:32)||!everyPip()||!usable())return;const token=scope(),sequence=calendar?++calendarDraftSeq:++emailDraftSeq;
  try{const answer=emailDraftsPage(await send(calendar?'list_pip_calendar_drafts':'list_pip_message_drafts',{pip_id:S.selected,limit:20}),S.selected,S.workspace.id,calendar);if(token!==scope()||sequence!==(calendar?calendarDraftSeq:emailDraftSeq))return;S[calendar?'calendarDrafts':'emailDrafts']=answer.drafts;S[calendar?'calendarDraftError':'emailDraftError']='';render();void loadDraftDetails();}catch(error){if(token===scope()&&sequence===(calendar?calendarDraftSeq:emailDraftSeq)){S[calendar?'calendarDraftError':'emailDraftError']=errorText(error);render();}}
 }
 function emailDraftCards(){
- if(remoteHost||S.apiVersion<32||!personalPip())return '';
+ if(remoteHost||S.apiVersion<32||!everyPip())return '';
  // An email it wrote is Grok's Allow card: what it would send, and Send / Always allow right here.
  const gmail=connectedLinks('gmail'),calendar=connectedLinks('googlecalendar'),pipName=S.pip?.name||'This Pip';
  const from=(d,links)=>({link:pickedLink(d.id,links),links,fromOpen:allowFromOpen===d.id});
@@ -5741,14 +5813,14 @@ let appLinkSeq=0,appLinkBusy='',appLinkTimer=0,appLinkUntil=0;const appLinkHosts
 // Per card: the accounts Composio answered with, for the person to choose from, and the cards just linked (one quiet line until the next message).
 const appLinkChoices=new Map(),appLinkSettled=new Set();
 async function loadAppLinks(){
- if(remoteHost||S.apiVersion<43||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<43||!everyPip()||!usable())return;
  const token=scope(),sequence=++appLinkSeq,pip=S.selected;
  try{const page=appLinksPage(await send('list_pip_app_links',{pip_id:pip}),pip);if(token!==scope()||sequence!==appLinkSeq||S.selected!==pip)return;
   S.appLinks=page.links;S.composio=page.composio;S.appLinksError='';render();watchAppSignIn();}
  catch(error){if(token===scope()&&sequence===appLinkSeq){S.appLinksError=errorText(error);render();}}
 }
 function appLinkCards(){
- if(remoteHost||S.apiVersion<43||!personalPip())return '';
+ if(remoteHost||S.apiVersion<43||!everyPip())return '';
  const pipName=S.pip?.name||'This Pip';
  const cards=shownAppLinks(S.appLinks).map(link=>appLinkMarkup(link,{esc,busy:appLinkBusy===link.id||S.busy||archived(),composio:S.composio!==false,host:appLinkHosts.get(link.id)||'',pipName,choice:appLinkChoices.get(link.id)||null}));
  return cards.join('')+(S.appLinksError?`<p class="app-link-note" role="alert">${esc(S.appLinksError)}</p>`:'');
@@ -5765,7 +5837,7 @@ S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';let pluginSeq=0,pluginBusy=
 // said of a refused one (keyErrors), and which were saved in this chat (keySaved). The key is read from its box when
 // Allow is pressed, sent once, and the box emptied.
 S.keyRequests=[];const keyFilled=new Set(),keyErrors=new Map(),keySaved=new Map();
-const keyCards=()=>S.apiVersion>=81&&!remoteHost&&personalPip();
+const keyCards=()=>S.apiVersion>=81&&!remoteHost&&everyPip();
 const keyBoxes=id=>[...document.querySelectorAll('[data-key-card] input[data-key-name]')].filter(box=>box.closest('[data-key-card]').dataset.keyCard===id);
 function keyTyped(box){
  const card=box.closest('[data-key-card]'),id=card?.dataset.keyCard;if(!id)return;
@@ -5801,8 +5873,8 @@ S.pipKeys=[];S.pipKeysError='';let pipKeysSeq=0,pipKeyBusy='',pipKeyConfirm='';c
 // Slice 2c (Pips API 85): a site's key card offers "Also let its Terminal use it" only while this Pip is known to be at
 // Do it all and has a computer. Which cards are ticked (pipKeyTicked) is kept across a redraw; none is ticked to begin.
 const pipKeyTicked=new Set();
-const pipKeyTerminalOffered=()=>S.apiVersion>=85&&pipKeysShown()&&!!S.pip?.computer_plan&&levelState.pip===S.selected&&levelState.value?.level==='full';
-const pipKeysShown=()=>S.apiVersion>=82&&!remoteHost&&personalPip();
+const pipKeyTerminalOffered=()=>S.apiVersion>=85&&pipKeysShown()&&hasBox()&&levelState.pip===S.selected&&levelState.value?.level==='full';
+const pipKeysShown=()=>S.apiVersion>=82&&!remoteHost&&everyPip();
 const pipKeyBox=id=>[...document.querySelectorAll('input[data-pip-key-box]')].find(box=>box.dataset.pipKeyBox===id)||null;
 function pipKeyTyped(box){
  const id=box.dataset.pipKeyBox,full=!!box.value.trim();
@@ -5881,7 +5953,7 @@ async function loadOwnApps(){
  if(remoteHost||S.apiVersion<61||!usable())return;
  const token=S.epoch,sequence=++ownAppsSeq;
  try{const apps=ownAppsPage(await send('list_apps'));if(token!==S.epoch||sequence!==ownAppsSeq)return;
-  S.ownApps=apps;S.ownAppsError='';render();if(apps.length&&personalPip())void loadPluginDrafts();}
+  S.ownApps=apps;S.ownAppsError='';render();if(apps.length&&everyPip())void loadPluginDrafts();}
  catch(error){if(token===S.epoch&&sequence===ownAppsSeq){S.ownAppsError=errorText(error);render();}}
 }
 async function acceptOwnAppUpdate(name,digest){
@@ -5891,7 +5963,7 @@ async function acceptOwnAppUpdate(name,digest){
 }
 async function loadPlugins(){
  void loadOwnApps();void loadPipKeys();
- if(remoteHost||S.apiVersion<44||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<44||!everyPip()||!usable())return;
  const token=scope(),sequence=++pluginSeq,pip=S.selected;
  try{const answer=await send('list_pip_plugins',{pip_id:pip}),page=pluginsPage(answer,pip),asking=keyCards()?keyRequests(answer,pip):[];if(token!==scope()||sequence!==pluginSeq||S.selected!==pip)return;
   S.plugins=page.plugins;S.pluginsInstalled=page.installed;S.keyRequests=asking;S.pluginsError='';
@@ -5902,7 +5974,7 @@ async function loadPlugins(){
 // The draft list carries summaries; a plugin's Allow card shows the whole call, read once per version.
 async function loadPluginDrafts(){
  // API 45 on there are no cards to allow: every plugin turned on is every Pip's, so any installed one may have a draft.
- if(S.apiVersion<44||!personalPip()||!usable()||!((S.plugins||[]).some(c=>c.status==='allowed')||S.apiVersion>=45&&(S.pluginsInstalled||[]).length||S.apiVersion>=61&&(S.ownApps||[]).length))return;
+ if(S.apiVersion<44||!everyPip()||!usable()||!((S.plugins||[]).some(c=>c.status==='allowed')||S.apiVersion>=45&&(S.pluginsInstalled||[]).length||S.apiVersion>=61&&(S.ownApps||[]).length))return;
  const token=scope(),pip=S.selected;
  for(const d of (S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired&&!pluginDrafts.has(d.id+':'+d.digest)).slice(0,5)){
   try{const v=connectorDraft((await send('get_pip_connector_draft',{draft_id:d.id})).draft,pip,S.workspace.id);if(token!==scope()||S.selected!==pip)return;
@@ -5915,7 +5987,7 @@ async function loadPluginDrafts(){
 const ownAppDecisions=new Map();
 function ownAppSettled(){return (S.connectorDrafts||[]).filter(d=>d.status==='prepared'&&!d.expired&&d.action_id&&isOwnApp(pluginDrafts.get(d.id+':'+d.digest)?.payload?.action?.server));}
 async function loadOwnAppDecisions(){
- if(remoteHost||S.apiVersion<62||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<62||!everyPip()||!usable())return;
  const token=scope(),pip=S.selected;
  for(const d of ownAppSettled().filter(d=>!ownAppDecisions.has(d.action_id)).slice(0,3)){
   try{const a=messageReview((await send('get_pip_app_action',{action_id:d.action_id})).action,pip,S.workspace.id);if(token!==scope()||S.selected!==pip)return;
@@ -5935,7 +6007,7 @@ function ownAppDecidedCards(){
 function pluginDraft(d){const v=S.apiVersion>=44&&pluginDrafts.get(d.id+':'+d.digest),server=v&&v.payload.action.server;
  const plugin=v&&(S.apiVersion>=61&&ownAppForServer(S.ownApps,server,v.payload.action.call.tool)||pluginForServer(S.plugins,server)||S.apiVersion>=45&&installedForServer(S.pluginsInstalled,server));return v&&plugin?{draft:v,plugin}:null;}
 function pluginCards(){
- if(remoteHost||S.apiVersion<44||!personalPip())return '';
+ if(remoteHost||S.apiVersion<44||!everyPip())return '';
  const pipName=S.pip?.name||'This Pip',off=archived()||S.busy;
  const actions=(S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired).map(pluginDraft).filter(Boolean)
   .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName,edit:cardEdit(draft),logo:pluginLogoSrc,accountLabel:id=>(S.appLinks||[]).find(l=>l.account===id)?.label||''}));
@@ -6109,7 +6181,7 @@ async function projectWork(id){
 S.borrows=[];S.borrowsError='';let borrowSeq=0,borrowBusy='',borrowTimer=0;
 async function loadBorrows(){
  window.clearTimeout(borrowTimer);
- if(remoteHost||S.apiVersion<59||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<59||!everyPip()||!usable())return;
  const token=scope(),sequence=++borrowSeq,pip=S.selected;
  try{const cards=borrowsPage(await send('list_pip_borrows',{pip_id:pip}),pip);if(token!==scope()||sequence!==borrowSeq||S.selected!==pip)return;
   const was=borrowActive(S.borrows);S.borrows=cards;S.borrowsError='';render();
@@ -6118,14 +6190,14 @@ async function loadBorrows(){
  catch(error){if(token===scope()&&sequence===borrowSeq){S.borrowsError=errorText(error);render();}}
 }
 function borrowCards(){
- if(remoteHost||S.apiVersion<59||!personalPip())return '';
+ if(remoteHost||S.apiVersion<59||!everyPip())return '';
  const lastUserAt=Math.max(0,...(S.messages||[]).filter(m=>m.role==='user'&&m.intro!==true).map(m=>Date.parse(m.created_at)||0));
  const pipName=S.pip?.name||'This Pip',off=archived()||S.busy||!usable(),replying=Boolean(S.chatActiveRun);
  return shownBorrows(S.borrows,{lastUserAt}).map(c=>borrowMarkup(c,{esc,busy:borrowBusy===c.id||off,pipName,replying:replying&&c.status==='requested'})).join('')
   +(S.borrowsError?`<p class="app-link-note" role="alert">${esc(S.borrowsError)}</p>`:'');
 }
 async function borrowAnswer(type,id){
- if(!usable()||!personalPip()||borrowBusy)return;
+ if(!usable()||!everyPip()||borrowBusy)return;
  const token=scope(),pip=S.selected,pipName=S.pip?.name||'This Pip';borrowBusy=id;render();
  try{const card=borrowResult(await send(type,{pip_id:pip,borrow_id:id}),pip,id);if(token!==scope()||S.selected!==pip)return;
   S.borrows=[card,...(S.borrows||[]).filter(c=>c.id!==id)];
@@ -6136,7 +6208,7 @@ async function borrowAnswer(type,id){
  finally{if(token===scope()){borrowBusy='';render();if(borrowActive(S.borrows))void loadBorrows();}}
 }
 async function pluginAnswer(type,id,takeBack=false){
- if(!usable()||!personalPip()||pluginBusy)return;
+ if(!usable()||!everyPip()||pluginBusy)return;
  for(const box of keyBoxes(id))box.value='';keyFilled.delete(id);keyErrors.delete(id);   // a key card answered Not now: its boxes are emptied
  const token=scope(),pip=S.selected,pipName=S.pip?.name||'This Pip';pluginBusy=id;render();
  try{const card=pluginResult(await send(type,{pip_id:pip,grant_id:id}),pip,id);if(token!==scope()||S.selected!==pip)return;
@@ -6323,7 +6395,7 @@ function routinesSectionMarkup(short=false){   // short: on its page, where the 
 function routinePopoverMarkup(){
  if(S.composerPanel!=='routines'||!keepsAll()||S.apiVersion<43)return '';
  const count=(S.routines||[]).filter(r=>r.status==='on').length;
- return `<section class="pip-routines-popover dgc-menu from-right" role="dialog" aria-label="${esc(S.pip.name)}’s routines"><div class="pip-routines-head"><strong>Routines</strong><small>${count} on</small><button type="button" id="chat-routines-close" class="pop-close" aria-label="Close routines" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>${routinesSectionMarkup()}</section>`;
+ return `<section class="pip-routines-popover dgc-menu from-right" role="dialog" aria-label="${esc(S.pip.name)}’s routines"><div class="pip-routines-head"><strong>Routines</strong><small>${count} on</small><button type="button" id="chat-routines-close" class="pop-close" aria-label="Close routines" title="Close">${window.DgcIcons.html('close',{size:14})}</button></div>${routinesSectionMarkup()}</section>`;
 }
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
@@ -6373,7 +6445,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:keepsAll()?routinesSectionMarkup(true):null,notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(personalPip()?placePartMarkup():folderPartsMarkup(p))+pipFolderSetMarkup(off)+appsUseMarkup(off)+skillsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimits:payFormMarkup(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&(personalPip()?p.computer_plan:folderBox())?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&hasBox()?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+sentSection(off)+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost&&keepsAll()?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll,knows:knowsYou()}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost&&personalPip()?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:keepsAll()?routinesSectionMarkup(true):null,notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(personalPip()?placePartMarkup():folderPartsMarkup(p))+pipFolderSetMarkup(off)+appsUseMarkup(off)+skillsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&everyPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimits:payFormMarkup(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&(personalPip()?p.computer_plan:folderBox())?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&hasBox()?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+sentSection(off)+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost&&keepsAll()?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll,knows:knowsYou()}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost&&everyPip()?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${healthMarkup(p.routine_health,{busy:off,canSignIn:!remoteHost})}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -6459,7 +6531,7 @@ function pipsSettingsMarkup(){
 // side bar's (media/shared/pipswelcome.js), so the line is here only where the page gave a way to open it.
 function howPipsWorkLine(){return S.apiVersion>=FLOW_API&&!remoteHost&&typeof options.onHowPipsWork==='function'?`<p class="pips-how-line"><button type="button" id="pips-how" class="link hook-link">How Pips work now</button><span> What changed for your Pips in 0.52.</span></p>`:'';}
 async function appLinkAction(type,id,quiet=false,fields={}){
- if(!usable()||!personalPip()||(appLinkBusy&&!quiet))return;
+ if(!usable()||!everyPip()||(appLinkBusy&&!quiet))return;
  const token=scope(),pip=S.selected;if(!quiet){appLinkBusy=id;render();}
  try{
   const answer=appLinkResult(await send(type,{pip_id:pip,link_id:id,...fields}),pip,id);if(token!==scope()||S.selected!==pip)return;
@@ -6485,7 +6557,7 @@ function watchAppSignIn(){
 let allowBusy='';const draftDetails=new Map();
 // The draft list carries summaries; an Allow card shows the whole message, read once per version.
 async function loadDraftDetails(){
- if(S.apiVersion<43||!personalPip()||!usable())return;
+ if(S.apiVersion<43||!everyPip()||!usable())return;
  const token=scope(),pip=S.selected;
  const waiting=list=>(list||[]).filter(d=>d.status==='pending'&&!d.expired&&!draftDetails.has(d.id+':'+d.digest)).slice(0,5);
  for(const d of [...waiting(S.emailDrafts),...(S.apiVersion>=35?waiting(S.calendarDrafts):[])]){
@@ -6590,7 +6662,7 @@ async function allowDismiss(id){
 async function openEmailDraft(id){
  if(id.startsWith('conndraft_')){await openConnectorDraft(id);return;}
  const calendar=id.startsWith('caldraft_');
- if(remoteHost||S.apiVersion<(calendar?35:32)||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<(calendar?35:32)||!everyPip()||!usable())return;
  const command=calendar?'get_pip_calendar_draft':'get_pip_message_draft';
  openReview({title:calendar?'Calendar event':'Email',description:calendar?'Loading the event. Nothing is added.':'Loading the email. Nothing is sent.',readOnly:true,body:'<p>Loading…</p>',request:{type:command,draft_id:id}});const ticket=S.review;
  try{const value=emailDraft((await send(command,{draft_id:id})).draft,S.selected,S.workspace.id,calendar);if(S.review!==ticket||ticket.scope!==scope())return;if(value.id!==id)throw Error('The returned draft does not match this review.');
@@ -6602,7 +6674,7 @@ async function openEmailDraft(id){
  }catch(error){if(S.review===ticket){ticket.error=errorText(error);renderReview();}}
 }
 async function emailDraftHistory(before=null,calendar=false){
- if(remoteHost||S.apiVersion<(calendar?35:32)||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<(calendar?35:32)||!everyPip()||!usable())return;
  const command=calendar?'list_pip_calendar_drafts':'list_pip_message_drafts';
  openReview({title:calendar?'Calendar drafts':'Email drafts',description:`Drafts ${S.pip?.name||'it'} wrote. Nothing is sent until you OK it.`,readOnly:true,body:'<p>Loading…</p>',request:{type:command,pip_id:S.selected}});const ticket=S.review;
  try{const page=emailDraftsPage(await send(command,{pip_id:S.selected,limit:20,...(before?{before_id:before}:{})}),S.selected,S.workspace.id,calendar);if(S.review!==ticket||ticket.scope!==scope())return;
@@ -6631,11 +6703,11 @@ function showCalendarReview(a){
  body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Account</dt><dd>${esc(p.account)}</dd><dt>Calendar</dt><dd>Primary</dd><dt>Title</dt><dd>${esc(e.summary)}</dd><dt>Start</dt><dd>${esc(e.start_datetime)}</dd><dt>End</dt><dd>${esc(e.end_datetime)}</dd><dt>Time zone</dt><dd>${esc(e.timezone)}</dd>${calendarExtras(e)}</dl><pre class="message-review-body">${esc(e.description)}</pre><p class="muted">Private and busy; invitees can see event details. No meeting link. The provider expands repeats in the named time zone; invalid dates or local times may be skipped. Calendar reminders, sharing and administrator access still apply. Review expires ${esc(date(a.expires_at))}.</p>${pending?'<button type="button" id="reject-message-review">Reject event</button>':''}`,always:pending,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
 }
 async function loadConnectorDrafts(){
- if(remoteHost||S.apiVersion<37||!personalPip()||!usable())return;const token=scope(),seq=++connectorDraftSeq;
+ if(remoteHost||S.apiVersion<37||!everyPip()||!usable())return;const token=scope(),seq=++connectorDraftSeq;
  try{const result=connectorDraftsPage(await send('list_pip_connector_drafts',{pip_id:S.selected,limit:20}),S.selected);if(token!==scope()||seq!==connectorDraftSeq)return;S.connectorDrafts=result.drafts;S.connectorDraftError='';render();void loadPluginDrafts();void loadOwnAppDecisions();}catch(error){if(token===scope()&&seq===connectorDraftSeq){S.connectorDraftError=errorText(error);render();}}
 }
 async function openConnectorDraft(id){
- if(remoteHost||S.apiVersion<37||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<37||!everyPip()||!usable())return;
  openReview({title:'App action',description:'Loading it. Nothing runs.',readOnly:true,body:'<p>Loading…</p>',request:{type:'get_pip_connector_draft',draft_id:id}});const ticket=S.review;
  try{const d=connectorDraft((await send('get_pip_connector_draft',{draft_id:id})).draft,S.selected,S.workspace.id);if(S.review!==ticket||ticket.scope!==scope())return;if(d.id!==id)throw Error('The saved draft identity changed.');if(d.status==='prepared'){await openMessageReview(d.action_id);return;}
  const available=d.status==='pending'&&!d.expired&&!archived();ticket.readOnly=!available;ticket.confirm='Edit and prepare review';ticket.savedConnectorDraft=d;ticket.sourceRun=d.source_run_id;ticket.connectorSummary=d.payload.action.call.arguments;
@@ -6644,7 +6716,7 @@ async function openConnectorDraft(id){
  }catch(error){if(S.review===ticket){ticket.error=errorText(error);renderReview();}}
 }
 async function connectorDraftHistory(before=null){
- if(remoteHost||S.apiVersion<37||!personalPip()||!usable())return;
+ if(remoteHost||S.apiVersion<37||!everyPip()||!usable())return;
  openReview({title:'Connector drafts',description:'Model-prepared actions. Each needs a separate review before execution.',readOnly:true,body:'<p>Loading…</p>',request:{type:'list_pip_connector_drafts',pip_id:S.selected}});const ticket=S.review;
  try{const page=connectorDraftsPage(await send('list_pip_connector_drafts',{pip_id:S.selected,limit:20,...(before?{before_id:before}:{})}),S.selected);if(S.review!==ticket||ticket.scope!==scope())return;
  ticket.body=page.drafts.length?page.drafts.map(d=>`<article class="entry"><button type="button" data-email-draft="${esc(d.id)}">${esc(d.subject)}</button><p class="muted">${d.expired?'Expired':d.status==='prepared'?'Action review prepared':d.status==='dismissed'?'Dismissed':'Needs your review'}</p></article>`).join(''):'<p>No connector drafts. Ask this Pip to prepare an action using your connected tools.</p>';ticket.connectorCursor=page.next_cursor;if(page.next_cursor)ticket.body+='<button type="button" id="connector-drafts-more">Older drafts</button>';renderReview();
@@ -6929,7 +7001,9 @@ function changeSummary(v){
  if(differs('model_choice'))parts.push(`Model: ${modelLabel(d.model_choice)}`);
  if(differs('web_plan'))parts.push(d.web_plan?.reads?.length?`Web pages: ${d.web_plan.reads.map(webReadLabel).join(', ')}`:'Web pages: none');
  if(differs('app_plan'))parts.push(d.app_plan?`Reads from ${d.app_plan.server}`:'No connected app reads');
- if(differs('computer_plan'))parts.push(d.computer_plan?'Gets its own computer':'Computer removed');
+ // (A Pip with a folder has its computer without a plan: the change that takes it away keeps `computer_plan: null`, the
+ //  same as the Pip's own, so the key itself is the removal.)
+ if(differs('computer_plan')||!personalPip()&&Object.hasOwn(d,'computer_plan')&&d.computer_plan==null&&(p.computer_plan??null)===null)parts.push(d.computer_plan?'Gets its own computer':'Computer removed');
  if(differs('github_plan'))parts.push(d.github_plan?'GitHub reads':'No GitHub reads');
  if(differs('source_policy'))parts.push(`Source: ${sourcePolicyLabel(d.source_policy)}`);
  if(differs('adaptation_policy'))parts.push(`Changes it may make itself: ${adaptationLabel(d.adaptation_policy)}`);
@@ -6953,13 +7027,19 @@ async function applyOwnChange(changes,same,notice){
  }catch(error){if(token===scope())S.error=errorText(error);return false;}
  finally{if(token===scope()){S.busy=false;render();}}
 }
-function personalProposalBody(proposal){
+// What a change does to the reads before each task (connected apps, exact web pages): any Pip's.
+function planChangesMarkup(proposal){
  const plan=proposal.definition?.app_plan,web=proposal.definition?.web_plan;
  if(plan)appReadPlan(plan);
  if(web)webReadPlan(web);
  const webList=v=>v?`<ul class="web-reads">${v.reads.map(r=>`<li>${esc(webReadLabel(r))}</li>`).join('')}</ul>`:'<p class="muted">None</p>';
- const webChanged=JSON.stringify(S.pip.web_plan||null)!==JSON.stringify(web||null);
- return `<dl class="meta"><dt>Name</dt><dd>${esc(proposal.definition?.name)}</dd><dt>What it does</dt><dd>${esc(proposal.definition?.goal)}</dd><dt>Model</dt><dd>${esc(modelLabel(proposal.definition?.model_choice))}</dd><dt>Schedule</dt><dd>${esc(scheduleLabel(proposal.definition?.schedule))}</dd></dl>${JSON.stringify(S.pip.app_plan||null)!==JSON.stringify(plan||null)?`<h3>Reads now</h3>${readList(S.pip.app_plan)}<h3>Reads after this change</h3>${readList(plan)}<p class="muted">This lets it read only. What it reads goes to ${esc(modelLabel(proposal.definition?.model_choice)==='Default'?'its model':modelLabel(proposal.definition?.model_choice))}. Removing access stops future reads; what it already read can’t be taken back.</p>`:''}${webChanged?`<h3>Current web reads</h3>${webList(S.pip.web_plan)}<h3>Proposed web reads</h3>${webList(web)}<p class="muted">DGC reads exactly these public pages and searches before each run.${S.pip.computer_plan||proposal.definition?.computer_plan?'':' Without a computer, it can’t open other pages, follow links, sign in or fill in forms.'}</p>`:''}<p>${esc(proposal.reason)}</p>`;
+ // (A Pip with a folder: only what the change names is compared, so a change about something else says nothing here.)
+ const named=k=>personalPip()||Object.hasOwn(proposal.definition||{},k);
+ const webChanged=named('web_plan')&&JSON.stringify(S.pip.web_plan||null)!==JSON.stringify(web||null);
+ return `${named('app_plan')&&JSON.stringify(S.pip.app_plan||null)!==JSON.stringify(plan||null)?`<h3>Reads now</h3>${readList(S.pip.app_plan)}<h3>Reads after this change</h3>${readList(plan)}<p class="muted">This lets it read only. What it reads goes to ${esc(modelLabel(proposal.definition?.model_choice)==='Default'?'its model':modelLabel(proposal.definition?.model_choice))}. Removing access stops future reads; what it already read can’t be taken back.</p>`:''}${webChanged?`<h3>Current web reads</h3>${webList(S.pip.web_plan)}<h3>Proposed web reads</h3>${webList(web)}<p class="muted">DGC reads exactly these public pages and searches before each run.${hasBox()||proposal.definition?.computer_plan?'':' Without a computer, it can’t open other pages, follow links, sign in or fill in forms.'}</p>`:''}`;
+}
+function personalProposalBody(proposal){
+ return `<dl class="meta"><dt>Name</dt><dd>${esc(proposal.definition?.name)}</dd><dt>What it does</dt><dd>${esc(proposal.definition?.goal)}</dd><dt>Model</dt><dd>${esc(modelLabel(proposal.definition?.model_choice))}</dd><dt>Schedule</dt><dd>${esc(scheduleLabel(proposal.definition?.schedule))}</dd></dl>${planChangesMarkup(proposal)}<p>${esc(proposal.reason)}</p>`;
 }
 function readList(plan){const words=appReadWords(plan);return words.length?`<ul class="web-reads">${words.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`:'<p class="muted">None</p>';}
 function proposalReview(id,reject=false) {
@@ -7000,8 +7080,10 @@ function proposalReviewSpec(proposal,reject=false) {
   const currentSchedule=S.pip.event_trigger?'No time schedule':scheduleLabel(S.pip.schedule),proposedSchedule=proposal.definition?.event_trigger?'No time schedule':scheduleLabel(proposal.definition?.schedule);
   const review={title:reject?'Turn this down?':`Change ${S.pip.name}?`,description:reject?`${S.pip.name} stays as it is.`:'Here’s what changes. Work already started isn’t affected.',body:personalPip()?personalProposalBody(proposal):pulseChange?pulseProposalBody(proposal,{stale,unavailable,pulseUnsupported,reject}):pathTrigger||S.pip.event_trigger?.commit_paths?pathProposalBody(proposal,{stale,unavailable,pathUnsupported,reject}):`<dl class="meta"><dt>Name</dt><dd>${esc(proposal.definition?.name)}</dd><dt>Branch or commit</dt><dd>${esc(proposal.definition?.source_ref)}</dd><dt>Model now</dt><dd>${esc(modelLabel(S.pip.model_choice))}</dd><dt>Model after</dt><dd>${esc(modelLabel(proposal.definition?.model_choice))}</dd><dt>Asked</dt><dd>${proposal.actor?esc(requester(proposal.actor)):'Not recorded'}</dd><dt>Expires</dt><dd>${proposal.expires_at?esc(date(proposal.expires_at)):'Not recorded'}</dd></dl><h3>What it would do</h3><p class="goal">${esc(proposal.definition?.goal)}</p><h3>Source</h3><dl class="meta"><dt>Now</dt><dd>${esc(sourcePolicyLabel(S.pip.source_policy))}</dd><dt>After</dt><dd>${esc(sourcePolicyLabel(proposal.definition?.source_policy))}</dd></dl><p class="muted">With your current files, it copies your saved files each time you ask (skipping files that may hold secrets); that isn’t a commit. It then runs only when you ask, with no handoffs. Changing this turns off its schedule and triggers, and switching back doesn’t bring them back.</p><h3>Changes it may make to itself</h3><dl class="meta"><dt>Now</dt><dd>${esc(adaptationLabel(S.pip.adaptation_policy))}</dd><dt>After</dt><dd>${esc(adaptationLabel(proposal.definition?.adaptation_policy))}</dd></dl><p class="muted">If it may move to a newer commit, later runs read that commit. It can never change its goal, model, schedule, triggers or permissions, or this setting. Accepting this alone runs nothing.</p>${pulseChange?`<h3>Commands now</h3>${pulsePlanReview(S.pip.verification_plan)}<h3>Commands after</h3>${pulsePlanReview(proposal.definition?.verification_plan)}`:''}<h3>Schedule</h3><dl class="meta"><dt>Now</dt><dd>${esc(currentSchedule)}</dd><dt>After</dt><dd>${esc(proposedSchedule)}</dd></dl><h3>Events</h3><dl class="meta"><dt>Now</dt><dd>${esc(eventTriggerLabel(S.pip.event_trigger))}</dd><dt>After</dt><dd>${esc(eventTriggerLabel(proposal.definition?.event_trigger))}</dd></dl>${commitRulesMarkup(S.pip.event_trigger?.commit_paths,'Paths it watches now')}${commitRulesMarkup(proposal.definition?.event_trigger?.commit_paths,'Paths it would watch')}${pathTrigger?`<p class="notice">Any other event you ticked can also start it, even without a path change. The minimum gap applies to all of them.</p><p class="muted">${esc(commitPathNotice)}</p>`:''}${quillAutomation?`<p class="notice">${esc(quillAutomationNotice)}</p>`:''}${sessionTrigger?`<p class="muted">${esc(sessionTurnNotice)}</p>`:''}<p class="muted">It runs on a schedule or on events, not both. Accepting doesn’t replay past events; if several happen while Pips are off, an active Pip runs once, and a paused or busy one skips them. ${documentationPip(S.pip)?'Events start private drafts.':'Events start read-only audits.'} They never start handoffs, fixes or tests.</p><p class="muted">A schedule runs while this Pip is active and Pips are running. If Pips were off, it runs once for the times it missed. A paused or busy Pip skips a scheduled time and picks up at the next one. When clocks change, a missing time is skipped and a repeated one runs once. What it may use doesn’t change.</p><p class="muted">${esc(proposal.reason)}</p><details><summary>Full setup (JSON)</summary><pre>${esc(JSON.stringify(proposal.definition,null,2))}</pre></details>${!reject&&stale?'<p class="notice error">This was written for an older version of this Pip. Turn it down and ask again.</p>':''}${pulseUnsupported?'<p class="notice error">This command plan can’t be accepted here. Update DGC, then refresh.</p>':''}${quillUnsupported?'<p class="notice error">Update DGC to accept a Quill schedule or events.</p>':''}${pathUnsupported?'<p class="notice error">These paths can’t be accepted here. Update DGC, then refresh.</p>':''}${sessionUnsupported?'<p class="notice error">Update DGC to accept a chat-turn trigger.</p>':''}${sourceUnsupported?'<p class="notice error">Update DGC to accept this source change.</p>':''}${unavailable?'<p class="notice error">This was already answered or is no longer available. Refresh to see it.</p>':''}${proposal.expires_at&&Date.parse(proposal.expires_at)<=Date.now()?'<p class="notice error">This expired. Ask again for a new one.</p>':''}`,confirm:reject?'Turn down':'Accept',requiresCommitPaths:!reject&&pathTrigger,requiresPulsePlan:!reject&&pulseChange,requiresQuillAutomation:!reject&&quillAutomation,requiresSessionTurn:!reject&&sessionTrigger,blocked:unavailable||(!reject&&stale),expiresAt:proposal.expires_at,request:{type:reject?'reject_pip_update':'accept_pip_update',pip_id:S.selected,proposal_id:proposal.id,expected_version:proposal.expected_version}};
   // GitHub reads are shown whichever body variant reviewed the rest; a plan this view cannot read blocks acceptance.
-  // A Personal Pip's computer is shown whenever the proposal keeps, gives or removes one.
-  if(personalPip()&&(S.pip?.computer_plan||proposal.definition?.computer_plan)){const label=v=>v?'Its own browser, Terminal and files. Anything it would submit waits for your OK.':'None';review.body+=`<dl class="meta"><dt>Computer now</dt><dd>${label(S.pip.computer_plan)}</dd><dt>Computer after</dt><dd>${label(proposal.definition?.computer_plan)}</dd></dl>`;}
+  // A Pip's computer is shown whenever the proposal keeps, gives or removes one (a Pip with a folder: when it names one).
+  const folderPlan=!personalPip()&&everyPip(),planKey=Object.hasOwn(proposal.definition||{},'computer_plan');
+  if(folderPlan){try{review.body+=planChangesMarkup(proposal);}catch{review.body+='<p class="notice">These reads are not supported by this view. Update DGC before accepting.</p>';if(!reject)review.blocked=true;}}
+  if(personalPip()&&(S.pip?.computer_plan||proposal.definition?.computer_plan)||folderPlan&&planKey){const label=v=>v?'Its own browser, Terminal and files. Anything it would submit waits for your OK.':'None';review.body+=`<dl class="meta"><dt>Computer now</dt><dd>${label(personalPip()?S.pip.computer_plan:hasBox())}</dd><dt>Computer after</dt><dd>${label(proposal.definition?.computer_plan)}</dd></dl>`;}
   if(others.length){review.setsAside=others.length;review.body+=`<p class="notice">${others.length===1?'Another change for this Pip is waiting too. It was written for the same version, so accepting this one sets that one aside. It is not approved. Ask the Pip again if you still want it.':`${others.length} other changes for this Pip are waiting too. They were written for the same version, so accepting this one sets them aside. They are not approved. Ask the Pip again if you still want them.`}</p>`;}
   if(!personalPip()&&(S.pip?.github_plan||proposal.definition?.github_plan)){let section;try{if(proposal.definition?.github_plan)githubReadPlan(proposal.definition.github_plan);section=githubProposalMarkup(proposal);}catch{section='<p class="notice">These GitHub reads are not supported by this view. Update DGC before accepting.</p>';if(!reject)review.blocked=true;}review.body+=section;}
   return review;
@@ -7088,9 +7170,9 @@ document.addEventListener('submit',event=>{
       S.notice='Handoff saved. Nothing starts until you approve it.';if(h.payload.action.kind!=='read_only')await loadExecution();if(handoffScope!==scope())return;reviewHandoff(h);void loadHandoffs();});return;
   }
   if(id==='web-reads-form'){
-    if(S.apiVersion<40||!personalPip()){setError('Update DGC to add web reads.');return;}
+    if(S.apiVersion<40||!everyPip()){setError('Update DGC to add web reads.');return;}
     let plan;try{plan=webReadsFromText(draft.webReads||webReadsLines(S.pip.web_plan));}catch(error){setError(error);return;}
-    void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{web_plan:plan},reason:'Review these exact web reads for this Personal Pip.'},result=>{const p=result.proposal;if(!record(p)||p.pip_id!==S.selected||JSON.stringify(p.definition?.web_plan)!==JSON.stringify(plan))throw new Error('The saved web reads differ from this review. Refresh before accepting.');draft.webReads='';S.pip={...S.pip,proposals:[...(S.pip.proposals||[]).filter(v=>v.id!==p.id),p]};proposalReview(p.id);});
+    void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{web_plan:plan},reason:'Review these exact web reads for this Pip.'},result=>{const p=result.proposal;if(!record(p)||p.pip_id!==S.selected||JSON.stringify(p.definition?.web_plan)!==JSON.stringify(plan))throw new Error('The saved web reads differ from this review. Refresh before accepting.');draft.webReads='';S.pip={...S.pip,proposals:[...(S.pip.proposals||[]).filter(v=>v.id!==p.id),p]};proposalReview(p.id);});
     return;
   }
   if(id==='source-form'){
@@ -7122,7 +7204,7 @@ document.addEventListener('submit',event=>{
     void applyOwnChange({adaptation_policy:policy},d=>JSON.stringify(adaptationPolicy(d.adaptation_policy))===JSON.stringify(policy),'Saved. The Pip uses this from its next run.').then(ok=>{if(ok)S.adaptationDirty=false;});return;
   }
   if(id==='model-form'){
-    let choice;try{choice=modelChoice(draft.pipModel,S.models,subscriptionChoices(personalPip()),routerOffer(),savedProviders());}catch(error){setError(error);return;}
+    let choice;try{choice=modelChoice(draft.pipModel,S.models,subscriptionChoices(everyPip()),routerOffer(),savedProviders());}catch(error){setError(error);return;}
     void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`Model saved: ${modelLabel(choice)}. Its next run uses it.${choice.mode==='subscription'?' '+usageLine(modelValue(choice)):''}`).then(ok=>{if(ok)S.modelDirty=false;});return;
   }
   if(id==='create-form'){
@@ -7179,6 +7261,11 @@ document.addEventListener('pointerover',event=>{
  if(!event.target.closest?.('aside'))shell.classList.remove('sidebar-dismissed');
 });
 document.addEventListener('click',event=>{
+  {const more=event.target.closest?.('[data-pip-more]');
+   if(more){event.preventDefault();event.stopPropagation();const id=more.dataset.pipMore,keyboard=event.detail===0;rowMenuFor=rowMenuFor===id?'':id;render();
+    if(rowMenuFor){placeRowMenu(keyboard);if(!keyboard)[...document.querySelectorAll('[data-pip-more]')].find(b=>b.dataset.pipMore===id)?.focus({preventScroll:true});}return;}
+   // (A row of its menu is the icon's own ask: the menu closes, and what follows here does it.)
+   if(rowMenuFor){rowMenuFor='';render();}}
   const tabFor=event.target.closest?.('[data-open-chat-tab],[data-open-pip-chat]');
   if(tabFor){
    event.preventDefault();
@@ -7562,9 +7649,9 @@ document.addEventListener('click',event=>{
     case 'remove-github-reads':
       if(githubPip()&&S.pip.github_plan)void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{github_plan:null},reason:'Remove this Pip’s GitHub reads.'},result=>{S.pip={...S.pip,proposals:[...(S.pip.proposals||[]),result.proposal]};proposalReview(result.proposal.id);});break;
     case 'remove-web-reads':
-      if(personalPip()&&S.pip.web_plan)void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{web_plan:null},reason:'Remove this personal Pip’s web reads.'},result=>{draft.webReads='';S.pip={...S.pip,proposals:[...(S.pip.proposals||[]),result.proposal]};proposalReview(result.proposal.id);});break;
+      if(everyPip()&&S.pip.web_plan)void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{web_plan:null},reason:'Remove this Pip’s web reads.'},result=>{draft.webReads='';S.pip={...S.pip,proposals:[...(S.pip.proposals||[]),result.proposal]};proposalReview(result.proposal.id);});break;
     case 'remove-app-access':
-      if(personalPip()&&S.pip.app_plan)void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{app_plan:null},reason:'Remove this personal Pip’s app-read access.'},result=>{S.pip={...S.pip,proposals:[...(S.pip.proposals||[]),result.proposal]};proposalReview(result.proposal.id);});break;
+      if(everyPip()&&S.pip.app_plan)void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{app_plan:null},reason:'Remove this Pip’s app-read access.'},result=>{S.pip={...S.pip,proposals:[...(S.pip.proposals||[]),result.proposal]};proposalReview(result.proposal.id);});break;
     case 'setup-in-chat':if(S.apiVersion>=23&&!archived()){setupEditing=true;S.create=true;S.overview=false;S.createStep='describe';draft.setupTask=`Change the setup for ${S.pip.name}: `;render();$('setupTask')?.focus();}break;
     case 'refresh-setups':void loadSetups();break;
     case 'give-computer':grantComputer(true);break;
@@ -7710,7 +7797,7 @@ document.addEventListener('click',event=>{
       // With more than one (Pips API 86), a menu under the icon asks which.
       if(computerUi().menu){closeComputerMenu();break;}
       // (Only a Pip with no folder is offered one here: a folder's Pip has the computer that came with its folder.)
-      const open=()=>{if(computerState.pip!==S.selected||!computerState.value)return;if(!computerState.value.granted){if(personalPip())grantComputer(true);}else if(severalComputers())openComputerMenu();else void openComputerView();};
+      const open=()=>{if(computerState.pip!==S.selected||!computerState.value)return;if(!computerState.value.granted){if(everyPip())grantComputer(true);}else if(severalComputers())openComputerMenu();else void openComputerView();};
       if(computerState.pip===S.selected&&computerState.value)open();else void loadComputer().then(open);
       break;}
     case 'edit-goal':S.editingGoal=true;draft.revisionGoal=S.pip?.goal||'';render();$('revisionGoal')?.focus();break;
@@ -7850,8 +7937,19 @@ document.addEventListener('keydown',event=>{
    if(menu&&menu.contains(event.target)){if(globalThis.DgcMenu?.handle(menu,event,{rows:'.dgc-menu-row',close:()=>{allowFromOpen='';render();},trigger:()=>document.querySelector(`[data-allow-from="${menu.dataset.allowFromMenu}"]`)}))return;}
    else if(row&&event.key==='Escape'){event.preventDefault();event.stopPropagation();closeAllowFrom(true);return;}
    else if(row&&event.key==='ArrowDown'&&menu){event.preventDefault();menu.querySelector('.dgc-menu-row')?.focus();return;}}
+  if(!S.review&&rowMenuFor){
+  // A Pips row's "…" menu: the arrows between its rows, Escape back to the "…".
+  const rowMenu=$('pip-row-menu');
+  if(rowMenu){
+   if(rowMenu.contains(event.target)){if(event.key==='Escape'||event.key==='Tab'){if(event.key==='Escape'){event.preventDefault();event.stopPropagation();}closeRowMenu(event.key==='Escape');return;}
+    if(globalThis.DgcMenu?.handle(rowMenu,event,{rows:'.dgc-menu-row',close:()=>closeRowMenu(true),trigger:()=>document.querySelector('[data-pip-more][aria-expanded="true"]')}))return;}
+   else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeRowMenu(!!event.target.closest?.('[data-pip-more]'));return;}
+   else if(event.key==='ArrowDown'&&event.target.closest?.('[data-pip-more]')){event.preventDefault();rowMenu.querySelector('.dgc-menu-row')?.focus({preventScroll:true});return;}
+  }
+  }
   if(!S.review&&folderUi.open){const set=event.target.closest?.('.pip-folder-set'),menu=set?.querySelector('.pip-folder-menu');
    if(menu&&menu.contains(event.target)){if(globalThis.DgcMenu?.handle(menu,event,{rows:'.dgc-menu-row',close:()=>{folderUi.open=false;render();},trigger:()=>$('pip-folder-btn')}))return;}
+
    else if(set&&event.key==='Escape'){event.preventDefault();event.stopPropagation();closeFolderMenu(true);return;}
    else if(set&&event.key==='ArrowDown'&&menu){event.preventDefault();menu.querySelector('.dgc-menu-row')?.focus();return;}}
   if(!S.review&&folderUi.adding&&event.key==='Escape'&&event.target.id==='pipFolderName'){event.preventDefault();event.stopPropagation();folderUi.adding=false;folderUi.error='';draft.pipFolderName='';render();$('pip-folder-btn')?.focus({preventScroll:true});return;}
@@ -7920,7 +8018,8 @@ const stopMessages=options.onMessage(message=>{
   if(message.type==='dock'){
    const keys=Array.isArray(message.pinned)?message.pinned:Array.isArray(message.pins)?message.pins.map(pin=>pin?.key):[];
    const next=new Set(keys.filter(key=>typeof key==='string')),same=next.size===dockPins.size&&[...next].every(key=>dockPins.has(key));
-   dockPins=next;dockKnown=true;if(!same&&S.overview&&!S.review)render();return;
+   const first=!dockKnown;      // (the first word of a dock: the rows gain their pins now, even with nothing pinned)
+   dockPins=next;dockKnown=true;if((!same||first)&&S.overview&&!S.review)render();return;
   }
   if(window.DgcVideo?.message(message))return;     // a reply video's bytes or state (src/videoHost.ts)
   if((message.type==='voiceReady'||message.type==='mic'||message.type==='micLevels')&&message.from==='pips'&&voiceMode?.receive(message))return;
@@ -7937,6 +8036,8 @@ const stopMessages=options.onMessage(message=>{
   if(globalThis.DgcPictureFold?.message(message))return;     // which pictures stay folded, and the setting
   if(message.type==='pipsPluginLogos'){takePluginLogos(message.logos);return;}
   if(message.type==='pipsAppLogos'){takePluginLogos(message.logos,true);return;}
+  if(message.type==='pipsGitRefs'){if(/^pip_[A-Za-z0-9]{1,64}$/.test(String(message.pip_id||'')))inlineTouches?.refsAnswer({scope:message.pip_id,remote:message.remote===true,github:message.github,known:message.known});return;}
+  if(message.type==='pipsFileCopy'||message.type==='pipsFileSaid'){fileActSaid(message);return;}
   if(message.type==='pipsFileData'){const done=mediaWaiting.get(message.requestId);if(done){mediaWaiting.delete(message.requestId);done(message);}return;}
   if(message.type==='pipsFiles'){projectFiles=(Array.isArray(message.files)?message.files:[]).filter(f=>record(f)&&typeof f.label==='string').slice(0,600);chatPicker?.refresh();return;}
   // Settings or the Router changed: Default may run somewhere else now. A list already read is read again.

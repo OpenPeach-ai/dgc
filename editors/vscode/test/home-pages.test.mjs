@@ -61,13 +61,15 @@ async function tell(x, h, message) { const out = h.hear(message); if (out) await
 // (A thing made is news: since 13 Nov evening what is new is in Recent only, so Home opens here on Recent opened whole.)
 const open = (options = {}) => openDock(browser, { tab: "home", state: homeState("quiet"), width: 300, height: 900, open: "recent", ...options });
 const pages = (hub) => hub.cards.filter((c) => c.key.startsWith("page:"));
-const homeCount = async (x) => Number((await x.tabs()).tabs.find((t) => t.id === "home").count || 0);
+// How many new things Home's tab says it has: they are in its words ("3 new"), never in its number (16 Nov).
+const homeCount = async (x) => Number((/(\d+) new$/.exec((await x.tabs()).tabs.find((t) => t.id === "home").label) || [])[1] || 0);
+const homeNumber = async (x) => (await x.tabs()).tabs.find((t) => t.id === "home").count || "";
 
 test("a page made in a Work session and a document made in a ChatDGC chat each arrive on Home as a card", async (t) => {
   if (skipOrFail(t)) return;
   const x = await open(), h = await host();
   try {
-    const before = await x.hub(), n = await homeCount(x);
+    const before = await x.hub(), n = await homeCount(x), number = await homeNumber(x);
     assert.deepEqual(pages(before), [], "nothing made yet");
     await tell(x, h, change(1, "page", "Login redirect map", fromWork));
     await tell(x, h, change(2, "doc", "Rent or buy, in one page", fromChat));
@@ -92,7 +94,8 @@ test("a page made in a Work session and a document made in a ChatDGC chat each a
       assert.equal(c.width, other.width, "the same width as the others");
       assert.equal(c.radius, other.radius); assert.equal(c.ground, other.ground);
     }
-    assert.equal(await homeCount(x), n + 2, "both count in Home's number");
+    assert.equal(await homeCount(x), n + 2, "both count as new in Home's words");
+    assert.equal(await homeNumber(x), number, "and Home's number, what needs you, is as it was");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
@@ -112,7 +115,7 @@ test("version 2 updates the card and never adds one; removed takes it off", asyn
     assert.deepEqual(pages(await x.hub()).map((c) => c.key), [KEY(1)]);
     await tell(x, h, change(1, "slides", "Q3 plan, final", fromWork, "removed", 2));
     assert.deepEqual(pages(await x.hub()), [], "removed: its card is gone");
-    assert.equal(await homeCount(x), n, "and Home's number with it");
+    assert.equal(await homeCount(x), n, "and Home's count of new things with it");
     assert.deepEqual(h.value["dgc.homePages"], [], "the host forgot it too");
   } finally { await x.close(); }
 });

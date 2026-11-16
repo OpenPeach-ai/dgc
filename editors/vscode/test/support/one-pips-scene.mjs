@@ -47,6 +47,9 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *    look     {[pip id]: body}: that Pip's chosen character (its profile's body)
  *    models   list_pip_models' rows ({id, name}; none by default)
  *    convs    list_pip_conversations answers (the first conversation), and create_pip_conversation makes one
+ *    pending  changes saved for GST watchdog that wait for you (its `proposals`)
+ *    answers  {[request type]: result}: what DGC answers to a request this stand-in has no answer of its own for (or in
+ *             place of its own); {byPip: {[pip id]: result}} answers by the Pip asked about
  *  Returns {answer(request) → result | undefined | {error}, state}. */
 export function makeBackend(o = {}) {
   const hex = (c) => c.repeat(32), ws = (c) => "ws_" + hex(c), pid = (c) => "pip_" + hex(c);
@@ -72,7 +75,7 @@ export function makeBackend(o = {}) {
     model_choice: o.model ? { mode: "model", model: o.model } : { mode: "default" }, created_at: "2026-11-01T09:00:00Z", updated_at: "2026-11-01T09:00:00Z",
     ...(o.look && o.look[id] ? { profile: { body: o.look[id] } } : {}), ...(o.mine && id === MORNINGS ? { computer_plan: { schema_version: 1 } } : {}), ...extra });
   const pips = o.empty ? [] : [pip(CORE, P, "Core", "core"), pip(MORNINGS, P, "Mornings", "quill"),
-    pip(GST, LIME, NAME, "rook", { goal: sub ? "Check the tile shop's totals every evening at 8" : "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}) }),
+    pip(GST, LIME, NAME, "rook", { goal: sub ? "Check the tile shop's totals every evening at 8" : "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.pending ? { proposals: o.pending } : {}), ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}) }),
     pip(ERP, LIME, "ERP daily audit", "scout"), pip(BEDS, GARDEN, "Bed planner", "scout")];
   const folders = [
     { folder: "/home/me/code/shop", name: "shop", here: true, exists: true, sessions: 2, pips: 0, workspace_id: SHOP, updated_at: ago(30) },
@@ -275,7 +278,8 @@ export function makeBackend(o = {}) {
     found.status = on ? "active" : "paused"; found.lifecycle_revision += 1; return { pip: { ...found } }; };
   answers.pause_pip = (r) => (o.holdSwitch ? undefined : turn(r, false));
   answers.resume_pip = (r) => (o.holdSwitch ? undefined : turn(r, true));
-  return { state, turn, answer(request) { state.requests.push(JSON.parse(JSON.stringify(request))); const make = answers[request.type]; return make ? make(request) : undefined; } };
+  return { state, turn, answer(request) { state.requests.push(JSON.parse(JSON.stringify(request))); if (o.answers && Object.hasOwn(o.answers, request.type)) { const given = o.answers[request.type]; return given && typeof given === "object" && given.byPip ? given.byPip[request.pip_id] : given; }
+    const make = answers[request.type]; return make ? make(request) : undefined; } };
 }
 
 let bundle;

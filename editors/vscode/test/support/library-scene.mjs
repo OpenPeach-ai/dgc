@@ -62,6 +62,21 @@ export const LIB_WIDGETS = [
   { id: "wg_" + "4".repeat(16), chat_id: CHATS[0].id, chat_title: "A week in Goa in March", title: "Trip budget calculator", created_at: ago(300) },
 ];
 
+/** The charts ChatDGC's replies drew (chatdgc_widgets op "charts", 16 Nov): each is in a reply of a chat. */
+const msgId = (c) => "msg_" + c.repeat(32);
+export const LIB_CHARTS = [
+  { chat_id: CHATS[0].id, chat_title: "A week in Goa in March", message_id: msgId("a"), id: msgId("a") + ":0", title: "Frost rating by tile", kind: "chart", chart_type: "bar", created_at: ago(20) },
+  { chat_id: CHAT, chat_title: "Rent or buy: the numbers", message_id: msgId("b"), id: msgId("b") + ":0", title: "Rent against buying, year by year", kind: "chart", chart_type: "line", created_at: ago(60 * 50) },
+  { chat_id: CHAT, chat_title: "Rent or buy: the numbers", message_id: msgId("b"), id: msgId("b") + ":1", title: "Chart", kind: "chart", chart_type: "pie", created_at: ago(60 * 50), project_id: "proj_" + "a".repeat(32), project_name: "Goa trip" },
+];
+/** What you attached in Work sessions, as the host hands them to the page (src/chatdgc.ts workFiles): each by a name
+ *  of the host's own (`ref`), never by a path. A picture, a file you named with @ in a session with no name, a sheet. */
+export const LIB_WORK_FILES = [
+  { ref: "wa_" + "1".repeat(16), kind: "image", name: "Picture 1.png", mime: "image/png", bytes: 48213, created_at: ago(8), session_name: "Fix totals", session_id: SESSION, project_name: "shop" },
+  { ref: "wa_" + "2".repeat(16), kind: "file", name: "order_total.py", created_at: ago(60 * 3), session_name: "", session_id: "", project_name: "lime_tiles" },
+  { ref: "wa_" + "3".repeat(16), kind: "file", name: "supplier-prices.csv", created_at: ago(60 * 24 * 2), session_name: "Read the price list and say which tiles went up", session_id: SESSIONS[0].id, project_name: "lime_tiles" },
+];
+
 /** The stand-in for the Library's host (src/chatdgc.ts fromLibrary), run in the page: `say(message)` is how the host
  *  answers. window.__lib keeps what it lists and what it was asked. */
 const HOST = `(${function (data, say, PNG, PICTURES) {
@@ -72,7 +87,7 @@ const HOST = `(${function (data, say, PNG, PICTURES) {
     lib.asked.push(JSON.parse(JSON.stringify(m)));
     if (m.type === "ready" || m.type === "list") {
       if (m.type === "ready") { say({ type: "dock", pins: lib.pins || [], colours: {} }); say({ type: "widgetsOffered", on: lib.widgets !== null }); say({ type: "workImagesOffered", on: lib.images !== null });
-        say({ type: "artifactsOffered", on: lib.artifacts !== null }); say({ type: "videosOffered", on: lib.videos !== null }); if (lib.view) say({ type: "view", view: lib.view }); }
+        say({ type: "artifactsOffered", on: lib.artifacts !== null }); say({ type: "videosOffered", on: lib.videos !== null }); if (lib.charts) say({ type: "chartsOffered", on: true }); if (lib.workFiles) say({ type: "workFilesOffered", on: true }); if (lib.view) say({ type: "view", view: lib.view }); }
       const files = lib.files.filter((f) => has(f.name, m.query) && (!m.kind || f.type === m.kind) && (!m.origin || (m.origin === "made") === (f.made === true)));
       const counts = {}; for (const f of lib.files) counts[f.type] = (counts[f.type] || 0) + 1;
       say({ type: "library", files, total: files.length, next: null, counts, origins: { made: lib.files.filter((f) => f.made).length, uploaded: lib.files.filter((f) => !f.made).length } });
@@ -85,6 +100,13 @@ const HOST = `(${function (data, say, PNG, PICTURES) {
     else if (m.type === "videoList") { if (lib.videos === null) { say({ type: "videosOffered", on: false }); return; }
       const found = lib.videos.filter((v) => (!m.surface || v.surface === m.surface) && has(v.prompt, m.query));
       say({ type: "videos", seq: m.seq || 0, offset: m.offset || 0, videos: found, total: found.length, next: null }); }
+    // (An older DGC's host knows neither question: it says nothing to them, as here when the scene lists none.)
+    else if (m.type === "charts") { if (!lib.charts) return; const found = lib.charts.filter((c) => has(c.title, m.query)), from = m.offset || 0, page = lib.pageSize || 60;
+      say({ type: "charts", offset: from, charts: found.slice(from, from + page), total: found.length, next: from + page < found.length ? from + page : null }); }
+    else if (m.type === "workFiles") { if (!lib.workFiles) return; const found = lib.workFiles.filter((f) => has(f.name, m.query)), from = m.offset || 0, page = lib.pageSize || 60;
+      say({ type: "workFiles", seq: m.seq || 0, offset: from, files: found.slice(from, from + page), total: found.length, next: from + page < found.length ? from + page : null }); }
+    else if (m.type === "workFilePic") say({ type: "workFileData", ref: m.ref, data: picture("tile") })
+    else if (m.type === "itemAct" && m.act === "copy" && m.item && m.item.kind === "workfile") say({ type: "itemCopy", key: "workfile:" + m.item.ref, data: picture("tile") });
     else if (m.type === "image") say({ type: "image", id: m.file.id, data: picture(m.file.name) });
     else if (m.type === "workImage") say({ type: "workImageData", path: m.path, data: picture(m.path) });
     // Copy (an item's menu): the host reads the picture and hands it back for the clipboard, as src/chatdgc.ts libraryAct does.
@@ -102,7 +124,7 @@ const drawn = (page) => page.evaluate(() => {
   const rows = [...root.querySelectorAll("#library-list > .lib-row")].map((r) => ({ key: r.dataset.key, type: r.dataset.type, title: r.querySelector(".lib-row-name")?.textContent || "",
     meta: [...(r.querySelector(".lib-row-meta")?.children || [])].filter((n) => seen(n)).map((n) => n.textContent).join("").replace(/\s+/g, " ").trim(),
     by: (r.querySelector(".lib-row-by")?.textContent || "").trim(), when: (r.querySelector(".lib-row-when")?.textContent || "").replace(/[\s·]+/g, ""),
-    maker: r.querySelector(".lib-row-maker")?.textContent || "", makerIs: r.querySelector(".lib-row-maker")?.tagName || "", tip: r.title || "",
+    maker: r.querySelector(".lib-row-maker")?.textContent || "", makerIs: r.querySelector(".lib-row-maker")?.tagName || "", tip: r.querySelector(".lib-row-name")?.dataset.more || "", said: r.getAttribute("aria-label") || "",
     thumb: r.querySelector(".lib-row-thumb img") ? "img" : r.querySelector(".lib-row-thumb .dgc-sheet") ? "sheet" : r.querySelector(".lib-row-thumb [data-mark]") ? "mark" : r.querySelector(".lib-row-thumb > *") ? "icon" : "",
     acts: [...r.querySelectorAll(".lib-row-actions [data-act]")].filter(seen).map((b) => b.dataset.act), more: seen(r.querySelector(".lib-row-more")), ...box(r) }));
   const tabs = [...root.querySelectorAll('#library-tabs [role="tab"]')].filter((t) => !t.hidden).map((t) => { const word = t.querySelector(".lib-tab-word"), icon = t.querySelector(".lib-tab-icon"), w = word.getBoundingClientRect();
@@ -136,7 +158,7 @@ function helpers(x, page) {
  *  offers none of that kind); pins: what is on the dock; everything else is dock-scene's. Returns its helpers plus
  *  lib() (the Library as drawn), said(type) (what the module asked the host through "sideLibrary"), libTab(id),
  *  menu(which), pick(which, label), search(words). */
-export async function openLibraryTab(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, pageSize = 60, tab = "library", ...rest } = {}) {
+export async function openLibraryTab(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, charts = null, workFiles = null, pageSize = 60, tab = "library", ...rest } = {}) {
   const x = await openDock(browser, { tab, height: 760, ...rest });
   await x.page.evaluate(({ data, HOST, PNG, PICTURES }) => {
     const say = (message) => window.dispatchEvent(new MessageEvent("message", { data: { type: "sideLibrary", message: JSON.parse(JSON.stringify(message)) } }));
@@ -145,14 +167,14 @@ export async function openLibraryTab(browser, { artifacts = LIB_ARTIFACTS, widge
     posted.push = function (m) { const n = push.call(this, m); if (m && m.type === "sideLibrary" && m.message) setTimeout(() => answer(m.message), 1); return n; };
     // (What the page asked before this stand-in was here is answered now.)
     for (const m of [...posted]) if (m && m.type === "sideLibrary" && m.message) answer(m.message);
-  }, { data: { artifacts: dated(artifacts), widgets: dated(widgets), files: dated(files), images: dated(images), videos: dated(videos), pageSize }, HOST, PNG, PICTURES });
+  }, { data: { artifacts: dated(artifacts), widgets: dated(widgets), files: dated(files), images: dated(images), videos: dated(videos), charts: dated(charts), workFiles: dated(workFiles), pageSize }, HOST, PNG, PICTURES });
   await x.settle(); await x.page.waitForTimeout(80); await x.settle();
   return { ...x, ...helpers(x, x.page), place: "side" };
 }
 
 /** Opens the Library in its editor tab (the page src/chatdgc.ts serves), on the same stand-in host. `view`: the tab
  *  the host opens it on ("" for the page's own). */
-export async function openLibraryPage(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, pageSize = 60, pins = [], view = "", width = 1100, height = 760, theme = "dark-modern", state, touch = false, forced = false, scale = 1, secure = false } = {}) {
+export async function openLibraryPage(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, charts = null, workFiles = null, pageSize = 60, pins = [], view = "", width = 1100, height = 760, theme = "dark-modern", state, touch = false, forced = false, scale = 1, secure = false } = {}) {
   const x = await openLibrary(browser, { width, height, theme, state, touch, forced, scale, secure });
   await x.page.evaluate(({ data, HOST, PNG, PICTURES }) => {
     const say = (message) => window.dispatchEvent(new MessageEvent("message", { data: JSON.parse(JSON.stringify(message)) }));
@@ -160,7 +182,7 @@ export async function openLibraryPage(browser, { artifacts = LIB_ARTIFACTS, widg
     const posted = window.__posted, push = posted.push;
     posted.push = function (m) { const n = push.call(this, m); if (m && typeof m.type === "string") setTimeout(() => answer(m), 1); return n; };
     for (const m of [...posted]) if (m && typeof m.type === "string") answer(m);
-  }, { data: { artifacts: dated(artifacts), widgets: dated(widgets), files: dated(files), images: dated(images), videos: dated(videos), pageSize, pins, view }, HOST, PNG, PICTURES });
+  }, { data: { artifacts: dated(artifacts), widgets: dated(widgets), files: dated(files), images: dated(images), videos: dated(videos), charts: dated(charts), workFiles: dated(workFiles), pageSize, pins, view }, HOST, PNG, PICTURES });
   const settle = () => x.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 60)))));
   await settle(); await x.page.waitForTimeout(80); await settle();
   const close = () => x.page.close();

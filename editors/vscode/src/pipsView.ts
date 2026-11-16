@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import { MIC_MESSAGES, SPEAK_MESSAGES, type Dictation, type DictationOwner, type ReadAloud } from './voice';
 import { randomBytes } from 'crypto';
 import { homedir } from 'os';
+import { FILE_ACTS, keptFileAct } from './fileActs';
+import { GitRefs } from './gitRefs';
+import { openCommit } from './gitCommitDoc';
+import { isAbsolute } from 'path';
 import type { Artifacts } from './artifacts';
 import { mcpAppsHost } from './mcpApps';
 import { handleVideoMessage, VIDEO_MESSAGES } from './videoHost';
@@ -1424,7 +1428,7 @@ export class PipsEditor implements vscode.Disposable {
   }
   /** Open a photo from a Pip's chat, the original, in an editor tab (one click on its thumbnail). With `save` (Download
    *  on a made file's row, pips-08) it asks where to save the original instead, under a name a person can read. */
-  private async openPhoto(message: any): Promise<void> {
+  private async openPhoto(message: any, surface = 'main'): Promise<void> {
     const unavailable = () => void vscode.window.showInformationMessage('That photo is no longer available.');
     const pip = message?.pip_id, id = message?.message_id, index = message?.index;
     if (this.apiVersion < 43 || !this.state.connected || typeof pip !== 'string' || !/^pip_[A-Za-z0-9]{1,64}$/.test(pip)
@@ -1445,6 +1449,8 @@ export class PipsEditor implements vscode.Disposable {
       const uri = this.apiVersion >= 52 ? await this.keptImage(result, { pip, message: id, index, generation }) : result?.image;
       const match = typeof uri === 'string' ? /^data:image\/(png|jpeg|gif|webp|bmp);base64,([A-Za-z0-9+/=]+)$/.exec(uri) : null;
       if (!match) { unavailable(); return; }
+      // (Copy, from the picture's menu: its bytes go to the page, whose clipboard it is.)
+      if (message?.copy === true) { this.post({ type: 'pipsFileCopy', data: uri }, surface); return; }
       if (message?.save === true) {
         const name = `Picture ${index + 1}.${match[1] === 'jpeg' ? 'jpg' : match[1]}`;
         const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), name), saveLabel: 'Download' });
@@ -1501,6 +1507,33 @@ export class PipsEditor implements vscode.Disposable {
   }
   /** Open a file from a Pip's chat in an editor tab (a copy under its own name: the kept one is named by its digest and
    *  must stay as it is), or with `save` ask where to save a copy of it. */
+  /** Commits and issues as links in a Pip's chat (media/shared/inline.js; src/gitRefs.ts runs git, read-only). The page
+   *  names the Pip and the hashes, never a folder: the Pip's folder is read from DGC here, and only a Pip with a folder
+   *  that DGC lists has one. Anything else is answered "no remote", and its hashes stay words. */
+  private readonly gitRefs = new GitRefs();
+  private readonly gitFolders = new Map<string, { folder: string; at: number }>();
+  private async pipGitFolder(pipId: string): Promise<string> {
+    const kept = this.gitFolders.get(pipId);
+    if (kept && Date.now() - kept.at < 60000) return kept.folder;
+    let folder = '';
+    try {
+      const pip = (await this.hostAsk('get_pip', { pip_id: pipId }))?.pip;
+      if (pip && pip.source_policy?.mode !== 'personal' && typeof pip.workspace_id === 'string' && pip.workspace_id) {
+        const rows = (await this.projectFolders())?.folders;
+        const row = Array.isArray(rows) ? rows.find((r: any) => r && r.workspace_id === pip.workspace_id && r.exists !== false && typeof r.folder === 'string' && isAbsolute(r.folder)) : undefined;
+        if (row) folder = row.folder;
+      }
+    } catch { folder = ''; }
+    this.gitFolders.set(pipId, { folder, at: Date.now() });
+    return folder;
+  }
+  private async gitRefsAct(message: any, surface: string): Promise<void> {
+    const pipId = typeof message?.pip_id === 'string' && /^pip_[A-Za-z0-9]{1,64}$/.test(message.pip_id) ? message.pip_id : '';
+    if (!pipId) return;
+    const folder = await this.pipGitFolder(pipId);
+    if (message.type === 'pipsGitCommitOpen') { if (folder) await openCommit(this.gitRefs, folder, message.hash); return; }
+    this.post({ type: 'pipsGitRefs', pip_id: pipId, ...(await this.gitRefs.answer(folder, message.hashes)) }, surface);
+  }
   private async openFile(message: any): Promise<void> {
     const unavailable = () => void vscode.window.showInformationMessage('That file is no longer available.');
     try {
@@ -1522,6 +1555,27 @@ export class PipsEditor implements vscode.Disposable {
       await fs.chmod(target, 0o600);
       await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target), { preview: true });
     } catch { unavailable(); }
+  }
+  /** A pick from a file's menu in the chat (media/shared/filemenu.js): Open, Open in editor, Save a copy… or Copy, on the
+   *  file the page names by its message and its number. DGC is asked where it is kept and the answer is checked
+   *  (messageFile); src/fileActs.ts does the rest. Copy path and Reveal are never done: DGC keeps this copy for the chat. */
+  private async fileAct(message: any, surface: string): Promise<void> {
+    const act = typeof message?.act === 'string' ? message.act : '';
+    if (!FILE_ACTS.has(act) || act === 'path' || act === 'reveal' || this.apiVersion < FILES_API) return;
+    if (message?.photo === true) {
+      // A picture the Pip made: shown and saved as its own buttons do; Copy hands its bytes to the page.
+      if (act === 'open' || act === 'save' || act === 'copy') await this.openPhoto({ pip_id: message.pip_id, message_id: message.message_id, index: message.index, save: act === 'save', copy: act === 'copy' }, surface);
+      return;
+    }
+    try {
+      const file = await this.messageFile(message);
+      const os = await import('node:os'), nodePath = await import('node:path');
+      await keptFileAct(act, file, {
+        say: (words) => this.post({ type: 'pipsFileSaid', words }, surface),
+        picture: (data) => this.post({ type: 'pipsFileCopy', data }, surface),
+        copyFolder: async () => nodePath.join(os.tmpdir(), 'dgc-pip-files', file.message, String(message.index)),
+      });
+    } catch { void vscode.window.showInformationMessage('That file is no longer available.'); }
   }
   /** A sent video's or sound's bytes, for its player in the chat (a blob: there, as DGC's own videos are). */
   private async fileData(message: any, surface: string): Promise<void> {
@@ -1597,6 +1651,8 @@ export class PipsEditor implements vscode.Disposable {
     if (message?.type === 'pipComputerFull' && computer) { void computerFullScreen.set(computer.panel, message.on === true, this.fullScreenSide); return; }
     if (message?.type === 'pipsOpenPhoto' && !computer) { void this.openPhoto(message); return; }
     if (message?.type === 'pipsOpenFile' && !computer) { void this.openFile(message); return; }
+    if (message?.type === 'pipsFileAct' && !computer) { void this.fileAct(message, surface); return; }
+    if ((message?.type === 'pipsGitRefs' || message?.type === 'pipsGitCommitOpen') && !computer) { void this.gitRefsAct(message, surface); return; }
     if (message?.type === 'pipsFileData' && !computer) { void this.fileData(message, surface); return; }
     if (message?.type === 'pipsOpenArtifact' && !computer) {
       // A Pip's report document or sheet, or a dashboard it refreshes: in the artifact panel (a document in the editor).
