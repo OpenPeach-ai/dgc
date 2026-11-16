@@ -7914,8 +7914,18 @@ class Agent(GoalLifecycle):
             return None
         return (Path(self.session_file), self.session_root)
 
+    def _rules_now(self) -> None:
+        """Adopt the user's rules as saved now before a decision: another window may have added or removed one."""
+        refresh = getattr(self.config, "refresh_permissions", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:                         # noqa: BLE001 -- the rules in hand still decide
+                pass
+
     def _monitor_permission(self, name: str, args: dict) -> tuple[str, str]:
         """The decision this call would get now, from the rules and mode in force (no card)."""
+        self._rules_now()
         with self._mode_lock:
             rules = {action: [*(self.config.permissions.get(action, []) or []),
                               *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
@@ -10256,6 +10266,7 @@ class Agent(GoalLifecycle):
             counts[sig] = counts.get(sig, 0) + 1
             if counts[sig] > _LOOP_SOFT:
                 return {}  # let the sequential path enforce/report its normal loop guard
+        self._rules_now()
         permission_rules = {action: [*(self.config.permissions.get(action, []) or []),
                                      *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
                             for action in ("allow", "ask", "deny")}
@@ -10888,6 +10899,7 @@ class Agent(GoalLifecycle):
                 return refusal
 
         def current_permissions():
+            self._rules_now()
             with self._mode_lock:
                 rules = {action: [*(self.config.permissions.get(action, []) or []),
                                   *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]

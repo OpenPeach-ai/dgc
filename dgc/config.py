@@ -396,6 +396,15 @@ def _config_write_lock():
             except OSError: pass
 
 
+def _file_stamp(path: Path):
+    """(mtime_ns, size) of a file, or None: enough to tell another process saved it."""
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return (info.st_mtime_ns, info.st_size)
+
+
 def _read_config_payload(path: Path) -> dict | None:
     """The config as it is on disk right now, or None when there is nothing usable there.
 
@@ -2014,6 +2023,48 @@ class Config:
         import copy
         self._baseline_data = copy.deepcopy(self.data)
         self._baseline_permissions = copy.deepcopy(self.user_permissions())
+        self._permissions_stamp = _file_stamp(USER_CONFIG)
+
+    def refresh_permissions(self, *, force: bool = False) -> bool:
+        """Adopt the user's rules as saved now: another window may have added or removed one (his call, 16 Nov: rules
+        shared across windows). A stat while the file is unchanged. A trusted project's rules stay live as they were,
+        and the live dict is updated in place (sub-agents hold it). Returns whether the rules were read again."""
+        if not getattr(self, "_persist", False):
+            return False
+        stamp = _file_stamp(USER_CONFIG)
+        if stamp is None or (not force and stamp == getattr(self, "_permissions_stamp", None)):
+            return False
+        on_disk = _read_config_payload(USER_CONFIG)
+        if on_disk is None:
+            return False
+        import copy
+        base = on_disk.get("permissions")
+        base = base if isinstance(base, dict) else {}
+        disk = {a: [rule for rule in base.get(a, []) if isinstance(rule, str)]
+                if isinstance(base.get(a), list) else [] for a in ("allow", "ask", "deny")}
+        own_allow = self.user_permissions()["allow"]
+        contributed = self._project_contribution()
+        rebuilt = {a: list(disk[a]) + list(contributed.get(a, [])) for a in disk}
+        if _policy_strips_allow():
+            rebuilt["allow"] = list(own_allow)        # the launcher reviews commands: stored allows stay stripped
+        for action in ("allow", "ask", "deny"):
+            self.permissions[action] = rebuilt[action]
+        self._baseline_permissions = copy.deepcopy(self.user_permissions())
+        self._permissions_stamp = stamp
+        return True
+
+    def add_permission_rule(self, action: str, rule: str) -> None:
+        """Add one of the user's rules (rendered), against the rules as saved now, and save."""
+        self.refresh_permissions()
+        if rule not in self.user_permissions().get(action, []):
+            self.permissions.setdefault(action, []).append(rule)
+        self.save()
+
+    def remove_permission_rule(self, action: str, rule: str) -> None:
+        """Remove one, against the rules as saved now (so a rule another window added goes too), and save."""
+        self.refresh_permissions()
+        self.permissions[action] = [item for item in self.permissions.get(action, []) if item != rule]
+        self.save()
 
     def hold_untrusted_mode(self) -> bool:
         """Run an untrusted workspace in `default`, without touching the user's stored mode.

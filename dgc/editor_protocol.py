@@ -522,6 +522,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # session has the id of the turn it opens in the history snapshot ("h3", or a running turn's own id).
     "outline": {"request_id": _S(), "session_id": _S(), "prompts": _A()},
     "sessions": {"items": _A(), "deleted": _B(False), "request_id": _S(False)},
+    # list_session_attachments' answer: items [{path, id, kind (image|file), name, mime?, bytes?, at, session_name,
+    # project, project_name}], total, next_offset; get_session_attachment's: one {id, kind, name, mime?, data? (a
+    # picture's data URI), file_path? (a file's place in its project)}.
+    "session_attachments": {"request_id": _S(), "items": _A(), "total": _I(), "next_offset": _f("integer", "null", required=False)},
+    "session_attachment": {"request_id": _S(), "id": _S(), "kind": _S(), "name": _S(), "mime": _S(False), "data": _S(False),
+                           "file_path": _S(False)},
     # archive_session's and create_session's answers (13 Nov; ready.capabilities.session_archive).
     "session_archived": {"path": _S(), "archived": _B(), "pips": _A(False), "request_id": _S(False)},
     "session_created": {"path": _S(), "name": _S(), "request_id": _S(False)},
@@ -951,6 +957,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "list_sessions": {"request_id": _S(False), "limit": _I(False), "offset": _I(False), "query": _S(False),
                       "scope": _S(False), "folder": _S(False), "archived": _B(False)},
     "delete_session": {"path": _S(), "archived": _B(False), "request_id": _S(False)},
+    # What you attached in Work sessions, for the Library (ready.capabilities.session_attachments, 16 Nov): the pictures
+    # and the files you named with @, from every project's sessions, newest first (answered by session_attachments);
+    # get_session_attachment gives one back (answered by session_attachment): a picture's data URI or a file's place.
+    "list_session_attachments": {"request_id": _S(), "query": _S(False), "limit": _I(False), "offset": _I(False)},
+    "get_session_attachment": {"request_id": _S(), "path": _S(), "id": _S()},
     # Archive and Restore for Work sessions, and a new named one (13 Nov; ready.capabilities.session_archive).
     "archive_session": {"path": _S(), "archived": _B(False), "pips": _A(False), "request_id": _S(False)},
     "create_session": {"name": _S(), "request_id": _S(False)},
@@ -1584,14 +1595,16 @@ COMMAND_FIELDS.update({
     # Widgets in the Library (offered as ready.capabilities.chatdgc.widget_library): `list` every widget a reply made,
     # newest first (`query` part of its name); `get` one with its page (`conversation_id`, `widget_id`), to open it
     # again; `remove` deletes one (its page goes, the reply keeps its name, marked removed, and is sent again as
-    # `chatdgc_message`). Answered by `chatdgc_widgets`.
+    # `chatdgc_message`). Answered by `chatdgc_widgets`. `charts` (ready.capabilities.chatdgc.chart_library) lists the
+    # ```chart blocks replies drew the same way ({chat_id, chat_title, message_id, id, title, kind "chart", chart_type,
+    # created_at}); each opens its chat.
     # The context window's meter again, for a chat (after its window preset changed): answered by `chatdgc_context`.
     # Offered with ready.capabilities.chatdgc.windows.
     "chatdgc_context": {"request_id": _S(), "conversation_id": _S()},
     # What fills a chat's window, part by part (offered as ready.capabilities.chatdgc.context_breakdown): answered by
     # `context_breakdown` with the conversation's id.
     "chatdgc_context_breakdown": {"request_id": _S(), "conversation_id": _S()},
-    "chatdgc_widgets": {"request_id": _S(), "op": _f("string", enum=("list", "get", "remove")), "query": _S(False),
+    "chatdgc_widgets": {"request_id": _S(), "op": _f("string", enum=("list", "get", "remove", "charts")), "query": _S(False),
                         "limit": _I(False), "offset": _I(False), "conversation_id": _S(False), "widget_id": _S(False)},
     "chatdgc_action": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "action_id": _S(),
                        "op": _f("string", enum=("run", "dismiss", "hand")), "arguments": _O(False), "pip_id": _S(False)},

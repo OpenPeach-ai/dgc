@@ -32,8 +32,10 @@ MAX_TEXT = 1_000_000                 # one message, in characters: a reply can b
 MAX_CHAT_BYTES = 32 * 1024 * 1024    # one chat file
 MAX_LIST = 200
 MAX_BODY = 1_000_000                 # characters of a chat kept for search
-INDEX_VERSION = 5                    # 2: what was said is searched too (body, body_fts); 3: the Library (files);
-                                     # 4: files ChatDGC made (files.made); 5: its widgets (widgets)
+INDEX_VERSION = 6                    # 2: what was said is searched too (body, body_fts); 3: the Library (files);
+                                     # 4: files ChatDGC made (files.made); 5: its widgets (widgets); 6: the charts a
+                                     # reply drew (charts, 16 Nov)
+_CHART_BLOCK = re.compile(r"```chart[ \t]*\n(.*?)```", re.S)
 PROJECT_ID = re.compile(r"proj_[a-f0-9]{32}\Z")
 MAX_PROJECTS = 200
 MAX_PROJECT_NAME = 80
@@ -169,6 +171,10 @@ class ChatStore:
             chat_id TEXT NOT NULL, id TEXT NOT NULL, message_id TEXT NOT NULL, title TEXT NOT NULL,
             created_at TEXT NOT NULL, PRIMARY KEY(chat_id, id))""")
         db.execute("CREATE INDEX IF NOT EXISTS widgets_order ON widgets(created_at)")
+        db.execute("""CREATE TABLE IF NOT EXISTS charts (
+            chat_id TEXT NOT NULL, id TEXT NOT NULL, message_id TEXT NOT NULL, title TEXT NOT NULL,
+            chart_type TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(chat_id, id))""")
+        db.execute("CREATE INDEX IF NOT EXISTS charts_order ON charts(created_at)")
         db.execute("CREATE TABLE IF NOT EXISTS body (id TEXT PRIMARY KEY, text TEXT NOT NULL DEFAULT '')")
         try:
             db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5(id UNINDEXED, text, "
@@ -242,6 +248,28 @@ class ChatStore:
         db.execute("DELETE FROM widgets WHERE chat_id=?", (chat["id"],))
         db.executemany("INSERT OR REPLACE INTO widgets(chat_id,id,message_id,title,created_at) VALUES(?,?,?,?,?)",
                        self._widgets_of(chat))
+        db.execute("DELETE FROM charts WHERE chat_id=?", (chat["id"],))
+        db.executemany("INSERT OR REPLACE INTO charts(chat_id,id,message_id,title,chart_type,created_at) "
+                       "VALUES(?,?,?,?,?,?)", self._charts_of(chat))
+
+    @staticmethod
+    def _charts_of(chat: dict) -> list[tuple]:
+        """The charts a chat's replies drew (```chart blocks, in the conversation you see), for the Library."""
+        rows = []
+        for m in chat.get("messages", []):
+            if not isinstance(m, dict) or m.get("role") != "assistant":
+                continue
+            for n, block in enumerate(_CHART_BLOCK.findall(str(m.get("text") or ""))):
+                try:
+                    spec = json.loads(block)
+                except ValueError:
+                    spec = {}
+                spec = spec if isinstance(spec, dict) else {}
+                title = " ".join(str(spec.get("title") or "").split())[:120] or "Chart"
+                rows.append((chat["id"], f"{m.get('id') or ''}:{n}", str(m.get("id") or ""), title,
+                             str(spec.get("type") or "chart")[:24],
+                             str(m.get("created_at") or chat.get("created_at") or "")))
+        return rows
 
     def _catch_up(self, db) -> None:
         """An index from before what was said was searched (2), or before the Library (3): read each chat once and
@@ -469,6 +497,7 @@ class ChatStore:
                 db.execute("DELETE FROM chats WHERE id=?", (chat_id,))
                 db.execute("DELETE FROM files WHERE chat_id=?", (chat_id,))
                 db.execute("DELETE FROM widgets WHERE chat_id=?", (chat_id,))
+                db.execute("DELETE FROM charts WHERE chat_id=?", (chat_id,))
                 db.execute("DELETE FROM body WHERE id=?", (chat_id,))
                 if self._fts:
                     db.execute("DELETE FROM body_fts WHERE id=?", (chat_id,))
@@ -564,6 +593,28 @@ class ChatStore:
         if text:
             items = [i for i in items if text in i["title"].casefold()]
         items.sort(key=lambda i: (i["created_at"] or "", i["id"]), reverse=True)
+        page = items[offset:offset + limit]
+        return {"widgets": page, "total": len(items),
+                "next_offset": offset + len(page) if offset + len(page) < len(items) else None}
+
+    def charts(self, *, query: str = "", limit: int = 60, offset: int = 0) -> dict:
+        """Every chart a reply drew, in every chat (archived ones too), the newest first; ``query`` part of its name."""
+        if type(limit) is not int or not 1 <= limit <= MAX_LIST or type(offset) is not int or offset < 0:
+            raise ChatStoreError(f"Ask for 1–{MAX_LIST} charts at a time.")
+        text = " ".join(str(query or "").split())[:200].casefold()
+        self._ensure()
+        with self._index() as db:
+            self._catch_up(db)
+            rows = db.execute("SELECT g.chat_id, g.id, g.message_id, g.title, g.chart_type, g.created_at, c.title, "
+                              "c.project FROM charts g JOIN chats c ON c.id = g.chat_id ORDER BY g.rowid").fetchall()
+        names = {p["id"]: p.get("name", "") for p in self._read_projects()}
+        items = [{"chat_id": r[0], "id": r[1], "message_id": r[2], "title": r[3], "kind": "chart", "chart_type": r[4],
+                  "created_at": r[5], "chat_title": r[6],
+                  **({"project_id": r[7], "project_name": names[r[7]]} if r[7] in names else {})} for r in rows]
+        if text:
+            items = [i for i in items if text in i["title"].casefold()]
+        # Newest reply first; one reply's charts in the order it drew them (a stable sort keeps the rows' order).
+        items.sort(key=lambda i: (i["created_at"] or "", i["message_id"]), reverse=True)
         page = items[offset:offset + limit]
         return {"widgets": page, "total": len(items),
                 "next_offset": offset + len(page) if offset + len(page) < len(items) else None}

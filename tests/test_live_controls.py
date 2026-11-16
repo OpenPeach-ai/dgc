@@ -155,7 +155,7 @@ class LiveControlTests(unittest.TestCase):
             self.backend.dispatch({"type": "set_think", "level": "xhigh", "request_id": "think"})
             self.wait("think_changed", request_id="think", think="xhigh")
             self.wait("info", message=(
-                "Thinking → xhigh · applies from the next model request"))
+                "Thinking: Extra high · applies from the next model request"))
             self.assertEqual(self.agent.config.get("thinking"), "xhigh")
             self.release.set()
             self.wait("turn_end", reason="completed")
@@ -175,7 +175,7 @@ class LiveControlTests(unittest.TestCase):
             self.backend.dispatch({"type": "set_think", "level": "high",
                                    "request_id": "subscription-think"})
             self.wait("info", message=(
-                "Thinking → high · applies when the next subscription turn starts"))
+                "Thinking: High · applies when the next subscription turn starts"))
         finally:
             self.backend._worker = None
         self.assertEqual(self.backend.config.get("subscription_model"), "opus")

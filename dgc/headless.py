@@ -270,7 +270,7 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "list_models", "list_models_at", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
     "get_recall", "list_sessions", "list_checkpoints", "rewind_preview", "list_retained_tasks", "list_artifacts",
-    "artifact_list", "artifact_get", "mods_list",
+    "artifact_list", "artifact_get", "mods_list", "list_session_attachments", "get_session_attachment",
     # DGC Router: reading it, testing a system or looking on the network is not the person acting on the chat.
     "router_status", "router_probe", "router_find", "router_suggest",
     # Image generators: reading them, or the Library of images DGC made.
@@ -565,6 +565,14 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 102 (0.52): a Pip's reply carries `artifacts` [{id, type, title, op}]: the pages, docs, sheets, decks and dashboards
 # it made or changed (op made | changed), counted by DGC, for the chat to show each as a card to open.
 PIPS_API_VERSION = 102
+
+
+_THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}
+
+
+def _think_words(level) -> str:
+    """A thinking level as the slider says it ("Extra high", never "xhigh")."""
+    return _THINK_WORDS.get(str(level or "off"), str(level or "off"))
 
 
 def attachment_limits() -> dict:
@@ -2897,6 +2905,7 @@ class Backend:
                           # list_sessions takes limit, offset and query; an item found by what was said
                           # carries match (dgc/session_index).
                           "session_paging": True,
+                          "session_attachments": 1,     # list/get_session_attachment: Work's attachments in the Library
                           # list_sessions {scope: "all"}: every project's sessions, each with its folder (12 Nov).
                           "session_scopes": True,
                           # Archive and Restore for Work sessions, and a new named one (13 Nov): archive_session,
@@ -3583,7 +3592,8 @@ class Backend:
         # attachments: how many things one message may carry (Limits for everyone, 10 Nov: 50; it was 10).
         # wakeups: a chat's wake_later (chatdgc_wakeups, chatdgc_wakeup_due, chatdgc_wake, chatdgc_cancel_wakeup).
         from .chatdgc.attachments import MAX_ATTACHMENTS as chat_attachments
-        return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
+        return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "chart_library": 1,
+                            "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1,
                             "holder": 1, "folder": 1, "mentions": 1, "fallback": 1, "attachments": chat_attachments,
                             "wakeups": 1},
@@ -4504,6 +4514,11 @@ class Backend:
                     # after this clear; Agent must not clear it again at entry.
                     self.agent.cancelled.clear()
 
+                # A thinking level saved in the background (set_think, session scope) holds the session for a moment:
+                # this turn waits for that save rather than finding the session busy (the save was ~2 s on a long one).
+                saving = self.__dict__.get("_think_save_thread")
+                if saving is not None and saving is not threading.current_thread() and saving.is_alive():
+                    saving.join(15)
                 self.agent._pending_images = images
                 self.agent._prompt_display_mentions = display_mentions or []
                 # The Output chip's choice for this prompt (empty for Auto, and for every turn DGC starts itself).
@@ -5318,6 +5333,30 @@ class Backend:
             f"({used + 1} of {AUTO_RESUME_MAX})")
         return True
 
+    def _save_think_later(self, command: str, request_id, revert, previous: str) -> None:
+        """A session's thinking level, saved in the background (his call, 16 Nov: a long session took ~2 s a step while
+        the slider waited). It applies and is answered at once; a save that fails puts the level back and says so.
+        One save at a time: a newer change while one runs is saved by the next."""
+        def run():
+            with self._think_save_lock():
+                ok = self.agent._persist()
+            if ok:
+                return
+            revert()
+            self.em.emit("command_rejected", command=command, reason="session_save_failed",
+                         message="The session could not save its thinking level, so it is back to "
+                                 f"{_think_words(previous)}.", **_request_fields(request_id))
+            self.em.emit("think_changed", think=previous or "off")
+        thread = threading.Thread(target=run, daemon=True, name="dgc-think-save")
+        self._think_save_thread = thread                 # a turn that starts now waits for it (_run_turn_queue)
+        thread.start()
+
+    def _think_save_lock(self):
+        lock = self.__dict__.get("_think_lock")
+        if lock is None:
+            lock = self.__dict__.setdefault("_think_lock", threading.Lock())
+        return lock
+
     def _resume_goal_later(self, used: int, reason: str) -> bool:
         """A goal its own failed turn paused: resumed after a wait (goals.AUTO_RESUME_WAITS), so an outage can pass.
         What the user does in the meantime wins (_resume_goal_now checks again)."""
@@ -5883,6 +5922,9 @@ class Backend:
         # that shows it unmarked lets someone read their own `deny` back and believe it applies.
         # Both terminal listings say so; this is the editor's, and it was showing them plain.
         from .permissions import invalid_rules
+        refresh = getattr(self.config, "refresh_permissions", None)
+        if callable(refresh):
+            refresh()                       # the rules as saved now: another window may have changed them
         broken = {(action, text) for action, text, _why in invalid_rules(self.config.permissions)}
         # A user rule equal to a trusted project's is live twice; it is one rule to the reader.
         live = [(action, str(rule)) for action in ("deny", "ask", "allow")
@@ -8782,16 +8824,20 @@ class Backend:
                 self.em.emit("command_rejected", command=t, reason="invalid_rule",
                              message=str(exc)[:500], request_id=request_id)
                 return
-            rules = self.config.permissions.setdefault(action, [])
-            # Deduped against the user's OWN rules, not the live set: a trusted project's identical
-            # rule is live too, and deduping against it meant the user's copy was never saved -- a
-            # deny the user added "everywhere" then applied only inside that one project.
-            own = getattr(self.config, "user_permissions", None)
-            if t == "add_permission_rule" and rendered not in (own()[action] if callable(own) else rules):
-                rules.append(rendered)
-            elif t == "remove_permission_rule":
-                self.config.permissions[action] = [item for item in rules if item != rendered]
-            self.config.save()
+            # Against the rules as saved now (Config.add/remove_permission_rule re-read them first): Remove takes off a
+            # rule another window added, and an add is deduped against the user's OWN rules, not the live set (a trusted
+            # project's identical rule is live too, and the user's copy must still be saved).
+            change = getattr(self.config, t, None)
+            if callable(change):
+                change(action, rendered)
+            else:                           # a config without them (an SDK stand-in): this process's own rules
+                rules = self.config.permissions.setdefault(action, [])
+                own = getattr(self.config, "user_permissions", None)
+                if t == "add_permission_rule" and rendered not in (own()[action] if callable(own) else rules):
+                    rules.append(rendered)
+                elif t == "remove_permission_rule":
+                    self.config.permissions[action] = [item for item in rules if item != rendered]
+                self.config.save()
             self._emit_permissions(request_id)
 
         elif t == "get_memory":
@@ -9210,20 +9256,16 @@ class Backend:
                 previous = str(config_get("subscription_effort", "") if callable(config_get) else "") or "off"
                 if session_route:
                     self.config.hold("subscription_effort", effort)
-                    if not self.agent._persist():
-                        self.config.hold("subscription_effort", previous if previous != "off" else "")
-                        self.em.emit("command_rejected", command=t, reason="session_save_failed",
-                                     message="The session could not save its reasoning choice.",
-                                     **_request_fields(request_id))
-                        return
+                    self._save_think_later(t, request_id, lambda: self.config.hold(
+                        "subscription_effort", previous if previous != "off" else ""), previous)
                 else:
                     self.config.set("subscription_effort", effort)
                 shown = effort or "off"
                 self.em.emit("think_changed", think=shown, **_request_fields(request_id))
                 if shown != previous:
                     self.em.emit("info", message=(
-                        f"Thinking → {shown} · applies when the next subscription turn starts"
-                        if self._busy() else f"Thinking → {shown}"))
+                        f"Thinking: {_think_words(shown)} · applies when the next subscription turn starts"
+                        if self._busy() else f"Thinking: {_think_words(shown)}"))
             else:
                 if level == "max":
                     self.em.emit(
@@ -9234,20 +9276,15 @@ class Backend:
                 previous = str(self.config.get("thinking", "off") or "off")
                 if session_route:
                     self.config.hold("thinking", level)
-                    if not self.agent._persist():
-                        self.config.hold("thinking", previous)
-                        self.em.emit("command_rejected", command=t, reason="session_save_failed",
-                                     message="The session could not save its reasoning choice.",
-                                     **_request_fields(request_id))
-                        return
+                    self._save_think_later(t, request_id, lambda: self.config.hold("thinking", previous), previous)
                 else:
                     self.config.set("thinking", level)
                 shown = str(self.config.get("thinking", "off") or "off")
                 self.em.emit("think_changed", think=shown, **_request_fields(request_id))
                 if shown != previous:
                     self.em.emit("info", message=(
-                        f"Thinking → {shown} · applies from the next model request"
-                        if self._busy() else f"Thinking → {shown}"))
+                        f"Thinking: {_think_words(shown)} · applies from the next model request"
+                        if self._busy() else f"Thinking: {_think_words(shown)}"))
         elif t == "set_goal":
             if self._busy():
                 self._yield_wake_turn()     # as start_goal: a wake turn yields, real work stays live
@@ -9652,6 +9689,20 @@ class Backend:
             items = list(reversed(selected))
             self.em.emit("recall", items=items, before=cursor, more=cursor > 0, total=total,
                          **_request_fields(request_id))
+
+        elif t in ("list_session_attachments", "get_session_attachment"):
+            from . import session_attachments
+            try:
+                if t == "list_session_attachments":
+                    found = session_attachments.listing(query=str(cmd.get("query") or ""), limit=cmd.get("limit", 60),
+                                                        offset=cmd.get("offset", 0))
+                    self.em.emit("session_attachments", request_id=request_id, **found)
+                else:
+                    self.em.emit("session_attachment", request_id=request_id,
+                                 **session_attachments.get(cmd.get("path"), str(cmd.get("id") or "")))
+            except (session_attachments.AttachmentError, ValueError) as exc:
+                self.em.emit("command_rejected", command=t, reason="attachment_unavailable",
+                             message=str(exc)[:300], **_request_fields(request_id))
 
         elif t == "list_sessions":
             # Optional (capability session_paging): `limit`, `offset` and `query` (a session's name,

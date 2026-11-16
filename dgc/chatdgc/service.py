@@ -1393,9 +1393,11 @@ class ChatService:
     def _widgets(self, cmd: dict) -> None:
         """Widgets in the Library: listed, one with its page (to open it again), or one deleted."""
         op, request_id = cmd["op"], cmd["request_id"]
-        if op == "list":
-            found = self.engine.store.widgets(query=cmd.get("query", ""), limit=cmd.get("limit", 60),
-                                              offset=cmd.get("offset", 0))
+        if op in ("list", "charts"):
+            # charts (ready.capabilities.chatdgc.chart_library): the ```chart blocks replies drew, listed as widgets
+            # are; each opens its chat.
+            listing = self.engine.store.charts if op == "charts" else self.engine.store.widgets
+            found = listing(query=cmd.get("query", ""), limit=cmd.get("limit", 60), offset=cmd.get("offset", 0))
             self.emit("chatdgc_widgets", request_id=request_id, op=op, **found)
             return
         conversation_id, widget_id = str(cmd.get("conversation_id") or ""), str(cmd.get("widget_id") or "")

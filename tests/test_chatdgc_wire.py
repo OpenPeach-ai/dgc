@@ -968,6 +968,7 @@ class HostTests(unittest.TestCase):
 
     def test_ready_offers_it(self):
         self.assertEqual(self.host.default._ready_payload()["capabilities"]["chatdgc"], {"version": 1, "widget_report": 1, "widget_library": 1,
+                          "chart_library": 1,                              # chart_library: 16 Nov, replies' charts listed
                           "windows": ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"], "context_breakdown": 1,
                           "voice_replies": 1, "question_forms": 1, "outline": 1, "holder": 1,   # holder: 25 Oct, Open here
                           "folder": 1,                                     # folder: 28 Oct, a folder the chat reads
