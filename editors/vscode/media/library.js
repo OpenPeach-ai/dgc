@@ -224,11 +224,12 @@
   }
 
   /** A chart's mark: a small tile with the chart's own kind drawn in it (bars, a line, a pie), in the text's colour. */
+  /** A chart's mark (media/shared/graph.css, his call of 16 Nov): one Azure, a mark for each kind DGC draws; anything
+   *  else wears the bar's. */
+  const CHART_KINDS = ["bar", "line", "area", "pie", "scatter"];
   function chartMark(kind) {
-    const inner = kind === "line" || kind === "area" || kind === "scatter" ? '<path d="M6 16.5 L10 11.5 L13.5 14 L18 7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 18.5 H18.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".55"/>'
-      : kind === "pie" || kind === "donut" ? '<path d="M12 5.5 A6.5 6.5 0 1 0 18.5 12 H12 Z" fill="currentColor" opacity=".55"/><path d="M13.5 4 A6.5 6.5 0 0 1 20 10.5 H13.5 Z" fill="currentColor"/>'
-      : '<rect x="6" y="12" width="3" height="6.5" rx="1" fill="currentColor" opacity=".55"/><rect x="10.5" y="8.5" width="3" height="10" rx="1" fill="currentColor"/><rect x="15" y="5.5" width="3" height="13" rx="1" fill="currentColor" opacity=".8"/>';
-    return `<svg class="lib-chart-mark" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><rect class="lib-chart-ground" x="1" y="1" width="22" height="22" rx="5"/>${inner}</svg>`;
+    const k = CHART_KINDS.includes(kind) ? kind : "bar";
+    return `<span class="graph graph--${k}" data-chart="${k}" aria-hidden="true">${"<i></i>".repeat(8)}</span>`;
   }
   /**
    * Draws the Library into `host` and keeps it up to date.

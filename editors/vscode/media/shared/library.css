@@ -80,9 +80,7 @@
 .dgc-lib .lib-row-sheet > .dgc-sheet { scale: 1; transform-origin: center; }
 .dgc-lib .lib-row-mark [data-mark] { --size: 36px; }
 /* A chart a ChatDGC reply drew: a small tile with its kind drawn in it (bars, a line, a pie), in the text's own colour. */
-.dgc-lib .lib-row-chart { color: var(--text); }
-.dgc-lib .lib-chart-mark { display: block; }
-.dgc-lib .lib-chart-ground { fill: var(--wash); stroke: var(--hair-strong, var(--border)); stroke-width: 1; }
+.dgc-lib .lib-row-chart .graph { --size: 36px; }   /* a chart's mark, the size a widget's is (media/shared/graph.css) */
 .dgc-lib .lib-row-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .dgc-lib .lib-row-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
 .dgc-lib .lib-row-meta { display: flex; align-items: baseline; min-width: 0; color: var(--text-2); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric: tabular-nums; white-space: pre; }

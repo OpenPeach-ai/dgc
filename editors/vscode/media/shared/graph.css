@@ -1,0 +1,77 @@
+/* Graph: a chart a ChatDGC reply drew. span.graph.graph--<kind> > i*8, kind one of bar, line, area, pie, scatter.
+   One Azure (his call, 16 Nov), in the marks' own material: two Folio sheets in the colour, the back one peeking out,
+   and the chart itself drawn on the front sheet in pale glass, so it is the first thing seen. The <i> a kind doesn't
+   use are hidden. */
+.graph{--size:52px;--h:213;--sat:91%;--light:57%;--cycle:9s;--phase:0s;
+  --sheet:linear-gradient(145deg,hsl(var(--h) 90% 70%),hsl(var(--h) 86% 47%) 62%,hsl(var(--h) 85% 31%));
+  --back:linear-gradient(145deg,hsl(var(--h) var(--sat) 66%) 0%,hsl(var(--h) var(--sat) 46%) 50%,hsl(var(--h) var(--sat) 27%) 100%);
+  --fold:linear-gradient(160deg,hsl(var(--h) 90% 85% / .75),hsl(var(--h) 85% 60% / .08) 63%,hsl(var(--h) 90% 35% / .4));
+  --glaze:linear-gradient(145deg,hsl(var(--h) 95% 86% / .55),hsl(var(--h) 90% 55% / .04));
+  --ink:linear-gradient(150deg,hsl(var(--h) 100% 98%) 0%,hsl(var(--h) 96% 88%) 55%,hsl(var(--h) 88% 75%) 100%);
+  --lift:0 calc(var(--size) * .018) calc(var(--size) * .04) hsl(var(--h) 90% 16% / .5);
+  display:inline-block;position:relative;width:var(--size);height:var(--size);flex:none;vertical-align:middle}
+/* The back sheet, peeking out above and to the left (Folio's first). */
+.graph::before{content:"";position:absolute;left:5%;top:5%;width:76%;height:76%;border-radius:24%;background:var(--back);transform:rotate(-13deg);
+  box-shadow:inset 0 1px 1px #ffffff45,inset -1px -2px 2px #0000001c}
+.graph i{position:absolute;display:none;box-sizing:border-box;background:var(--ink);overflow:hidden;
+  box-shadow:inset 0 1px 1px #ffffffb0,inset -1px -1px 1px hsl(var(--h) 80% 40% / .25),var(--lift);
+  animation-duration:var(--cycle);animation-delay:var(--phase);animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-play-state:var(--graph-play,running)}
+/* The front sheet the chart is drawn on: Folio's body, fold and glaze. */
+.graph i:nth-child(1){display:block;left:13%;top:14%;width:78%;height:76%;border-radius:24%;background:var(--sheet);transform:rotate(-3deg);
+  box-shadow:inset 0 1px 1px #ffffff45,inset -1px -2px 2px #0000001c,0 calc(var(--size) * .02) calc(var(--size) * .05) hsl(var(--h) 85% 20% / .3)}
+.graph i:nth-child(1)::before,.graph i:nth-child(1)::after{content:"";position:absolute;display:block;pointer-events:none}
+.graph i:nth-child(1)::before{inset:-15% 13% 25% -12%;border-radius:30%;background:var(--fold);transform:rotate(-30deg)}
+.graph i:nth-child(1)::after{inset:35% 22% 6% 21%;border-radius:28%;background:var(--glaze);transform:rotate(14deg)}
+
+/* Bar: three bars rising, standing on the sheet's floor. */
+.graph--bar i:nth-child(-n+4){display:block}
+.graph--bar i:nth-child(n+2){bottom:22%;width:15%;border-radius:calc(var(--size) * .045) calc(var(--size) * .045) calc(var(--size) * .02) calc(var(--size) * .02);transform-origin:50% 100%}
+.graph--bar i:nth-child(2){left:27%;height:24%;animation-name:graph-bar}
+.graph--bar i:nth-child(3){left:45%;height:38%;animation-name:graph-bar;animation-delay:calc(var(--phase) + .6s)}
+.graph--bar i:nth-child(4){left:63%;height:52%;animation-name:graph-bar;animation-delay:calc(var(--phase) + 1.2s)}
+
+/* Line: three strokes through four points, a bead at each. */
+.graph--line i:nth-child(-n+8){display:block}
+.graph--line i:nth-child(n+2):nth-child(-n+4){height:calc(var(--size) * .085);border-radius:calc(var(--size) * .045);transform-origin:calc(var(--size) * .0425) 50%}
+.graph--line i:nth-child(2){left:calc(26% - var(--size) * .0425);top:calc(66% - var(--size) * .0425);width:calc(var(--size) * .198 + var(--size) * .085);transform:rotate(-45deg)}
+.graph--line i:nth-child(3){left:calc(40% - var(--size) * .0425);top:calc(52% - var(--size) * .0425);width:calc(var(--size) * .161 + var(--size) * .085);transform:rotate(29.7deg)}
+.graph--line i:nth-child(4){left:calc(54% - var(--size) * .0425);top:calc(60% - var(--size) * .0425);width:calc(var(--size) * .325 + var(--size) * .085);transform:rotate(-59.5deg)}
+.graph--line i:nth-child(n+5){width:calc(var(--size) * .15);height:calc(var(--size) * .15);border-radius:50%;animation-name:graph-bead}
+.graph--line i:nth-child(5){left:calc(26% - var(--size) * .075);top:calc(66% - var(--size) * .075)}
+.graph--line i:nth-child(6){left:calc(40% - var(--size) * .075);top:calc(52% - var(--size) * .075);animation-delay:calc(var(--phase) + .5s)}
+.graph--line i:nth-child(7){left:calc(54% - var(--size) * .075);top:calc(60% - var(--size) * .075);animation-delay:calc(var(--phase) + 1s)}
+.graph--line i:nth-child(8){left:calc(70.5% - var(--size) * .075);top:calc(32% - var(--size) * .075);animation-delay:calc(var(--phase) + 1.5s)}
+
+/* Area: the line's own path, the room under it filled in fainter glass (no beads: that is the line's). */
+.graph--area i:nth-child(-n+5){display:block}
+.graph--area i:nth-child(2){left:22%;top:28%;width:52%;height:50%;border-radius:0;opacity:.88;box-shadow:none;
+  clip-path:polygon(7.7% 100%,7.7% 76%,34.6% 48%,61.5% 64%,93.3% 8%,93.3% 100%);animation-name:graph-hill}
+.graph--area i:nth-child(n+3){height:calc(var(--size) * .085);border-radius:calc(var(--size) * .045);transform-origin:calc(var(--size) * .0425) 50%}
+.graph--area i:nth-child(3){left:calc(26% - var(--size) * .0425);top:calc(66% - var(--size) * .0425);width:calc(var(--size) * .198 + var(--size) * .085);transform:rotate(-45deg)}
+.graph--area i:nth-child(4){left:calc(40% - var(--size) * .0425);top:calc(52% - var(--size) * .0425);width:calc(var(--size) * .161 + var(--size) * .085);transform:rotate(29.7deg)}
+.graph--area i:nth-child(5){left:calc(54% - var(--size) * .0425);top:calc(60% - var(--size) * .0425);width:calc(var(--size) * .325 + var(--size) * .085);transform:rotate(-59.5deg)}
+
+/* Pie: a ring, as DGC draws it, its largest share lifted out and brightest. */
+.graph--pie i:nth-child(-n+3){display:block}
+.graph--pie i:nth-child(2),.graph--pie i:nth-child(3){left:25%;top:24%;width:56%;height:56%;border-radius:50%;box-shadow:none;
+  -webkit-mask-image:radial-gradient(circle,transparent 0 33%,#000 34.5%),var(--share);mask-image:radial-gradient(circle,transparent 0 33%,#000 34.5%),var(--share);
+  -webkit-mask-composite:source-in;mask-composite:intersect}
+.graph--pie i:nth-child(2){--share:conic-gradient(transparent 0 108deg,#000 112deg 356deg,transparent 360deg);opacity:.82}
+.graph--pie i:nth-child(3){--share:conic-gradient(#000 0 104deg,transparent 105deg);background:linear-gradient(150deg,#fff,hsl(var(--h) 100% 93%) 60%,hsl(var(--h) 92% 82%));
+  transform:translate(5%,-5%);filter:drop-shadow(0 calc(var(--size) * .015) calc(var(--size) * .02) hsl(var(--h) 90% 16% / .55));animation-name:graph-share}
+
+/* Scatter: beads rising left to right. */
+.graph--scatter i:nth-child(-n+6){display:block}
+.graph--scatter i:nth-child(n+2){border-radius:50%;animation-name:graph-bead}
+.graph--scatter i:nth-child(2){left:26%;top:60%;width:13%;height:13%}
+.graph--scatter i:nth-child(3){left:38%;top:42%;width:18%;height:18%;animation-delay:calc(var(--phase) + .7s)}
+.graph--scatter i:nth-child(4){left:58%;top:52%;width:12%;height:12%;animation-delay:calc(var(--phase) + 1.4s)}
+.graph--scatter i:nth-child(5){left:60%;top:27%;width:17%;height:17%;animation-delay:calc(var(--phase) + 2.1s)}
+.graph--scatter i:nth-child(6){left:44%;top:65%;width:9%;height:9%;animation-delay:calc(var(--phase) + 2.8s)}
+
+@keyframes graph-bar{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.9)}}
+@keyframes graph-bead{0%,100%{translate:0 0}50%{translate:0 -6%}}
+@keyframes graph-hill{0%,100%{opacity:.88}50%{opacity:.72}}
+@keyframes graph-share{0%,100%{transform:translate(5%,-5%)}50%{transform:translate(7%,-7%)}}
+@media(prefers-reduced-motion:reduce){.graph i{animation:none!important}}
+@media(forced-colors:active){.graph::before,.graph i{forced-color-adjust:none}}

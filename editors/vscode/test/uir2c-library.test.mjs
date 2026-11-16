@@ -38,9 +38,12 @@ for (const [place, width] of [["side", 300], ["side", 440], ["tab", 700]]) {
       assert.ok(lib.rows.findIndex((r) => r.title === "Trip budget calculator") < lib.rows.findIndex((r) => r.title === "Rent against buying, year by year"), "a widget of five hours ago is before a chart of two days ago");
       assert.match(charts[0].meta, /^A chart in A week in Goa in March · 20m/, "it says where it is");
       assert.equal(charts[0].maker, "A week in Goa in March"); assert.equal(charts[0].makerIs, "BUTTON", "and its chat's name leads back to the chat");
-      const mark = await x.page.evaluate(() => { const row = document.querySelector('.lib-row[data-type="chart"]'), m = row.querySelector(".lib-row-thumb .lib-chart-mark"), r = m?.getBoundingClientRect();
-        return m ? { w: Math.round(r.width), h: Math.round(r.height), bars: m.querySelectorAll("rect, path").length } : null; });
-      assert.ok(mark && mark.w >= 16 && mark.h >= 16 && mark.bars >= 3, `a chart mark is drawn (${JSON.stringify(mark)})`);
+      // Each chart wears its kind's mark (graph.css, his call of 16 Nov): one Azure, 36 px as a widget's mark is.
+      const marks = await x.page.evaluate(() => [...document.querySelectorAll('.lib-row[data-type="chart"] .lib-row-thumb .graph')].map((m) => {
+        const r = m.getBoundingClientRect(), shown = [...m.children].filter((i) => getComputedStyle(i).display !== "none").length;
+        return { kind: m.dataset.chart, w: Math.round(r.width), h: Math.round(r.height), shown, hue: getComputedStyle(m).getPropertyValue("--h").trim() }; }));
+      assert.equal(marks.length, 3, `each chart has its mark (${JSON.stringify(marks)})`);
+      for (const m of marks) { assert.deepEqual([m.w, m.h], [36, 36], `36 px: ${JSON.stringify(m)}`); assert.ok(m.shown >= 3, `drawn: ${JSON.stringify(m)}`); assert.equal(m.hue, "213", "Azure"); }
       assert.equal((await x.said("charts")).length, 1, "asked for once");
       assert.deepEqual(x.errors, []);
     } finally { await closeIt(x); }
