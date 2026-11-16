@@ -1025,7 +1025,7 @@ function chatMarkup(){
   const timed=(m,mark=true)=>{const at=Date.parse(m.created_at),line=mark&&simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return line;};
   const latest=S.messages.at(-1),answerable=latest&&latest.role==='assistant'&&Array.isArray(latest.choices)?latest:null;
   // One message as drawn: yours, or a reply. (`bubble` alone: a message that is drawn inside a reply, where it was read.)
-  const bubble=(m,more={})=>messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:renderPipReply,canSend,quote:quoteFor(m,shown),canReply:canReply(),canDownload:S.apiVersion>=43&&!remoteHost,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,undo:canUndoOwn(),openChanges:ownDetailsOpen,undoing:ownUndoing,undoErrors:ownUndoErrors,...more});
+  const bubble=(m,more={})=>messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:renderPipReply,canSend,quote:quoteFor(m,shown),canReply:canReply(),canDownload:S.apiVersion>=43&&!remoteHost,canOpenFiles:canOpenFiles(),activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,undo:canUndoOwn(),openChanges:ownDetailsOpen,undoing:ownUndoing,undoErrors:ownUndoErrors,...more});
   const drawMessage=m=>{
     if(routineFailed(m)){const failed=window.DgcMarkdown?.modelFailure?.(m.error);return timed(m,false)+failedRoutineMarkup(m,postRoutineTitle(m.text),{failure:failed,detail:typeof m.error_detail==='string'&&m.error_detail?(window.DgcMarkdown?.editorAdvice?.(m.error_detail)??m.error_detail):failed?.detail||''});}
     if(failedHidden(m))return timed(m,false)+failedHiddenMarkup(m);
@@ -1540,6 +1540,66 @@ function hydrateMessageImages(){
   }).catch(()=>{}).finally(()=>messageImageFlight.delete(key));
  }
 }
+// ---- a file in a message (Pips API 101): a Pip sends files in its chat, and yours open the same way. The page names
+// the message and the file's number; its host asks DGC where the file is kept, checks it, and opens it, saves a copy,
+// or hands a video's or a sound's bytes to its player here. The page never holds a path.
+const FILES_API=101,MEDIA_AUTO_BYTES=32*1048576;
+const canOpenFiles=()=>S.apiVersion>=FILES_API&&!remoteHost;
+function openMessageFile(key,save=false){
+ const [messageId,index]=String(key||'').split(':');
+ if(!canOpenFiles()||!S.selected||!messageId||!/^\d+$/.test(index||''))return;
+ vscode.postMessage({type:'pipsOpenFile',pip_id:S.selected,message_id:messageId,index:Number(index),...(save?{save:true}:{})});
+}
+// A player per sent video or sound, kept across redraws (its slot is the page's own: data-dom-own) so one that is
+// playing is never reloaded. A small one loads when it is drawn; a large one waits for Play.
+const messageMedia=new Map(),mediaWaiting=new Map();let mediaSeq=0;
+const mediaSize=n=>n<1048576?`${Math.max(1,Math.round(n/1024))} KB`:`${(n/1048576).toFixed(1)} MB`;
+function mediaNote(entry,text){
+ entry.state='error';entry.box.replaceChildren();
+ const note=document.createElement('p');note.className='msg-media-note';note.setAttribute('role','status');note.textContent=text;entry.box.append(note);
+}
+function loadMessageMedia(entry,play=false){
+ if(entry.state!=='idle')return;
+ entry.state='loading';entry.box.classList.add('loading');entry.box.querySelector('[data-media-load]')?.setAttribute('disabled','');
+ const requestId=`pipfile-${++mediaSeq}`,timer=window.setTimeout(()=>{if(mediaWaiting.delete(requestId))mediaNote(entry,`This ${entry.kind==='video'?'video':'sound'} can\u2019t be played here. Open plays it.`);},60000);
+ mediaWaiting.set(requestId,answer=>{
+  window.clearTimeout(timer);entry.box.classList.remove('loading');
+  const data=answer?.data,bytes=data instanceof Uint8Array?data:data instanceof ArrayBuffer?new Uint8Array(data):Array.isArray(data?.data)?Uint8Array.from(data.data):null;
+  if(!bytes||!bytes.length||!new RegExp(`^${entry.kind}/[A-Za-z0-9.+-]{1,60}$`).test(String(answer.mime||''))){mediaNote(entry,/no longer available/i.test(String(answer?.error||''))?`That file is no longer available.`:`This ${entry.kind==='video'?'video':'sound'} can\u2019t be played here. Open plays it.`);return;}
+  entry.url=URL.createObjectURL(new Blob([bytes],{type:answer.mime}));entry.state='ready';
+  const player=document.createElement(entry.kind);player.className=`msg-sent-${entry.kind}`;player.controls=true;player.preload='metadata';if(entry.kind==='video')player.playsInline=true;
+  player.setAttribute('aria-label',`${entry.kind==='video'?'Video':'Sound'}: ${entry.name}`);player.src=entry.url;
+  // A file Chromium has no decoder for (an .mov, an H.265 video): said plainly, with Open still on its card.
+  player.addEventListener('error',()=>mediaNote(entry,`This ${entry.kind==='video'?'video':'sound'} can\u2019t be played here. Open plays it.`),{once:true});
+  entry.box.replaceChildren(player);
+  if(play)void player.play?.().catch(()=>{});
+ });
+ vscode.postMessage({type:'pipsFileData',requestId,pip_id:entry.pip,message_id:entry.message,index:entry.index});
+}
+function hydrateMessageMedia(){
+ for(const slot of document.querySelectorAll('.msg-sent-media[data-message-media]')){
+  const key=slot.dataset.messageMedia,[message,index]=String(key||'').split(':'),kind=slot.dataset.media==='audio'?'audio':'video';
+  if(!message||!/^\d+$/.test(index||''))continue;
+  let entry=messageMedia.get(key);
+  if(!entry){
+   const bytes=Number(slot.dataset.bytes)||0,name=String(slot.dataset.name||'');
+   entry={key,kind,pip:S.selected,message,index:Number(index),name,bytes,state:'idle',url:'',box:document.createElement('div')};
+   entry.box.className=`msg-media-box is-${kind}`;
+   if(bytes>MEDIA_AUTO_BYTES){
+    const button=document.createElement('button');button.type='button';button.className='msg-media-load';button.dataset.mediaLoad=key;button.setAttribute('aria-label',`Play ${name} (${mediaSize(bytes)})`);
+    button.innerHTML='<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M5 3.2v9.6L12.6 8Z"/></svg>';
+    const words=document.createElement('span');words.textContent=`Play \u00b7 ${mediaSize(bytes)}`;button.append(words);
+    button.addEventListener('click',()=>loadMessageMedia(entry,true));
+    entry.box.append(button);
+   }
+   messageMedia.set(key,entry);
+   // (At most a few players are kept: the oldest one's bytes are let go.)
+   if(messageMedia.size>12){const [old,gone]=messageMedia.entries().next().value;if(gone.url)URL.revokeObjectURL(gone.url);gone.box.remove();messageMedia.delete(old);}
+  }
+  if(entry.box.parentNode!==slot)slot.replaceChildren(entry.box);
+  if(entry.state==='idle'&&entry.bytes<=MEDIA_AUTO_BYTES)loadMessageMedia(entry);
+ }
+}
 function openMessageImage(key,save=false){
  const [messageId,index]=String(key||'').split(':');
  if(!S.selected||!messageId||!/^\d+$/.test(index||''))return;
@@ -1674,6 +1734,10 @@ function drawChatQueue(){
   // Steer is a mid-turn update to the reply running now; with none running, the message simply goes.
   steer:S.chatActiveRun&&S.apiVersion>=73?id=>{const item=chatQueue().find(i=>i.id===id);if(item&&chatQueueSendText(item.text,item.marks))setChatQueue(chatQueue().filter(i=>i.id!==id));}:null,
   remove:id=>{setChatQueue(chatQueue().filter(i=>i.id!==id));$('chatText')?.focus();},
+  // Edit (16 Nov): this queue is the page's own, so the message is taken out and given back to the box, its @ marks
+  // where they were. A draft already in the box is asked about first (media/messagequeue.js).
+  edit:id=>{const pip=S.selected,item=chatQueue().find(i=>i.id===id);if(!item)return;setChatQueue(chatQueue().filter(i=>i.id!==id));giveBackToBox(pip,{text:item.text,display_mentions:item.marks});fitChatInput();const box=$('chatText');box?.focus();if(box?.setSelectionRange)box.setSelectionRange(box.value.length,box.value.length);},
+  draft:()=>!!messageWords(draft.chatText),
   copy:(id,text)=>{const item=[...S.chatWaiting,...chatQueue()].find(i=>i.id===id);vscode.postMessage({type:'copy',text:item?.text||text});},
  });
  drawChatTray();
@@ -5563,7 +5627,7 @@ function render() {
   reader?.sync();talkBar?.refresh();voiceBar?.refresh();
   const parts=document.querySelector('.pip-ctx-breakdown');if(parts&&S.chatContext?.breakdown&&window.DgcBreakdown)parts.replaceChildren(window.DgcBreakdown.render(S.chatContext.breakdown));
   for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old!==node&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose)node.replaceWith(old);}
-  observeAvatars();fitChatInput();hydrateMessageImages();hydrateMessageVideos();hydratePluginLogos();sayShown();
+  observeAvatars();fitChatInput();hydrateMessageImages();hydrateMessageVideos();hydrateMessageMedia();hydratePluginLogos();sayShown();
   if(typeof DgcIconActions!=='undefined')DgcIconActions.refresh(root);   // an answer the pointer or the keyboard is still on shows its pill again
   // A card Needs attention opened stays shown as the chat redraws while its drafts and apps load.
   if(cardFlash.selector&&Date.now()<cardFlash.until)for(const el of document.querySelectorAll(cardFlash.selector))el.classList.add('attention-flash');
@@ -7140,6 +7204,11 @@ document.addEventListener('click',event=>{
   if(link){event.preventDefault();const target=window.DgcMarkdown?.linkOf?.(link.dataset);if(target?.kind==='external')vscode.postMessage({type:'openExternal',url:target.target});else if(target?.kind==='file')vscode.postMessage({type:'openFile',path:target.target,line:target.line,endLine:target.endLine});return;}
   const copy=event.target.closest?.('button.copy[data-c]');if(copy){event.preventDefault();try{vscode.postMessage({type:'copy',text:decodeURIComponent(copy.dataset.c)});copy.classList.add('done');copy.title='Copied';copy.setAttribute('aria-label','Copied');copy.innerHTML=transcriptIcon('check');}catch{/* malformed generated data is not copied */}return;}
   // Download on a file's row in a reply (pips-08): the host asks where to save the kept file.
+  // A file in a message (API 101): Save a copy…, or Open (the card, or your own file's chip).
+  const saveFile=event.target.closest?.('button[data-message-file-save]');
+  if(saveFile){openMessageFile(saveFile.dataset.messageFileSave,true);return;}
+  const openFile=event.target.closest?.('button[data-message-file]');
+  if(openFile){openMessageFile(openFile.dataset.messageFile);return;}
   const download=event.target.closest?.('button[data-message-download]');
   if(download&&S.apiVersion>=43&&!remoteHost){openMessageImage(download.dataset.messageDownload,true);return;}
   const photo=event.target.closest?.('img[data-message-image]');
@@ -7859,6 +7928,7 @@ const stopMessages=options.onMessage(message=>{
   if(globalThis.DgcPictureFold?.message(message))return;     // which pictures stay folded, and the setting
   if(message.type==='pipsPluginLogos'){takePluginLogos(message.logos);return;}
   if(message.type==='pipsAppLogos'){takePluginLogos(message.logos,true);return;}
+  if(message.type==='pipsFileData'){const done=mediaWaiting.get(message.requestId);if(done){mediaWaiting.delete(message.requestId);done(message);}return;}
   if(message.type==='pipsFiles'){projectFiles=(Array.isArray(message.files)?message.files:[]).filter(f=>record(f)&&typeof f.label==='string').slice(0,600);chatPicker?.refresh();return;}
   // Settings or the Router changed: Default may run somewhere else now. A list already read is read again.
   // A Pip was marked read somewhere else (its pill on the home, a card in a Work chat): the counts are read again.

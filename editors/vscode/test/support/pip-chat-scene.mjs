@@ -173,7 +173,17 @@ export const host = (opts) => `(${function (PIP, opts) {
     say("u1", "user", "Does the invoice total in this screenshot match what billing.py works out? The rate card is attached.", "1", 30, { images: [{ index: 0, mime: "image/png", bytes: 734003 }], files: [{ index: 0, name: "rate-card.csv", bytes: 18432 }] }),
     say("a1", "assistant", "It doesn't. The screenshot shows a total of 1,180.00, and `billing.py` rounds each line before it adds tax, which gives 1,179.96 for the same rate card. The rounding is on line 212.", "1", 29),
   ];
-  const messages = opts.empty ? [] : opts.details ? (project ? detailsProject : detailsChat) : project ? projectChat : opts.ticks ? ticksChat : personal;
+  // opts.sent: a Pip sends files in its chat, like a person (Pips API 101; pass api: 101, convs: true and details: true
+  // for its picture). You sent a file with your message; the Pip's reply carries a picture, a video and a zip it sent
+  // from its computer ("audio": a voice note too; "big": the video is larger than the page loads by itself).
+  // opts.sentMedia {index: base64}: the bytes the host hands the page for a video or a sound (none: it says it can't).
+  const sentChat = [
+    say("u1", "user", "Record the checkout flow and send me the recording, a screenshot of the last step and the logs. My notes are attached.", "1", 24, { files: [{ index: 0, name: "checkout-notes.md", bytes: 2048, mime: "text/markdown" }] }),
+    say("a1", "assistant", "Here they are: the recording of the checkout, a screenshot of the last step, and the logs zipped.", "1", 22, { images: [{ index: 0, mime: "image/png", bytes: 412000 }],
+      files: [{ index: 0, name: "checkout-flow.webm", bytes: opts.sent === "big" ? 96 * 1048576 : 16154, mime: "video/webm" }, { index: 1, name: "checkout-logs-2026-11-16.zip", bytes: 4404019, mime: "application/zip" },
+        ...(opts.sent === "audio" ? [{ index: 2, name: "voice-note.wav", bytes: 8044, mime: "audio/x-wav" }] : [])] }),
+  ];
+  const messages = opts.empty ? [] : opts.sent ? sentChat : opts.details ? (project ? detailsProject : detailsChat) : project ? projectChat : opts.ticks ? ticksChat : personal;
   // opts.said: more messages after those, each {role, text} (a prompt with links in it, a reply with links).
   (opts.said || []).forEach((m, i) => messages.push(say("x" + i, m.role, m.text, "8", Math.max(1, 6 - i))));
   // opts.reply: one more prompt and the Pip's answer to it, as given (a reply with code blocks, say).
@@ -440,6 +450,9 @@ export const host = (opts) => `(${function (PIP, opts) {
       update_pip_routine: (r) => { const found = routines.find((v) => v.id === r.routine_id); state.routines.push(r.changes); if ("conversation_id" in r.changes) { if (r.changes.conversation_id) found.conversation_id = r.changes.conversation_id; else delete found.conversation_id; } return { routine: found }; },
     });
   }
+  // (opts.sent runs at Pips API 101: what a chat asks from API 92 on is answered with nothing to show.)
+  if (opts.sent) { answers.get_pip_goal ||= () => ({ pip_id: PIP, goal: null }); answers.list_pip_project_changes ||= () => ({ pip_id: PIP, changes: [] });
+    answers.list_pip_fixes ||= () => ({ pip_id: PIP, workspace_id: W, fixes: [] }); }
   // (opts.details: a picture of a message is a small drawn one; what a send brought is kept, by count, in
   // window.__brought, and comes back on its message as DGC lists it.)
   if (opts.details) {
@@ -752,6 +765,10 @@ export const host = (opts) => `(${function (PIP, opts) {
       const asked = opts.logos && (m?.type === "pipsPluginLogos" ? m.plugins : m?.type === "pipsAppLogos" ? m.apps : null);
       if (asked) { const known = opts.logos[m.type === "pipsPluginLogos" ? "plugins" : "apps"] || {};
         setTimeout(() => window.postMessage({ type: m.type, logos: Object.fromEntries(asked.map((id) => [id, known[id] || ""])) }, "*"), opts.logosAfter || 1); }
+      // A sent file's bytes for its player (opts.sent): answered as the host does, the bytes or why not.
+      if (m?.type === "pipsFileData") { const b64 = opts.sentMedia?.[m.index], file = messages.find((v) => v.id === m.message_id)?.files?.find((f) => f.index === m.index);
+        const bytes = b64 ? Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)) : null;
+        setTimeout(() => window.postMessage(bytes && file ? { type: "pipsFileData", requestId: m.requestId, mime: file.mime, data: bytes, bytes: bytes.length } : { type: "pipsFileData", requestId: m.requestId, error: "That file is no longer available." }, "*"), opts.answerAfter || 1); }
       return; }
     const make = answers[m.request.type];
     if (!make) window.__unanswered.push(m.request.type);

@@ -128,8 +128,27 @@
 
   // ---- scrolling: follow the reply while the reader is at the bottom
   let pinned = true;
-  scroller.addEventListener("scroll", () => { pinned = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48; });
-  const follow = () => { if (pinned) scroller.scrollTop = scroller.scrollHeight; };
+  // Reading back without losing the end, as in Work (media/main.js renderToLatest) and a Pip's chat: Latest shows only
+  // while you are away from the end (Work's 60px), says New once something arrived that you haven't seen, and a click
+  // goes to the end and puts the keyboard back in the box.
+  const toLatest = $("cd-to-latest"), LATEST_AWAY_PX = 60;
+  let unread = false;
+  function paintLatest() {
+    if (!toLatest) return;
+    const away = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight >= LATEST_AWAY_PX && !document.body.classList.contains("cd-blank");
+    if (!away) unread = false;
+    toLatest.hidden = !away;
+    toLatest.classList.toggle("unread", away && unread);
+    $("cd-to-latest-label").textContent = away && unread ? "New" : "Latest";
+    const title = away && unread ? "ChatDGC has written more since you scrolled up. Jump to it" : "Jump to the newest message";
+    toLatest.title = title; toLatest.setAttribute("aria-label", title);
+  }
+  /** Something new was written at the end: if you're reading back, the pill says so. */
+  const noteNew = () => { if (!pinned) unread = true; };
+  scroller.addEventListener("scroll", () => { pinned = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48; paintLatest(); });
+  const follow = () => { if (pinned) scroller.scrollTop = scroller.scrollHeight; paintLatest(); };
+  if (toLatest) toLatest.addEventListener("click", () => { pinned = true; unread = false; scroller.scrollTop = scroller.scrollHeight; paintLatest(); input.focus(); });
+  if (typeof ResizeObserver === "function") new ResizeObserver(() => paintLatest()).observe(scroller);
   // An open thinking box scrolls on its own (wheel, trackpad, or the keys once it has focus), and follows its words
   // while it's at its end. Moved off its end by the reader, it stays where they put it, and so does the chat: the
   // reply going on below doesn't pull what they're reading away. At its end, the wheel goes on to the chat as usual.
@@ -4606,7 +4625,7 @@
         const saved = Object.keys(state.draftEdit).filter((k) => k.startsWith(`${message.id}\u0000`) && state.draftEdit[k].saving);
         for (const k of saved) delete state.draftEdit[k];
         if (saved.length) announce("Draft saved.");
-        if (message.role === "user") { pinned = true; render(); } else update(message.id);
+        if (message.role === "user") { pinned = true; render(); } else { if (at < 0) noteNew(); update(message.id); }
         voiceMode?.check(state.busy);
         return;
       }
@@ -4767,6 +4786,7 @@
         if (msg.text || msg.thinking) delete message.waiting;      // the model has started
         message.text = (message.text || "") + (msg.text || "");
         message.thinking = (message.thinking || "") + (msg.thinking || "");
+        if (msg.text || msg.thinking) noteNew();
         update(message.id);
         return;
       }

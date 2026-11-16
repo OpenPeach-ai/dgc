@@ -67,7 +67,8 @@ const TO_EDITOR: Record<string, Fix> = {
   chat_change: (e, to) => field(e, "root", to),
   image: (e, to) => field(e, "path", to),
   // A Pip chat's kept photo, read by the host itself (get_pip_message_image as_file, Pips API 52).
-  pips_result: (e, to) => { if (e.command === "get_pip_message_image") { field(e.result, "path", to); } },
+  // (And a file in a Pip's chat, which the host opens, saves or hands to a player: get_pip_message_file, API 101.)
+  pips_result: (e, to) => { if (e.command === "get_pip_message_image" || e.command === "get_pip_message_file") { field(e.result, "path", to); } },
   plugin_operation: (e, to) => field(e, "path", to),
   skill_package: (e, to) => field(e, "path", to),
   plugin_catalog: (e, to) => each(e.items, (i) => field(i, "logo_file", to)),

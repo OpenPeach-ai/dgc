@@ -400,7 +400,7 @@ test("the pill's hover label follows its state: agents ending under the pointer 
       && !document.getElementById("hover-tip").hidden, null, { timeout: 10000 });
     const after = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
       tip: document.getElementById("hover-tip").textContent, text: document.getElementById("agents-pill").innerText.trim() }));
-    assert.deepEqual(after, { hidden: false, tip: "No sub-agents working · Click to open the agent map", text: "0" },
+    assert.deepEqual(after, { hidden: false, tip: "No sub-agents working · Click to open the agent map", text: "" },
       "the pill stays for the whole chat, counting none working");
   } finally { await page.close(); }
 });

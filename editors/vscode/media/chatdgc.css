@@ -112,7 +112,7 @@ body.cd-blank .cd-fine { display: none; }
 
 .cd-msg { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 .cd-user { align-items: flex-end; gap: 2px; }
-.cd-bubble { max-width: min(85%, 640px); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-2xl);
+.cd-bubble { max-width: min(85%, 640px); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-bubble, 10px);
   background: var(--bubble); color: var(--text);
   font: var(--w-reg) var(--t-chat)/1.6 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A link you sent: a link with its site's favicon (media/mentions.js, "links"), in the quiet colour a sent mark has
@@ -246,7 +246,7 @@ body.cd-blank .cd-fine { display: none; }
 .cd-versions-count { min-width: 34px; text-align: center; }
 /* Editing a message you sent. */
 .cd-edit { display: flex; flex-direction: column; gap: var(--sp-2); width: min(85%, 640px); padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--hair-strong); border-radius: var(--r-2xl); background: var(--box); }
+  border: 1px solid var(--hair-strong); border-radius: var(--r-bubble, 10px); background: var(--box); }   /* (it stands where the bubble stood: the bubble's corner) */
 .cd-edit-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 .cd-edit-cancel { padding: 2px var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--btn-r, 6px); background: transparent;
   color: var(--text); font: var(--w-semi) var(--t-xs)/1.6 var(--sans); cursor: pointer; }

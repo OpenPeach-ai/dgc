@@ -902,7 +902,7 @@
     // Under the name: the words a search found, or what it is doing now. Running with no window (a reload, a closed
     // window or tab) is picked up where it is by opening it.
     const sub = el("span", "session-sub");
-    if (typeof item.match === "string" && item.match) { sub.classList.add("session-match"); sub.textContent = item.match; }
+    if (typeof item.match === "string" && item.match) { sub.classList.add("session-match"); sub.textContent = plainPreview(item.match, { code: true }) || item.match; }
     else if (item.waiting === true) { sub.classList.add("session-waiting"); sub.textContent = "Wants your okay"; }
     else {
       sub.textContent = [item.windowless ? "Running, no window" : running ? "Running" : item.open ? "Open in a tab" : "", plural(count, "message")].filter(Boolean).join(" · ");
@@ -1416,9 +1416,22 @@
     return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: new Date(at).getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
   }
   /** The last message's words without its Markdown: a table's pipes, emphasis marks and link targets. */
-  function plainPreview(text) {
-    return String(text || "").replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_#>|~]+|-{3,}/g, " ")
+  // A row's second line in plain words: never Markdown's marks, and never the source of something the chat draws. A
+  // chart's block read `chart {"type": "bar", "t…` in the chat list (C10, user test 15 Nov) and a Work search's words
+  // came with their links and backticks (W34). A block is named by its kind; with `code` (what a search found, where
+  // the words searched for may be inside one) only its fence goes. An underscore inside a name and a lone star are
+  // text, not emphasis.
+  const PREVIEW_BLOCK = { chart: "chart", mermaid: "diagram", widget: "widget", html: "widget", svg: "picture", math: "formula", latex: "formula" };
+  function plainPreview(text, { code = false } = {}) {
+    const said = String(text || "")
+      .replace(/```\s*([A-Za-z0-9_+-]*)([\s\S]*?)(?:```|$)/g, (_, kind, body) => (code ? ` ${body} ` : ` (${PREVIEW_BLOCK[kind.toLowerCase()] || "code"}) `))
+      .replace(/!?\[([^\]]*)\]\([^)\s]*(?:\)|$)/g, "$1")
+      .replace(/(\*\*|__)(?=\S)([^*_]*?\S)\1/g, "$2").replace(/(^|[\s(])([*_])(?=[^\s*_])([^*_]*?[^\s*_])\2(?=[\s).,;:!?]|$)/g, "$1$3")
+      .replace(/[`~]+|(^|\s)[#>|]+(?=\s)|-{3,}/g, "$1 ")
       .replace(/\s+/g, " ").trim();
+    // A reply that is only a chart: "Chart".
+    const only = /^\(([a-z]+)\)$/.exec(said);
+    return only ? only[1][0].toUpperCase() + only[1].slice(1) : said;
   }
   function renderChats(msg) {
     const section = $("chats-home"), list = $("chats-list"), status = $("chats-status"), more = $("chats-more");
@@ -1490,7 +1503,7 @@
     if (answering) bit("chat-state", "Answering"); else if (openChats.has(item.id)) bit("chat-state", "Open in a tab");
     // (A chat inside a project is the same row as any chat, asked 13 Nov: its mark, its last words, its age and its
     // actions. It had neither a mark nor its words.)
-    const words = plainPreview(typeof item.match === "string" && item.match ? item.match : item.preview);
+    const words = typeof item.match === "string" && item.match ? plainPreview(item.match, { code: true }) : plainPreview(item.preview);
     if (words) bit("chat-preview", words);
     main.append(name);
     if (sub.childElementCount) main.append(sub);
@@ -2163,6 +2176,8 @@
     window.DgcMessageQueue?.render(queueList, items, {
       steer: steerQueuedLive ? (id) => steerQueuedNow([queuedPrompts.get(id)?.node]) : null,
       remove: queueEditLive ? removeQueued : null,
+      edit: queueEditLive ? editQueued : null,
+      draft: () => !!(composerText().trim() || attachments.length),
       reorder: queueEditLive ? reorderQueued : null,
       copy: (id, text) => vscode.postMessage({ type: "copy", text: queuedPrompts.get(id)?.text ?? text }),
     });
@@ -2180,6 +2195,50 @@
     renderQueued();
     vscode.postMessage({ type: "queueRemove", id });
   }
+  // Edit: the message goes back to the box (16 Nov). The queue is the backend's, so it is asked to take the message out
+  // first, as Remove asks (queue_remove), and only its word that it is out (queue_changed) puts the words, attachments,
+  // @ marks and Artifact choice back in the box. If the message started first, the page says so and the box is left
+  // alone. A draft in the box is asked about before this is called (media/messagequeue.js); one typed while DGC was
+  // answering is kept, and the message waits in the transcript as "not sent" with its Restore.
+  const queueEdits = new Map();          // request id -> {started}: Edit was pressed and DGC hasn't answered yet
+  function editQueued(id) {
+    const entry = queuedPrompts.get(id);
+    if (!entry || entry.removing) return;
+    entry.removing = true; entry.editing = true;
+    // What the box held when Edit was pressed: that draft was asked about, so it may be replaced.
+    entry.replaces = composerText();
+    queueEdits.set(id, { started: false });
+    renderQueued();
+    vscode.postMessage({ type: "queueRemove", id });
+  }
+  function queuedBackToBox(id, entry) {
+    queueEdits.delete(id);
+    const typed = composerText();
+    if ((typed.trim() || attachments.length) && typed !== entry.replaces) {
+      // Something was typed while DGC took the message out: nobody agreed to lose that. The message is kept, unsent.
+      queuedPrompts.set(id, entry); entry.removing = false; entry.editing = false;
+      if (!entry.node.isConnected) log.appendChild(entry.node);
+      rejectPrompt(id, true);
+      return;
+    }
+    // One step of the box's history, so Undo brings back a draft this replaced.
+    recordComposerEdit(() => {
+      attachments.length = 0;
+      setComposerValue(entry.text); attachments.push(...(entry.attachments || []).map((a) => ({ ...a })));
+      restoreDraftParts(entry.parts, entry.text);
+      setGoalDraftArmed(entry.goal === true);
+    });
+    if (outputOffered && entry.output && entry.output !== "auto" && offeredOutputs().some(([value]) => value === entry.output)) setOutput(entry.output);
+    renderAtts(); onInput(); persistDraft(); input.focus();
+    speak("The queued message is back in the box.");
+  }
+  // The message's own turn started before DGC read the removal: said once, and the box is left as it is.
+  function queueEditStarted(id) {
+    const edit = queueEdits.get(id);
+    if (!edit || edit.started) return;
+    edit.started = true;
+    sysLine("It already started: that message is being answered now, so it stays as sent.");
+  }
   function reorderQueued(order) {
     arrangeQueued(order);
     renderQueued();
@@ -2195,6 +2254,7 @@
   function queueChanged(ev) {
     const gone = typeof ev.removed === "string" ? queuedPrompts.get(ev.removed) : null;
     if (gone) { queuedPrompts.delete(ev.removed); gone.node?.remove(); }
+    if (gone?.editing) queuedBackToBox(ev.removed, gone);
     if (Array.isArray(ev.order)) arrangeQueued(ev.order.filter((id) => typeof id === "string"));
     queuedCount = Number.isInteger(ev.count) ? ev.count : queuedPrompts.size;
     renderQueued();
@@ -3837,9 +3897,26 @@
       unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== id);
       renderAtts(); onInput(); persistDraft(); input.focus();
     };
-    const retry = el("button", "act", confirmed ? "Restore unsent message" : "Review delivery before restoring"); retry.type = "button";
+    // A message that never went no longer says "queued for the next turn · Steer now" under it: there is no turn to
+    // steer (W36, user test 15 Nov). It says it was not sent.
+    if (confirmed && pending.node.querySelector(":scope > .steer-note")) {
+      setSteerState(pending.node, "");
+      const note = el("div", "steer-note"); note.textContent = "Not sent"; pending.node.appendChild(note);
+    }
+    const retry = el("button", "act", confirmed ? "Restore" : "Review delivery before restoring"); retry.type = "button";
+    if (confirmed) { retry.title = "Put this message back in the box"; retry.setAttribute("aria-label", "Restore unsent message"); }
     retry.onclick = restore; pending.node.appendChild(retry);
-    if (confirmed && (!pending.session || pending.session === draftSession) && !composerText() && !attachments.length) restore();
+    if (confirmed && (!pending.session || pending.session === draftSession) && !composerText() && !attachments.length) {
+      restore();
+      // After your own Stop the message is back in the box, whole, and that is all there is to say: its bubble in the
+      // transcript was a second copy that read as half sent. (A backend that went away keeps the bubble: its line
+      // says what happened to the messages it never ran.)
+      if (stopping()) {
+        pending.node.remove();
+        returnedNodes.delete(id);
+        const at = returnedPrompts.findIndex((row) => row.node === pending.node); if (at >= 0) returnedPrompts.splice(at, 1);
+      }
+    }
     else {
       unconfirmedDrafts.push({ id, session: pending.session || draftSession, rejected: confirmed,
         draft: { text: pending.text, attachments: pending.attachments, start: 0,
@@ -5875,12 +5952,22 @@
     if (!replaying) undockAskCard("turn_end");
     // A question about a mod DGC wrote is not the turn's: DGC keeps it open after the turn, until it is answered.
     turn.block.querySelectorAll(".card:not(.resolved):not(.mod-offer)").forEach(resolveCard);
+    // (A step your own Stop ended is not an "issue" on its group's row: it is marked, and its row is drawn again.)
+    const byStop = reason === "cancelled" && stopping() && !replaying, stoppedAt = stopAsked;
     turn.block.querySelectorAll('.tool[data-status="running"]').forEach((card) => {
       if (outlivesTheTurn(card) || reason === "moved") return;   // moved: it is still running, elsewhere
       setToolStatus(card, "stopped");
+      if (byStop) card.dataset.userStopped = "1";
       const dot = card.querySelector(".dot");
       if (dot) dot.className = "dot deny";
     });
+    if (byStop) {
+      for (const card of turn.block.querySelectorAll('.tool:is([data-status="failed"], [data-status="denied"], [data-status="stopped"])')) {
+        if ((card._statusAt || 0) >= stoppedAt) card.dataset.userStopped = "1";
+        if (card.dataset.userStopped) refreshToolGroup(card.closest(".tool-group"));
+      }
+    }
+    if (reason !== "moved") stopAsked = 0;
     clearInterval(turn.timer);
     clearTimeout(turn.recoverTimer);
     // A turn whose last act was a tool call has no prose after it to retire the group, so fold it
@@ -5923,6 +6010,10 @@
       // step keeps its own tiles. Before, a picture was three folds deep and the reply only named its path.
       const pictures = madePictures(turn.block);
       if (pictures) box.appendChild(foldPictures(pictures, turn.block));
+      // What this turn made (a document, a deck, a sheet: its card) goes under the reply too. The model is told its
+      // artifact "shows as a card under your reply" and says so; the card was drawn where the tool ran, above the
+      // reply's words (W25, user test 15 Nov). A turn that didn't finish keeps its cards where they are.
+      if (complete) for (const made of turn.block.querySelectorAll(":scope > .artifact-card")) box.appendChild(made);
       // The CLI's count of what this turn's recovery point restores, when it sent one (turn_files); else the
       // diffs this turn's own edit tools drew, as an older CLI (or a subscription engine's turn) leaves it.
       const summary = complete ? turnSummaryCard(turn.files ? turn.files.edits : turn.edits, turn.prompt, turn.files) : null;
@@ -6880,7 +6971,7 @@
     }
     group.classList.remove("agent-owned");
     const running = cards.filter(card => card.dataset.status === "running");
-    const failures = cards.filter(card => ["failed", "denied", "stopped"].includes(card.dataset.status));
+    const failures = cards.filter(card => ["failed", "denied", "stopped"].includes(card.dataset.status) && card.dataset.userStopped !== "1");
     const summary = group.querySelector(".tool-group-label");
     group.classList.toggle("running", running.length > 0);
     // Running, the header says what is happening in the present tense ("Running a command",
@@ -7183,6 +7274,7 @@
   function setToolStatus(card, status) {
     const value = String(status || "");
     card.dataset.status = value;
+    card._statusAt = Date.now();          // (when: a step that ended after you pressed Stop was ended by it)
     const label = card.querySelector(".tool-status");
     if (label) label.textContent = value;
     const copy = toolCopy(card.dataset.toolName || "");
@@ -9400,6 +9492,12 @@ function permissionChoices(ev) {
         if (ev.ok) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
           sessionResetHooks("rewound");
+          // A line that stays, under what is left of the conversation (the history DGC sends next goes above it): a
+          // rewind to the first turn left an empty session and nothing to say why (W30, user test 15 Nov).
+          if (!replaying) {
+            const files = Number(ev.files_restored) || 0;
+            sysLine(`\u21a9 Rewound: the conversation is back to an earlier point${files ? `, and DGC put ${files === 1 ? "1 file" : `${files} files`} back as ${files === 1 ? "it was" : "they were"} then` : ""}. What came after it was taken back.`);
+          }
         }
         break;
       case "session":
@@ -9476,7 +9574,7 @@ function permissionChoices(ev) {
           // backend carries on turn_start. Never by position: a queued custom slash command, a goal
           // cycle or a continuation has no id of the user's, and popping the head for one of those
           // silently discarded a message the user could otherwise restore after a backend exit.
-          if (typeof ev.request_id === "string" && ev.request_id) queuedPrompts.delete(ev.request_id);
+          if (typeof ev.request_id === "string" && ev.request_id) { queueEditStarted(ev.request_id); queuedPrompts.delete(ev.request_id); }
           renderQueued();
         }
         break;
@@ -9530,7 +9628,7 @@ function permissionChoices(ev) {
           rejectPrompt(ev.request_id);
           if (wasQueued) queuedCount = Math.max(0, queuedCount - 1);
           renderQueued();
-          if (ev.message) sysLine(ev.message);
+          if (ev.message && !stopping()) sysLine(ev.message);
         } else {
           if (pending?.node) {
             pending.node.querySelector(".role").textContent = ev.state === "applied" ? "you · steering" : "you · queued";
@@ -9846,12 +9944,18 @@ function permissionChoices(ev) {
             noteBox.hidden = false;
             c.querySelectorAll('.btns button:not([data-d="deny"])').forEach((x) => { x.hidden = true; });
             b.textContent = "Deny without a note";
+            b.classList.add("wide");            // the wide box: in the usual one its words were cut ("Deny without…")
             b.setAttribute("data-no-note", "");
             const send = el("button", "act primary", "Send note");
             send.type = "button"; send.dataset.d = "deny"; send.setAttribute("data-send-note", "");
             send.onclick = () => answer(send);
             b.after(send);
             noteBox.focus();
+            // In the dock a tall card (an edit's diff) scrolls inside it, and the note opened below what showed: its
+            // box and both buttons were out of sight (W10, user test 15 Nov). The end of the card comes into view,
+            // now and once the box has grown to its focused height.
+            const showNote = () => { const dock = c.closest(".approval-dock"); if (dock && c.dataset.deny && !c.classList.contains("resolved")) dock.scrollTop = dock.scrollHeight; };
+            showNote(); requestAnimationFrame(showNote); setTimeout(showNote, 180);
             return;
           }
           if (b.hasAttribute("data-edit-prompt")) {
@@ -10309,6 +10413,8 @@ function permissionChoices(ev) {
           appendConversationContent(line);
           break;
         }
+        // The turn's own row says "Stopped for 13s": not "turn cancelled" as a line under it as well.
+        if (turn && String(ev.message || "") === "turn cancelled") break;
         sysLine(ev.message); break;
       case "mode_changed": if (ev.message) sysLine(ev.message); break;
       case "permission_resolved":
@@ -10322,7 +10428,14 @@ function permissionChoices(ev) {
         // that did not take): a refusal of its polling must not fill the chat with lines.
         if (["get_background_output", "list_background_shells", "stop_background_shell"].includes(ev.command)
             || (ev.command === "agent_control" && String(ev.request_id || "").startsWith("agent-stop-"))) break;
-        if (ev.command === "queue_remove") { for (const entry of queuedPrompts.values()) entry.removing = false; renderQueued(); if (ev.message) sysLine(ev.message); break; }
+        if (ev.command === "queue_remove") {
+          // An Edit that was refused: the message started first (or is about to). Said once, in DGC's own words.
+          const edits = [...queueEdits.keys()];
+          for (const id of edits) queueEditStarted(id);
+          queueEdits.clear();
+          for (const entry of queuedPrompts.values()) { entry.removing = false; entry.editing = false; }
+          renderQueued(); if (ev.message && !edits.length) sysLine(ev.message); break;
+        }
         if (ev.command === "steer_queued") { steerQueuedRefused(); sysLine(ev.message || "That message stays queued for the next turn."); break; }
         if (ev.command === "start_pip_fix" || ev.command === "undo_pip_fix") { pipFixRefused(ev); break; }
         if (ev.command === "continue_agent") break;    // the box that asked says why (agent_continue_state)
@@ -10352,7 +10465,8 @@ function permissionChoices(ev) {
           if (card.dataset.requestId === String(ev.id)) resolveCard(card, "Closed without a decision");
         });
         askExpired(ev);
-        sysLine("Input request closed. No unanswered choice was selected."); break;
+        if (!stopping()) sysLine("Input request closed. No unanswered choice was selected.");
+        break;
       case "compacted": {
         compacting = false; lastCompaction = ev;
         contextState = { ...contextState, used: ev.after_tokens, size: ev.context_size };
@@ -10440,7 +10554,12 @@ function permissionChoices(ev) {
   }
   // The messages queued behind the run stay in the restore set: the backend answers a cancel by
   // handing each one back ("returned"), and that is what marks them not sent and restorable.
-  function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
+  // `stopAsked`: when you pressed Stop on the turn that is running. What DGC then says of that Stop (each queued message
+  // handed back, the open request closed, "turn cancelled") is already on screen as the turn's own "Stopped for 13s" and
+  // the message back in the box: said again as lines, a Stop left six of them (W36, user test 15 Nov).
+  let stopAsked = 0;
+  const stopping = () => stopAsked > 0 && Date.now() - stopAsked < 60000;
+  function doStop() { stopAsked = Date.now(); queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   $("goal-toggle").onclick = () => vscode.postMessage({
     type: goalState.status === "active" ? "pauseGoal" : "resumeGoal",
   });
@@ -10727,8 +10846,10 @@ function permissionChoices(ev) {
     // What a restore puts back: the typed words and the chips. The pastes are already chips, so
     // restoring `text` (which has them appended) as well would put every paste back twice.
     const sentAt = Date.now();
+    // (parts and output: the @ marks where they stood and the Artifact choice, for Edit on a queued message.)
     pendingPrompts.set(requestId, { text: pastes.length ? kept : text,
-      attachments: attachments.map(({ fromPill, ...rest }) => rest), node: m, session: draftSession, sentAt });
+      attachments: attachments.map(({ fromPill, ...rest }) => rest), node: m, session: draftSession, sentAt,
+      parts: draftParts(), output: outputOffered ? outputPick : "auto" });
     // A message sent while a turn runs is folded into that turn, so no turn start ever stamps it: it gets its time
     // now, as every prompt does (reported 25 Oct: steered prompts had none).
     if (streaming && delivery === "steer") stampPrompt(m, sentAt);
@@ -11279,7 +11400,7 @@ function permissionChoices(ev) {
       if (e.key === "ArrowDown") { e.preventDefault(); movePop(1); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); movePop(-1); return; }
       if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); choosePop(popIdx); return; }
-      if (e.key === "Escape") { e.preventDefault(); hidePop(); return; }
+      if (e.key === "Escape") { e.preventDefault(); hidePop(); dropButtonSlash(); return; }
     }
     if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); cycleMode(); return; }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(e.altKey ? "queue" : undefined); }
@@ -11621,9 +11742,19 @@ function permissionChoices(ev) {
     am.querySelector("button")?.focus();
   }
   $("btn-add").onclick = toggleAddMenu;
+  // The slash the commands button typed, while it is still only that (W3, user test 15 Nov: Escape closed the menu and
+  // left the "/" in the box). {at, text}; forgotten once anything is typed after it, or the caret moves off it.
+  let buttonSlash = null;
+  function dropButtonSlash() {
+    const typed = buttonSlash; buttonSlash = null;
+    if (!typed) return;
+    const [from, to] = composerSelection();
+    if (from === to && to === typed.at + typed.text.length && composerText().slice(typed.at, to) === typed.text) { editComposer(typed.at, to, ""); onInput(); }
+  }
   function openCommandMenu() {
     const caret = composerSelection()[1];
     const prefix = caret && !/\s/.test(composerText()[caret - 1]) ? " /" : "/";
+    buttonSlash = { at: caret, text: prefix };
     editComposer(caret, caret, prefix);
     // Focus FIRST, then place the caret. Focusing an editing host moves the selection to its
     // start, so the old order -- harmless when the element was a textarea, whose focus does not
@@ -13579,7 +13710,7 @@ function permissionChoices(ev) {
     // pipsProjectFolder: the Project Folder choice changed; pipsFolderPicked: the folder the editor's picker gave (Add a folder…).
     // pipsChatDraft, pipsChatChanged: a Pip's chat is open in another page too (its editor tab, the Pips tab): what was
     // typed there, and that something was sent or answered there (15 Nov, "Open in editor").
-    if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked", "pipsChatDraft", "pipsChatChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
+    if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked", "pipsChatDraft", "pipsChatChanged", "pipsFileData"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     // pipSetupChanged: a new-Pip card was created or turned down somewhere else; this chat's copy and the Pips page read it again.
     if (msg.type === "pipSetupChanged") { pipSetupCards?.receive(msg); for (const listener of pipsListeners) listener(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
@@ -15150,10 +15281,12 @@ function permissionChoices(ev) {
   }
   // The pill says what runs NOW: the agents working (Claude Code's counting rule) and the background
   // tasks the map lists, counted from the map's own list so the two never disagree -- "2 agents",
-  // "2 tasks", "1 agent · 2 tasks". Once the chat has had an agent the pill stays for the rest of it
-  // -- "0 agents" when nothing runs -- so the map is always one click away; a chat that never had one
-  // shows it only while a task runs (/agents still opens the map). With no task running it reads as
-  // it always did. A narrow footer keeps only the total running (`.agents-short`) beside the dot.
+  // "2 tasks", "1 agent · 2 tasks". Once the chat has had an agent the pill stays for the rest of it,
+  // so the map is always one click away; a chat that never had one shows it only while a task runs
+  // (/agents still opens the map). With nothing running it is the map's door and says so, "Agent map",
+  // with its quiet ring: it used to count nothing, "0 sub-agents", for the rest of the session (W27, user
+  // test 15 Nov). A narrow footer keeps only the total running (`.agents-short`) beside the dot, and
+  // the ring alone when that is none.
   function renderAgentsPill() {
     const picker = $("agents-picker"), pill = $("agents-pill");
     if (!picker || !pill) return;
@@ -15168,7 +15301,8 @@ function permissionChoices(ev) {
     picker.hidden = false;
     const n = c.active;
     const state = c.waiting > 0 ? "waiting" : n > 0 || tasks > 0 ? "running" : "idle";
-    const label = [n > 0 || !tasks && !previews ? agentPlural(n, "sub-agent") : "",
+    const nothing = state === "idle" && !previews;         // nothing runs at all: the pill is the map's door
+    const label = nothing ? "Agent map" : [n > 0 || !tasks && !previews ? agentPlural(n, "sub-agent") : "",
       tasks ? agentPlural(tasks, "task") : "", previews ? agentPlural(previews, "preview") : ""].filter(Boolean).join(" · ");
     const inBackground = tasks > 0 ? `${agentPlural(tasks, "background task")} running` : "";
     const said = state === "waiting"
@@ -15178,7 +15312,7 @@ function permissionChoices(ev) {
     const title = [...said.filter(Boolean), previews ? `${agentPlural(previews, "live preview")} serving a page` : "", "Click to open the agent map"].filter(Boolean).join(" · ");
     pill.dataset.state = state;
     agentsSetText(pill.querySelector(".agents-text"), label);
-    agentsSetText(pill.querySelector(".agents-short"), String(n + tasks + previews));
+    agentsSetText(pill.querySelector(".agents-short"), nothing ? "" : String(n + tasks + previews));
     pill.querySelector(".agents-need").hidden = state !== "waiting";
     hoverTip.retitle(pill, title);
     pill.setAttribute("aria-label", `${label} · ${title}`);
@@ -17302,6 +17436,28 @@ function permissionChoices(ev) {
     if (!card._images?.length && !card._imagesOmitted) return;
     renderImageRow(card);
   }
+  // The strip of a step's pictures is one row that scrolls sideways. A plain mouse wheel over it moves it that way
+  // while it still can, and at its end the wheel is the page's again (16 Nov: the wheel scrolled the page, and only a
+  // trackpad, Shift+wheel or the scrollbar moved the strip). An edge with pictures hidden beyond it fades.
+  function fitImageStrip(strip) {
+    const over = strip.scrollWidth > strip.clientWidth + 1;
+    strip.classList.toggle("fade-start", over && strip.scrollLeft > 1);
+    strip.classList.toggle("fade-end", over && strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1);
+  }
+  function wireImageStrip(strip) {
+    strip.addEventListener("scroll", () => fitImageStrip(strip), { passive: true });
+    strip.addEventListener("wheel", (e) => {
+      if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;       // a sideways wheel is the browser's own
+      const room = e.deltaY > 0 ? strip.scrollWidth - strip.clientWidth - strip.scrollLeft : strip.scrollLeft;
+      if (room <= 1) return;                                 // at this end: the page scrolls on
+      e.preventDefault();
+      // (A wheel that counts in lines or pages, not pixels: Firefox's, and some mice.)
+      const step = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * strip.clientWidth : e.deltaY;
+      strip.scrollLeft += Math.sign(step) * Math.min(Math.abs(step), room);
+      fitImageStrip(strip);
+    }, { passive: false });
+    if (typeof ResizeObserver === "function") new ResizeObserver(() => fitImageStrip(strip)).observe(strip);
+  }
   function renderImageRow(card) {
     const body = card.querySelector(":scope > .body");
     if (!body) return;
@@ -17310,6 +17466,7 @@ function permissionChoices(ev) {
       row = el("ul", "tool-images");
       row.setAttribute("role", "list"); row.setAttribute("aria-label", "Images from this step");
       body.prepend(row);
+      wireImageStrip(row);
     }
     row.textContent = "";
     const records = card._images || [];
@@ -17325,6 +17482,7 @@ function permissionChoices(ev) {
       row.appendChild(more);
     }
     requestImages(records);
+    fitImageStrip(row);
   }
   function imageChip(record, index, count) {
     if (record.state === "ready" && !IMAGE_DATA.test(record.src)) {

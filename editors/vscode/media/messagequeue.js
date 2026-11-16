@@ -110,11 +110,32 @@
     });
     return handle;
   }
+  // Edit puts a queued message back in the box. If the box already holds a draft (on.draft() says so), the row asks
+  // first, under its words: Replace draft / Keep draft (Escape keeps). `asking`: which row of a list is asking.
+  const asking = new WeakMap();
+  function askRow(list, row, item, items, on) {
+    row.classList.add("asking");
+    const ask = make("div", "dgc-queue-ask");
+    ask.setAttribute("role", "group"); ask.setAttribute("aria-label", "Replace the draft in the box?");
+    ask.appendChild(make("span", "dgc-queue-ask-words", on.askWords || "The box has a draft. Replace it with this message?"));
+    const settle = (replace) => { asking.delete(list); render(list, items, on);
+      if (replace) on.edit(item.id); else [...list.children].find((r) => r.dataset.queueId === item.id)?.querySelector('[data-queue-role="edit"]')?.focus(); };
+    const keep = make("button", "dgc-queue-ask-btn", "Keep draft"), replace = make("button", "dgc-queue-ask-btn primary", "Replace draft");
+    keep.type = replace.type = "button"; keep.dataset.queueRole = "ask-keep"; replace.dataset.queueRole = "ask-replace";
+    keep.addEventListener("click", () => settle(false)); replace.addEventListener("click", () => settle(true));
+    ask.addEventListener("keydown", (event) => { if (event.key !== "Escape") return; event.preventDefault(); event.stopPropagation(); settle(false); });
+    const acts = make("span", "dgc-queue-ask-acts");
+    acts.append(keep, replace);
+    ask.appendChild(acts);
+    row.appendChild(ask);
+  }
   /** items: {id, text, files, steering, title, fixed}. A fixed row is one the surface can't change: it shows and copies.
-      on: reorder(ids), steer(id), edit(id), remove(id), copy(id, text). */
+      on: reorder(ids), steer(id), edit(id), remove(id), copy(id, text); draft(): the box holds a draft now, so Edit
+      asks before replacing it; askWords: what it asks. */
   function render(list, items, on = {}) {
     if (list.dataset.dragging) return;        // the row under the pointer stays put; the next change redraws it
     const root = list.getRootNode();
+    if (asking.has(list) && (!on.edit || !items.some((item) => item.id === asking.get(list) && !item.fixed) || !on.draft?.())) asking.delete(list);
     const had = root.activeElement && list.contains(root.activeElement) ? root.activeElement : null;
     const refocus = had ? { id: had.closest("[data-queue-id]")?.dataset.queueId, role: had.dataset.queueRole } : null;
     list.replaceChildren(...items.map((item, index) => {
@@ -142,14 +163,20 @@
         steer.type = "button"; steer.disabled = !!item.steering; steer.dataset.queueRole = "steer";
         steer.title = "Send this message to the running turn now";
         steer.innerHTML = ICONS.steer;
-        steer.appendChild(document.createTextNode(item.steering ? "Steering…" : "Steer"));
+        // (Its word is hidden in a narrow panel, where the row also carries Edit and Remove: the name says it then.)
+        steer.appendChild(make("span", "dgc-queue-steer-label", item.steering ? "Steering…" : "Steer"));
+        steer.setAttribute("aria-label", item.steering ? "Steering…" : `Steer now: ${item.text}`);
         steer.addEventListener("click", () => on.steer(item.id));
         row.appendChild(steer);
       }
       if (on.edit && !item.fixed) {
         const edit = iconButton(`dgc-queue-icon${on.editClass ? ` ${on.editClass}` : ""}`, `Edit queued message: ${item.text}`, "edit", "Edit: back to the box");
         edit.dataset.queueRole = "edit";
-        edit.addEventListener("click", () => on.edit(item.id));
+        edit.addEventListener("click", () => {
+          if (!on.draft?.()) { on.edit(item.id); return; }
+          asking.set(list, item.id); render(list, items, on);
+          [...list.children].find((r) => r.dataset.queueId === item.id)?.querySelector('[data-queue-role="ask-keep"]')?.focus();
+        });
         row.appendChild(edit);
       }
       if (on.remove && !item.fixed) {
@@ -163,6 +190,7 @@
       more.setAttribute("aria-haspopup", "menu"); more.setAttribute("aria-expanded", "false");
       more.addEventListener("click", () => moreMenu(more, row, item, index, on));
       row.appendChild(more);
+      if (asking.get(list) === item.id) askRow(list, row, item, items, on);
       return row;
     }));
     if (refocus?.id && refocus.role) {

@@ -29,4 +29,19 @@
 .dgc-queue-choice { padding: 6px 10px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .dgc-queue-choice:hover:not(:disabled) { color: var(--text-strong, var(--vscode-foreground)); background: color-mix(in srgb, currentColor 10%, transparent); }
 .dgc-queue-choice:disabled { opacity: .45; cursor: default; }
+/* Edit, when the box already holds a draft: the row asks under its words (media/messagequeue.js askRow). The buttons are
+   the queue's own height (26px) with the controls' 6px corner; Replace is the one filled button. */
+.dgc-queue-row.asking { flex-wrap: wrap; row-gap: 4px; padding-bottom: 6px; }
+.dgc-queue-row.asking > .dgc-queue-text { flex-basis: 0; }       /* the row's own line stays one line: only the question wraps under it */
+.dgc-queue-ask { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 8px; min-width: 0; padding-left: 24px; box-sizing: border-box; }
+.dgc-queue-ask-words { flex: 1 1 12em; min-width: 0; color: var(--text, var(--vscode-foreground)); }
+.dgc-queue-ask-acts { flex: none; display: inline-flex; gap: 6px; }
+/* A narrow panel: Steer is its arrow alone, so the message's own words keep some room beside Edit and Remove. */
+@media (max-width: 360px) { .dgc-queue-steer-label { display: none; } .dgc-queue-steer { width: 26px; padding: 0; } }
+.dgc-queue-ask-btn { flex: none; height: 26px; padding: 0 10px; border: 1px solid var(--border-strong, var(--vscode-input-border, color-mix(in srgb, currentColor 30%, transparent))); border-radius: var(--btn-r, 6px);
+  background: transparent; color: var(--text, var(--vscode-foreground)); font: inherit; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.dgc-queue-ask-btn:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.dgc-queue-ask-btn.primary { border-color: var(--solid, var(--vscode-foreground)); background: var(--solid, var(--vscode-foreground)); color: var(--on-solid, var(--vscode-editor-background)); }
+.dgc-queue-ask-btn.primary:hover { background: var(--solid-hover, var(--solid, var(--vscode-foreground))); }
+.dgc-queue-ask-btn:focus-visible { outline: 2px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .dgc-queue-handle svg, .dgc-queue-mark svg { transition: none; } }

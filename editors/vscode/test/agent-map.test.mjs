@@ -114,7 +114,7 @@ test("the pill counts the agents working now and stays for the whole chat; a new
   p.update(sid(2), { state: "running" });
   p.end(sid(1)); p.end(sid(2));
   p.event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 });
-  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "0 sub-agents" }, "after the turn: 0 sub-agents, still there");
+  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "Agent map" }, "after the turn: the map's door, still there");
   p.open();
   assert.equal(p.$("agent-map-subtitle").textContent, "3 agents · click an agent for details", "the map counts every agent");
   p.$("agent-map-close").click();
@@ -123,7 +123,7 @@ test("the pill counts the agents working now and stays for the whole chat; a new
   // A reloaded chat whose agents all ended: the backend's snapshot brings the pill back at 0.
   p.event({ type: "agents", items: [{ id: sid(7), parent_id: null, call_id: "c", description: "old", depth: 1, state: "finished",
     tool_calls: 1, isolated: false, parallel: false, restored: true }], total: 1, active: 0 });
-  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "0 sub-agents" });
+  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "Agent map" });
   assert.deepEqual(p.errors, []);
 });
 
@@ -487,7 +487,7 @@ test("a chat reset, a rewind, a chat switch and a backend exit each close the ma
     assert.equal(p.$("agents-pill").getAttribute("aria-expanded"), "false");
   }
   // After a backend exit the agents read stopped; the pill keeps them, none working.
-  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "0 sub-agents" });
+  assert.deepEqual(p.pill(), { hidden: false, state: "idle", label: "Agent map" });
   p.open();
   assert.equal(p.rows()[1].querySelector(".am-meta").textContent, "Stopped · qwen3.8:27b");
   assert.equal(p.rows()[1].title, "agent 01\nDGC's backend stopped");

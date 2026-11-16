@@ -157,17 +157,41 @@ export function madeFilesMarkup(m){
   }).join('')}</div>`;
 }
 
+// A file in a message (Pips API 101): what a Pip sent from its computer with its reply (send_to_chat), like a person
+// sending a file. Each is the shared document card with the small sheet of its kind: its name, its size, Open (the card)
+// and Save a copy…. A video or a sound also gets a player over its card: an empty slot here, which the page fills
+// (pipsClient hydrateMessageMedia) with bytes its host hands it. Neither names a place on disk: the buttons carry the
+// message and the file's number, and the host asks DGC where it is kept.
+const MEDIA_KIND=mime=>/^video\//.test(String(mime||''))?'video':/^audio\//.test(String(mime||''))?'audio':'';
+const messageFiles=m=>Array.isArray(m.files)?m.files.slice(0,50).filter(f=>f&&Number.isInteger(f.index)&&f.index>=0&&f.index<64&&typeof f.name==='string'&&f.name):[];
+const SAVE_COPY=name=>`aria-label="Save a copy of ${esc(name)}" title="Save a copy\u2026"`;
+export function sentFilesMarkup(m,name='the Pip'){
+  const sheets=globalThis.DgcFileSheet,list=messageFiles(m);
+  if(!sheets||!list.length)return '';
+  return `<div class="msg-made-files msg-sent-files" role="group" aria-label="Files ${esc(name)} sent">${list.map(f=>{
+    const key=`${m.id}:${f.index}`,file=f.name,dot=file.lastIndexOf('.'),ending=dot>0?file.slice(dot+1).toLowerCase():'',kind=sheets.of(ending,file);
+    const tag=kind.kind==='file'&&/^[a-z0-9]{1,5}$/.test(ending)?ending.toUpperCase():kind.tag,bytes=Number.isFinite(f.bytes)&&f.bytes>0?f.bytes:0,media=MEDIA_KIND(f.mime);
+    return (media?`<div class="msg-sent-media" data-message-media="${esc(key)}" data-media="${media}" data-bytes="${bytes}" data-name="${esc(file)}" data-dom-own="1"></div>`:'')
+      +`<div class="dgc-doc-card msg-made-file msg-sent-file" data-tone="${esc(kind.kind)}"><span class="dgc-doc-tile has-sheet" aria-hidden="true">${sheets.html(kind.kind,{tag})}</span>`
+      +`<span class="dgc-doc-words"><span class="dgc-doc-name" title="${esc(file)}">${esc(file)}</span><span class="dgc-doc-meta">${esc(tag)}${bytes?` \u00b7 ${esc(fileBytes(bytes))}`:''}</span></span>`
+      +`<span class="dgc-doc-acts">${sheets.openPill()}<button type="button" class="dgc-doc-open" data-message-file="${esc(key)}" aria-label="Open ${esc(file)}">Open</button>`
+      +`<button type="button" class="dgc-doc-dl" data-message-file-save="${esc(key)}" ${SAVE_COPY(file)}>${sheets.DOWNLOAD}</button></span></div>`;
+  }).join('')}</div>`;
+}
+
 // `inline`: the messages a reply read on the way, each one's drawn bubble by its id (replyPieces); `live`: the reply as
 // it is being written, the finished reply's own markup without the row it ends with.
 // `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
 // key}, a long one's start and its Show all.
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,quote='',canReply=false,canDownload=false,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map(),inline=null,live=false}) {
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,quote='',canReply=false,canDownload=false,canOpenFiles=false,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map(),inline=null,live=false}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   // Every photo the message brought (no four-photo cap from Pips API 52); a click opens the original.
   // A Pip's reply shows the images it made (generate_image) the same way, below its words.
   const pictures=Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,64).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" data-pic-open alt="Image ${Number(i.index)+1}" title="Open the photo"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
   const size=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
-  const files=user&&Array.isArray(m.files)&&m.files.length?`<div class="msg-files">${m.files.slice(0,50).map(f=>{const name=String(f.name||''),dot=name.lastIndexOf('.');return `<span class="msg-file" title="${esc(name)}"><span class="chat-file-ext" aria-hidden="true">${esc((dot>0?name.slice(dot+1):'txt').slice(0,4))}</span><span class="chat-file-name">${esc(name)}</span><span class="chat-file-size">${esc(size(Number(f.bytes)||0))}</span></span>`;}).join('')}</div>`:'';
+  // Your own files (API 101: each opens, and saves a copy, as a file the Pip sent does; the chip is its Open).
+  const files=user&&Array.isArray(m.files)&&m.files.length?`<div class="msg-files">${m.files.slice(0,50).map(f=>{const name=String(f.name||''),dot=name.lastIndexOf('.'),key=`${m.id}:${Number(f.index)}`,acts=canOpenFiles&&name&&Number.isInteger(f.index)&&f.index>=0&&f.index<64;
+    return `<span class="msg-file${acts?' can-open':''}" title="${esc(name)}"><span class="chat-file-ext" aria-hidden="true">${esc((dot>0?name.slice(dot+1):'txt').slice(0,4))}</span><span class="chat-file-name">${esc(name)}</span><span class="chat-file-size">${esc(size(Number(f.bytes)||0))}</span>${acts?`<button type="button" class="msg-file-open" data-message-file="${esc(key)}" aria-label="Open ${esc(name)}"></button><button type="button" class="msg-file-save" data-message-file-save="${esc(key)}" ${SAVE_COPY(name)}>${globalThis.DgcFileSheet?.DOWNLOAD||'\u2193'}</button>`:''}</span>`;}).join('')}</div>`:'';
   // A message that is only images or files shows them, not DGC's stand-in text.
   const standIn=pictures&&m.text==='(sent an image)'||files&&m.text==='(sent a file)';
   const said=!user&&clip&&!clip.open?clip.text:m.text;
@@ -180,6 +204,8 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
     +(!user&&pictures?foldPictures(`pip:${m.id}:images`,pictures,{pictures:Math.min(64,m.images.length)}):'')
     // Each picture it made is a file too: a row with its kind, its size and Download (pips-08).
     +(!user&&pictures&&canDownload?madeFilesMarkup(m):'')
+    // The files it sent from its computer (API 101): a player for a video or a sound, and each file's card.
+    +(!user&&canOpenFiles?sentFilesMarkup(m,name):'')
     // API 71: the videos it started (generate_video), each its job's figure (media/videoPlayer.js), filled in by the
     // page after it draws: its progress, then its player.
     +(!user&&Array.isArray(m.videos)&&m.videos.length?foldPictures(`pip:${m.id}:videos`,`<div class="msg-videos made-pictures">${m.videos.slice(0,4).map(v=>`<div class="msg-video" data-message-video="${esc(String(v.id||''))}"></div>`).join('')}</div>`,{videos:Math.min(4,m.videos.length),label:m.videos.length===1?String(m.videos[0].prompt||''):''}):'')

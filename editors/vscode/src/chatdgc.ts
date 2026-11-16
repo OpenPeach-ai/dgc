@@ -334,6 +334,7 @@ function chatdgcPage(asset: (name: string) => string, cspSource: string): string
 <div id="cd-log" class="cd-log" role="log" aria-label="Conversation"></div>
 <section id="cd-empty" class="cd-empty" aria-live="polite"></section>
 </div></main>
+<button type="button" id="cd-to-latest" class="to-latest" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><span class="codicon codicon-arrow-down" aria-hidden="true"></span><span id="cd-to-latest-label">Latest</span></button>
 <footer class="cd-foot"><div class="cd-column">
 <div id="cd-elsewhere" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="cd-elsewhere-text" class="elsewhere-text"></span><button type="button" id="cd-elsewhere-open" class="act primary" title="Carry on with this chat in this window; the other window shows it read-only">Open here</button></div>
 <p id="cd-notice" class="cd-notice" role="alert" hidden></p>

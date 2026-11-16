@@ -328,7 +328,7 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 .chat-style .pip-message.assistant .answer p:first-child{margin-top:0}
 .chat-style .pip-message.assistant .answer p:last-child{margin-bottom:0}
 .chat-style .pip-message.user{border:0;background:transparent;padding:0;display:flex;flex-direction:column;align-items:flex-end}
-.chat-style .pip-message.user .bubble{max-width:85%;background:var(--bubble);color:var(--text,var(--vscode-foreground));border-radius:18px;padding:9px 14px}
+.chat-style .pip-message.user .bubble{max-width:85%;background:var(--bubble);color:var(--text,var(--vscode-foreground));border-radius:var(--r-bubble,10px);padding:9px 14px}
 /* pipsTranscript.css loads after this file with equal weight: these carry one more class. */
 .chat-style .pip-message.msg .response-actions{opacity:1}
 .chat-style .pip-message .response-actions>*{transition:opacity .12s}
@@ -944,7 +944,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-topbar{border-bottom:1px solid color-mix(in srgb,var(--pip-edge) 70%,transparent)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.msg{margin-bottom:20px;gap:5px}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.user{margin-top:7px}
-.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(86%,620px);padding:10px 14px;border-radius:17px 17px 6px 17px;line-height:1.55;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(86%,620px);padding:10px 14px;border-radius:var(--r-bubble,10px);line-height:1.55;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split{gap:7px}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:min(90%,640px);padding:10px 14px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 6%,transparent);border-radius:17px 17px 17px 6px;background:var(--pip-bubble);box-shadow:0 1px 2px rgba(0,0,0,.06)}
@@ -976,14 +976,14 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer{--tray-lift:var(--lift-box)}
 .rail-pop .chat-queue-box{margin:0;padding:0 8px 8px;border-radius:0;background:transparent}
 .rail-pop .chat-queue-head{display:none}
-/* A Pip's chat follows as Work's does (pipsFollow.js): Work's Latest pill (media/main.css #to-latest) and its pinned prompt (main.css "0.47 pinned prompt"). */
+/* A Pip's chat follows as Work's does (pipsFollow.js): Work's Latest pill (media/main.css #to-latest) and its pinned prompt (main.css "0.47 pinned prompt"). The pill's ground is the field's colour over the page's own, so it is solid in a theme whose field colour is see-through (16 Nov). */
 .conversation-log{isolation:isolate}
 /* A plain block, so the messages' margins meet as they did before there were boxes. */
 .pip-turn{display:block;min-width:0}
-.pip-to-latest{position:relative;z-index:1;flex:none;align-self:center;display:inline-flex;align-items:center;gap:4px;height:28px;min-height:28px;margin:-36px 0 8px;padding:0 12px;cursor:pointer;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,var(--line)));border-radius: var(--btn-r, 6px);background:var(--vscode-input-background,var(--vscode-dropdown-background,var(--vscode-editor-background)));color:var(--vscode-foreground);box-shadow:0 4px 16px rgba(0,0,0,.18);font:500 11px/1 var(--vscode-font-family,system-ui)}
+.pip-to-latest{position:relative;z-index:1;flex:none;align-self:center;display:inline-flex;align-items:center;gap:4px;height:28px;min-height:28px;margin:-36px 0 8px;padding:0 12px;cursor:pointer;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,var(--line)));border-radius: var(--btn-r, 6px);background:linear-gradient(var(--latest-fill),var(--latest-fill)) var(--vscode-editor-background,#1f1f1f);--latest-fill:var(--vscode-input-background,var(--vscode-dropdown-background,var(--vscode-editor-background)));color:var(--vscode-foreground);box-shadow:0 4px 16px rgba(0,0,0,.18);font:500 11px/1 var(--vscode-font-family,system-ui)}
 .pip-to-latest[hidden]{display:none}
 .pip-to-latest:hover{border-color:var(--vscode-foreground);color:var(--vscode-editor-foreground,var(--vscode-foreground))}
-.pip-to-latest.unread{background:var(--solid);border-color:var(--solid);color:var(--on-solid)}
+.pip-to-latest.unread{background:linear-gradient(var(--solid),var(--solid)) var(--vscode-editor-background,#1f1f1f);border-color:var(--solid);color:var(--on-solid)}
 .chat-style .pip-turn>.pip-message.user{position:sticky;top:0;z-index:2}
 .chat-style .pip-turn>.pip-message.user::before{content:"";position:absolute;z-index:-1;pointer-events:none;inset:-16px -16px -12px;background:var(--vscode-editor-background);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 12px),transparent)}
 .chat-style .pip-turn>.pip-message.user .bubble{cursor:pointer}
@@ -1250,9 +1250,10 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.msg.user{margin-top:24px}
 .simple-pips.chat-open .pip-conversation.chat-style .chat-time{margin:16px 0 12px;font-size:11px;color:var(--pc-quiet)}
 
-/* Bubbles: 20 with a 7.5 tail, 8 x 12 inside, flat. Yours is the shared grey (as Work's and ChatDGC's); the Pip's is a
+/* Bubbles: 8 x 12 inside, flat. Yours has the sent bubble's 10 on every corner (--r-bubble, as in Work and ChatDGC: his
+   call of 16 Nov); the Pip's keeps 20 with a 7.5 tail. Yours is the shared grey (as Work's and ChatDGC's); the Pip's is a
    wash of the text's own colour, with no line around it. */
-.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(calc(100% - 40px),600px);padding:8px 12px;border-radius:var(--r-2xl,20px) var(--r-2xl,20px) var(--r-sm,7.5px) var(--r-2xl,20px);box-shadow:none}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(calc(100% - 40px),600px);padding:8px 12px;border-radius:var(--r-bubble,10px);box-shadow:none}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split{gap:4px}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:var(--pc-measure);padding:8px 12px;border:0;border-radius:var(--r-2xl,20px) var(--r-2xl,20px) var(--r-2xl,20px) var(--r-sm,7.5px);box-shadow:none}
@@ -1590,6 +1591,41 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .msg-made-files .dgc-doc-card.msg-made-file{flex-wrap:nowrap;width:100%;max-width:100%;margin:0}
 .msg-made-files .dgc-doc-card.msg-made-file .dgc-doc-words{flex:1 1 0}
 .pip-message.user .msg-images,.pip-message.user .msg-files{align-self:flex-end;max-width:100%}
+/* A Pip sends files in its chat, like a person (Pips API 101). Each file it sent is the shared document card (its sheet,
+   its name, its kind and size; the card is Open, and Save a copy… is the small button at its right), under the rows of
+   the pictures it made. A video or a sound gets a player over its card (.msg-sent-media: the page fills it,
+   pipsClient hydrateMessageMedia): 420 wide at most, as the cards are; a large one shows Play first. */
+.msg-made-files.msg-sent-files{margin-top:6px}
+.msg-sent-media{min-width:0;max-width:100%}
+.msg-sent-media:empty{display:none}
+.msg-media-box{display:block;min-width:0;overflow:hidden;border-radius:10px}
+.msg-media-box.is-video{background:black;aspect-ratio:16/9}
+.msg-media-box.is-video:has(video){aspect-ratio:auto}
+.msg-media-box.is-video.loading{background:color-mix(in srgb,var(--vscode-foreground) 10%,var(--vscode-editor-background))}
+.msg-sent-video{display:block;width:100%;max-height:320px;background:black}
+.msg-media-box.is-audio{border-radius:0;overflow:visible}
+.msg-sent-audio{display:block;width:100%;height:40px}
+.msg-media-box.is-audio.loading{height:40px;border-radius:10px;background:color-mix(in srgb,var(--vscode-foreground) 8%,transparent)}
+/* Play, on a video or a sound too large to load just for being on screen: a button of the buttons' own height and corner. */
+.msg-media-box:has(>.msg-media-load){display:grid;place-items:center}
+.msg-media-box.is-audio:has(>.msg-media-load){justify-items:start}
+.msg-media-load{display:inline-flex;align-items:center;gap:6px;height:28px;min-height:28px;padding:0 12px;border:1px solid color-mix(in srgb,#fff 35%,transparent);border-radius:var(--btn-r,6px);background:color-mix(in srgb,black 55%,transparent);color:#fff;font:500 12px/1 var(--vscode-font-family,system-ui);cursor:pointer}
+.msg-media-load:hover:not(:disabled){background:color-mix(in srgb,black 35%,transparent);border-color:#fff}
+.msg-media-load:disabled{opacity:.6;cursor:default}
+.msg-media-box.is-audio .msg-media-load{border-color:var(--hair-strong,var(--line));background:transparent;color:var(--vscode-foreground)}
+.msg-media-box.is-audio .msg-media-load:hover:not(:disabled){background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent)}
+.msg-media-box:has(>.msg-media-note){aspect-ratio:auto;background:transparent;border-radius:0}
+.msg-media-note{margin:0;font-size:12px;line-height:1.5;color:var(--pc-quiet,var(--muted))}
+@media (forced-colors:active){.msg-media-load{border-color:ButtonText;background:ButtonFace;color:ButtonText}}
+/* Your own file on your message opens and saves the same way: the chip is its Open, and Save a copy… is at its end. */
+.msg-file.can-open{position:relative;max-width:280px;padding-right:4px}
+.msg-file.can-open:hover{border-color:var(--hair-strong,var(--vscode-foreground))}
+.msg-file-open{position:absolute;inset:0;z-index:0;min-height:0;margin:0;padding:0;border:0;border-radius:inherit;background:transparent;cursor:pointer}
+.msg-file-open:hover{background:transparent}
+.msg-file-save{position:relative;z-index:1;flex:none;display:inline-grid;place-items:center;width:28px;height:28px;min-height:0;padding:0;border:0;border-radius:var(--btn-r,6px);background:transparent;color:var(--pc-quiet,var(--muted));cursor:pointer}
+.msg-file-save:hover{background:color-mix(in srgb,var(--vscode-foreground) 10%,transparent);color:var(--vscode-foreground)}
+.msg-file-save>svg{width:14px;height:14px}
+.msg-file-open:focus-visible,.msg-file-save:focus-visible{outline:2px solid var(--vscode-focusBorder,currentColor);outline-offset:1px}
 .pip-message.user .msg-image{max-width:100%}
 .pip-message.assistant .msg-images{justify-content:flex-start}
 

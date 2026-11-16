@@ -163,12 +163,13 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) {
         } else {
           assert.match(rest.mask, /linear-gradient/, "the last lines fade out");
           assert.match(rest.maskStd, /linear-gradient/);
-          assert.equal(await opacity(s.page), "0", "at rest the pill is not shown");
+          // (16 Nov, user test W28: it showed only under a pointer, and the strip kept for it read as an empty gap.)
+          assert.equal(await opacity(s.page), "1", "at rest the pill is shown, in its strip");
         }
         await s.page.hover(".msg.user > .bubble");
-        assert.equal(await opacity(s.page), "1", "hovering the bubble shows it");
+        assert.equal(await opacity(s.page), "1", "hovering the bubble keeps it");
         await s.page.mouse.move(1, 1);
-        assert.equal(await opacity(s.page), theme === "hc" ? "1" : "0", "and moving away hides it again");
+        assert.equal(await opacity(s.page), "1", "and so does moving away");
 
         // Real Tab presses from the header: the link on line 2, then the pill; line 11's link is
         // folded away and skipped until the prompt opens.

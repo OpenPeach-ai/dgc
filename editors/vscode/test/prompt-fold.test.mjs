@@ -576,15 +576,15 @@ test("the fold's rules sit in their own section, in the order the cascade relies
   assert.ok(section.includes(`max-height: calc(${lineHeight}em * var(--prompt-fold-lines))`),
     "the clamp is exactly that many of the prompt's lines");
   assert.match(section, /\.prompt-fold::before \{ content: attr\(data-label\); \}/, "the label is drawn, never text");
+  // Show more is always there in its strip (16 Nov, user test W28: shown only under a pointer, the strip read as an
+  // empty gap under a faded line). No rule hides it at rest, so none has to reveal it.
   const rest = section.indexOf('.user .bubble[data-fold="folded"] > .prompt-fold { position: absolute;');
-  assert.ok(rest > 0 && /opacity: 0;/.test(section.slice(rest, section.indexOf("\n", rest))), "the pill rests at opacity 0");
-  for (const reveal of [
-    '.user .bubble[data-fold="folded"]:hover > .prompt-fold',
-    '.user .bubble[data-fold="folded"]:has(:focus-visible) > .prompt-fold',
-    '@media (hover: none) { .user .bubble[data-fold="folded"] > .prompt-fold { opacity: 1; } }',
+  assert.ok(rest > 0 && !/opacity/.test(section.slice(rest, section.indexOf("\n", rest))), "the pill is not hidden at rest");
+  assert.equal(/\.prompt-fold \{[^}]*opacity: 0/.test(section), false, "and nothing else hides it");
+  for (const kept of [
     'body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-fold="folded"] > .prompt-fold { opacity: 1;',
     '@media (forced-colors: active) {',
-  ]) assert.ok(section.indexOf(reveal) > rest, `revealed, after the rest rule: ${reveal}`);
+  ]) assert.ok(section.indexOf(kept) > rest, `after the rest rule: ${kept}`);
   for (const bare of [
     '.user .bubble[data-fold="folded"] > .prompt-text:focus-within { -webkit-mask-image: none; mask-image: none; }',
     'body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-fold="folded"] > .prompt-text { -webkit-mask-image: none; mask-image: none; }',

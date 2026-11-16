@@ -35,7 +35,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
       assert.equal(isPurple(bubble.fill), false);
       assert.equal(bubble.image, "none", "no light on it");
       assert.equal(bubble.grain, "none", "and no grain over it");
-      assert.equal(bubble.corner, "20px");
+      assert.equal(bubble.corner, "10px", "the sent bubble's corner, on every surface (16 Nov)");
       const allow = await look(x.page, ".card button.act.primary");
       assert.deepEqual([allow.fill, allow.words], [token["--solid"], token["--on-solid"]], "Allow once: a fill of the text colour, the ground's colour for its words");
       const send = await look(x.page, "#send");

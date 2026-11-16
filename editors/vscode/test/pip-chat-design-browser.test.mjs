@@ -48,8 +48,9 @@ for (const theme of ["dark", "light"]) for (const [where, width] of PLACES) {
       // One measure: the choices are as wide as a reply may be, never a width of their own.
       assert.equal(f.choices["max-width"], f.replies[0]["max-width"], "choices and replies share one measure");
       assert.ok(f.choices.right <= right + 1 && f.replies.every((r) => r.right <= right + 1));
-      // Corners on the shared scale: 16 for a bubble with a 6 tail, 8 for a row; and nothing in the chat casts a shadow.
-      for (const b of f.prompts) assert.deepEqual([b["border-top-left-radius"], b["border-bottom-right-radius"], b["box-shadow"]], ["20px", "7.5px", "none"], say(b));   // the shared scale, a quarter rounder (0.52 look)
+      // Corners on the shared scale: yours is the sent bubble's 10 on every corner, as in Work and ChatDGC (16 Nov; it was
+      // 20 with a 7.5 tail); the Pip's keeps 20 with its tail; 10 for a row; and nothing in the chat casts a shadow.
+      for (const b of f.prompts) assert.deepEqual([b["border-top-left-radius"], b["border-bottom-right-radius"], b["box-shadow"]], ["10px", "10px", "none"], say(b));
       for (const r of f.replies) assert.deepEqual([r["border-top-left-radius"], r["border-bottom-left-radius"], r["box-shadow"], r["border-top-width"]], ["20px", "7.5px", "none", "0px"], say(r));
       for (const c of f.choices.rows) assert.equal(c["border-top-left-radius"], "10px");
       assert.equal(f.form["border-top-left-radius"], "6px", "the box keeps the composer's corner (the buttons' 6 px since 14 Nov)");

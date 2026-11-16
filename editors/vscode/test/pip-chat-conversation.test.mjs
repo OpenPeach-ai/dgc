@@ -219,10 +219,10 @@ test('the composer has the sub-agents pill, counting its sub-agents, and it open
  assert.deepEqual(x.requests('stop_pip_agent').at(-1),{type:'stop_pip_agent',pip_id:GST,agent_id:AGENT});
 });
 
-test('the pill stays once the Pip has had a sub-agent ("0 sub-agents"), and a Pip that never had one has none',async()=>{
+test('the pill stays once the Pip has had a sub-agent ("Agent map"), and a Pip that never had one has none',async()=>{
  const x=await chat({fix:'ready'});
  assert.equal(x.$('#chat-agents').dataset.state,'idle');
- assert.equal(x.$('#chat-agents .agents-text').textContent,'0 sub-agents');
+ assert.equal(x.$('#chat-agents .agents-text').textContent,'Agent map');
  const none=await chat({fix:'ask'});
  assert.equal(none.$('#chat-agents'),null);
 });

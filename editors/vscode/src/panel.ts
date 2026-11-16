@@ -6151,6 +6151,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsOpenChat":
       case "pipsChatDraft":
       case "pipsOpenPhoto":
+      case "pipsOpenFile":            // a file in a Pip's chat: Open, Save a copy…, a player's bytes (Pips API 101)
+      case "pipsFileData":
       case "pipsOpenArtifact":
       case "pipsPluginLogos":
       case "pipsAppLogos":

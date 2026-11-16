@@ -3,6 +3,19 @@
 // takes the one wide size, and one whose words do not fit that either keeps the wide size, ends in an ellipsis and
 // says them whole as its title. Called after a page draws; it reads and writes two things only: the class "wide"
 // and the title.
+// Whether a button's words are wider than its room. scrollWidth is a whole number: words 0.1 px too wide ("Install ·
+// 68 MB" in the 104 px box, 86.1 px of words in 86 px) end in an ellipsis and still measure as fitting (W21, user test
+// 15 Nov). So the words themselves are measured, to the fraction, where the engine can.
+function overflows(b) {
+  if (b.scrollWidth > b.clientWidth + 1) return true;
+  try {
+    const view = b.ownerDocument.defaultView, range = b.ownerDocument.createRange();
+    range.selectNodeContents(b);
+    const words = range.getBoundingClientRect().width, style = view.getComputedStyle(b);
+    const room = b.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+    return words > 0 && room > 0 && words > room + 0.01;
+  } catch { return false; }
+}
 export function fitButtons(root, selector) {
   for (const b of root.querySelectorAll(selector)) {
     if (!b.clientWidth) continue;                       // not laid out
@@ -10,8 +23,8 @@ export function fitButtons(root, selector) {
     if (b.dataset.fitFor === said) continue;            // measured for these words already
     b.dataset.fitFor = said;
     b.classList.remove('wide');
-    if (b.scrollWidth > b.clientWidth + 1) b.classList.add('wide');
-    if (b.scrollWidth > b.clientWidth + 1) { if (!b.title) { b.title = said; b.dataset.fitTitle = '1'; } }
+    if (overflows(b)) b.classList.add('wide');
+    if (overflows(b)) { if (!b.title) { b.title = said; b.dataset.fitTitle = '1'; } }
     else if (b.dataset.fitTitle) { b.removeAttribute('title'); delete b.dataset.fitTitle; }
   }
 }

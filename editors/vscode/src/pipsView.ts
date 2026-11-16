@@ -144,6 +144,13 @@ const DATA_URI = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2
 const decodedBytes = (b64: string) => Math.floor(b64.length * 3 / 4) - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
 /** A Pip chat's kept photo: <state>/chat_images/<pip_id>/<sha256>.<ext>, as the backend names it. */
 const KEPT_PHOTO = /^[0-9a-f]{64}\.(png|jpg|gif|webp|bmp)$/;
+/** A file in a Pip's chat is kept under its digest, with no ending (dgc/pip_chat.py file_directory). */
+const KEPT_FILE = /^[0-9a-f]{64}$/;
+/** What a page may be handed the bytes of, to play: a video or a sound. Anything else opens or saves. */
+const PLAYABLE = /^(?:video|audio)\/[A-Za-z0-9.+-]{1,60}$/;
+/** The most a Pip sends as one file (dgc/pip_chat_sends.py MAX_FILE_BYTES); a larger answer is not a kept file. */
+const KEPT_FILE_BYTES = 200 * MiB;
+const FILES_API = 101;
 const KEPT_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
 const attr = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 /** Several conversations per Pip, and several computers (Pips API 79). Why a request is refused, or '' when it may go:
@@ -319,7 +326,7 @@ export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', mark
   const chat = page?.chat && /^pip_[A-Za-z0-9]{1,64}$/.test(page.chat.pip) && /^(?:conv_[0-9a-f]{32})?$/.test(page.chat.conversation) ? page.chat : undefined;
   const says = ` data-link-favicons="${favicons ? 'on' : 'off'}"${chat ? ` data-pip-chat="${attr(chat.pip)}" data-pip-conversation="${attr(chat.conversation)}"` : ''}`;
   // frame-src: only a plugin's card (MCP Apps), at the loopback address DGC's backend serves it from.
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:${favicons ? ' https:' : ''}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};${codiconUri ? ` font-src ${attr(cspSource)};` : ''}${videoUri ? ' media-src blob:;' : ''}${cardsUri ? ' frame-src http://127.0.0.1:* http://localhost:*;' : ''}">${codiconUri ? `<link rel="stylesheet" href="${attr(codiconUri)}">` : ''}<link rel="stylesheet" href="${attr(styleUri)}">${cardsStyleUri ? `<link rel="stylesheet" href="${attr(cardsStyleUri)}">` : ''}<title>DGC Pips</title></head><body${says}><main id="app">${PIPS_BOOT_MARK}</main><div id="review-root"></div>${cardsUri ? `<script src="${attr(cardsUri)}"></script>` : ''}${videoUri ? `<script src="${attr(videoUri)}"></script>` : ''}${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:${favicons ? ' https:' : ''}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};${codiconUri ? ` font-src ${attr(cspSource)};` : ''} media-src blob:;${cardsUri ? ' frame-src http://127.0.0.1:* http://localhost:*;' : ''}">${codiconUri ? `<link rel="stylesheet" href="${attr(codiconUri)}">` : ''}<link rel="stylesheet" href="${attr(styleUri)}">${cardsStyleUri ? `<link rel="stylesheet" href="${attr(cardsStyleUri)}">` : ''}<title>DGC Pips</title></head><body${says}><main id="app">${PIPS_BOOT_MARK}</main><div id="review-root"></div>${cardsUri ? `<script src="${attr(cardsUri)}"></script>` : ''}${videoUri ? `<script src="${attr(videoUri)}"></script>` : ''}${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
 }
 
 /** A Pip's computer in an editor tab: its Browser, Files and Terminal. */
@@ -1457,6 +1464,77 @@ export class PipsEditor implements vscode.Disposable {
       await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target), { preview: true });
     } catch { unavailable(); }
   }
+  /** A file in a Pip's chat (Pips API 101: one the Pip sent with a reply, or one of your own): where DGC keeps it, asked
+   *  by the host and checked before anything touches it. Only a regular file where a Pip chat's files are kept, in this
+   *  Pip's folder, named by its digest, of the size DGC said; never a link. The page is never told the path. */
+  private async messageFile(message: any): Promise<{ path: string; name: string; mime: string; bytes: number; message: string }> {
+    const gone = () => new Error('That file is no longer available.');
+    const pip = message?.pip_id, id = message?.message_id, index = message?.index;
+    if (this.apiVersion < FILES_API || !this.state.connected || typeof pip !== 'string' || !/^pip_[A-Za-z0-9]{1,64}$/.test(pip)
+      || typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id) || !Number.isSafeInteger(index) || index < 0 || index > 63) throw gone();
+    const generation = this.generation;
+    const result = await new Promise<any>((resolve, reject) => {
+      const requestId = 'pips-file-' + randomBytes(12).toString('hex');
+      const timer = setTimeout(() => { this.hostReads.delete(requestId); reject(gone()); }, 30000);
+      this.hostReads.set(requestId, (event) => {
+        clearTimeout(timer); this.hostReads.delete(requestId);
+        if (event.type === 'pips_result' && event.ok === true && event.command === 'get_pip_message_file') resolve(event.result); else reject(gone());
+      });
+      if (!this.send({ type: 'pips_control', request: { type: 'get_pip_message_file', pip_id: pip, message_id: id, index, request_id: requestId } }, this.backendIdentity)) {
+        clearTimeout(timer); this.hostReads.delete(requestId); reject(gone());
+      }
+    });
+    const fs = await import('node:fs/promises');
+    const nodePath = await import('node:path');
+    if (generation !== this.generation || !this.state.connected) throw gone();
+    const path = result?.path, bytes = result?.bytes, name = result?.name, mime = result?.mime;
+    if (result?.message_id !== id || result?.index !== index || typeof path !== 'string' || !nodePath.isAbsolute(path)
+      || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > KEPT_FILE_BYTES || typeof mime !== 'string' || mime.length > 128
+      // Its own name, as a person sees it: no folders, quotes or control characters (dgc/pip_chat.py file_name).
+      || typeof name !== 'string' || !name.trim() || name === '.' || name === '..' || /[\/\\"\u0000-\u001f]/.test(name) || Buffer.byteLength(name) > 255) throw gone();
+    const info = await fs.lstat(path).catch(() => undefined);
+    if (!info || !info.isFile() || info.isSymbolicLink() || info.size !== bytes) throw gone();
+    const real = await fs.realpath(path);
+    if (!KEPT_FILE.test(nodePath.basename(real)) || nodePath.basename(nodePath.dirname(real)) !== pip
+      || nodePath.basename(nodePath.dirname(nodePath.dirname(real))) !== 'chat_files') throw gone();
+    return { path: real, name, mime, bytes, message: id };
+  }
+  /** Open a file from a Pip's chat in an editor tab (a copy under its own name: the kept one is named by its digest and
+   *  must stay as it is), or with `save` ask where to save a copy of it. */
+  private async openFile(message: any): Promise<void> {
+    const unavailable = () => void vscode.window.showInformationMessage('That file is no longer available.');
+    try {
+      const file = await this.messageFile(message);
+      if (message?.save === true) {
+        const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), file.name), saveLabel: 'Save a copy' });
+        if (!target) return;
+        await vscode.workspace.fs.copy(vscode.Uri.file(file.path), target, { overwrite: true });
+        void vscode.window.showInformationMessage(`Saved ${target.path.split('/').pop()}.`);
+        return;
+      }
+      const fs = await import('node:fs/promises');
+      const os = await import('node:os');
+      const nodePath = await import('node:path');
+      const folder = nodePath.join(os.tmpdir(), 'dgc-pip-files', file.message, String(message.index));
+      await fs.mkdir(folder, { recursive: true, mode: 0o700 });
+      const target = nodePath.join(folder, file.name);
+      await fs.copyFile(file.path, target);
+      await fs.chmod(target, 0o600);
+      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target), { preview: true });
+    } catch { unavailable(); }
+  }
+  /** A sent video's or sound's bytes, for its player in the chat (a blob: there, as DGC's own videos are). */
+  private async fileData(message: any, surface: string): Promise<void> {
+    const requestId = typeof message?.requestId === 'string' ? message.requestId.slice(0, 64) : '';
+    try {
+      const file = await this.messageFile(message);
+      if (!PLAYABLE.test(file.mime)) { this.post({ type: 'pipsFileData', requestId, error: 'That file can\'t be played here.' }, surface); return; }
+      const fs = await import('node:fs/promises');
+      const raw = await fs.readFile(file.path);
+      if (raw.byteLength !== file.bytes) throw new Error('changed');
+      this.post({ type: 'pipsFileData', requestId, mime: file.mime, bytes: raw.byteLength, data: new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength) }, surface);
+    } catch { this.post({ type: 'pipsFileData', requestId, error: 'That file is no longer available.' }, surface); }
+  }
   receive(message: any, surface = 'main'): void {
     const computer = surface.startsWith('computer:') ? this.computers.get(surface.slice(9)) : undefined;
     // (A chat's own tab is the Pips page on another surface: what the Pips page may ask, it may, answered to it.)
@@ -1518,6 +1596,8 @@ export class PipsEditor implements vscode.Disposable {
     // Full screen in a computer tab went on or off: the window follows (ComputerFullScreen).
     if (message?.type === 'pipComputerFull' && computer) { void computerFullScreen.set(computer.panel, message.on === true, this.fullScreenSide); return; }
     if (message?.type === 'pipsOpenPhoto' && !computer) { void this.openPhoto(message); return; }
+    if (message?.type === 'pipsOpenFile' && !computer) { void this.openFile(message); return; }
+    if (message?.type === 'pipsFileData' && !computer) { void this.fileData(message, surface); return; }
     if (message?.type === 'pipsOpenArtifact' && !computer) {
       // A Pip's report document or sheet, or a dashboard it refreshes: in the artifact panel (a document in the editor).
       const id = String(message.id || ''), kind = String(message.artifactType || '');

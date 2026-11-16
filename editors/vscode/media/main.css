@@ -593,7 +593,7 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
 .msg.dgc > .role + .msg.user,
 body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { margin-top: var(--sp-2); }
 /* A sent prompt: a quiet raised grey, flat (0.52; it was a purple tint under a soft light and a grain). */
-.user .bubble { position: relative; max-width: 92%; background: var(--bubble); border: 0; border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: normal; color: var(--text); }
+.user .bubble { position: relative; max-width: 92%; background: var(--bubble); border: 0; border-radius: var(--r-bubble, 10px); padding: var(--sp-2) var(--sp-3); white-space: normal; color: var(--text); }
 /* A prompt reads at the answer's size and spacing: it inherited the page's tight default line height. */
 /* The question, inside the answer's own bubble: the card that asked it is removed as soon as the
    answer lands, so without this the transcript shows an answer to nothing. */
@@ -1615,20 +1615,24 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 /* Reading back through a run should not mean losing your place at the end of it. The pill only
    exists while you are away from the bottom, and says so louder once something arrived while
    you were reading. */
-#to-latest { position: relative; z-index: 3; align-self: center;
+/* One pill for Work (#to-latest) and ChatDGC (#cd-to-latest, class to-latest); a Pip's chat repeats it (src/pips.css
+   .pip-to-latest). Its ground is the field's colour laid over the page's own: many themes make the field's colour
+   see-through (Cursor's is #ffffff0d), and painted alone the transcript's words showed through the pill (16 Nov). */
+#to-latest, .to-latest { position: relative; z-index: 3; align-self: center;
   margin: calc(-1 * (var(--control) + var(--sp-2))) 0 var(--sp-2);
   display: inline-flex; align-items: center; gap: var(--sp-1);
   height: var(--control); padding: 0 var(--sp-3); cursor: pointer;
   border: 1px solid var(--border-strong); border-radius: var(--btn-r, 6px);
-  background: var(--surface2); color: var(--text);
+  background: linear-gradient(var(--surface2), var(--surface2)) var(--bg); color: var(--text);
   box-shadow: var(--shadow-2); font: var(--w-med) var(--t-xs)/1 var(--sans); }
+.to-latest[hidden] { display: none; }
 /* A flex item of body: with the default flex-shrink it was squeezed to ~13px once the transcript
    overflowed, its negative margin no longer took back its height, and after Latest the view stopped
    ~15px short of the end. Its height is its own. */
-#to-latest { flex: none; }
-#to-latest:hover { border-color: var(--text); color: var(--text-strong); }
-#to-latest.unread { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
-#to-latest .codicon { font-size: var(--t-sm); }
+#to-latest, .to-latest { flex: none; }
+:is(#to-latest, .to-latest):hover { border-color: var(--text); color: var(--text-strong); }
+:is(#to-latest, .to-latest).unread { background: linear-gradient(var(--solid), var(--solid)) var(--bg); border-color: var(--solid); color: var(--on-solid); }
+:is(#to-latest, .to-latest) .codicon { font-size: var(--t-sm); }
 
 /* One hover label for the whole panel: the panel's own surface and type, not the operating
    system's, and quick enough to feel like part of the interface rather than a delayed hint. */
@@ -2140,14 +2144,11 @@ textarea[data-held="1"], input[data-held="1"]:not([type="radio"]):not([type="che
 /* The pill gets a strip of its own under the three lines, so it never sits on the text: over the faded last line it
    read as text running into it (reported 19 Oct). */
 .user .bubble[data-fold="folded"] { padding-bottom: calc(var(--sp-2) + 26px); }
-.user .bubble[data-fold="folded"] > .prompt-fold { position: absolute; right: var(--sp-2); bottom: var(--sp-1); z-index: 1; opacity: 0; transition: opacity .12s; }
-.user .bubble[data-fold="folded"]:hover > .prompt-fold,
-.user .bubble[data-fold="folded"]:has(:focus-visible) > .prompt-fold { opacity: 1; }
-.user .bubble[data-fold="folded"]:has(> .prompt-atts) > .prompt-fold { opacity: 1; }
+/* Show more is always there in its strip: shown only under a pointer, the strip read as an empty gap under a faded
+   line, with no way on (W28, user test 15 Nov). */
+.user .bubble[data-fold="folded"] > .prompt-fold { position: absolute; right: var(--sp-2); bottom: var(--sp-1); z-index: 1; }
 .user .bubble[data-fold="open"] > .prompt-fold { position: sticky; bottom: calc(var(--control) + var(--sp-3)); z-index: 1;
   display: flex; width: max-content; margin: var(--sp-2) 0 0 auto; }
-@media (hover: none) { .user .bubble[data-fold="folded"] > .prompt-fold { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .user .bubble[data-fold] > .prompt-fold { transition: none; } }
 body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-fold="folded"] > .prompt-text { -webkit-mask-image: none; mask-image: none; }
 body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-fold="folded"]:has(> .prompt-atts)::after { content: none; }
 body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-fold="folded"] > .prompt-fold { opacity: 1; border-color: var(--vscode-contrastBorder, var(--border-strong)); }
@@ -2617,6 +2618,12 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   gap: var(--sp-2); overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scroll-padding-inline: 3px;
   scrollbar-width: thin; }
 .tool-images > li { flex: none; scroll-snap-align: start; display: flex; }
+/* An edge with more pictures hidden beyond it fades out (main.js fitImageStrip sets the classes as the strip moves). */
+.tool-images.fade-end { -webkit-mask-image: linear-gradient(to left, transparent, #000 32px); mask-image: linear-gradient(to left, transparent, #000 32px); }
+.tool-images.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
+.tool-images.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .tool-images:is(.fade-start, .fade-end) { -webkit-mask-image: none; mask-image: none; }
+@media (forced-colors: active) { .tool-images:is(.fade-start, .fade-end) { -webkit-mask-image: none; mask-image: none; } }
 /* A viewed image is shown, not sampled. An 80px tile with object-fit:cover took a tall
    screenshot and kept a centre slice of it -- the one part of a screenshot that is never the
    point. Bigger, and contained, so the whole picture is there to recognise. */
@@ -2631,6 +2638,8 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .image-tile { grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
 .image-tile img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
 /* One image has the row to itself, so it may use the card's width rather than sit in a square. */
+/* (Its item may shrink to the strip: flex none let a 420px picture run 60px past a 440px panel, with a scrollbar.) */
+.tool-images > li:only-child { flex: 0 1 420px; min-width: 0; }
 .tool-images:has(> li:only-child) .image-chip,
 .tool-images:has(> li:only-child) .image-tile { width: 100%; max-width: 420px; }
 .tool-images:has(> li:only-child) .image-tile { height: auto; aspect-ratio: auto; max-height: 320px; }
@@ -3799,6 +3808,10 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
 button.act, .card.perm-card .btns button.act, .card.perm-card .btns button.act:not(.primary), .goal-dialog-actions .act, :is(.artifact, .card) .abtn:not(.dgc-doc-open), .ask-act, .open-ask-send, .open-ask-skip, .auto-mode-buttons button, #sessions-host .home-new { display: inline-block; flex: none; box-sizing: border-box; width: var(--btn-w); min-width: 0; max-width: 100%; height: var(--btn-h); min-height: 0; padding: 0 var(--btn-pad); border: 1px solid var(--btn-line); border-radius: var(--btn-r);
   background: transparent; color: var(--btn-text); font-weight: var(--w-med, 500); line-height: calc(var(--btn-h) - 2px); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: none; transition: var(--btn-move); }
 button.act[data-d="acceptEdits"], button.act.wide, :is(.artifact, .card) .abtn.wide:not(.dgc-doc-open) { width: var(--btn-w-wide); }
+/* After Deny, "Deny without a note" takes the wide box (its words were cut in the usual one: W10, user test 15 Nov),
+   and in a panel too narrow for it beside Send note the two go one under the other, whole. */
+.card.perm-card .btns button.act.wide, .card.perm-card .btns button.act.wide:not(.primary) { width: var(--btn-w-wide); }
+.card.perm-card[data-deny] > .btns { flex-wrap: wrap; }
 button.act:hover:not(:disabled), .card.perm-card .btns button.act:hover:not(:disabled), .card.perm-card .btns button.act:not(.primary):hover:not(:disabled), .goal-dialog-actions .act:hover:not(:disabled), :is(.artifact, .card) .abtn:not(.dgc-doc-open):hover:not(:disabled), .ask-act:hover:not(:disabled), .open-ask-send:hover:not(:disabled), .open-ask-skip:hover:not(:disabled), .auto-mode-buttons button:hover:not(:disabled), #sessions-host .home-new:hover:not(:disabled) { border-color: var(--btn-line-hover); background: var(--btn-wash); color: var(--btn-text); transform: var(--btn-up); transition-duration: var(--btn-in); }
 button.act:active:not(:disabled), .card.perm-card .btns button.act:active:not(:disabled), .card.perm-card .btns button.act:not(.primary):active:not(:disabled), .goal-dialog-actions .act:active:not(:disabled), :is(.artifact, .card) .abtn:not(.dgc-doc-open):active:not(:disabled), .ask-act:active:not(:disabled), .open-ask-send:active:not(:disabled), .open-ask-skip:active:not(:disabled), .auto-mode-buttons button:active:not(:disabled), #sessions-host .home-new:active:not(:disabled) { transform: var(--btn-down); transition-duration: var(--btn-press); }
 button.act:focus-visible, .card.perm-card .btns button.act:focus-visible, .card.perm-card .btns button.act:not(.primary):focus-visible, .goal-dialog-actions .act:focus-visible, :is(.artifact, .card) .abtn:not(.dgc-doc-open):focus-visible, .ask-act:focus-visible, .open-ask-send:focus-visible, .open-ask-skip:focus-visible, .auto-mode-buttons button:focus-visible, #sessions-host .home-new:focus-visible { outline: var(--btn-ring); outline-offset: 2px; }

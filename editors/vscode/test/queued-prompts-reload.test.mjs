@@ -61,13 +61,13 @@ test("DGC: Restart Backend during a turn gives the queued messages back as not s
   try {
     s.provider.restart();
     const lines = await settled(s);
-    assert.deepEqual(notSent(lines), ["you · not sent: second message [Restore unsent message]",
-      "you · not sent: third message [Restore unsent message]"], lines.join("\n"));
+    assert.deepEqual(notSent(lines), ["you · not sent: second message [Restore]",
+      "you · not sent: third message [Restore]"], lines.join("\n"));
     assert.equal(await composerText(s.page), "second message", "the first is back in the empty composer");
     assert.equal(await s.page.locator("#queued").textContent(), "");
     // The second one restores once the composer is free.
     await s.page.locator("#input").fill("");
-    await s.page.locator(".msg.user", { hasText: "third message" }).locator("button", { hasText: "Restore unsent message" }).click();
+    await s.page.locator(".msg.user", { hasText: "third message" }).locator("button", { hasText: "Restore" }).click();
     assert.equal(await composerText(s.page), "third message");
     await sleep(500);
     assert.equal(notSent(await transcript(s.page)).length, 2, "the reconnect's history leaves them in place");
@@ -83,8 +83,8 @@ test("Developer: Reload Window during a turn gives the queued messages back as n
   try {
     await s.reloadWindow();
     const lines = await settled(s);
-    assert.deepEqual(notSent(lines), ["you · not sent: second message [Restore unsent message]",
-      "you · not sent: third message [Restore unsent message]"], lines.join("\n"));
+    assert.deepEqual(notSent(lines), ["you · not sent: second message [Restore]",
+      "you · not sent: third message [Restore]"], lines.join("\n"));
     assert.equal(await composerText(s.page), "second message");
     // They are handed back once: another reload of the window does not bring them back again.
     await s.page.locator("#input").fill("");
@@ -111,8 +111,8 @@ test("a backend that dies on its own gives the queued messages back once, under 
     const lines = await settled(s);
     await sleep(800);                                   // the extension's own give-back lands after session_ready
     const final = await transcript(s.page);
-    assert.deepEqual(notSent(final), ["you · not sent: second message [Restore unsent message]",
-      "you · not sent: third message [Restore unsent message]"], final.join("\n"));
+    assert.deepEqual(notSent(final), ["you · not sent: second message [Restore]",
+      "you · not sent: third message [Restore]"], final.join("\n"));
     assert.ok(final.indexOf(notSent(final)[0]) > final.findIndex((line) => line.startsWith("DGC:")), "below the replayed turn");
     assert.equal(lines.filter((line) => /second message/.test(line)).length, 1);
     assert.equal(await composerText(s.page), "second message");
@@ -134,12 +134,14 @@ test("a webview reloaded with messages queued still shows them, and Stop gives t
     }, "the queued messages after the reload", 10_000).catch(async () => transcript(s.page));
     assert.deepEqual(shown.slice(-2), ["you · queued: second message", "you · queued: third message"], shown.join("\n"));
     await s.page.locator("#send").click();                      // Stop
+    // Your own Stop (16 Nov, user test W36): the first is back in the box and so leaves the transcript (its bubble
+    // there read as half sent); the second can't go in the box too, so it stays, not sent, with its Restore.
     const lines = await until(async () => {
       const now = await transcript(s.page);
-      return notSent(now).length === 2 ? now : null;
+      return notSent(now).length === 1 && !now.some((line) => line.startsWith("you · queued")) ? now : null;
     }, "Stop to hand the queued messages back", 15_000).catch(async () => transcript(s.page));
-    assert.deepEqual(notSent(lines), ["you · not sent: second message [Restore unsent message]",
-      "you · not sent: third message [Restore unsent message]"], lines.join("\n"));
+    assert.deepEqual(notSent(lines), ["you · not sent: third message [Restore]"], lines.join("\n"));
+    assert.equal(lines.some((line) => line.includes("second message")), false, lines.join("\n"));
     assert.equal(await composerText(s.page), "second message");
     assert.deepEqual(s.errors, []);
   } finally {
@@ -199,7 +201,7 @@ test("DGC: Restart Backend before a steering message is applied gives it back as
     const lines = await steerNotSent(s);
     await sleep(800);
     const final = await transcript(s.page);
-    assert.deepEqual(notSent(final), ["you · not sent: steer this please [Restore unsent message]"], final.join("\n"));
+    assert.deepEqual(notSent(final), ["you · not sent: steer this please [Restore]"], final.join("\n"));
     assert.equal(final.filter((line) => /not confirmed|steer this please/.test(line)).length, 1, final.join("\n"));
     assert.equal(lines.filter((line) => /not confirmed/.test(line)).length, 0);
     assert.equal(await composerText(s.page), "steer this please");
@@ -217,7 +219,7 @@ test("Developer: Reload Window before a steering message is applied gives it bac
     await steerNotSent(s);
     await sleep(800);
     const final = await transcript(s.page);
-    assert.deepEqual(notSent(final), ["you · not sent: steer this please [Restore unsent message]"], final.join("\n"));
+    assert.deepEqual(notSent(final), ["you · not sent: steer this please [Restore]"], final.join("\n"));
     assert.equal(await composerText(s.page), "steer this please");
     assert.deepEqual(s.errors, []);
   } finally {

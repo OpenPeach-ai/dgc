@@ -2676,8 +2676,10 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
   send({ type: "event", event: { type: "turn_start" } });
   send({ type: "event", event: { type: "text_delta", text: "discard this future" } });
   send({ type: "event", event: { type: "rewound", ok: true, files_restored: 1 } });
-  assert.equal(doc.getElementById("log").children.length, 0,
-    "a successful typed rewind must clear the abandoned future");
+  // (What is left is the line that says it was rewound: 16 Nov, user test W30. The abandoned turn is gone.)
+  assert.deepEqual([...doc.getElementById("log").children].map((n) => [n.className, /^\u21a9 Rewound: .*1 file back/.test(n.textContent)]), [["sys", true]],
+    "a successful typed rewind must clear the abandoned future, and say it was rewound");
+  assert.doesNotMatch(doc.getElementById("log").textContent, /discard this future/);
   send({ type: "event", event: { type: "history", items: [
     { role: "user", text: "restored question" },
     { role: "assistant", text: "restored answer", tools: [] },
@@ -3811,7 +3813,7 @@ test("a queued prompt the backend hands back is restorable too", () => {
   h.event({ type: "steering_update", request_id: h.queued.requestId, state: "returned",
             message: "DGC's backend stopped before this queued message ran; it is back in the composer." });
   assert.equal(h.input.value, "an unrelated draft", "a newer draft is never overwritten");
-  const restore = [...h.doc.querySelectorAll("button")].find((b) => /Restore unsent message/.test(b.textContent));
+  const restore = [...h.doc.querySelectorAll("button")].find((b) => /^Restore$/.test(b.textContent) && b.getAttribute("aria-label") === "Restore unsent message");
   assert.ok(restore, "the returned message offers a restore");
   h.input.value = "";
   restore.click();
@@ -3911,7 +3913,7 @@ test("a queued slash command that runs first does not consume the user's queued 
           message: "DGC's backend stopped before this queued message ran; it is back in the composer." });
   h.send({ type: "backend_exit", code: 0, recovering: true, resumes: "offer", cause: "stdin closed" });
   assert.equal(input.value, "Then run the tests", "the user's queued words come back");
-  assert.ok([...h.doc.querySelectorAll("button")].some((b) => /Restore unsent message/.test(b.textContent)),
+  assert.ok([...h.doc.querySelectorAll("button")].some((b) => /^Restore$/.test(b.textContent) && b.getAttribute("aria-label") === "Restore unsent message"),
     "and the message keeps its restore action");
   assert.deepEqual(h.errors, []);
 });
@@ -4527,15 +4529,18 @@ test("Stop with messages queued gives them back as not sent instead of leaving t
             message: "Stopped before 2 queued messages ran; they were not sent." });
   h.event({ type: "steering_update", request_id: second.requestId, state: "returned" });
   h.event({ type: "turn_end", turn_id: "t1", reason: "cancelled" });
+  // Your own Stop (16 Nov, user test W36): the first is back in the box, so its bubble leaves the transcript (there it
+  // read as half sent); the second can't go in the box too, and stays as not sent with its Restore.
   const bubbles = [...h.doc.querySelectorAll(".msg.user")].filter((node) => /Then run the tests|update the changelog/.test(node.textContent));
-  assert.equal(bubbles.length, 2);
+  assert.deepEqual(bubbles.map((node) => node.querySelector(".bubble").textContent), ["And update the changelog"]);
+  assert.equal(bubbles[0].querySelector(".steer-note").textContent, "Not sent", "it no longer says it is queued, or offers Steer now");
   for (const bubble of bubbles) {
     assert.equal(bubble.querySelector(".role").textContent, "you · not sent");
-    assert.ok([...bubble.querySelectorAll("button")].some((b) => /Restore unsent message/.test(b.textContent)));
+    assert.ok([...bubble.querySelectorAll("button")].some((b) => /^Restore$/.test(b.textContent) && b.getAttribute("aria-label") === "Restore unsent message"));
   }
   assert.equal(h.input.value, "Then run the tests", "the first one is back in the empty composer");
   assert.equal(h.doc.getElementById("queued").textContent, "");
-  assert.match(h.doc.getElementById("log").textContent, /Stopped before 2 queued messages ran; they were not sent\./);
+  assert.doesNotMatch(h.doc.getElementById("log").textContent, /Stopped before 2 queued messages ran/, "what a Stop did is on screen already: no line says it again");
   assert.deepEqual(h.errors, []);
 });
 

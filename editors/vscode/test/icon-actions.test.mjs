@@ -192,8 +192,13 @@ test("Home: a click answers once; the card says what it will do with Undo as a w
     assert.deepEqual(await sent(), []);
     await x.page.click(act(K.visit, "yes")); await settle(x.page);
     assert.equal(await x.page.evaluate(() => { const due = window.__holds.filter(Boolean); window.__holds = []; due.forEach((fn) => fn()); return due.length; }), 1, "one answer is held");
-    await x.page.waitForFunction((s) => !document.querySelector(s), HOME(K.visit));
+    // The answered card leaves when its Undo moment passes (the held timer, fired above) and its answer goes out. What is
+    // waited for is that: no Undo on it, and the answer sent. It used to wait for no card with this Pip's key at all,
+    // and the same Pip's next card ("The tomatoes want water tomorrow.") takes that key about a frame later: a wait
+    // that first looked after that frame never saw the key free, and timed out at 30 s (about one run in three).
+    await x.page.waitForFunction(([undo]) => !document.querySelector(undo) && window.__requests.some((r) => r.type === "decide_pip_computer_action"), [act(K.visit, "undo")]);
     await settle(x.page);
+    assert.notEqual((await x.page.evaluate(row, HOME(K.visit)))?.title, "Allowed. Garden notes opens seeds.example.", "the answered card has left");
     assert.deepEqual((await sent()).map((r) => r.type), ["decide_pip_computer_action"], "sent once when the moment passed");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }

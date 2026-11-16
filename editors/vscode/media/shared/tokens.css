@@ -103,7 +103,9 @@
   --sp: 4px;                     /* the unit: every gap and pad is a multiple of it */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;  --sp-5: 20px;  --sp-6: 24px;
   /* Corners on one scale, a quarter rounder than the 6 / 8 / 10 / 12 / 16 it replaces; a prompt box takes 22. */
-  --r-sm: 7.5px;  --r-md: 10px;  --r-lg: 12.5px;  --r-xl: 15px;  --r-2xl: 20px;  --r-box: 6px;  --r-full: 9999px;      /* the prompt box: the button family's corner (--btn-r) since 14 Nov, it was 22px */
+  /* --r-bubble: a sent message's bubble, on every surface (Work, ChatDGC, a Pip's chat): 10px, his call of 16 Nov. It was
+     20px in Work and ChatDGC and 20px with a 7.5px tail in a Pip's chat. Bubbles only: controls keep --btn-r. */
+  --r-sm: 7.5px;  --r-md: 10px;  --r-lg: 12.5px;  --r-xl: 15px;  --r-2xl: 20px;  --r-box: 6px;  --r-full: 9999px;  --r-bubble: 10px;      /* the prompt box: the button family's corner (--btn-r) since 14 Nov, it was 22px */
   /* Five sizes and four weights, on Codex's steps (11 · 12 · 14 · 16 · 18). The panel had
      grown 13 sizes including half-pixels and seven weights; the eye reads that as noise even
      when no single choice is wrong. Line heights are 1 · 1.2 · 1.45 · 1.6, chosen by role. */

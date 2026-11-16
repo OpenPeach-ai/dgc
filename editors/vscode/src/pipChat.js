@@ -129,14 +129,15 @@ export function retryAskMarkup(fix, {esc = escape, off = false, busy = '', error
 
 // ---- The composer's pill and the agent map for this Pip ----
 /** Work's sub-agents pill: "1 sub-agent" (its count alone in a narrow box). Once the Pip has had a sub-agent it stays,
- *  "0 sub-agents" when none works, so the map is one click away; a Pip that never had one has no pill.
+ *  so the map is one click away: "Agent map" when none works (it said "0 sub-agents", a count of nothing: W27, user
+ *  test 15 Nov), and its ring alone in a narrow box; a Pip that never had one has no pill.
  *  (Background commands join the count in a later step: their feed isn't built yet.) */
 export function pillMarkup(agents, {esc = escape, open = false} = {}) {
   if (!agents.length) return '';
-  const n = agents.filter(a => AGENT_LIVE.includes(a.state)).length, label = plural(n, 'sub-agent');
+  const n = agents.filter(a => AGENT_LIVE.includes(a.state)).length, label = n ? plural(n, 'sub-agent') : 'Agent map';
   const title = `${n ? (n === 1 ? 'A sub-agent is working' : 'Sub-agents are working') : 'No sub-agents working'} · Click to open the agent map`;
   return `<button type="button" id="chat-agents" class="composer-chip agents-pill" data-state="${n ? 'running' : 'idle'}" title="${esc(title)}" aria-label="${esc(`${label} · ${title}`)}" aria-haspopup="dialog" aria-expanded="${open}">`
-    + `<span class="agents-dot" aria-hidden="true"></span><span class="agents-text">${esc(label)}</span><span class="agents-short" aria-hidden="true">${n}</span></button>`;
+    + `<span class="agents-dot" aria-hidden="true"></span><span class="agents-text">${esc(label)}</span><span class="agents-short" aria-hidden="true">${n || ''}</span></button>`;
 }
 /** Which of its sub-agents the map shows now, and which it folds under "Earlier in this chat": the ones working and
  *  the ones that wait on you (asked, held) show; with none of those, its newest one. */
