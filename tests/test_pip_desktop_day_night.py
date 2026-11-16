@@ -157,14 +157,14 @@ class TheDesktopFollowsTheClock(unittest.TestCase):
         self.assertIn("cp /run/dgc/conf/tint2rc-$look /tmp/config/tint2rc", sh)
         self.assertIn("sleep 60", sh)
         self.assertIn('--set-wallpaper=/run/dgc/conf/wallpaper-$now.jpg', sh)
-        self.assertIn('kill -USR1 "$dock"', sh)
+        self.assertIn('redraw_dock "$dock"', sh)
         self.assertNotIn("-c /run/dgc/conf/tint2rc ", sh, "the dock reads the copy that changes with the look")
 
     def test_after_a_switch_the_pointer_is_nudged_so_no_old_square_stays_under_it(self):
         """Seen live (16 Nov): a screen reader connected before the switch kept a square of the old wallpaper under the
         pointer until it moved."""
         sh = (conf_for() / "desktop.sh").read_text()
-        switch = sh.index("--set-wallpaper=")
+        switch = sh.index("--set-wallpaper=/run/dgc/conf/wallpaper-$now.jpg")
         self.assertIn("nudge_pointer() {", sh)
         self.assertGreater(sh.find("nudge_pointer\n", switch), switch, "nudged after the wallpaper changes")
         out = subprocess.run(["sh", "-c", pip_screen.NUDGE_SH + "nudge_pointer; echo done\n"],
@@ -210,6 +210,24 @@ class AMacLikeDock(unittest.TestCase):
             self.assertEqual(pip_screen.dock_icon(index, count, (1440, 900)),
                              (left + index * (size + gap) + size // 2, 900 - margin - height // 2))
         self.assertEqual(pip_screen.dock_icon(1, 3), pip_screen.dock_icon(1, 3, (1280, 800)))
+
+
+    def test_after_the_dock_redraws_the_wallpaper_is_set_again_so_its_corners_match(self):
+        """Seen live (16 Nov): after the dock's reload it copied the screen's background for its glass while it still
+        shrank to its icons, so the square corners around its rounded bar showed another part of the wallpaper (a teal
+        square on the dark wave), at the start and at a switch. Measured on a real desktop: 76 levels apart; with the
+        wallpaper set again a moment after the reload, the dock copies it once more where it stands: 1 apart."""
+        sh = (conf_for() / "desktop.sh").read_text()
+        body = sh[sh.index("redraw_dock() {"):sh.index("}", sh.index("redraw_dock() {"))]
+        reload = body.index('kill -USR1 "$@"')
+        again = body.index("--set-wallpaper=/run/dgc/conf/wallpaper-$look.jpg --wallpaper-mode=crop")
+        self.assertLess(reload, body.index("sleep 1"), body)
+        self.assertLess(body.index("sleep 1"), again, "the wallpaper again once the dock stands where it stays")
+        start = sh.index('sleep 2; redraw_dock "$dock" "$topbar"')
+        self.assertLess(sh.index('"$DESK_DOCK" -c /tmp/config/tint2rc'), start, "at the start, after the dock is up")
+        switch = sh[sh.index("while sleep 60"):]
+        self.assertLess(switch.index("look=$now"), switch.index('redraw_dock "$dock"'), "at a switch, in the new look")
+        self.assertNotIn("kill -USR1", sh.replace('kill -USR1 "$@"', ""), "every redraw goes through redraw_dock")
 
 
 class SmallerDesktopIcons(unittest.TestCase):

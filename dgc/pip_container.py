@@ -238,9 +238,14 @@ def due() -> bool:
         return False
     if current["state"] == "failed":
         try:
-            at = json.loads(_status_path().read_text(encoding="utf-8")).get("at")
-        except (OSError, ValueError, AttributeError):
-            at = None
+            last = json.loads(_status_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            last = None
+        last = last if isinstance(last, dict) else {}
+        # Cut off (its last word "running", no process at it): taken up again at the next open, as status() says.
+        if last.get("state") == "running":
+            return True
+        at = last.get("at")
         return not isinstance(at, (int, float)) or time.time() - at > 3600
     return True
 

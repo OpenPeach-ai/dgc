@@ -198,6 +198,17 @@ class SetupTests(FakeContainerTests):
         (self.base / "dgc-desktop" / "status.json").write_text(json.dumps(status))
         self.assertTrue(pip_container.due(), "after an hour")
 
+    def test_a_setup_cut_off_with_dgc_is_taken_up_again_at_the_next_open(self):
+        # It says "Open the computer again to retry": opening it again does, not an hour later.
+        path = self.base / "dgc-desktop" / "status.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"state": "running", "step": "Building", "done": 3, "total": 9, "at": time.time() - 30,
+                                    "tag": pip_container.tag()}))
+        cut = pip_container.status()
+        self.assertEqual(cut["state"], "failed")
+        self.assertIn("Open the computer again to retry", cut["error"])
+        self.assertTrue(pip_container.due())
+
     def test_an_older_dgcs_image_is_deleted_and_a_new_dockerfile_builds_again(self):
         (self.state / "system-running").touch()
         (self.state / "image-dgc-pip-computer_oldtag12345").touch()

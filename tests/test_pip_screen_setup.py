@@ -195,6 +195,26 @@ class SetupTests(unittest.TestCase):
         (self.home / "desktop/arm64/status.json").write_text(json.dumps(data))
         self.assertTrue(setup.due())
 
+    def test_a_download_cut_off_with_dgc_is_taken_up_again_at_the_next_open_not_a_day_later(self):
+        # Live check, 16 Nov: VS Code closed at 140 of 143 MB; the next open said "Open the computer again to retry"
+        # and opening it again did nothing, because the cut-off download's last word was "running" (a day's wait).
+        status = self.home / "desktop/arm64/status.json"
+        status.parent.mkdir(parents=True)
+        status.write_text(json.dumps({"state": "running", "step": "Downloading Google Chrome and the desktop",
+                                      "done": 140054894, "total": 143528224, "at": time.time() - 60}))
+        value = setup.status()
+        self.assertEqual(value["state"], "failed")
+        self.assertIn("Open the computer again to retry", value["error"])
+        self.assertTrue(setup.due(), "what the words promise: opening it again takes the download up again")
+
+    def test_a_download_still_going_is_not_started_twice(self):
+        status = self.home / "desktop/arm64/status.json"
+        status.parent.mkdir(parents=True)
+        status.write_text(json.dumps({"state": "running", "step": "Downloading", "done": 1, "total": 2, "at": time.time()}))
+        with patch.object(setup, "_running", return_value=True):
+            self.assertEqual(setup.status()["state"], "running")
+            self.assertFalse(setup.due())
+
     def test_the_desktop_uses_dgcs_own_copy_and_says_it_is_setting_up_until_then(self):
         with patch("shutil.which", side_effect=lambda name: None if name in pip_screen.PROGRAMS.values() else "/usr/bin/" + name), \
                 patch("dgc.pip_computer_box.box_runs", return_value=(True, "")):

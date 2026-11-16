@@ -58,11 +58,13 @@ const pressTool = async (p, id) => { if (await p.isVisible(`#${id}`)) { await p.
 const posted = (p, type) => p.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
 const text = (p, selector) => p.evaluate((s) => document.querySelector(s)?.textContent ?? null, selector);
 
+const DAY = new Date(2026, 10, 16, 12, 0).getTime(), NIGHT = new Date(2026, 10, 16, 22, 0).getTime();
 for (const width of WIDTHS) {
   test(`Fit is the default at ${width}px: the screen fills the tab with its shape kept, and the band left is the page's own ground`, async (t) => {
     if (skipOrFail(t)) return;
-    for (const theme of ["dark", "light"]) {
-      const x = await openComputer(browser, { width, theme });
+    // By day and by night (the tab's own desktop changes its wallpaper at 19:00: the real screen's band never does).
+    for (const [theme, now] of [["dark", DAY], ["light", DAY], ["dark", NIGHT], ["light", NIGHT]]) {
+      const x = await openComputer(browser, { width, theme, now });
       try {
         const l = await layout(x.p);
         assert.deepEqual(l.pixels, [1280, 800], "the viewer drew the computer's screen");
@@ -78,7 +80,7 @@ for (const width of WIDTHS) {
         assert.deepEqual(l.scrolls, [false, false], "nothing to scroll");
         // The band: the page's own ground, in either theme, and no picture or grey over it.
         assert.equal(l.ground.body, GROUND[theme]);
-        assert.equal(l.ground.live, GROUND[theme], `${theme}: the band is the page's ground`);
+        assert.equal(l.ground.live, GROUND[theme], `${theme}${now === NIGHT ? " at night" : ""}: the band is the page's ground`);
         assert.equal(l.ground.stage, GROUND[theme]);
         assert.equal(l.ground.image, "none", "no wallpaper behind the real screen");
         assert.equal(l.ground.vnc, "rgba(0, 0, 0, 0)"); assert.equal(l.ground.screen, "rgba(0, 0, 0, 0)", "the viewer paints no ground of its own");

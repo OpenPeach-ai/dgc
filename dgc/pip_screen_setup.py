@@ -195,6 +195,10 @@ def due() -> bool:
     at = last.get("at") if isinstance(last, dict) else None
     if not isinstance(at, (int, float)):
         return True
+    # A download whose last word is "running" with no process at it was cut off (DGC or the editor closed): it is
+    # taken up again at the next look, as status() tells the user, and not a day later.
+    if last.get("state") == "running":
+        return True
     wait = 3600 if last.get("state") == "failed" else CHECK_EVERY
     return time.time() - at > wait
 

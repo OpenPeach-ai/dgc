@@ -556,11 +556,52 @@ class RealScreenTests(unittest.TestCase):
         viewer.sendall(UPDATE)
         self.assertEqual(recv(1)[0], 0)
         recv(1); rects = struct.unpack(">H", recv(2))[0]
-        pixels = b""
+        # Each rectangle where it is on the screen (Raw: its rows, left to right), so a pixel is found by its place.
+        pixels = bytearray(width * height * 4)
         for _ in range(rects):
             x, y, w, h, encoding = struct.unpack(">HHHHi", recv(12))
-            pixels += recv(w * h * 4)
-        return width, height, pixels
+            block = recv(w * h * 4)
+            for row in range(h):
+                at = ((y + row) * width + x) * 4
+                pixels[at:at + w * 4] = block[row * w * 4:(row + 1) * w * 4]
+        return width, height, bytes(pixels)
+
+    def test_the_docks_square_corners_show_the_wallpaper_behind_them(self):
+        """Seen live (16 Nov): around the dock's rounded glass, its window's square corners showed another part of the
+        wallpaper (a teal square on the dark wave). Each corner pixel now matches the wallpaper just beside it."""
+        pip = self.store.create(self.registry.personal()["id"], "Corners", "Look", "local-console")
+        proposal = self.store.propose(pip["id"], 1, {"computer_plan": {"schema_version": 1}}, "local-console")
+        self.store.accept(pip["id"], proposal["id"], 1, "local-console")
+        host = pip_computer.host_for(self.registry.directory, pip["id"], pip["workspace_id"])
+        host.viewer = pip_computer.ViewServer(host)
+        viewer = socket.socket(socket.AF_UNIX)
+        viewer.settimeout(60)
+        viewer.connect(str(host.viewer.path))
+        viewer.sendall(json.dumps({"token": host.viewer.token, "op": "desktop"}).encode() + b"\n")
+        line = b""
+        while not line.endswith(b"\n"):
+            line += viewer.recv(1)
+        self.assertEqual(json.loads(line), {"ok": True})
+        time.sleep(6)                       # the dock's redraw at its start comes about 3 s in
+        width, height, pixels = self.frame(viewer)
+        threading.Thread(target=_drain, args=(viewer,), daemon=True).start()
+        from dgc import pip_apps
+        icons = 3 + sum(pip_apps.find(key) is not None for key in pip_apps.APPS)
+        bar = 2 * sum(pip_screen.DOCK_PAD) + icons * pip_screen.DOCK_ICON + (icons - 1) * pip_screen.DOCK_GAP \
+            + 2 * pip_screen.DOCK_BORDER
+        left, right = (width - bar) // 2, (width - bar) // 2 + bar - 1
+        bottom = height - pip_screen.DOCK_MARGIN - 1
+        top = bottom - pip_screen.DOCK_HEIGHT + 1
+
+        def rgb(x, y):
+            i = (y * width + x) * 4
+            return pixels[i + 2], pixels[i + 1], pixels[i]
+        for name, inside, beside in (("top left", (left + 1, top + 1), (left - 3, top + 1)),
+                                     ("top right", (right - 1, top + 1), (right + 3, top + 1)),
+                                     ("bottom left", (left + 1, bottom - 1), (left - 3, bottom - 1)),
+                                     ("bottom right", (right - 1, bottom - 1), (right + 3, bottom - 1))):
+            a, b = rgb(*inside), rgb(*beside)
+            self.assertLessEqual(max(abs(p - q) for p, q in zip(a, b)), 12, f"the dock's {name} corner: {a} beside {b}")
 
     def test_the_screen_shows_the_desktop_and_input_waits_while_a_pip_works(self):
         pip = self.store.create(self.registry.personal()["id"], "Shopper", "Shop", "local-console")
@@ -576,6 +617,7 @@ class RealScreenTests(unittest.TestCase):
         while not line.endswith(b"\n"):
             line += viewer.recv(1)
         self.assertEqual(json.loads(line), {"ok": True})
+        opened = time.monotonic()
         self.assertFalse(host.browser.alive(), "the screen opens on its desktop, with no browser (16 Nov)")
         self.assertEqual(host.browser.display_dir, host.desktop.x11_dir, "when it opens, it is a window on the screen")
         # The desktop's Terminal is online through the computer's egress, like the browser: the desktop
@@ -635,6 +677,9 @@ class RealScreenTests(unittest.TestCase):
         from dgc import pip_apps
         icons = 3 + sum(pip_apps.find(key) is not None for key in pip_apps.APPS)    # the apps this machine has join the dock
         x, y = pip_screen.dock_icon(0, icons)
+        # The dock redraws itself about 3 s after the screen opens (desktop.sh's redraw_dock); a click in that moment
+        # can land while it rebuilds its window (one run in four lost it).
+        time.sleep(max(0.0, opened + 5 - time.monotonic()))
         for button in (0, 1, 0):
             viewer.sendall(struct.pack(">BBHH", 5, button, x, y))
             time.sleep(0.15)

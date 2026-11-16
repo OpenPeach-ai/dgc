@@ -451,8 +451,16 @@ topbar=$!
       esac
     done < /run/dgc/sock/launch
   done ) &
-# The dock can draw before the wallpaper and window manager settle; a reload redraws it on top.
-sleep 2; kill -USR1 "$dock" "$topbar" 2>/dev/null
+# The dock can draw before the wallpaper and window manager settle; a reload redraws it on top. After a reload the
+# dock copies the screen's background for its glass while it still shrinks to its icons, so the square corners around
+# its rounded bar showed another part of the wallpaper (seen live, 16 Nov); the wallpaper is set again a moment after,
+# and the dock copies the background once more where it stands.
+redraw_dock() {{
+  kill -USR1 "$@" 2>/dev/null
+  sleep 1
+  "$DESK_FILES" --profile dgc --set-wallpaper=/run/dgc/conf/wallpaper-$look.jpg --wallpaper-mode=crop > /dev/null 2>&1
+}}
+sleep 2; redraw_dock "$dock" "$topbar"
 # Each minute: when a switch in conf/looks has passed, the other version of the wallpaper and the dock's other glass.
 ( while sleep 60; do
     now=$(look_now)
@@ -461,8 +469,8 @@ sleep 2; kill -USR1 "$dock" "$topbar" 2>/dev/null
     cp /run/dgc/conf/pcmanfm/dgc/desktop-items-$now.conf /tmp/config/pcmanfm/dgc/desktop-items-0.conf
     cp /run/dgc/conf/tint2rc-$now /tmp/config/tint2rc
     "$DESK_FILES" --profile dgc --set-wallpaper=/run/dgc/conf/wallpaper-$now.jpg --wallpaper-mode=crop > /dev/null 2>&1
-    kill -USR1 "$dock" 2>/dev/null
-    sleep 1; nudge_pointer
+    redraw_dock "$dock"
+    nudge_pointer
   done ) &
 wait
 """, 0o700)

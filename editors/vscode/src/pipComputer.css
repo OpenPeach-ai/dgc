@@ -153,7 +153,9 @@ body.pc-screen-mode{padding:0}
 .pc-stage::backdrop{background:var(--vscode-editor-background)}
 /* The editor may refuse the browser's full screen: then the screen and its bar take the whole tab. */
 .pc-fill .pc-stage{position:fixed;inset:0;z-index:5}
-.pc-live{background:var(--vscode-editor-background)}
+/* The real screen's band is the editor's own ground by day and by night: the night wallpaper rule is the tab's own
+   desktop's, never the live screen's (seen 16 Nov after 19:00). */
+.pc-live,.pc-night .pc-live{background:var(--vscode-editor-background)}
 /* The screen's tools, in the one bar: the shared small button, words beside each mark while there is room. */
 .pc-tools{position:relative;flex:1 0 auto;align-self:stretch;display:flex;align-items:center;gap:6px}
 .dgc-btn.pc-tool{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:5px;width:auto;min-width:26px;padding:0 7px;overflow:visible}
