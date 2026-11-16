@@ -1,5 +1,5 @@
-// Each turn's prompt stays at the top of the transcript while its answer scrolls under it, the way the
-// Claude Code extension does it (main.css, "0.47 pinned prompt"): the prompt is `position: sticky`
+// Each turn's prompt stays at the top of the transcript while its answer scrolls under it, in pure
+// CSS (main.css, "0.47 pinned prompt"): the prompt is `position: sticky`
 // inside its own box, so the end of that box pushes it off and the next prompt takes over.
 //
 // jsdom lays nothing out, so these hold what the boxes ARE -- which rows each one gathers, live and

@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// The editor tabs, activity bar and secondary sidebar show DGC's own mark, the way Claude Code and
-// Codex show theirs — not a generic terminal glyph. The editor paints these icons as a single-colour
+// The editor tabs, activity bar and secondary sidebar show DGC's own mark —
+// not a generic terminal glyph. The editor paints these icons as a single-colour
 // mask, so the file must be solid filled shapes in a 24px box.
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));

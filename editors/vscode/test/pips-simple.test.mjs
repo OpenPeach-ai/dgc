@@ -470,7 +470,7 @@ test('Start in the chat brings Pips back, and Core, like any Pip, takes the mess
 });
 
 test('a Personal Pip has no Run now: you chat with it, or it works on its schedule',async()=>{
- // Reported 2026-10-07: "why do we need a manual Run Now button at all? grok bots don't have that".
+ // Reported 2026-10-07: "why do we need a manual Run Now button at all?"
  const results=async p=>{const x=setup({jobs:[p]});await x.drain();x.click(`[data-job="${p.id}"]`);await x.drain();x.click('.pip-menu [data-tab="runs"]');await x.drain();return x;};
  const chat=await results(pip('pip_'+'g'.repeat(32),'Gmail','scout'));
  assert.equal(chat.d.querySelector('#run'),null);assert.match(chat.d.body.textContent,/When Gmail works on its own, on a schedule/);

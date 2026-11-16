@@ -1,11 +1,11 @@
-// Work in the 0.52 look, in real Chromium on the real session page (test/support/codex-look-scene.mjs): the greys are the
+// Work in the 0.52 look, in real Chromium on the real session page (test/support/dgc-look-scene.mjs): the greys are the
 // editor's, and purple is left for Send and live marks. A sent prompt's bubble is a quiet raised grey with no light or
 // grain on it; the one main button on a card is a fill of the text colour; a running step's label is plain shimmering
 // text while the live verb beside it keeps the purple; the prompt box has the buttons' 6 px corner (14 Nov; it was 22 px) and its own soft edge; and
 // the model menu is a raised grey with a half-pixel ring. Dark and light, 700 and 300 px.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { openRunningTurn, READY } from "./support/codex-look-scene.mjs";
+import { openRunningTurn, READY } from "./support/dgc-look-scene.mjs";
 import { openWorkTab } from "./support/work-tab-scene.mjs";
 import { chromiumOrNull, isPurple, look, tokenColours } from "./support/look-probe.mjs";
 

@@ -829,7 +829,7 @@ function chatControlsMarkup(canSend,busy){
  const ctx=!S.noProvider&&!cliName&&o&&S.chatContext&&S.chatContext.pip_id===S.selected&&S.chatContext.context_size===o.context_size?S.chatContext:null,pct=ctx?Math.min(100,Math.round(ctx.used_tokens/ctx.context_size*100)):null;
  const meter=ctx?`<div class="ctx-head"><div><span class="ctx-kicker">Context window</span><strong>${ctx.used_tokens.toLocaleString('en-US')} / ${ctx.context_size.toLocaleString('en-US')}</strong></div><span class="ctx-pct">${pct}%</span></div>${ctx.breakdown?`<div class="pip-ctx-breakdown" data-sig="${esc(ctx.breakdown.used+':'+ctx.breakdown.categories.map(c=>c.id+'='+c.tokens).join(','))}"></div>`:`<div class="ctx-track" aria-hidden="true"><span style="width:${pct}%"></span></div><div class="ctx-split"><span>${Math.max(0,ctx.context_size-ctx.used_tokens).toLocaleString('en-US')} free</span><span>${ctx.recent_messages} recent message${ctx.recent_messages===1?'':'s'}${ctx.summarized_messages?` · ${ctx.summarized_messages} in its brief`:''}</span></div>`}`:`<div class="ctx-head"><div><span class="ctx-kicker">Context window</span></div></div>`;
  const contextMenu=S.composerPanel==='context'?`<section class="composer-model-menu composer-context-menu dgc-menu from-right" role="dialog" aria-label="Context window">${meter}${cliName?`<p class="composer-scope composer-cli-window">${esc(cliName)} manages its own context window, so there is no size to set here.</p>${continuityMarkup()}`:o?`<div class="composer-context-size"><label for="chat-context">Window size</label><select id="chat-context" aria-label="Context window" title="${esc(choiceScope())}"${locked?' disabled':''}>${sizes.map(n=>`<option value="${n}"${o.context_size===n?' selected':''}>${n===1048576?'1M':n%1024===0?n/1024+'K':n.toLocaleString()}</option>`).join('')}</select></div>${composerNote(`${choiceScope()} Pips supports 2,048–${S.chatControls.context_max.toLocaleString()} tokens; main DGC requests ${S.chatControls.inherited_context_size.toLocaleString()}. ${S.chatControls.context_note}`)}${continuityMarkup()}`:unavailable}</section>`:'';
- // An empty box offers voice mode where Send is, as ChatGPT does; a word typed, and it's Send again.
+ // An empty box offers voice mode where Send is; a word typed, and it's Send again.
  const offerVoice=!!voiceMode&&!busy&&canSend&&!draft.chatText.trim()&&!(canAttachImages()&&(pendingImages().length||pendingFiles().length));
  const sendAction=`<button type="submit" class="chat-send${canSend&&(draft.chatText.trim()||canAttachImages()&&(pendingImages().length||pendingFiles().length))?' ready':''}" aria-label="${busy?'Send mid-turn update':'Send message'}" title="${busy?'Send mid-turn update':'Send message'}"${canSend?'':' disabled'}>${composerIcon('up')}</button>`;
  const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${globalThis.DgcComposer?.STOP||composerIcon('stop')}</button>${S.apiVersion>=73?sendAction:''}`:sendAction;
@@ -5599,7 +5599,7 @@ function simplePipHeader(){
   ?`<span class="topbar-setup" role="status" title="Getting its computer ready. This happens once."><span class="topbar-spinner" aria-hidden="true"></span>Setting up your Pip…</span>`
   :computerIconMarkup();
  if(pageView()){
-  // Its page (Grok's bot settings): back, its name, then Share and a small menu.
+  // Its page: back, its name, then Share and a small menu.
   const sub=['instructions','character'].includes(S.pipPage),share=S.apiVersion>=41&&['scout','lens','rook','lock','quill'].includes(p.pip_type)&&!archived();
   return `<header class="pip-topbar"><button type="button" id="${sub?'pip-page-back':'simple-to-chat'}" class="topbar-icon" aria-label="${sub?'Back':'Back to the chat'}" title="${sub?'Back':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill${pipOff(p)?' is-off':''}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${sub?(S.pipPage==='character'?'Face':'Instructions'):'Settings'}${pipOff(p)?' · Off':''}</small></div><div class="topbar-actions">${pipSwitchMarkup(p)}${share?`<button type="button" class="topbar-icon" data-pip-share aria-label="Share as template" title="Share as template"${S.busy||!usable()?' disabled':''}>${simpleIcon('share')}</button>`:''}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${pipPageMenu()}</div></details></div></header>`;
  }
@@ -5800,7 +5800,7 @@ async function loadEmailDrafts(calendar=false){
 }
 function emailDraftCards(){
  if(remoteHost||S.apiVersion<32||!everyPip())return '';
- // An email it wrote is Grok's Allow card: what it would send, and Send / Always allow right here.
+ // An email it wrote is an Allow card: what it would send, and Send / Always allow right here.
  const gmail=connectedLinks('gmail'),calendar=connectedLinks('googlecalendar'),pipName=S.pip?.name||'This Pip';
  const from=(d,links)=>({link:pickedLink(d.id,links),links,fromOpen:allowFromOpen===d.id});
  const full=d=>S.apiVersion>=43?draftDetails.get(d.id+':'+d.digest):null,open=d=>d.status==='pending'&&!d.expired&&full(d);
@@ -6251,7 +6251,7 @@ function pluginSkip(id){
  const d=(S.connectorDrafts||[]).find(x=>x.id===id);if(!d||S.busy||!usable()||pluginBusy)return;
  void mutate({type:'dismiss_pip_connector_draft',draft_id:d.id,expected_digest:d.digest},r=>{const v=connectorDraft(r.draft,S.selected,S.workspace.id);if(v.id!==d.id||v.status!=='dismissed')throw Error('The dismissal does not match this action.');S.notice='Not run.';void loadEmailDrafts();});
 }
-// ---- A Personal Pip's page, as on Grok's bots: face, name and title, then Info (Instructions,
+// ---- A Personal Pip's page: face, name and title, then Info (Instructions,
 // Routines, Notifications, Share as template), Links, Media and Files. And its routines' cards.
 S.pipPage='info';S.routines=null;S.routinesError='';
 let routineSeq=0,routineEditing='',routineBusy='',routineError='',pageNameDirty=false,titleEditing=false,lookDirty=false,profileBusy=false;

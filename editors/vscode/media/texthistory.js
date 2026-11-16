@@ -1,5 +1,5 @@
 // window.DgcTextHistory: undo and redo for a box that isn't Work's -- ChatDGC's and a Pip's -- the way the Work chat's prompt
-// box has them (main.js, "undo and redo"), and the way Codex's composer has them: Mod-z, Mod-Shift-z and Mod-y, a
+// box has them (main.js, "undo and redo"): Mod-z, Mod-Shift-z and Mod-y, a
 // typing run broken by a pause, and every edit the page makes itself a step of its own.
 //
 // A <textarea> keeps a history of its own, and for typing it is fine. What it cannot hold is everything else these

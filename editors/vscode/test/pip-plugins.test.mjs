@@ -1,4 +1,4 @@
-// A Pip asks before it uses one of your plugins, as Grok asks before a bot uses a connector (Pips API 44).
+// A Pip asks before it uses one of your plugins (Pips API 44).
 // The Pip calls use_plugin; this card is the user's side (Allow, no second sign-in, or Not now). What the
 // Pip would then do in the plugin is an Allow card: Allow, Always allow, Don't. A plugin that can move
 // money asks every time: its card has no Always allow.
@@ -260,7 +260,7 @@ test('Pips settings → Plugins: which Pips use each plugin, Remove for one, and
 });
 
 test('Pips settings → Plugins (Pips API 45): every plugin is every Pip\'s, with what it may do without asking',async()=>{
- // Reported 2026-10-09: a plugin turned on in Settings is consent; ChatGPT's four levels decide what asks.
+ // Reported 2026-10-09: a plugin turned on in Settings is consent; four levels decide what asks.
  const levels=['always_ask','any_changes','important','never_ask'];
  const uses={plugins:[{plugin:'aave',name:'Aave',money:true,about:'Live markets',permission:'important'},
   {plugin:'airtable',name:'Airtable',money:false,about:'',permission:'any_changes'}],levels,installed};

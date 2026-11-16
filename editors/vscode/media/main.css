@@ -29,7 +29,7 @@
 @import url("./shared/inline.css");
 @import url("./shared/effort.css");
 @import url("./pips/wordmark.css");
-/* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
+/* DGC panel — a quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
 /* `hidden` must mean hidden. Every component that sets its own `display` outranks the user-agent
    rule for `[hidden]`, so the attribute silently did nothing on `.fbtn` and the composer carried a
@@ -544,8 +544,8 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
 /* transcript */
 #log { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
   overscroll-behavior: contain; overflow-anchor: none; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
-/* A new session isn't a blank window: DGC's mark (media/dgc.svg), muted, in the middle of the empty transcript, as Codex
-   shows its own. The first message takes its place. It fades in after a moment, so a resumed chat whose history
+/* A new session isn't a blank window: DGC's mark (media/dgc.svg), muted, in the middle of the empty transcript.
+   The first message takes its place. It fades in after a moment, so a resumed chat whose history
    arrives at once never flashes it. */
 #log:empty { justify-content: center; align-items: center; }
 #log:empty::before { content: ""; display: block; flex: none; width: 44px; height: 44px; margin-bottom: var(--sp-6, 24px);
@@ -650,7 +650,7 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 .text :is(ul, ol), .surface-markdown :is(ul, ol) { margin: var(--sp-2) 0 var(--sp-3); padding-left: var(--sp-6); }
 .text li + li, .surface-markdown li + li { margin-top: var(--sp-1); }
 .text li > p { margin-bottom: var(--sp-1); }
-/* Codex's heading scale, ported verbatim: h1 1.5x, h2 1.25x, h3 1.125x, h4-h6 at body size, with
+/* The heading scale: h1 1.5x, h2 1.25x, h3 1.125x, h4-h6 at body size, with
    spacing derived from a quarter of the body size. Every heading previously rendered at 1.08em, so
    a multi-section answer had no visible outline -- an h2 and an h4 were indistinguishable. */
 .text, .surface-markdown { --md-size: 1em; --md-space: calc(var(--md-size) / 4); }
@@ -759,8 +759,7 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 :is(.md-link, .chip.made-file)[data-file-kind="svg"]::before { content: "\e091"; color: var(--fk-orange); }  /* seti _svg */
 /* Files the model made and asked to show, as chips under the step that made them. The kind mark
    comes from the same [data-file-kind] table a file link uses, so a produced .py and a mentioned
-   .py read as the same kind of thing. No download button: the file is already on this machine,
-   which is why neither Codex nor Claude Code's extension offers one either. */
+   .py read as the same kind of thing. No download button: the file is already on this machine. */
 .made-files { display: flex; flex-wrap: wrap; gap: var(--sp-1); list-style: none; margin: var(--sp-1) 0 0; padding: 0; }
 /* The full appearance, not just layout. `.chip` is NOT a base class -- the only other chip rule is
    scoped to `.user .bubble .prompt-att.chip` -- so a bare <button class="chip"> outside a prompt
@@ -973,9 +972,9 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 }
 
 .thinking .verb, .cd-wave .verb { color: var(--muted); }
-/* Codex's status shimmer waits 600 ms, sweeps for one second, then rests until the
-   four-second cycle repeats. The dim base and narrow bright band follow its source;
-   CSS approximates the TUI's cosine blend without splitting text into characters. */
+/* The status shimmer waits 600 ms, sweeps for one second, then rests until the
+   four-second cycle repeats: a dim base and a narrow bright band. CSS approximates
+   a cosine blend without splitting text into characters. */
 @keyframes dgc-activity-shimmer {
   0% { background-position: 120% 0; }
   25%, 100% { background-position: -20% 0; }
@@ -1128,7 +1127,7 @@ body.hide-reasoning .tool-group-label .tg-thought { display: none; }
    happens and folds only once the model has moved on -- so every step is on screen as it runs,
    named, with its own status, and the body is the detail behind it. */
 .tool .body { display: none; margin: 0 var(--sp-2) var(--sp-2) var(--sp-6); padding: 0 0 0 var(--sp-2); border-left: 1px solid var(--border-strong); }
-/* A step is ONE line until the reader opens it -- the rule Codex uses, and the one asked for.
+/* A step is ONE line until the reader opens it -- the rule asked for.
    `.has-output` used to show the body too, so a closed card still printed four clamped lines of
    output. That was invisible in a clean turn (the group folds when the model moves on) and loud in
    any turn that had trouble: one failed command holds its group open, and every successful step
@@ -1575,7 +1574,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .context-head > div { min-width: 0; display: grid; gap: var(--sp-1); }
 .context-kicker { color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; }
 .context-head strong { color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.2 var(--mono); font-variant-numeric: tabular-nums; }
-/* The prompt cache's clock, after the context meter (as Claude Code shows it): whole minutes in tabular
+/* The prompt cache's clock, after the context meter: whole minutes in tabular
    figures, the clock alone in the error colour once the cache has gone. No hover fill: a click opens the
    meter's details beside it, so the meter's own button is the control. */
 .cache-clock { cursor: pointer; gap: 2px; }
@@ -2175,7 +2174,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-f
 /* ---- end long prompts ---------------------------------------------------------------------- */
 
 /* ---- 0.47 pinned prompt ------------------------------------------------------------------------ */
-/* The prompt you sent stays at the top while you read its answer, as in the Claude Code extension.
+/* The prompt you sent stays at the top while you read its answer.
    One box per prompt (main.js wrapTurn): its row, anything the log wrote before its turn started, its
    DGC block, and the turns nobody typed that continued it. The row is sticky INSIDE the box, so the
    end of the box pushes it off and the next prompt takes over, with no script. The box is a column
@@ -2357,7 +2356,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.dgc > .
 
 /* ---- 0.40 agents ------------------------------------------------------------------------------ */
 /* The "● 2 agents" pill and the agent map it opens. Green, blue and a grey ring distinguish working,
-   waiting and idle agents; the light theme takes darker steps (Claude's #89D185 is 1.8:1 on white).
+   waiting and idle agents; the light theme takes darker steps (#89D185 is 1.8:1 on white).
    Shape and a visible "needs you" carry the state too, so it never rests on hue alone. A failure's
    words take their own red: --del-text is for diff counts on the dark grounds and reads 2.6:1 on white. */
 :root { --agent-run:#89D185; --agent-wait:#3B82F6; --agent-idle:var(--faint); --agent-fail-text:#F0747E; }
@@ -2397,7 +2396,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
    sentence whose names -- only the names -- open each agent's page. Same type and tone as a tool
    group's header. No margin: the line is usually followed by hidden spawn groups, and a steered
    prompt's rule (`.msg.dgc > :not(.role):has(+ .msg.user)`) zeroes only its visible neighbour's
-   margin. Not selectable, like Codex's group: a copied transcript carries none of it. */
+   margin. Not selectable: a copied transcript carries none of it. */
 .agent-line { display: flex; align-items: flex-start; gap: 6px; min-width: 0; margin: 0; padding: var(--sp-1) 0;
   color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); user-select: none; }
 /* One text line tall, so the faces centre on the sentence's first line however it wraps. */
@@ -2986,7 +2985,7 @@ body.ask-docked #tasks-panel { display: none; }
   .ask { padding-right: var(--sp-1); padding-left: var(--sp-1); }
 }
 /* The answered questions, inside the propose_options step: open until the reader closes it, every option
-   still listed and the picks marked, as Claude Code keeps them. The unpicked rows go quiet through their
+   still listed and the picks marked. The unpicked rows go quiet through their
    colours, not opacity, so their words keep their contrast. */
 .tool.asked-card:not(.open) .body { display: none; }
 .tool.asked-card .body { padding-top: var(--sp-1); }
@@ -3217,8 +3216,8 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report.quiet { align-items: center; margin: var(--sp-2) 0; padding: var(--sp-1) var(--sp-3);
   border-color: transparent; background: transparent; box-shadow: none; }
 .pip-report, .pip-report-group { --pip-report-face: 20px; }
-/* A finding's severity in Apple's system colours (asked 8 Nov): systemRed and systemYellow on a dark theme; on a light
-   one Apple's own Increase Contrast values, since its standard red (3.2:1) and yellow (1.4:1) don't read as small text on
+/* A finding's severity in a clear red and yellow (asked 8 Nov) on a dark theme; on a light one, their deeper
+   higher-contrast values, since the bright red (3.2:1) and yellow (1.4:1) don't read as small text on
    white. #D70015 is 4.9:1 and #B25000 4.7:1 on the lightest grounds; the old amber was 2.4:1 there. */
 .pip-report, .pip-report-group, .pips-digest-severity { --sev-high: #FF453A; --sev-medium: #FFD60A; --sev-good: #30D158; }
 body.vscode-light :is(.pip-report, .pip-report-group, .pips-digest-severity),
@@ -3304,7 +3303,7 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
 .pip-report-line-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }   /* shortens before a button leaves the card */
 /* What it found is said in the card's own ink, never in red bold (asked 13 Nov: calm): a run that needs you reads in the
    text colour, a clean one in the quiet grey, and the one colour on the card is the dot before its worst finding. "fixed"
-   keeps a small green dot (a mark, 3:1 on every ground: Apple's own greens, as the severities are Apple's reds). */
+   keeps a small green dot (a mark, 3:1 on every ground: --sev-good, beside the severities' red and yellow). */
 .pip-report-line-state[data-bad] { color: var(--text); }
 .pip-report-line-state[data-good]::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--sev-good); vertical-align: 1px; }
 @media (forced-colors: active) { .pip-report-line-state[data-good]::before { forced-color-adjust: none; background: CanvasText; } }

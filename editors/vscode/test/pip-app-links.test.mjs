@@ -1,4 +1,4 @@
-// A Pip connects your apps from its own chat, like Grok's connectors (Pips API 43). A user's Gmail
+// A Pip connects your apps from its own chat (Pips API 43). A user's Gmail
 // Pip answered "I can't set up the Gmail connection myself — I've got no tool for it"; now it asks with
 // connect_app and this card is the user's side. The host opens the sign-in page from the backend's
 // reply: the webview never sees the link.
@@ -160,7 +160,7 @@ test('an account your other Pips use: the card asks to let this one use it, with
 });
 
 const message=(id,role,text,extra={})=>({id,pip_id:PIP,workspace_id:PW,role,text,run_id:'run_'+id.padEnd(32,'0').slice(0,32),status:'succeeded',model:'m',created_at:'2026-10-07T09:00:00.000Z',...extra});
-test("Grok's A/B card: the Pip's choices sit under its latest reply, and a tap answers with one",async()=>{
+test("the choices card: the Pip's choices sit under its latest reply, and a tap answers with one",async()=>{
  const x=setup({links:[],messages:[message('u1','user','Hi'),message('a1','assistant','Shall I connect Gmail?',{choices:['Yes, connect Gmail','Not yet']})]});await openChat(x);
  const choices=[...x.d.querySelectorAll('.msg-choice')];
  assert.deepEqual(choices.map(b=>b.textContent),['AYes, connect Gmail','BNot yet']);
@@ -205,7 +205,7 @@ test('choices under an older reply are not offered, and words already typed are 
  assert.equal(y.d.getElementById('chatText').value,'and also Gmail');
 });
 
-// Grok's Allow card: the email a Pip wrote, inline, with Send / Always allow; the reviewed steps run
+// The Allow card: the email a Pip wrote, inline, with Send / Always allow; the reviewed steps run
 // without the dialogs, on the Pip's own connected Gmail account.
 const RUN='run_'+'5'.repeat(32),DRAFT='maildraft_'+'3'.repeat(32),ACTION='appaction_'+'2'.repeat(32);
 const mail={recipient_email:'friend@example.test',subject:'A short note',body:'Lunch on Friday? <img src=x>'};

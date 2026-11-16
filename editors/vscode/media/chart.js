@@ -1,4 +1,4 @@
-// Charts in ChatDGC (ChatGPT's interactive charts): a reply's ```chart block, JSON the model wrote, drawn as SVG here
+// Interactive charts in ChatDGC: a reply's ```chart block, JSON the model wrote, drawn as SVG here
 // with no library and nothing loaded from anywhere. Bar (grouped, stacked, horizontal), line, area, pie and scatter;
 // hover for values, the legend shows or hides a series, and the card offers the numbers as a table, Copy data and
 // Save image. Words in it (title, labels, names) are always text, never markup.

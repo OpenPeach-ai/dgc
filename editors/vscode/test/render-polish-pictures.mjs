@@ -9,7 +9,7 @@ import { sample } from "./support/notes-sample.mjs";
 import { cleanup } from "./support/notes-host.mjs";
 import { openChat as openPipChat } from "./support/pip-chat-scene.mjs";
 import { openOnePips, GST } from "./support/one-pips-scene.mjs";
-import { openRunningTurn, openChatDgc } from "./support/codex-look-scene.mjs";
+import { openRunningTurn, openChatDgc } from "./support/dgc-look-scene.mjs";
 import { openMapScene } from "./support/agent-map-scene.mjs";
 import { openLibrary, ITEMS } from "./support/chat-scene.mjs";
 import { eachSurface } from "./support/marks-centred-scene.mjs";

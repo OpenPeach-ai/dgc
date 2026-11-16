@@ -1,4 +1,4 @@
-// Rearranging the dock by drag and drop, as on a Mac (media/shared/dock.js and dock.css, media/main.js, src/dock.ts),
+// Rearranging the dock by drag and drop (media/shared/dock.js and dock.css, media/main.js, src/dock.ts),
 // measured in real Chromium on the side bar's real page with a real pointer (support/dock-scene.mjs). What is held here:
 //   - press and drag a pinned icon along the dock: the others slide apart to open a gap where it would land, and
 //     dropping puts it there; the host is told the place (dockPlace), and the order holds over a reload

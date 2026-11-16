@@ -1,5 +1,5 @@
 // Thousands of Pips: the home pages, searches and keeps the open Pip; Pips settings sets how many. (Harness from pip-plugins.)
-// A Pip asks before it uses one of your plugins, as Grok asks before a bot uses a connector (Pips API 44).
+// A Pip asks before it uses one of your plugins (Pips API 44).
 // The Pip calls use_plugin; this card is the user's side (Allow, no second sign-in, or Not now). What the
 // Pip would then do in the plugin is an Allow card: Allow, Always allow, Don't. A plugin that can move
 // money asks every time: its card has no Always allow.

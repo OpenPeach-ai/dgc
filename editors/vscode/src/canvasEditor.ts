@@ -1,4 +1,4 @@
-// ChatDGC's formatted canvas (Canvas option B): ChatGPT's canvas look over the same Markdown file option A opens.
+// ChatDGC's formatted canvas (Canvas option B): a formatted page over the same Markdown file option A opens.
 // ProseMirror edits the document; canvasMarkdown.ts reads the file in and writes it back block by block. The
 // extension host (canvasDoc.ts) owns the TextDocument: it saves, keeps versions and applies the model's changes; this
 // page sends what you typed and shows what changed. Text only: nothing here turns the file's words into markup.
@@ -478,7 +478,7 @@ function load(text: string, flash: boolean): void {
   paintBar();
 }
 
-// ---- the toolbar: ChatGPT's, as a row of plain buttons
+// ---- the toolbar: a row of plain buttons
 
 const bar = document.getElementById("cv-bar") as HTMLElement;
 const style = document.getElementById("cv-style") as HTMLSelectElement;

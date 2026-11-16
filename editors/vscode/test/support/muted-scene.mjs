@@ -2,7 +2,7 @@
 // pictures: a Work session after one turn and into the next (steps, "Worked for", the time and Trace, a system line,
 // the prompt box with its placeholder, the model and its think level, the footer), a ChatDGC chat, and a Pip's chat.
 // Built on the 0.52 look's scenes. Not a *.test.mjs file.
-import { openRunningTurn, openChatDgc as chatDgc, openPips as pips, READY } from "./codex-look-scene.mjs";
+import { openRunningTurn, openChatDgc as chatDgc, openPips as pips, READY } from "./dgc-look-scene.mjs";
 
 export async function openWork(browser, { width = 700, height = 900, theme = "dark-modern" } = {}) {
   const x = await openRunningTurn(browser, { width, height, theme, queue: false });

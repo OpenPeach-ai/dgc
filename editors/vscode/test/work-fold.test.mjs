@@ -1,5 +1,5 @@
-// A turn's work folds into "Worked for 43s ›" once its final answer is there (Codex collapses its
-// commentary the same way). The one-line progress updates, the tool rows and their groups, thinking and
+// A turn's work folds into "Worked for 43s ›" once its final answer is there.
+// The one-line progress updates, the tool rows and their groups, thinking and
 // sub-agent lines whose agents are done fold into the turn's "Worked for" row, which moves to the top of
 // the turn; one click shows them again in place, and the row folds them again once the next turn has
 // answered. A detailed message, a message sent mid-turn, question and approval cards, notices, a Pip's

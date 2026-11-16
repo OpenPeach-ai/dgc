@@ -25,7 +25,7 @@ with long holds, and its body leans the way it looks; it breathes, and blinks (s
 Thinking looks up to one side and the other, working reads left to right and bobs with a little
 squash and stretch, waiting for you hops for attention, success bounces twice, and failure droops.
 
-`mount()` also lets the eyes follow the pointer, as Grok's bots do: one pointer listener per
+`mount()` also lets the eyes follow the pointer: one pointer listener per
 document, and a critically damped spring (ω = 14, fixed 1/120 s steps) per Pip, so the eyes and a
 slight lean turn toward the pointer and settle back about 2.4 seconds after it stops. The frame
 loop starts only when the pointer moves and stops once every Pip has settled; while a Pip follows

@@ -20,7 +20,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); });
 
-import { openChatDgc } from "./support/codex-look-scene.mjs";
+import { openChatDgc } from "./support/dgc-look-scene.mjs";
 
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300]) {
   test(`a chat: grey bubbles, a prompt box with the 6px corner, purple only on the link and where Send is (${theme}, ${width}px)`, async (t) => {

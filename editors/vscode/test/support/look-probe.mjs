@@ -1,4 +1,4 @@
-// What a page's tokens compute to, and one element's look: shared by the 0.52 look's tests (codex-look-*.test.mjs).
+// What a page's tokens compute to, and one element's look: shared by the 0.52 look's tests (dgc-look-*.test.mjs).
 // Runs in the page. Not a *.test.mjs file.
 
 /** {name: computed colour} for custom properties, read on `where` (a selector; the body by default) as a colour or a fill. */

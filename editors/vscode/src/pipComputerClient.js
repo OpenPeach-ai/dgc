@@ -1,4 +1,4 @@
-// A Pip's computer in an editor tab: its Browser, Files and Terminal, like Grok's bots.
+// A Pip's computer in an editor tab: its Browser, Files and Terminal.
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
 import {DRAWER,cardWords,cardTitle,drawerMarkup,bellMarkup} from './pipComputerDrawer.js';
@@ -30,7 +30,7 @@ const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],compu
  // and that wiped each letter as you typed it (a user's report); it shows yours until you go,
  // press Escape or leave the bar.
  address:null,
- // The full screen, like Grok's bots: the CLI can stream it (screenCapable) and this machine has it (desktop.available).
+ // The full screen: the CLI can stream it (screenCapable) and this machine has it (desktop.available).
  screenCapable:false,desktop:null,screen:{state:'off',reason:''},
  // Where the Pip last acted by position (Pips API 53): you see its cursor there while it works.
  pointer:null,pointerSeq:-1,pointerAt:0,pointerPulse:false,screenWatching:false,
@@ -299,7 +299,7 @@ function drawDrawer(fresh){
  ringBell();
 }
 function moreKeys(){const menu=$('pc-more-menu');if(menu)window.DgcMenu.keys(menu,{close:()=>{S.more=false;render();},trigger:()=>$('pc-more')});}
-// A desktop like Grok's bots' computers: a wallpaper, a dock with three apps, apps in windows.
+// A desktop: a wallpaper, a dock with three apps, apps in windows.
 const APPS={browser:'Browser',files:'Files',terminal:'Terminal'};
 // Each app wears the picture the full desktop's dock does (dgc/desktop_assets, copied byte for byte into media/pips/apps,
 // drawn by pipComputer.css): one app, one picture, on every screen.

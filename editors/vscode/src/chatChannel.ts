@@ -28,7 +28,7 @@ export interface ChatBackend extends EventEmitter {
 const MAX_HELD = 256;
 
 /**
- * A chat in its own directory, opened on a backend another chat slot started -- Codex's model: one
+ * A chat in its own directory, opened on a backend another chat slot started -- one
  * `dgc serve`, many sessions, each with its own project root, config, trust, MCP servers and mode.
  *
  * To the panel it is a backend like any other. It "starts" by asking that backend for a chat; its

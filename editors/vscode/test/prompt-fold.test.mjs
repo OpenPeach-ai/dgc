@@ -99,7 +99,7 @@ test("four lines fold, three do not; one unbroken line folds by its wrapped heig
   const views = [];
   const fold = (text) => { const p = panel(); views.push(p); return p.submit(text).dataset.fold ?? "none"; };
   assert.equal(fold(lines(3)), "none", "three lines show whole");
-  assert.equal(fold(lines(4)), "folded", "a fourth line folds, as Claude Code does");
+  assert.equal(fold(lines(4)), "folded", "a fourth line folds");
   assert.equal(fold("a".repeat(120)), "none", "one 120-character word wraps to three lines");
   assert.equal(fold("a".repeat(160)), "folded", "and at 160 to four");
   assert.equal(fold("QUJD".repeat(750)), "folded", "base64 has no spaces and folds like any prompt");

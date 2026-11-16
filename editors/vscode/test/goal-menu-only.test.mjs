@@ -1,4 +1,4 @@
-// A goal starts only when Goal is chosen from the "/" menu (decided 12 Nov, as Codex in VS Code).
+// A goal starts only when Goal is chosen from the "/" menu (decided 12 Nov).
 // The composer's goal paths, in the panel's own script (media/main.js) with a stub host:
 //   - Goal chosen in the menu (Enter, Tab or a click on its row) pins the Goal choice to this draft; what is sent
 //     next is the goal's objective;

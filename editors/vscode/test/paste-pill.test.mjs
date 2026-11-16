@@ -6,7 +6,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openRailScene } from "./support/rail-scene.mjs";
-import { openChatDgc } from "./support/codex-look-scene.mjs";
+import { openChatDgc } from "./support/dgc-look-scene.mjs";
 import { openChat as openPip } from "./support/pip-chat-scene.mjs";
 
 let chromium;

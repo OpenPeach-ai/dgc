@@ -1,6 +1,6 @@
 // A file named in an answer wears its kind, not its extension spelled out mid-sentence.
 //
-// Codex shows a python mark beside documents.py and a doc mark beside a set of notes, and keeps
+// A python mark beside documents.py and a doc mark beside a set of notes, with
 // the full path in the hover label. DGC already marked where an EXTERNAL link pointed (github,
 // npm, the marketplace) but gave every workspace file the same treatment: none.
 //

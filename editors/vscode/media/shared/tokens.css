@@ -3,7 +3,7 @@
    canvas.css. Grounds, text and borders are the editor's own theme tokens, so light, dark and high contrast follow it;
    only the accent and the washes are ours.
 
-   The greys and whites are the editor's own, the way Codex's extension takes them: grounds from the theme, and every
+   The greys and whites are the editor's own: grounds from the theme, and every
    line, quiet word and filled pill derived from the text colour. One purple on top, on at most a tenth of what is
    coloured on a screen: Send, links, DGC's mark, and live marks (an unread dot, a spinner, a switch that is on). Never a
    bubble, a container, a count or a second button. Every raw purple lives in this file; test/no-raw-purple.test.mjs
@@ -32,11 +32,11 @@
   --border-strong: var(--hair-strong);
   --text:var(--vscode-foreground, var(--fallback-text));
   --text-strong:var(--vscode-editor-foreground, var(--vscode-foreground, var(--fallback-text-strong)));
-  /* Quiet text is a dull mid grey, as Codex's is. Codex's secondary text in an editor is its text at 65%
+  /* Quiet text is a dull mid grey: the editor's text at 65%
      (color-mix(in srgb, var(--vscode-foreground) 65%, transparent)): #8d8d8d on Dark Modern's #181818. DGC's is that
      grey, opaque (a stroked icon's crossings are painted once), and held whatever the theme's text is: no brighter
      than #8d8d8d on a dark ground. It was the editor's description colour: #9d9d9d in Dark Modern, and in Light Modern
-     the text colour itself, so nothing there was quiet. A light ground takes #6c6c6c (below): Codex's 65% of the light
+     the text colour itself, so nothing there was quiet. A light ground takes #6c6c6c (below): 65% of the light
      text is 3.9:1 there, and this is the lightest grey that reads at 4.5:1 on Light Modern's and Light+'s side bars.
      High contrast keeps the theme's own (below). --muted-firm is for quiet words on a raised or washed ground (a
      field, a pill, a menu), where that grey would read under 4.5:1: #9a9a9a at most on dark, #5e5e5e at least on light.
@@ -77,7 +77,7 @@
   --accent-hover:#6A4BF0; --lav:#A78BFA;
   /* A count's pill and a chosen mark: a neutral wash. Purple is for Send, links and live marks. */
   --accent-soft: color-mix(in srgb, var(--text) 8%, transparent);
-  /* Selection and focus are structural, not chromatic. Codex marks a chosen row by lifting its
+  /* Selection and focus are structural, not chromatic. A chosen row is marked by lifting its
      surface and a focused field by firming its border; purple is reserved for the primary action,
      links and live status. A 2px accent rail down every selected row read as decoration. */
   --sel:var(--vscode-list-activeSelectionBackground, rgba(255,255,255,.06));
@@ -110,7 +110,7 @@
      20px in Work and ChatDGC and 20px with a 7.5px tail in a Pip's chat. Bubbles only: controls keep --btn-r.
      --r-code: an inline code chip (a path, a command in a line of words), on every surface: 4px, his call of 16 Nov. */
   --r-sm: 7.5px;  --r-md: 10px;  --r-lg: 12.5px;  --r-xl: 15px;  --r-2xl: 20px;  --r-box: 6px;  --r-full: 9999px;  --r-bubble: 10px;  --r-code: 4px;      /* the prompt box: the button family's corner (--btn-r) since 14 Nov, it was 22px */
-  /* Five sizes and four weights, on Codex's steps (11 · 12 · 14 · 16 · 18). The panel had
+  /* Five sizes (11 · 12 · 14 · 16 · 18) and four weights. The panel had
      grown 13 sizes including half-pixels and seven weights; the eye reads that as noise even
      when no single choice is wrong. Line heights are 1 · 1.2 · 1.45 · 1.6, chosen by role. */
   --t-xs: 11px; --t-sm: 12px; --t-base: var(--vscode-font-size,13px); --t-lg: 16px; --t-xl: 18px;

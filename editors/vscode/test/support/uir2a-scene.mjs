@@ -3,7 +3,7 @@
 // options-scene.mjs's THEMES ("cursor-dark" and "light-cursor" have a see-through input ground). Not a *.test.mjs file.
 import { readFileSync } from "node:fs";
 import { openWorkTab } from "./work-tab-scene.mjs";
-import { READY } from "./codex-look-scene.mjs";
+import { READY } from "./dgc-look-scene.mjs";
 import { THEMES } from "./options-scene.mjs";
 import * as chat from "./chat-scene.mjs";
 import * as pips from "./pip-chat-scene.mjs";

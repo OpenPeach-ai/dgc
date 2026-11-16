@@ -1301,7 +1301,7 @@ test("the Library: its own tab, its files asked for, and each file's actions thr
   assert.deepEqual(lib.last("library"), { type: "library", files: [{ id: "x" }], total: 1, next: null, counts: { pdf: 1 },
                                           origins: { made: 1, uploaded: 0 } });
   lib.say({ type: "list", origin: "made" });
-  assert.equal(last("chatdgc_library").origin, "made", "files ChatDGC made, as ChatGPT filters them");
+  assert.equal(last("chatdgc_library").origin, "made", "the files ChatDGC made");
   lib.say({ type: "list", origin: "<script>" });
   assert.equal(last("chatdgc_library").origin, undefined, "only a filter DGC knows");
   const file = { source: "chat", chat_id: ID(7), id: `att_${"a".repeat(32)}`, name: "budget.csv", kind: "document", size: 15 };

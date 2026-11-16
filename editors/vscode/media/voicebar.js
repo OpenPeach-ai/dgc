@@ -3,8 +3,8 @@
 //   [✕ Cancel]  [ ▁▃▅▂▇▃▁ live waveform ··· 0:07 ]  [■ Stop: add it to the message]  [↑ Stop and send]
 //
 // The waveform is your microphone, not an animation: DGC Voice reads how loud it is about every 50 ms on the
-// computer you're at, and each bar here is 200 ms of that, scrolling in from the right (Codex draws its dictation
-// the same way). A flat line for three seconds says so: "Not hearing anything — check your microphone".
+// computer you're at, and each bar here is 200 ms of that, scrolling in from the right.
+// A flat line for three seconds says so: "Not hearing anything — check your microphone".
 //
 // A page makes one bar controller for its box (create(scope)), puts markup(scope) where the box's bottom row was,
 // and tells the controller what happens: state("starting" | "recording" | "writing" | "idle"), push(levels). The
@@ -12,7 +12,7 @@
 // frame, so a page that redraws its whole box (Pips) loses nothing. Clicks come back as data-voice-action buttons.
 (function (root) {
   "use strict";
-  const BAR_W = 3, PITCH = 6, BAR_MS = 200;     // Codex's scrolling waveform: 3 px bars every 6 px, one per 200 ms
+  const BAR_W = 3, PITCH = 6, BAR_MS = 200;     // the scrolling waveform: 3 px bars every 6 px, one per 200 ms
   // Flat this long, this quiet: "not hearing anything". A working microphone's own hiss is above this (about
   // -66 dBFS); one the system withholds reads exactly nothing.
   const QUIET_MS = 3000, QUIET_RMS = 0.0005;

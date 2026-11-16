@@ -1,4 +1,4 @@
-// Maths in Markdown, as ChatDGC draws it (ChatGPT does): TeX between $…$, \(…\), $$…$$ or \[…\] becomes a placeholder
+// Maths in Markdown, as ChatDGC draws it: TeX between $…$, \(…\), $$…$$ or \[…\] becomes a placeholder
 // holding the TeX, which the page draws with KaTeX. Only a page that asks gets it (main DGC's chat doesn't), never in
 // code, and money stays money: as pandoc reads it, "$5 and $10" has no maths in it.
 import { test } from "node:test";

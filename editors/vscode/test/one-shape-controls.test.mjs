@@ -11,7 +11,7 @@ import { openGrid, EVERY } from "./support/home-grid-scene.mjs";
 import { openWorkTab } from "./support/work-tab-scene.mjs";
 import { openChat as openChatTab, conversation } from "./support/chat-scene.mjs";
 import { openChat as openPip } from "./support/pip-chat-scene.mjs";
-import { openRunningTurn, openPips, openSettingsGeneral } from "./support/codex-look-scene.mjs";
+import { openRunningTurn, openPips, openSettingsGeneral } from "./support/dgc-look-scene.mjs";
 import { openSheet } from "./support/pip-cards-polish-scene.mjs";
 import { GST, openOnePips } from "./support/one-pips-scene.mjs";
 import { openSettingsChanges } from "./support/settings-undo-scene.mjs";

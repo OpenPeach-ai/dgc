@@ -19,7 +19,7 @@
   // An icon that cannot load (the icon service unreachable, or nothing for that host) gives the link its bundled glyph
   // back: the one fallback Work's page and a Pip's chat use (media/mentions.js, "links").
   window.DgcMentions?.watchFavicons(document);
-  // Maths, as ChatGPT draws it: the Markdown leaves each formula as TeX in a placeholder, and KaTeX (loaded the first
+  // Maths: the Markdown leaves each formula as TeX in a placeholder, and KaTeX (loaded the first
   // time one shows) draws it in the conversation. A copied reply is built afresh, so it carries the TeX as written.
   window.DgcMarkdown?.setMath?.(true);
   let katexAsked = false;
@@ -85,7 +85,7 @@
   new MutationObserver(() => { if (!mathFrame) mathFrame = requestAnimationFrame(() => { mathFrame = 0; renderMath(log); }); })
     .observe(log, { childList: true, subtree: true });
   const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), notice = $("cd-notice");
-  // Web search is always there, as in ChatGPT: the model looks things up whenever an answer depends on it, so the box
+  // Web search is always there: the model looks things up whenever an answer depends on it, so the box
   // has no switch for it (reported 2026-10-18: "it anyway uses web, so let's not confuse users"). Settings -> Web
   // search -> Search in ChatDGC turns it off for every chat.
   const searchMode = () => "auto";
@@ -244,7 +244,7 @@
     return node;
   }
 
-  /** The queries a reply ran on the chat's spreadsheets (ChatGPT's "View analysis"): each SQL and what it returned. */
+  /** The queries a reply ran on the chat's spreadsheets ("View analysis"): each SQL and what it returned. */
   function analysisNode(message) {
     const queries = Array.isArray(message.queries) ? message.queries.filter((q) => q && typeof q.sql === "string") : [];
     if (!queries.length) return null;
@@ -278,7 +278,7 @@
     return box;
   }
 
-  // ---- interactive answers (ChatGPT's): a widget, one self-contained HTML page, in a tab of its own beside the chat
+  // ---- interactive answers: a widget, one self-contained HTML page, in a tab of its own beside the chat
   // (VS Code runs nothing in a frame inside this page, and this page runs only its own code). The card says what it
   // is, opens it, and shows its page.
   const hashOf = (text) => { let h = 5381; for (let i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0; return h.toString(36); };
@@ -348,7 +348,7 @@
     return box;
   }
 
-  // ---- charts (ChatGPT's interactive charts): a ```chart block of JSON, drawn by chart.js
+  // ---- interactive charts: a ```chart block of JSON, drawn by chart.js
   function chartBlocks(node, live) {
     if (!window.DgcChart) return;
     for (const pre of node.querySelectorAll('pre.code[data-language="chart"]')) {
@@ -363,7 +363,7 @@
     }
   }
 
-  // ---- writing blocks (ChatGPT's): a draft the user will send as it is, which the model writes in an ```email or
+  // ---- writing blocks: a draft the user will send as it is, which the model writes in an ```email or
   // ```draft block. It reads as the email it is, with Copy (plain text), Open in mail app, and Edit in place.
   const DRAFT_KINDS = ["email", "draft"];
   /** A rendered fence that is a draft: its kind and words. The label may sit on the line after the backticks. */
@@ -486,7 +486,7 @@
     logosWanted.push(id);
   }
   function logoImage(src) { const img = document.createElement("img"); img.alt = ""; img.src = src; return img; }
-  /** The plugins a reply read from ("Used [logo] Aave"), as ChatGPT names the apps it used: what came from a plugin
+  /** The plugins a reply read from ("Used [logo] Aave"), each by name: what came from a plugin
    *  did. A logo not here yet shows a plug until the host sends it; a bare name (an earlier build's) keeps the plug. */
   function pluginsNote(message) {
     const used = (Array.isArray(message.plugins) ? message.plugins : [])
@@ -686,7 +686,7 @@
     sync();
     return card;
   }
-  /** A card of several questions answered together, as ChatGPT asks them: numbered, each with its options and the
+  /** A card of several questions answered together: numbered, each with its options and the
    *  first chosen until you change it, and one button, in the model's words, that sends them all. Answerable while
    *  the reply is the last thing said; then it shows what was sent, or that you moved on. */
   function formCard(message, q, form, index, live) {
@@ -788,7 +788,7 @@
     button.addEventListener("click", () => openSources(message));
     return button;
   }
-  /** The Sources panel, beside the conversation, as ChatGPT opens it. */
+  /** The Sources panel, beside the conversation. */
   function openSources(message) {
     $("cd-sources-panel")?.remove();
     const panel = el("aside", "cd-panel");
@@ -1060,7 +1060,7 @@
     if (sig) block.dataset.sig = sig;              // what it holds: a redraw keeps the block while this is the same
     return block;
   }
-  // ---- pictures from the web above a reply (ChatGPT's image strip). The backend fetched and kept them with the
+  // ---- pictures from the web above a reply (an image strip). The backend fetched and kept them with the
   // chat, so each is asked for by id like an attached image: the screen never asks an image host itself.
   function webPicture(item) {
     const picture = el("img");
@@ -1203,7 +1203,7 @@
   // A menu row's leading icon, in the shared menu's icon box (media/shared/menu.css).
   const menuIcon = (name) => { const glyph = icon(name); glyph.classList.add("dgc-menu-icon"); return glyph; };
   const RESEARCHING = ["planning", "running", "writing", "checking"];
-  const COUNTDOWN = 15;                // seconds a new plan waits for Edit before it starts, as ChatGPT's does
+  const COUNTDOWN = 15;                // seconds a new plan waits for Edit before it starts
   /** A <details> that stays as you left it across redraws (research redraws often). */
   function kept(key, cls, label, open = false) {
     const box = el("details", cls);
@@ -1477,7 +1477,7 @@
     }
     return box;
   }
-  /** The report on its own, as ChatGPT's full-screen view has it: contents, the report, and its sources. */
+  /** The report on its own, full screen: contents, the report, and its sources. */
   function openReader(message) {
     $("cd-reader")?.remove();
     const title = message.research?.plan?.title || "Report";
@@ -1730,7 +1730,7 @@
     if (next) node.append(next);
     return node;
   }
-  // ---- projects (ChatGPT's): chats, files and instructions together. A chat in one says so in its header; a new
+  // ---- projects: chats, files and instructions together. A chat in one says so in its header; a new
   // chat in one is the project's page (its instructions, files, memory and chats), and what's sent starts a chat.
   function projectOf(conversation) {
     const id = conversation?.project;
@@ -1886,7 +1886,7 @@
     document.body.append(panel);
     (focus === "instructions" ? inst : name).focus();
   }
-  // ---- plugins: a card under a reply for what the model would do in one of your plugins (ChatGPT's confirmation).
+  // ---- plugins: a card under a reply for what the model would do in one of your plugins, to confirm.
   // Nothing goes until you choose: Send it now (with your edits), Hand it to a Pip (first for something recurring),
   // or Don't. Its inputs are the model's: text only, and editable here.
   function cardFields(args, composio = false) {
@@ -2655,7 +2655,7 @@
     }
     return box;
   }
-  /** Follow-ups (ChatGPT's): a few next messages under the chat's last reply; one click sends it. Not under an older
+  /** Follow-ups: a few next messages under the chat's last reply; one click sends it. Not under an older
    *  reply (the conversation moved on), and not while a reply is being written. */
   function followupsNode(message) {
     const list = Array.isArray(message.followups) ? message.followups.filter((f) => typeof f === "string" && f.trim()) : [];
@@ -2683,7 +2683,7 @@
     showSending(item);
     hideNotice(); controls();
   }
-  /** Branch in new chat (ChatGPT's): this conversation up to here, in a new chat of its own, opened in a tab. */
+  /** Branch in new chat: this conversation up to here, in a new chat of its own, opened in a tab. */
   function branchAction(message) {
     if (state.conversation?.temporary || !message.id) return null;
     return idleOnly(action("git-branch", "Branch in new chat", () => vscode.postMessage({ type: "branch", messageId: message.id })));
@@ -2801,7 +2801,7 @@
     const head = el("div", "context-head"), named = el("div");
     named.append(el("span", "context-kicker", "Context window"), el("strong", "", `${used.toLocaleString()} / ${room.toLocaleString()}`));
     head.append(named, el("span", "cd-pop-pct", `${Math.round(Math.min(1, used / (room || 1)) * 100)}%`));
-    // What fills it, part by part (as Claude's Usage sheet), once counted for this chat; until then, the meter's lines.
+    // What fills it, part by part (media/breakdown.js), once counted for this chat; until then, the meter's lines.
     const drawn = counted && window.DgcBreakdown ? window.DgcBreakdown.render(counted) : null;
     const track = el("div", "context-track"), fill = el("span");
     fill.style.width = `${(share * 100).toFixed(1)}%`;
@@ -3087,7 +3087,7 @@
     });
   }
 
-  // ---- the prompt rail (ChatGPT's "table of contents", media/promptrail.js, the same as the Work chat's): every prompt
+  // ---- the prompt rail (a table of contents, media/promptrail.js, the same as the Work chat's): every prompt
   // from the outline, even those on pages not on screen; going to one of those loads the pages before it first.
   const promptNode = (id) => log.querySelector(`.cd-msg.cd-user[data-id="${CSS.escape(id)}"]`);
   const promptRail = window.DgcPromptRail?.create({
@@ -3274,12 +3274,12 @@
       button.disabled = state.busy || state.compacting || readOnly() || button.dataset.never === "1";
     }
     const text = input.value;
-    // An empty box offers voice mode where Send is, as ChatGPT does; a word typed, and it's Send again.
+    // An empty box offers voice mode where Send is; a word typed, and it's Send again.
     const empty = !text.trim() && !state.pending.length;
     const locked = readOnly();
     const offerVoice = !!voiceMode && empty && !state.busy && !!state.conversation && !state.unavailable && !state.compacting && !locked;
     if (voiceModeButton) voiceModeButton.hidden = !offerVoice;
-    // While it answers, Send stays beside Stop for what you've typed: it queues it (Codex's queue).
+    // While it answers, Send stays beside Stop for what you've typed: it queues it (the queue, below).
     const queueing = busyNow() && !empty;
     send.hidden = offerVoice || (busyNow() && empty);
     stop.hidden = !(state.busy || state.briefing) || locked;      // Stop ends a reply, or Continue in Work's brief
@@ -3307,7 +3307,7 @@
     input.style.height = `${Math.min(input.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
   }
   input.addEventListener("input", () => { grow(); controls(); saveDraft(); });
-  // ---- undo and redo (media/texthistory.js): the box's own history, as the coding chat's box and Codex's have one.
+  // ---- undo and redo (media/texthistory.js): the box's own history, as the coding chat's box has one.
   // The textarea's would do for typing, but not for what this page does to the box itself -- a message sent or given
   // back, words dictated, a long paste folded into a chip -- which it either never recorded or lost track of.
   const history = window.DgcTextHistory ? window.DgcTextHistory.create({
@@ -3526,7 +3526,7 @@
     grow(); saveDraft(); chips();
     if (state.research) researchMode(false);
     if (state.output !== "auto") outputChoice("auto");
-    // While it's answering (or summarizing), the message waits its turn, as Codex queues one: it goes when the
+    // While it's answering (or summarizing), the message waits its turn in the queue: it goes when the
     // reply finishes. Voice mode never gets here busy -- it waits for the reply itself.
     if (busyNow()) { enqueue(item); controls(); return; }
     dispatch(item, spoken);
@@ -3555,9 +3555,9 @@
     controls();
   }
 
-  // ---- the queue (Codex's): messages sent while it's answering wait above the box, in order. When the reply
+  // ---- the queue: messages sent while it's answering wait above the box, in order. When the reply
   // finishes, the first goes, and the next when that one's reply finishes. Stop, or a reply that failed, sends
-  // none of them: they all come back to the box, as Codex gives them back, for you to decide. Kept per chat with
+  // none of them: they all come back to the box, for you to decide. Kept per chat with
   // the draft, so a reload doesn't lose them (they come back to the box then, never sent on their own).
   const MAX_QUEUED = 10;
   const queueKey = (id) => `queue:${id || "new"}`;
@@ -5073,7 +5073,7 @@
     return fine && parts.map((part) => (typeof part === "string" ? part : part.wire)).join("") === text ? parts : null;
   }
 
-  // ---- keyboard shortcuts (ChatGPT's): Ctrl on Windows and Linux, Cmd on a Mac
+  // ---- keyboard shortcuts: Ctrl on Windows and Linux, Cmd on a Mac
   const MAC = /Mac/i.test(navigator.platform || navigator.userAgent || "");
   const MOD = MAC ? "⌘" : "Ctrl";
   const SHORTCUTS = [

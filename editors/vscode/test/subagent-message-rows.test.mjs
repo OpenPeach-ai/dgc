@@ -1,4 +1,4 @@
-// A parent steering a running sub-agent, the way Codex shows it: "Sent message to <agent>".
+// A parent steering a running sub-agent, shown as one line: "Sent message to <agent>".
 //
 // The row was a wrench card reading "Used tool · message task" with no recipient, so a parent
 // talking to one of the children it started looked like an unnamed tool. The backend resolves the

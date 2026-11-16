@@ -1,4 +1,4 @@
-// The Work tab's sessions, the way Codex lists its chats (the user's note of 10 November), in real Chromium with the real
+// The Work tab's sessions, as a short list (the user's note of 10 November), in real Chromium with the real
 // panel page (test/support/home-scene.mjs): only the six newest show (three, before the tabs gave the list a page of its
 // own), each a row with its blob, its title and its age at the right ("2h", "1w", "1mo"), then a quiet "View all (N)". That opens a popover over the list: a "Search
 // recent chats" field, then every session in a list that scrolls and narrows as you type. Escape or a click outside

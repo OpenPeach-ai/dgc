@@ -898,7 +898,7 @@ for (const kind of ["image", "file"]) {
         assert.equal(m.height, composer.height, `its chip is the composer's height (${m.height}px sent, ${composer.height}px in the composer)`);
         assert.equal(m.tile, 24, "the image is a 24px tile, as in the composer's pill (0.52)");
         assert.equal(m.tile, composer.tile);
-        assert.equal(m.caption, "shot.png", "beside its file's name, as in Claude Code");
+        assert.equal(m.caption, "shot.png", "beside its file's name");
         assert.equal(m.caption, composer.caption, "the same words as in the composer");
         await s.page.evaluate(() => window.__pin.heads().at(-1).querySelector(".image-chip").click());
         assert.equal(await s.page.evaluate(() => { const v = document.getElementById("image-viewer"); return !!v && !v.hidden && !!v.querySelector("img"); }), true, "a click opens the image");
@@ -908,7 +908,7 @@ for (const kind of ["image", "file"]) {
   });
 }
 
-// A pasted image's chip names its file, as Claude Code's does (reported 2026-10-22): the name cut to
+// A pasted image's chip names its file (reported 2026-10-22): the name cut to
 // fit, the full name with its type, size and dimensions on hover. An image with no file name keeps
 // its type and size.
 test("a pasted image's chip shows its file name, cut to fit", async (t) => {

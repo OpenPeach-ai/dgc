@@ -70,7 +70,7 @@
 - **Ollama Cloud** is one of the providers in Settings › Models › + Add provider: Ollama's cloud models with no Ollama installed. **Get a key** opens ollama.com's API keys page; paste the key once and DGC checks it before saving (ollama.com lists its models to anyone, so the key is checked on its own, at no cost). A key it refuses is said at once in plain words and nothing is saved. If Ollama's web search has no key of its own, it uses this one.
 - A Work session's context meter shows no percentage until the model has answered once: on a model DGC can't reach it showed a number about nothing.
 - A ChatDGC chat's waiting wake-ups are a pill on the bar above its prompt box, as in Work ("Wakes 14:30"): it opens each one with its time, its reason and a Cancel. A wake-up's turn reads "Woke up as planned" with its reason, as a quiet line in the chat where a message bubble would be.
-- Rearrange the dock by dragging, as on a Mac: press a pinned item and drag it along the dock, the others slide apart to open a gap where it would land, and letting go puts it there. The order is kept on this computer with the pins. A short press is still a click, "+" stays last, Escape puts the item back, and letting go outside the dock snaps it back: a drag never removes anything.
+- Rearrange the dock by dragging: press a pinned item and drag it along the dock, the others slide apart to open a gap where it would land, and letting go puts it there. The order is kept on this computer with the pins. A short press is still a click, "+" stays last, Escape puts the item back, and letting go outside the dock snaps it back: a drag never removes anything.
 - By keyboard, Alt+Left and Alt+Right move the focused dock item one place and say where it is now ("Moved to place 2 of 6"). Under reduced motion nothing slides: the gap just appears.
 - Quiet text is a duller grey, in a Work session, ChatDGC and a Pip's chat: step and activity rows with their icons, times, the footer's mode and hint, placeholders, the wordmark. In a dark theme it is #8d8d8d (it was the editor's description colour, #9d9d9d in Dark Modern); in a light theme it is #6c6c6c, where it used to be the text colour itself. Body text and code are as bright as before, and high contrast themes are unchanged.
 - Quiet words on a raised ground (a field, a pill above the prompt box, a menu) take a slightly firmer grey so they still read at 4.5:1.
@@ -136,8 +136,8 @@
 - A Pip's chat: your message is the quiet grey bubble in the page's own text colour (it was white on solid purple), Undo and Details are quiet text, and the prompt box matches Work's and ChatDGC's.
 - The side bar home: the search box is on top, then two quiet headings that fold, "Pips" and "Sessions". Open, a heading ends with what it offers (Open Pips; + for a new session, or a new chat on the Chat tab); folded, with its count ("2 need you", "6 new"; how many sessions, with a dot when one needs you). Sessions list three, or every one that needs you (running with no window), those first, then View all (N). Both folds are kept on this computer.
 - Settings fills the width it has: no empty bar down the right, at any size. Its side menu is slimmer rows in smaller words, quiet until chosen, and folds to a column of icons (by its button, and by itself in a narrow tab); groups are cards on rounder corners; Save all is filled with the text colour, and only a switch that is on is purple. In a narrow tab a row puts its control under its words.
-- The side bar home is calmer. The Pips block is a plain list with soft counts, and its chevron folds it under "Pips · 2 need you · 6 new" (kept on this computer, the count still updating). Dismiss all and Open Pips are quiet text, every block shares one 12 px edge, and New session is the one filled button. Work's sessions show the three newest, each title with its age ("5m", "3d", "1mo"), then "View all (N)", which opens a search over every session as Codex does.
-- A new Work session isn't a blank window: DGC's mark sits in the middle, muted (a faint wash of the text colour, never the accent), as Codex shows its own; your first message takes its place. It fades in after a moment, so a chat you reopen doesn't flash it before its history arrives, and just appears with reduced motion.
+- The side bar home is calmer. The Pips block is a plain list with soft counts, and its chevron folds it under "Pips · 2 need you · 6 new" (kept on this computer, the count still updating). Dismiss all and Open Pips are quiet text, every block shares one 12 px edge, and New session is the one filled button. Work's sessions show the three newest, each title with its age ("5m", "3d", "1mo"), then "View all (N)", which opens a search over every session.
+- A new Work session isn't a blank window: DGC's mark sits in the middle, muted (a faint wash of the text colour, never the accent); your first message takes its place. It fades in after a moment, so a chat you reopen doesn't flash it before its history arrives, and just appears with reduced motion.
 - Work's prompt box stays where it is when you send: the line under it while a turn runs ("Enter to steer · Alt+Enter to queue") now has its room kept, so the box no longer jumps up on send and back down when the turn ends. The line is always one line, and in a short panel (under about 420 px tall) it is left out so the transcript keeps its rows.
 - A Pip's chat is calmer: one column the Pip's words start from and your prompts end at, a steady rhythm between turns, bubbles on the shared corners, choices as outline rows with a quiet letter, the Soft permission card's second buttons as outlines, links in the one purple, figures in the UI font, a prompt box on the shared corner whose border firms on focus, and quieter top-bar buttons. Placeholder and control words now clear 4.5:1 in light and dark. The faces and how they move are unchanged.
 - Work's "Edited N files" card takes the changed-files look: the + and − totals beside its title, then Undo, a chevron that folds the card and Open diff; under it the files grouped by folder in the order they came, each folder a row with its own counts that folds. One file stays one row with its folder dimmed before its name; a turn of more than six files starts with its folders folded.
@@ -146,7 +146,7 @@
 - Enter in a new Work session before it is ready sends your message by itself once it is, with no second Enter. The line while it waits says "Starting this chat" (a real reconnect still says "reconnecting"), and it goes away once the chat is ready; before, it said "reconnecting" even for a first start and stayed in the chat for good. Switching to another chat first drops the waiting message rather than sending it there.
 - Work's box at about 300 px wide no longer draws one button over another while a turn runs: Queue becomes the queue's icon (its name stays in the tooltip and for screen readers), the footer's buttons are 24 px below 320 px, and below 290 px the cache clock gives way, as the context meter already does.
 - A schedule on any days is said in words: "Weekends at 10:00", "Mondays and Thursdays at 08:00", "Every day at 09:00", on a Pip's page, in its routines and on the line of a change it made (before, only weekdays and Mondays were, and the rest read as a cron line). In a Personal Pip's box the "/" list is as tall as its rows; the @ list keeps its one height.
-- A waiting approval sits just above the prompt box, as in Claude Code and Codex, never only somewhere up in the chat, and the box stays yours to type in. Several wait one at a time, the card saying "1 of 3", then "2 of 3"; answered, each leaves its one quiet line where its step is in the chat ("bash · Denied · note for the model: …"). Show in the image viewer goes to it, on Allow once. A Pip's chat does the same with what its computer holds for your okay (Send once · Always allow · Reject).
+- A waiting approval sits just above the prompt box, never only somewhere up in the chat, and the box stays yours to type in. Several wait one at a time, the card saying "1 of 3", then "2 of 3"; answered, each leaves its one quiet line where its step is in the chat ("bash · Denied · note for the model: …"). Show in the image viewer goes to it, on Allow once. A Pip's chat does the same with what its computer holds for your okay (Send once · Always allow · Reject).
 - The approval card is one line: a quiet shield and what it asks ("Run bash"), and at the right Always allow, Deny and Allow once, only Allow once filled; the command sits in a small chip under it. The note for the model appears only after Deny, with Deny without a note and Send note. In a narrow panel the buttons go under the command, in the same order.
 - An artifact or a document in Work or ChatDGC is one calm card: a coloured square tile with its icon, its name, and a quiet line saying what it is ("Document · version 1 · made", "Word document · 79 KB"); a click anywhere on it opens it, and Download or Save a copy sit small at its right. In a narrow chat the name stays beside the tile and the buttons take a line of their own.
 - A Personal Pip's chat shows what it changed about itself, after the reply that did it: "Pitch updated its job: name, instructions · Undo · Details" (or "added a routine"); Undo puts it back, and the line says Undone. Typing / at the start of a Personal Pip's box offers /setup: a few questions, then it sets itself up. Needs Pips API 77.
@@ -164,7 +164,7 @@
 - One menu for "+" and every picker, in Work, ChatDGC and a Pip's chat: a soft lift, taller rows, plain words in place of the monospace hints, and the same keys everywhere (arrows, Home, End, Escape back to its button). Work's "+" menu comes in three groups, Add to the message, This chat and Go to, with key caps for @, $ and /.
 - A link in a ChatDGC reply shows its site's favicon, as a link in Work does (and the bundled mark when the icon can't load). The dgc.linkFavicons setting now switches both.
 - One purple, from one place. Pips had a purple of its own beside the panel's; now Pips, Settings, a Pip's computer and the canvas take every colour from the panel's one set of tokens. On light themes, high contrast light included, accent words and marks take the deeper purple, where the pale one read 2.6:1 on white.
-- Finding severity in Apple's system colours: red for high and yellow for medium on dark themes, Apple's own higher-contrast red and yellow on light ones, where the old amber was hard to read.
+- Finding severity in clearer colours: red for high and yellow for medium on dark themes, a deeper, higher-contrast red and yellow on light ones, where the old amber was hard to read.
 - A Pip report card's face sits in the middle of the card, not at its top; an opened card keeps it beside the Pip's name.
 - A Pip report card says "1 new · 3 still there" and names the new finding when its review said which findings are new.
 - A held request that was lost, unsent, says why on its line: "Not sent, DGC restarted" (the Pip then does that step again) or "Not sent, its computer was stopped".
@@ -872,7 +872,7 @@
     the rail lists the prompts on screen and its card offers to load the earlier messages.
   - It belongs to the chat's own transcript: it isn't shown over Pips, an agent's page or the Sessions list.
 
-- **A pasted image's chip shows its file name,** cut to fit, as Claude Code's does; its type, size and
+- **A pasted image's chip shows its file name,** cut to fit; its type, size and
   dimensions are on hover. A screenshot copied straight to the clipboard has no name of its own and still
   reads like "PNG · 1920×1080". The sent prompt's chip reads the same.
 
@@ -900,7 +900,7 @@
 - **Settings → Running sessions** lists each session running with no window, what it is doing and for how long, with
   **Open** and **Stop**; the Sessions list marks it **Running, no window**.
 
-- **A clock for the prompt cache, after the context meter (Work chat only).** As Claude Code shows it: a small
+- **A clock for the prompt cache, after the context meter (Work chat only).** A small
   clock and the whole minutes left (**4m**) while the provider keeps this conversation cached, changing once a
   minute; the clock alone in the error colour once the cache has gone, with why in its tooltip (idle too long,
   the conversation was compacted, or Ollama unloaded the model). It appears only for Anthropic and a local
@@ -1107,7 +1107,7 @@
 
 ### Agent map
 
-- **The agents pill opens the agent map**, as in Claude Code, and so does `/agents`. The pill counts the agents
+- **The agents pill opens the agent map**, and so does `/agents`. The pill counts the agents
   working now and stays after the turn once the chat has had one.
   - **The map:** the chat as the root and every agent it started, in columns by depth (stacked in a narrow side bar):
     its face (swirling while it works), what it was asked, and its time and tokens, ticking. Failed agents are red,
@@ -1161,7 +1161,7 @@
   The list's footer opens the Library on its Widgets tab. Esc closes the list, Tab and Enter work it, and a long chat
   opened on its latest messages still lists every widget (with a CLI that sends a chat's outline). The side bar's
   Library button now says it holds widgets too.
-- **The prompt rail**, as ChatGPT's table of contents: in a chat of five prompts or more, a short tick for each prompt
+- **The prompt rail**, a table of contents for the chat: in a chat of five prompts or more, a short tick for each prompt
   sits in the right margin, centred, and the one you're reading is bright.
   - **Hover it** (or Tab to it) for a card of every prompt with its time under day headings (Today, Yesterday, the
     weekday), the widget each reply made, and the one you're reading tinted. Click a prompt to go there: the view
@@ -1171,14 +1171,14 @@
   - **Long chats:** the ticks close up to 4px apart, then show a window around where you are, faded at both ends;
     they're shorter at side-bar width.
   - **Chats opened on their latest messages** still list every prompt (with a CLI that sends a chat's outline), and
-    going to an early one loads the messages before it first. ChatGPT's rail broke in exactly that case.
+    going to an early one loads the messages before it first.
 - **A chat's header opens on DGC's wordmark**, as a Work session's does: ChatDGC's mark (the chat bubble with the three
   slashes inside it), "DGC" and the blinking cursor. The slashes in the bubble breathe in turn as Work's do, and stand
   still for a reader who asked for less motion.
 - **Each prompt and reply says when it was sent or written**, in DGC's chat, ChatDGC and Pips: the time today,
   Yesterday or the weekday this week, then the date; the whole date on hover. A reopened chat shows its times too, and
   how long each finished turn worked.
-- **Answered questions stay in the chat**, as Claude Code keeps them: "Questions · Answered · 2 questions", every
+- **Answered questions stay in the chat**: "Questions · Answered · 2 questions", every
   question with every option and its description, your picks marked (a filled circle for one choice, ticked boxes for
   several, "Your words" for an answer you typed). It no longer folds away inside "Used 1 tool".
 - **A working agent's face swirls**, everywhere it is drawn, chips included; still once it ends, and still for a reader
@@ -1186,7 +1186,7 @@
 - **An agent running in parallel says what each step worked on** ("Read README.md"), on its page and in the map,
   where it read a bare "Read".
 - **Dictation, in every box.** DGC's chat, ChatDGC and Pips each have a microphone beside Send. While you speak, the
-  box's bottom row becomes the voice bar, as Codex shows it:
+  box's bottom row becomes the voice bar:
   - **The bar:** ✕ Cancel, a live waveform with the time, ■ Stop and ↑ Send. Stop puts what you said in the box at
     the caret; Send puts it in and sends it.
   - **The waveform is your microphone:** DGC Voice measures how loud it is about every 50 ms, and each bar is
@@ -1202,7 +1202,7 @@
     (macOS records zeros without permission), never sent as speech.
 - **Read aloud.** A speaker under every reply, in DGC's chat, ChatDGC and Pips. The reply's voice plays as each
   sentence is made, and the speaker shows Stop while it reads. One reply is read at a time.
-- **Voice mode, in ChatDGC and Pips.** While the box is empty, voice mode sits where Send is, as in ChatGPT. It
+- **Voice mode, in ChatDGC and Pips.** While the box is empty, voice mode sits where Send is. It
   listens with a live waveform, and when you stop talking it writes it down and sends it. It reads the reply
   aloud, then listens again.
   - **When your turn ends:** after about 1.2 seconds of quiet, measured against the room's own hum.
@@ -1211,9 +1211,9 @@
     while it speaks.
 - **Voice offered once:** the first time DGC starts with voice available and nothing installed, a notification
   offers to set it up.
-- **Voice mode has nothing to look at**, as ChatGPT's: a spoken reply makes no canvas, file, widget or question
+- **Voice mode has nothing to look at**: a spoken reply makes no canvas, file, widget or question
   card. Typing again brings them back.
-- **Send while it answers, as Codex queues it.** In ChatDGC a message sent while a reply is being written (or while
+- **Send while it answers.** In ChatDGC a message sent while a reply is being written (or while
   it summarizes) waits above the box and goes by itself when the reply finishes, one a reply, in order. Edit or ✕
   on each; ↑ in an empty box takes back the last. Stop, or a reply that fails, sends none of them: they come back
   to the box.
@@ -1246,13 +1246,13 @@
 - **⋯ → Export…** saves a chat as Markdown or JSON.
 - **Settings → ChatDGC:** what ChatDGC should know about you, how it should respond, and its personality.
 - **Search finds a chat by anything said in it**, and shows the words around what it found.
-- **Keyboard shortcuts**, as ChatGPT has them:
+- **Keyboard shortcuts**:
   - new chat: Ctrl/⌘+Shift+O;
   - copy the last reply: Ctrl/⌘+Shift+C;
   - copy the last code block: Ctrl/⌘+Shift+;;
   - focus the box: Shift+Esc;
   - the list of shortcuts: Ctrl/⌘+/.
-- **Sources, as ChatGPT shows them.** A fact a reply took from the web carries a pill with the site's favicon
+- **Sources.** A fact a reply took from the web carries a pill with the site's favicon
   and name; point at it for the page's title and what it says. **Sources** under the reply opens every page it
   cited, and the other results it found, in a panel beside the chat. A site's icon sits on a white disc, so
   a dark logo still shows on a dark theme.
@@ -1260,7 +1260,7 @@
   **Settings → ChatDGC → Suggest follow-ups** turns them off.
 - **Branch in new chat.** The branch button under a reply opens a new chat with the conversation up to there,
   in a tab of its own, marked where it branched (with a link back). The original stays as it was.
-- **Projects**, as ChatGPT has them: chats, files and instructions together. They sit above your chats in the
+- **Projects**: chats, files and instructions together. They sit above your chats in the
   side bar; drag a chat onto one, or use **Move to project…**. A project's page shows its instructions, files,
   memory setting and chats, and its box starts a chat in it. Every chat in it reads its instructions and files,
   and a project can keep its memory to itself.
@@ -1273,7 +1273,7 @@
   paperclip lists your newest files before Upload.
 - **ChatDGC has its own mark:** DGC's three slashes in a speech bubble, on its chat tabs, its project pages, the
   Library and the New Chat (ChatDGC) and Ask ChatDGC buttons, so a ChatDGC tab is never taken for a DGC session.
-- **What fills the window.** ChatDGC's meter details show it as Claude's Usage sheet does: a bar a colour a part,
+- **What fills the window.** ChatDGC's meter details show it as a usage sheet: a bar a colour a part,
   each part's tokens and share, every tool listed with its own, the room kept for summarizing and the free space.
   The parts fold under **Details** at first, with the bar and what's free shown at a glance. Main DGC's and a Pip's
   context menus fold the same way, and what you open stays open as the meter updates.
@@ -1296,7 +1296,7 @@
   chat. Edit it yourself; ChatDGC reads your version and changes it with small edits you can undo. Select a part and
   choose **Ask ChatDGC About This**; the title bar has shortcuts, **Canvas Versions…** (compare or bring back) and
   **Download Canvas…** (Word, PDF, Markdown, or the code file).
-- **A canvas document opens formatted**, as ChatGPT shows it: a page with headings, lists, tables and maths drawn, and
+- **A canvas document opens formatted**: a page with headings, lists, tables and maths drawn, and
   a toolbar (style, bold, italic, strikethrough, code, link, lists, quote, divider, **Ask ChatDGC** on a selection,
   shortcuts). Type Markdown shortcuts as you would (`# `, `- `, `> `). It saves itself when you pause, and what
   ChatDGC changes lights up as it lands. **Open Canvas as Markdown** shows the same file as text, and **Open Canvas
@@ -1320,21 +1320,21 @@
   one to see it larger, with its title and **Open page**; the arrow keys step through them. A rules, prices or
   code question gets none. The pictures are fetched by DGC and kept with the chat: the chat screen never asks
   an image site itself.
-- **Web search is always on in ChatDGC**, as in ChatGPT: a question about facts that could be wrong or out
+- **Web search is always on in ChatDGC**: a question about facts that could be wrong or out
   of date (rules, rates, prices, news, people) is looked up before it's answered, with sources. The box's
   **Web** picker is gone; **Search** makes it search first for one message, and **Settings → Web search** can
   turn it off.
-- **Memory**, as ChatGPT has it. ChatDGC remembers what you tell it about yourself, says so under the reply
+- **Memory.** ChatDGC remembers what you tell it about yourself, says so under the reply
   (with **Forget**), and knows your projects from your Work sessions. The same memory reaches your Work
   sessions and Pips. **Settings → Memory** shows it all: edit, delete, add, keep a project out, delete all,
   or turn it off.
 - **Chat and Work are tabs** in the side bar, so a long list of chats no longer pushes your sessions out of
   sight. The search covers both, and each tab shows what it found.
-- **Deep research**, as ChatGPT has it. Press **Deep research** in the box: a plan first (it starts in 15
+- **Deep research.** Press **Deep research** in the box: a plan first (it starts in 15
   seconds unless you edit it), then its searching and reading as it happens, with a box to add to it, then a
   report whose every citation was checked against its source. **Open report** shows it full screen with
   contents and sources, and **Export…** saves it. If it finishes out of sight, VS Code tells you.
-- **Questions in an answer**, as ChatGPT asks them. When what comes next depends on something only you know, a
+- **Questions in an answer.** When what comes next depends on something only you know, a
   reply can put a question to you as a card right where it asks: pick an answer, or type your own, and
   **Continue** sends the follow-up the model wrote for it. The reply goes on below the card.
 - **A context meter** in the box (amber at 70%, red at 85%), with **Compact now** and **Continue in a new chat**.
@@ -1356,7 +1356,7 @@
   many there are. Needs the DGC CLI with this release.
 - DGC opens on your project's **Sessions**: the side bar lists this project's sessions, newest
   first, with when each was last used and how many messages it has. **Open in Editor**, a
-  double-click or Enter opens a session in an editor tab of its own, as in Claude Code; **New
+  double-click or Enter opens a session in an editor tab of its own; **New
   session** opens a new one in a tab. The Pips stay in the side bar.
 - Each tab is a full chat with its own DGC process. It is named by its session's name, else its
   first prompt. A session open in a tab is marked **Open in a tab**, and opening it again brings that
@@ -1389,7 +1389,7 @@
   own package and installs it from there (from the Marketplace instead, once it's there and not older), on the
   computer you're at even in a Remote SSH window. It starts at once, with no reload, and the box that asked says
   it's ready. If it can't install, it says why and where the file is, with **Install from VSIX…**.
-- **Cmd+Z and Ctrl+Z in the prompt box undo what you did, in the order you did it**, as in Codex's box. The box
+- **Cmd+Z and Ctrl+Z in the prompt box undo what you did, in the order you did it**. The box
   keeps its own history now; the browser's did not keep up with it, and in VS Code it was what the keys reached:
   - A paste, dictated words, a picked completion and a message put back are each one step. They were undone
     together with everything typed before them; typing pauses for half a second end a step too.
@@ -1625,7 +1625,7 @@
   Always allow: it asks every time. After you allow an action the chat reloads and the Pip carries
   on with what the plugin answered. Its page lists the plugins it may use, each with **Take back**.
   Needs the DGC CLI with Pips API 44.
-- **A Personal Pip's page, like a Grok bot's.** Its Settings are one clean page: its face, name and
+- **A Personal Pip's page.** Its Settings are one clean page: its face, name and
   an optional title at the top, then **Info**, **Links**, **Media** and **Files**. Info has its
   **Instructions** (a full page to edit them), its **Routines**, a **Notifications** switch and
   **Share as template**. Links, Media and Files list what was shared in its chat (and its
@@ -1660,8 +1660,8 @@
   Open browser" in **Give a computer** (it lists the browser, the online Terminal, connected apps,
   signing in with **Open its computer**, and that anything it would submit, send, pay or change waits
   for your OK); "the Job tab" (now Settings); "Connect an app once in DGC Settings" (Settings shows
-  **Reads before each task** only for a Pip that has them; apps connect from the chat); "Online like
-  Grok's bots" in the Terminal; "A completed Pip run never performs one automatically".
+  **Reads before each task** only for a Pip that has them; apps connect from the chat); the Terminal's
+  old "Online like…" note; "A completed Pip run never performs one automatically".
 - **Plain words for project Pips too.** Scout, Lens, Rook, Lock, Quill, Patch and Pulse no longer
   say runner, revision, proposal, receipt, artifact, invocation, digest or "Pips API 22". An audit is
   **Compared with the last audit** ("Found again", "Not found again", and that a finding not found
@@ -1675,7 +1675,7 @@
 - No longer true, and gone: "Restore from Job" and "in Job" (now Settings), "update the lab", a
   Pip computer's "Its own browser and files" in a change review (it has a Terminal too), and a
   Personal Pip's finished task reading "Report ready" in the main chat (it is "Done").
-- A Personal Pip has no **Run now**, like Grok's bots: you chat with it, or it works on its schedule.
+- A Personal Pip has no **Run now**: you chat with it, or it works on its schedule.
   Its Results say what it made on its schedule, or how to give it one in its chat.
 - **You can message Core.** Core's chat never sent: the choices and the send button stayed grey and
   Enter did nothing, because DGC's type list marks Core "not available" as a background Pip and the
@@ -1686,13 +1686,13 @@
   reply".
 - Pressing Enter while a Pip is answering keeps your message in the box and says "<Pip> is still
   answering. Send this when it is done." (it did nothing before).
-- **A Pip computer's Terminal is online**, like Grok's: public websites only, never this computer or
+- **A Pip computer's Terminal is online**: public websites only, never this computer or
   your network. Under each command it lists the sites reached and anything DGC blocked.
 - **"Needs you" when a site checks for robots.** A Pip stops at a robot check; its chat shows
   **<Pip> needs you** with **Open its computer** and **I've done it**, and it carries on after.
 - **Allow cards.** An email a Pip wrote shows in its chat as **Send this email?** with who it is from,
-  to, subject and the text, and **Send**, **Always allow**, **Edit** and **Don't send**, like Grok's
-  Allow card. Send uses the Gmail account connected to that Pip and sends exactly that draft, once;
+  to, subject and the text, and **Send**, **Always allow**, **Edit** and **Don't send**.
+  Send uses the Gmail account connected to that Pip and sends exactly that draft, once;
   Always allow also lets it send from that account without asking (take it back in its Settings).
   Without a connected Gmail the card offers **Choose account…**, the full review as before.
 - **A Pip's choices.** A Pip can end its message with 2 to 4 choices, shown as buttons under it (A, B,
@@ -1740,7 +1740,7 @@
   (sometimes twice), and its eyes follow your pointer, settling back when you stop. Thinking looks
   up to each side, working reads and bobs, waiting hops for your attention, success bounces and
   failure droops. Reduced motion keeps them still.
-- With the desktop programs installed, a Pip's computer tab is its real screen, like Grok's bots:
+- With the desktop programs installed, a Pip's computer tab is its real screen:
   Chrome, a file manager and a terminal on a desktop with a dock, which you use directly. While
   the Pip works you watch. Without them, the tab says what to install and shows the simpler view.
 - A Pip's Settings shows its **Skills** (your DGC skills that fit everyday work) with **Manage
@@ -1866,7 +1866,7 @@
   A folder outside your window is asked about first, as `/new DIR` asks in the terminal: your
   MCP servers start there and your hooks run there before you type anything. Restart Backend,
   or recovery after a crash, brings the chat back on its own conversation.
-- Chats share one `dgc serve`, the way Codex runs its threads, instead of one process each. A Stop
+- Chats share one `dgc serve` instead of one process each. A Stop
   ends only its own chat's turn and approval cards — before, one chat's Stop could expire another
   chat's open approval, and your answer to it was refused as stale. Closing a chat keeps the backend
   for the chats still on it. `dgc.shareBackend` turns sharing off. This extension needs DGC CLI
@@ -1883,7 +1883,7 @@
 - A message to a running sub-agent reads "Sent message to <what it was asked to do>", with a
   message mark, instead of "Used tool · message task" with a wrench. The other sub-agent tools wear
   the sub-agent mark.
-- Sub-agents read the way they do in Codex: one quiet line for the agents started together, their
+- Sub-agents read as one quiet line for the agents started together, their
   faces first, then "Durable rules review, Remote web and Paper pip concept started working" — where
   each used to get a full-width row of its own. Only the names are links, each opening that agent's
   page, and Back or Escape brings you back to the name you used. The words change in place —
@@ -1915,8 +1915,8 @@
   show in full, and Run again, Edit and Restore still use the whole message. Opening one while DGC
   is still answering keeps you where you are; **Latest** takes you back to the end. A message you
   opened stays open when you switch chats and come back.
-- The message you sent stays at the top of the chat while you read DGC's answer to it, as in Claude
-  Code. The next message takes its place, and scrolling back up brings the earlier one back. A long
+- The message you sent stays at the top of the chat while you read DGC's answer to it.
+  The next message takes its place, and scrolling back up brings the earlier one back. A long
   message stays there folded to its first five lines; one you opened with **Show more** scrolls
   with the answer instead. A message too tall to keep there in a short window (one with a
   screenshot, say) scrolls as before. Turns DGC starts on its own (a monitor or agent waking it, a
@@ -2015,9 +2015,8 @@ here, under one version number.
 
 - **A goal is a control, not text you type.** Picking `/goal` opens a control in the composer
   footer beside the permission mode, carrying whatever you had already typed -- those words are the
-  objective. Cancelling leaves your draft alone; saving moves the words into the goal. Codex models
-  a goal the same way, as thread state rather than composer text, and puts its control in the same
-  place. Typing `/goal TEXT` and pressing Enter is unchanged.
+  objective. Cancelling leaves your draft alone; saving moves the words into the goal. The goal is
+  thread state rather than composer text. Typing `/goal TEXT` and pressing Enter is unchanged.
 
 - **Pills lost their box, and the slash menu lost its sigils.** A skill or template is now a mark
   and its name in the accent colour, wearing the same icon its menu row shows; a bordered chip
@@ -2504,7 +2503,7 @@ Pairs with CLI 0.44.1.
 
 ## 0.14.1 — 2026-09-06
 
-- Added the Codex-style `objective /goal` composer action: selecting or submitting the suffix now preserves the full objective, tags it as a goal, persists it, and starts the turn with one Enter.
+- Added the `objective /goal` composer action: selecting or submitting the suffix now preserves the full objective, tags it as a goal, persists it, and starts the turn with one Enter.
 - Kept `/goal <objective>` and goal-state commands intact while ensuring an inline `/goal` mentioned inside ordinary prose is never misclassified.
 - Replaced the extension's fixed black shell with Cursor/VS Code theme tokens for the sidebar, transcript, composer, controls, text, and overlays, with DGC color retained for focused product accents.
 - Verified the goal and pinned-composer flow in a real VS Code host at wide and narrow widths across both dark and light host themes.
@@ -2513,12 +2512,12 @@ Pairs with CLI 0.44.1.
 
 - Added a composer-attached changed-files rail backed by live Git state, with addition/deletion totals and one-click native VS Code side-by-side review.
 - Rebuilt the standing-goal surface as a timed composer rail with direct pause/resume, edit, and clear controls; `/goal <objective>` remains a tagged action that starts that exact objective.
-- Matched the current Codex editor hierarchy for compact tools, readable diffs, transcript cadence, and the model/reasoning composer while keeping DGC purple to restrained identity and focus accents.
+- Reworked the editor hierarchy for compact tools, readable diffs, transcript cadence, and the model/reasoning composer while keeping DGC purple to restrained identity and focus accents.
 - Made active-turn goal pause/clear cancellation-safe, bounded change review for binary, oversized, and symlinked files, and verified the complete UI at wide and narrow Cursor/VS Code panel widths.
 
 ## 0.13.0 — 2026-09-06
 
-- Added DGC Ultra, the combined model/reasoning control, and a Codex-inspired live activity row that follows the newest response instead of floating above a scrolled transcript.
+- Added DGC Ultra, the combined model/reasoning control, and a live activity row that follows the newest response instead of floating above a scrolled transcript.
 - Made `/goal <objective>` persist a visible timed goal and immediately run that exact objective; pause, resume, edit, and clear remain available above the composer.
 - Added the current thread title to the header with automatic first-prompt naming and click-to-rename behavior across new and resumed sessions.
 - Made Artifact Stop a single acknowledgement-driven action with an explicit stopping/error state, eliminating white disabled controls and double-click shutdowns.

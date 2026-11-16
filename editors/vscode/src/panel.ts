@@ -516,8 +516,8 @@ function managedMcpIdentity(item: ManagedMcpServer): string {
  *  running it can judge. `dgc.maxLiveChats` exists for someone who WANTS a ceiling (set it to 1 to
  *  keep DGC single-chat); left alone, the limit is the machine.
  */
-/** `dgc.shareBackend`: chats open on one `dgc serve` when the CLI can hold several (Codex's model:
- *  one process, every session in its own folder). Off, each chat starts its own backend. */
+/** `dgc.shareBackend`: chats open on one `dgc serve` when the CLI can hold several (one process,
+ *  every session in its own folder). Off, each chat starts its own backend. */
 function shareBackend(): boolean {
   return vscode.workspace.getConfiguration("dgc").get<boolean>("shareBackend", true) !== false;
 }
@@ -9524,7 +9524,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.openEditorSettings(name, usageRange, browse);
   }
 
-  /** Codex-style settings: a real editor tab beside the chat, not a page inside it. */
+  /** Settings in a real editor tab beside the chat, not a page inside it. */
   openEditorSettings(section = "general", usageRange?: string, browse?: string): void {
     this.settingsSelection = { section, range: usageRange || "7d" };
     this.settingsBrowse = typeof browse === "string" ? browse : undefined;
@@ -11170,8 +11170,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Plugins' cards (MCP Apps): their bridge and look, the same in Work, a Pip's chat and ChatDGC (media/mcpApps.js).
     const mcpAppsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mcpApps.js"));
     const mcpAppsCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mcpApps.css"));
-    // `https:` in img-src is what lets a favicon load beside a link the user typed, and it is
-    // the same allowance Codex ships. It is NOT what keeps model output from phoning home: the
+    // `https:` in img-src is what lets a favicon load beside a link the user typed, and that is
+    // all it is for. It is NOT what keeps model output from phoning home: the
     // markdown renderer never emits an <img> for model content -- it turns every image into a
     // labelled link the user has to click. That renderer is the guarantee, and
     // model-images-never-render.test.mjs is what holds it still now that the CSP no longer would.

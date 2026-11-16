@@ -1,4 +1,4 @@
-// A Personal Pip's plugins (pip_plugins), as Grok asks before a bot uses a connector. The Pip asks with
+// A Personal Pip's plugins (pip_plugins): it asks before it uses one, with
 // use_plugin; this card is the user's side: Allow (no second sign-in: DGC's own connection is used)
 // or Not now. What the Pip would then do in a plugin is an Allow card: Allow, Always allow (never for
 // a plugin that can move money: those ask every time) or Don't.
@@ -156,7 +156,7 @@ function sentInputs(esc, tool, args) {
   return `<details class="allow-sent"><summary>Inputs as sent</summary><pre>${esc(text)}</pre></details>`;
 }
 
-/** What the Pip would do in a plugin, as Grok's Allow card. Edit changes its inputs right here. */
+/** What the Pip would do in a plugin, as an Allow card. Edit changes its inputs right here. */
 export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName = 'Your Pip', edit = null, logo = null, accountLabel = null }) {
   const a = draft.payload.action, id = esc(draft.id), off = busy ? ' disabled' : '';
   // A plugin the user set to Always ask offers Allow once and Don't only, as an ask rule of their own does: an Always
@@ -250,7 +250,7 @@ export function pluginsPageMarkup(cards, { esc, busy = false, pipName = 'This Pi
 
 // Pips settings → Plugins (list_pip_plugin_uses): which Pips use each plugin, with Remove per Pip,
 // and the plugins added to DGC that a Pip could ask for.
-// What each plugin may do without asking (Pips API 45): ChatGPT's four levels, for every Pip.
+// What each plugin may do without asking (Pips API 45): four levels, for every Pip.
 export const PLUGIN_LEVELS = [
   ['always_ask', 'Always ask', 'Asks before it reads or changes anything'],
   ['any_changes', 'Ask before any change', 'Reads at once, asks before it changes anything'],

@@ -1,4 +1,4 @@
-// The end-of-turn "Edited N files" card, rebuilt to the shape Codex ships (reported 2026-09-24).
+// The end-of-turn "Edited N files" card, rebuilt (reported 2026-09-24).
 //
 // The bug this carries a fix for: DGC recorded every edit as a pair of line counts and nothing
 // else, so a file it could not diff -- a brand-new file, a binary write, a change past
@@ -76,7 +76,7 @@ test("a bare filename gets no dimmed half", () => {
 });
 
 // The user's changed-files look (their reference card, 7 Nov): files grouped by folder, each folder a row with its own
-// counts that folds. A long turn starts with its folders folded (Codex's three rows and "Show N more" did that job).
+// counts that folds. A long turn starts with its folders folded (three rows and "Show N more" did that job before).
 test("files are grouped by folder, each folder with its counts, folding both ways", () => {
   const card = turnThatEdited([{ path: "README.md", diff: true }, { path: "src/a.py", diff: true }, { path: "src/b.py", diff: true },
                                { path: "docs/guide.md", diff: true }]);

@@ -1,5 +1,5 @@
-// Home as cards (asked 13 Nov: "nice looking cards which users can add on the Home Screen, something like widgets users
-// add on iPhone screens ... bento cards, which users can rearrange"). Home is one scrolling page of cards in a grid. The
+// Home as cards (asked 13 Nov: "nice looking cards which users can add on the Home Screen ...
+// bento cards, which users can rearrange"). Home is one scrolling page of cards in a grid. The
 // user chooses which cards and their order; the side bar's WIDTH chooses each card's form ("user just selects the card,
 // not the size"): under about 380 px every card is Small (a square, two to a row); to about 620 px Medium (a card two
 // squares wide, as tall as it needs); wider, Large where a card has one (a 2×2 block), else Medium, packed densely.

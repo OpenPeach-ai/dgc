@@ -207,7 +207,7 @@ test("a goal's Trace opens the Trace of the turns between its start and its end,
 });
 
 test("a goal's own next turn says which goal turn it is; any other resume keeps its words", () => {
-  // Codex's shape (12 Nov night): each goal cycle is a turn of its own, started by DGC ("resume" on the wire, labelled
+  // The goal's turns (12 Nov night): each goal cycle is a turn of its own, started by DGC ("resume" on the wire, labelled
   // "Goal · turn N"), never drawn as something you sent.
   const x = chat();
   x.event({ type: "turn_start", turn_id: "t1", prompt: "Ship the release", kind: "prompt" });

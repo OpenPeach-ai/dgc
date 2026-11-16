@@ -4,8 +4,8 @@
 // labelled link instead of an <img>, AND the webview CSP said `img-src ${cspSource} data:`, so an
 // external image could not have loaded even if one slipped through.
 //
-// Shipping favicons meant widening that CSP to `img-src ... https:` -- the same allowance Codex
-// ships -- so the second guarantee is gone, and a link in an answer now carries an <img> of its
+// Shipping favicons meant widening that CSP to `img-src ... https:` -- no wider
+// than favicons need -- so the second guarantee is gone, and a link in an answer now carries an <img> of its
 // own. That makes "the output contains no <img>" the wrong test; it would fail on our own mark.
 //
 // The guarantee that actually matters, and the one held here, is narrower and exact:
@@ -107,7 +107,7 @@ test("the CSP still forbids everything it forbade except images", () => {
   assert.match(value, /font-src \$\{webview\.cspSource\}/, "fonts stay local");
 });
 
-test("images are widened deliberately and only as far as Codex widens them", () => {
+test("images are widened deliberately and only as far as favicons need", () => {
   const value = /const csp = `([^`]+)`/.exec(panelSrc)[1];
   const imgSrc = /img-src ([^;]+)/.exec(value);
   assert.ok(imgSrc, "img-src should be declared");

@@ -22,7 +22,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); });
 
-import { openPips } from "./support/codex-look-scene.mjs";
+import { openPips } from "./support/dgc-look-scene.mjs";
 
 const purpleFills = (p) => p.evaluate(() => { const out = []; const all = (root) => { for (const n of root.querySelectorAll("*")) { if (n.shadowRoot) all(n.shadowRoot); if (!n.checkVisibility() || n.closest("svg, .avatar, .home-pip-face, .pip-face, [role=switch][aria-checked=true]")) continue;   // (a switch that is on is a live mark: media/shared/tokens.css; a Pip's on/off switch, 12 Nov)
   const r = n.getBoundingClientRect(); if (r.width > 12 && r.height > 12) out.push({ n: n.id || String(n.className), c: getComputedStyle(n).backgroundColor }); } }; all(document); return out; });

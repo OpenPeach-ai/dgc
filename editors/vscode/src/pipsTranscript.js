@@ -237,7 +237,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
     // page after it draws: its progress, then its player.
     +(!user&&Array.isArray(m.videos)&&m.videos.length?foldPictures(`pip:${m.id}:videos`,`<div class="msg-videos made-pictures">${m.videos.slice(0,4).map(v=>`<div class="msg-video" data-message-video="${esc(String(v.id||''))}"></div>`).join('')}</div>`,{videos:Math.min(4,m.videos.length),label:m.videos.length===1?String(m.videos[0].prompt||''):''}):'')
     +(!user&&clip?`<button type="button" class="link run-post-show" data-post-more="${esc(clip.key)}" aria-expanded="${clip.open===true}">${clip.open?'Show less':'Show all'}</button>`:'');
-  // The plugins it took an answer from, as ChatGPT names the apps it used ("Used [logo] Aave"): what it says came
+  // The plugins it took an answer from, each by name ("Used [logo] Aave"): what it says came
   // from a plugin did, rather than from the model's memory. A logo not here yet shows a plug until the host sends it.
   const plugins=!user&&Array.isArray(m.plugins)?m.plugins.slice(0,8):[];
   const used=plugins.length?`<div class="msg-plugins" title="This reply used ${plugins.length===1?'this plugin':'these plugins'}"><span>Used</span> ${plugins.map((p,i)=>{const src=pluginLogo(p.plugin);return `<span class="msg-plugin"><span class="msg-plugin-mark" data-plugin-mark="${esc(p.plugin)}">${src?`<img alt="" src="${esc(src)}">`:transcriptIcon('plug')}</span><span>${esc(p.name)}${i<plugins.length-1?',':''}</span></span>`;}).join(' ')}</div>`:'';
@@ -245,7 +245,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // (media/mcpApps.js), above its words, so a redraw never reloads one.
   const cards=!user&&Array.isArray(m.apps)?m.apps.filter(a=>a&&/^app_[0-9a-f]{24}$/.test(String(a.card_id||''))).slice(0,8):[];
   const shownCards=cards.length&&globalThis.DgcMcpApps?`<div class="msg-apps">${cards.map(a=>`<div class="mcp-app-slot" data-card-id="${esc(a.card_id)}"></div>`).join('')}</div>`:'';
-  // Grok's A/B card: the choices the Pip offered under its latest reply; a tap answers it.
+  // The choices the Pip offered under its latest reply, as a card; a tap answers it.
   const offered=!user&&Array.isArray(choices)&&choices.length?`<div class="msg-choices" role="group" aria-label="Answer ${esc(name)}">${choices.slice(0,4).map((c,i)=>`<button type="button" class="msg-choice" data-pip-choice="${esc(c)}"${canSend?'':' disabled'}><span class="msg-choice-key" aria-hidden="true">${'ABCD'[i]}</span><span>${esc(c)}</span></button>`).join('')}</div>`:'';
   // A mid-turn message the reply never read wasn't sent, and says so; one the reply read and then failed has no answer either.
   const unsent=user&&m.steer_status==='missed',again=user&&m.steered&&m.status==='failed'?` <button type="button" class="message-send-again" data-chat-action="resend" data-message-id="${esc(m.id)}"${canSend?'':' disabled'}>Send again</button>`:'';

@@ -1,5 +1,5 @@
-// Home as cards (asked 13 Nov: "nice looking cards which users can add on the Home Screen, something like widgets users
-// add on iPhone screens ... bento cards, which users can rearrange"; "user just selects the card, not the size"). In real
+// Home as cards (asked 13 Nov: "nice looking cards which users can add on the Home Screen ...
+// bento cards, which users can rearrange"; "user just selects the card, not the size"). In real
 // Chromium on the real side bar (support/home-grid-scene.mjs, with a stand-in for the host): the width picks each card's
 // form (Small under ~380 px, Medium to ~620 px, Large where a card has one beyond), a Small card opens to its full form
 // and back, the Cards button and its library, Arrange Home by pointer and by keyboard, what is kept across a reload,

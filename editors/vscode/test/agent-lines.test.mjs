@@ -1,4 +1,4 @@
-// Sub-agents in the transcript, the way Codex draws them: quiet stable lines, at most four agents
+// Sub-agents in the transcript: quiet stable lines, at most four agents
 // from one batch per line. Faces first, then a sentence in which only the names are controls --
 // "Durable rules review, Remote web and Paper pip concept started working" -- whose words change in
 // place while the names stay where they are. Each agent used to get a full-width row of its own.

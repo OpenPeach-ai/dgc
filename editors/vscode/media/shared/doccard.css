@@ -1,5 +1,5 @@
-/* An artifact or a document in a chat: one calm card on every surface (ui-04; the user's note, 9 Nov, from Claude Code's
-   chat). A coloured square tile with its icon on the left, its name, and a quiet second line saying what it is
+/* An artifact or a document in a chat: one calm card on every surface (ui-04; the user's note, 9 Nov).
+   A coloured square tile with its icon on the left, its name, and a quiet second line saying what it is
    ("Document · MD · 79 kB"). The whole card opens it: its Open button lies over the card (the words stay readable
    under it, and the keyboard and a screen reader still reach Open, by name); anything else it offers (Download, Save a
    copy) sits small at the right, above that layer. Each surface keeps its own markup and adds these classes:

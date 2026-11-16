@@ -1,5 +1,5 @@
-// One "Needs attention" list across your Personal Pips (list_pip_attention, Pips API 44), like Grok's
-// sidebar and Dots' activity view: each card a Pip is waiting on you for, newest first. A row opens that
+// One "Needs attention" list across your Personal Pips (list_pip_attention, Pips API 44), in one place:
+// each card a Pip is waiting on you for, newest first. A row opens that
 // Pip at the card (its chat, its computer). A new Pip waiting for you is a card in the list itself, and nowhere else
 // on the page: Review and Reject are on it. Words are the Pips' and the user's own: text only.
 // A row's answers (asked 12 Nov): the ones Home offers for the same thing (Apply / Not now, Allow / Not now), then Review,

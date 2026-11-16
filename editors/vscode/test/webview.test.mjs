@@ -2111,7 +2111,7 @@ test("a link says where it goes, and its mark discloses the host and nothing mor
     "each link is classified by where it points");
 
   // This test used to assert that NOTHING was fetched for a link mark. That was DGC's policy and
-  // is no longer: links wear the site's real favicon, as they do in Codex, which a user
+  // is no longer: links wear the site's real favicon, which a user
   // asked for after being shown what it discloses. What survives is the bound on the disclosure
   // -- the icon service is asked about an ORIGIN, so a URL's path and query never leave, and the
   // service fetches the site itself, so the site's operator sees Google rather than the reader.
@@ -2188,7 +2188,7 @@ test("the composer keeps Send with the model group so a long model name cannot p
   const right = footer.querySelector(".cf-right");
   assert.ok(left && right, "the footer is split into two zones");
 
-  // Codex puts what the turn may do on the left and which model does it on the right.
+  // What the turn may do sits on the left, and which model does it on the right.
   assert.ok(left.contains(doc.getElementById("btn-mode")), "permission mode sits on the left");
   assert.ok(left.contains(doc.getElementById("btn-add")), "attach sits on the left");
   assert.ok(right.contains(doc.getElementById("btn-model")), "the model picker sits on the right");
@@ -3322,7 +3322,7 @@ test("a finished turn summarises what it changed and offers Undo and Review", ()
 
   const card = doc.querySelector(".turn-summary");
   assert.ok(card, "a turn that changed files must say so");
-  // Codex's wording, adopted 2026-09-24: the card leads with the action, not the noun.
+  // The wording adopted 2026-09-24: the card leads with the action, not the noun.
   assert.equal(card.querySelector(".ts-title").textContent, "Edited 2 files");
   assert.equal(card.querySelector(".ts-head .change-add").textContent, "+1");
   assert.equal(card.querySelector(".ts-head .change-del").textContent, "−1");

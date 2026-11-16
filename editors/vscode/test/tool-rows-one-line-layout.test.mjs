@@ -248,7 +248,7 @@ for (const width of [300, 460]) {
           step: [step.animationName, step.animationDuration, step.animationDelay] };
       });
       assert.deepEqual(cadence.label, ["dgc-activity-shimmer", "4s", "0.6s"]);
-      assert.deepEqual(cadence.step, cadence.label, "the visible tool row and its live step share Codex's cadence");
+      assert.deepEqual(cadence.step, cadence.label, "the visible tool row and its live step share one cadence");
       assert.equal(live.overflow, 0);
       await send(page, frames.slice(6, 8));
       live = await read();

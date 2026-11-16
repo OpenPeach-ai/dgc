@@ -1,8 +1,8 @@
 // A URL you type in a prompt is a link, and it wears the site's own favicon.
 //
-// Codex does this by handing the ORIGIN to Google's favicon service and widening its webview CSP
-// to img-src https:. We copy that mechanism exactly. What these tests hold still are the three
-// things that make copying it safe rather than merely similar:
+// DGC does this by handing the ORIGIN to Google's favicon service and widening its webview CSP
+// to img-src https:. What these tests hold still are the three
+// things that make it safe:
 //
 //   1. Only the origin is ever sent. A pasted URL with a token in its path or query discloses its
 //      host and nothing else -- the difference between "google sees you visited a jira" and
@@ -40,7 +40,7 @@ test("only the origin is sent to the icon service", () => {
   }
 });
 
-test("it is Codex's service, keyed the way Codex keys it", () => {
+test("it is Google's icon service, keyed on the origin alone", () => {
   assert.equal(faviconUrl("https://vibedgc.com/docs"),
     "https://www.google.com/s2/favicons?domain=https%3A%2F%2Fvibedgc.com&sz=32");
 });
@@ -157,7 +157,7 @@ test("an icon that fails to load falls back to the bundled mark", () => {
 });
 
 test("a link in the MODEL's answer wears the favicon too", () => {
-  // The line DGC used to draw and Codex does not. The maintainers asked for Codex's behaviour.
+  // The line DGC used to draw, and no longer does: the maintainers asked for that.
   const dom = makeDom();
   // Backend events reach the panel wrapped, the way panel.ts forwards them.
   const event = (data) => dom.send({ type: "event", event: data });

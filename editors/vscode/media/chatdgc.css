@@ -184,18 +184,18 @@ body.cd-blank .cd-fine { display: none; }
 .cd-question .cd-other::placeholder { color: var(--muted); }
 .cd-question-go { justify-self: stretch; padding: var(--sp-1) var(--sp-3); font-size: var(--t-sm); }
 .cd-question-note { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
-/* A card of several questions (ChatGPT's form): numbered groups, a hairline between them, one button under all. */
+/* A card of several questions (a form): numbered groups, a hairline between them, one button under all. */
 .cd-form { gap: 0; }
 .cd-form-q { display: grid; gap: var(--sp-2); min-width: 0; padding: var(--sp-3) 0; }
 .cd-form-q:first-child { padding-top: 0; }
 .cd-form-q + .cd-form-q { border-top: 1px solid var(--border); }
 .cd-form > .cd-question-go, .cd-form > .cd-question-note { margin-top: var(--sp-2); }
 
-/* Sources, as ChatGPT shows them: a pill with the site where a fact is cited (its card on hover), a Sources
+/* Sources: a pill with the site where a fact is cited (its card on hover), a Sources
    button under the reply with the sites' favicons, and a panel beside the conversation listing them all. */
 .cd-fav { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px;
   border-radius: 50%; overflow: hidden; background: var(--surface); color: var(--muted); }
-/* A site's own icon sits on a white disc, as ChatGPT has it: a dark logo (BBC's blocks, GitHub's cat) would vanish on
+/* A site's own icon sits on a white disc: a dark logo (BBC's blocks, GitHub's cat) would vanish on
    a dark theme's surface, and inset, a square one isn't clipped to the circle. */
 .cd-fav:has(img) { background: #fff; }
 .cd-fav img { width: 12px; height: 12px; display: block; }
@@ -440,7 +440,7 @@ body.cd-blank .cd-fine { display: none; }
 .cd-stop:hover { background: var(--text); }
 /* While it answers, Send (now "queue") sits just before Stop, not halfway along the row. */
 #cd-send:not([hidden]) + #cd-stop { margin-left: var(--sp-1); }
-/* Messages waiting their turn (Codex's queue): above the box's text, one line each, in the order they'll go. */
+/* Messages waiting their turn (the queue): above the box's text, one line each, in the order they'll go. */
 /* The bar for what is going on (media/shared/tray.css, the same as Work's and a Pip's chat) on ChatDGC's box: it
    meets the box, and its shell goes round it. The queue is its pill's detail: its rows open in the popover above. */
 .cd-foot .rail-line.has-chips { margin: 0 calc(-1 * var(--shell-pad)); }
@@ -632,7 +632,7 @@ textarea.cd-plan-input { resize: vertical; }
 .cd-memory-forget:focus-visible, .cd-memory-manage:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 
 
-/* Pictures from the web above a reply (ChatGPT's image strip): each with its site, opening larger over the chat. */
+/* Pictures from the web above a reply (an image strip): each with its site, opening larger over the chat. */
 .cd-pictures { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: grid; gap: 6px; max-width: 640px;
   grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .cd-pictures[data-count="1"] { grid-template-columns: minmax(0, 320px); }
@@ -676,7 +676,7 @@ textarea.cd-plan-input { resize: vertical; }
 .cd-branched-from:hover { text-decoration: underline; }
 .cd-branched-from:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 
-/* Projects (ChatGPT's): the project a chat is in, before its name; a project's page (a new chat in it): its name,
+/* Projects: the project a chat is in, before its name; a project's page (a new chat in it): its name,
    instructions and files as two cards, its memory, and its chats; the settings panel beside it. */
 .cd-crumb { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 40%; min-height: 24px; padding: 0 4px 0 6px;
   border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; }
@@ -739,7 +739,7 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 
 /* (The Library's look is media/shared/library.css: one module draws it here, in its editor tab, and in the side bar.) */
 
-/* A plugin's card under a reply (ChatGPT's confirmation): what it would do, its inputs (editable), and the choice. */
+/* A plugin's card under a reply, to confirm: what it would do, its inputs (editable), and the choice. */
 .cd-card { display: flex; flex-direction: column; gap: var(--sp-2); max-width: 560px; margin: var(--sp-2) 0; padding: var(--sp-3);
   border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); }
 .cd-card[data-status="waiting"] { border-color: color-mix(in srgb, var(--text) 30%, transparent); }
@@ -812,7 +812,7 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .cd-card-in-row > .cd-card-head { display: none; }
 .cd-card-apps { display: flex; flex-direction: column; gap: var(--sp-2); }
 
-/* Follow-ups (ChatGPT's): a few next messages under the last reply, each a row that sends itself. */
+/* Follow-ups: a few next messages under the last reply, each a row that sends itself. */
 .cd-followups { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: var(--sp-2);
   padding-top: var(--sp-2); border-top: 1px solid var(--border); }
 .cd-followup { display: inline-flex; align-items: center; gap: var(--sp-2); max-width: 100%; padding: 5px var(--sp-2);
@@ -841,7 +841,7 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .cd-file[data-removed] .cd-file-badge { opacity: .45; }
 @media (max-width: 420px) { .cd-file { flex-wrap: wrap; } .cd-file-actions { width: 100%; } }
 
-/* A writing block (ChatGPT's): a draft to send as it is, read as the email or message it is. */
+/* A writing block: a draft to send as it is, read as the email or message it is. */
 .cd-draft { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-3) 0; padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); }
 .cd-draft-head { display: flex; align-items: center; gap: var(--sp-2); color: var(--muted);

@@ -1,4 +1,4 @@
-// A Personal Pip's routines (pip_routines), Grok's Routines: something it does on its own, at a time,
+// A Personal Pip's routines (pip_routines): something it does on its own, at a time,
 // when a matching email arrives, before a calendar event, when your own app sends an event (Pips API 63:
 // "When the shop app sends order.created"), or when a service calls its own secret address (Pips API 90, pipWebhooks.js). You add and edit them in its Settings; the Pip may suggest one
 // in its chat, and the card under its message is your Add routine / Not now.

@@ -49,7 +49,7 @@ export const PROMPT = "Make me a small set of cube icons, with a demo page.";
 /** Work, in a session tab: the prompt and the finished reply. */
 export async function openWork(browser, { width = 700, height = 760, theme = "dark-modern" } = {}) {
   const { openWorkTab } = await import("./work-tab-scene.mjs");
-  const { READY } = await import("./codex-look-scene.mjs");
+  const { READY } = await import("./dgc-look-scene.mjs");
   const x = await openWorkTab(browser, { width, height, theme });
   const event = (e) => x.send({ type: "event", event: e });
   await x.page.addStyleTag({ content: seti() });

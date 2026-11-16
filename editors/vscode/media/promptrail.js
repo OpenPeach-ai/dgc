@@ -1,10 +1,10 @@
-// window.DgcPromptRail: the prompt rail (ChatGPT's "table of contents", the maintainers approved 2026-10-18), the same in
+// window.DgcPromptRail: the prompt rail (a table of contents, the maintainers approved 2026-10-18), the same in
 // ChatDGC (chatdgc.js) and the Work chat (main.js). From five prompts, a short tick per prompt in the transcript's
 // right margin, centred, the one being read bright. Hovering it (or Tab to it) opens a card of every prompt with its
 // time under day headings, and the widget a reply made; a click goes there and outlines it. Alt+Up and Alt+Down step
 // between prompts, from anywhere in the page, the message box included. Ticks close up to 4px apart for a long chat,
 // then show a window around where you are. It lists every prompt even when only the latest pages are on screen (the
-// page's outline), and going to one not on screen loads the pages before it first: ChatGPT's rail broke exactly there.
+// page's outline), and going to one not on screen loads the pages before it first, so the jump still lands.
 //
 // The page owns its transcript, so it says what the rail needs to know (DgcPromptRail.create(options)):
 //   id         the rail's element id; its card's is `${id}-card`

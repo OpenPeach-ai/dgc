@@ -257,7 +257,7 @@
   input.select = () => setComposerRange(0, composerText().length);
 
   // ---- undo and redo ------------------------------------------------------------------------
-  // The box keeps its own history, as Codex's composer does (a ProseMirror history, bound to
+  // The box keeps its own history (undo steps of its own, bound to
   // Mod-z, Mod-Shift-z and Mod-y in the composer's own keymap), instead of leaning on the
   // browser's. Chromium's undo stack was measured in this box and does not do what Cmd+Z means,
   // however carefully each edit is routed through execCommand:
@@ -378,8 +378,8 @@
   const undoComposer = () => moveComposerHistory(composerHistory.done, composerHistory.undone);
   const redoComposer = () => moveComposerHistory(composerHistory.undone, composerHistory.done);
 
-  // Cmd+Z, Cmd+Shift+Z and Cmd+Y on a Mac; Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y elsewhere -- Codex's
-  // Mod-z, Mod-Shift-z and Mod-y. Read from the layout's letter, and from the physical key when the
+  // Cmd+Z, Cmd+Shift+Z and Cmd+Y on a Mac; Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y elsewhere -- the
+  // box's Mod-z, Mod-Shift-z and Mod-y. Read from the layout's letter, and from the physical key when the
   // layout's letter is not Latin, so a Cyrillic or Greek keyboard still undoes.
   function composerHistoryKey(event) {
     if (event.altKey || event.isComposing || event.keyCode === 229) return "";
@@ -447,8 +447,7 @@
   // A pill copied out of the box reads as the token that made it -- $skill, @file, /command -- or,
   // for a link, as the URL itself; Chromium's own copy wrote the pill's label (a truncated host
   // for a link) and its markup. Pasted back into the box, the same copy is pills again, with the
-  // skills and files they stand for: Codex's composer does the same through its own clipboard
-  // serializer. Nothing is trusted from the clipboard for that -- the pills come from this
+  // skills and files they stand for. Nothing is trusted from the clipboard for that -- the pills come from this
   // panel's memory of its last copy, and only when the clipboard still holds that exact text.
   var composerCopy = null;
   function copyComposerSelection(event) {
@@ -736,7 +735,7 @@
   // doing, and its age at the right ("2h", "1w", "1mo"; a purple dot while it runs), then "View all (N)", which lists
   // every session in place: the same rows in the same list, the page scrolling under the tab bar and the dock, "Load
   // more" at its end when there are more, and "Show fewer" after it, which goes back to the six. (It opened a popover
-  // over the list, Codex's way, 2026-11-10: with a second search field and a second Project Folder dropdown, and the
+  // over the list from 2026-11-10, with a second search field and a second Project Folder dropdown, and the
   // list under it showing through. Taken out 13 Nov.) The search field and the dropdown above are the only ones.
   // A search from the tab's own box still lists everything it found.
   const SESSIONS_SHOWN = 6;
@@ -1545,7 +1544,7 @@
     });
     return row;
   }
-  // ---- Projects (ChatGPT's): chats, files and instructions together. A project opens its page in a tab; its
+  // ---- Projects: chats, files and instructions together. A project opens its page in a tab; its
   // chevron lists its chats here. While searching, the results say each chat's project instead.
   let projects = [], lastProjects = "";
   const projectChats = new Map();
@@ -2550,7 +2549,7 @@
       return i ? [" · ", figure] : [figure];
     }));
     syncContextSizeControl();
-    // What fills the window, part by part (as Claude's Usage sheet), once the backend has counted it: its bar and its
+    // What fills the window, part by part (media/breakdown.js), once the backend has counted it: its bar and its
     // list take the place of the single bar and the free/auto line.
     const parts = contextBreakdown && window.DgcBreakdown ? window.DgcBreakdown.render(contextBreakdown) : null;
     $("ctx-breakdown").replaceChildren(...(parts ? [parts] : []));
@@ -2634,7 +2633,7 @@
     renderContextMenu();
   }
   // ---- the prompt cache's clock (0.48, Work only; dgc/cache_clock.py) ----------------------------------
-  // Copied from Claude Code: warm -> a clock and the whole minutes left ("4m"), changed at most once a minute
+  // Warm -> a clock and the whole minutes left ("4m"), changed at most once a minute
   // (no seconds, no animation); gone -> the clock alone in the error colour. Timed only where the backend knows it
   // from the provider itself (Anthropic's own cache report, a local Ollama's /api/ps), after a reply that used a
   // cache. Reopening a chat whose cache has gone says so once, and (0.52) so does an open chat left idle past its
@@ -2742,7 +2741,7 @@
     }
   }
   // ---- "Idle 1d 17h. The prompt cache has likely expired, so your next message will re-cache about 524k tokens."
-  // Claude Code's line at the end of a session left idle (0.52). Written when the chat is found idle with its cache
+  // The line at the end of a session left idle (0.52). Written when the chat is found idle with its cache
   // gone: the clock's own timer running out, the provider saying so (an Ollama that unloaded the model), or the window
   // shown again. One line an idle stretch, in the reopen note's words and look; while the chat stays idle its time is
   // brought up to date when the window is shown again, never by a timer. The next turn ends the stretch: the line
@@ -4113,8 +4112,8 @@
       // Moving to a neighbouring control should not make you wait again -- but the window in
       // which that holds is short, or scanning a toolbar makes every label feel instant.
       //
-      // Both numbers are Codex's, read from its shipped webview bundle (delayDuration 700,
-      // skipDelayDuration 300). Ours were 380 and 500: twice as eager to appear, and staying in
+      // The numbers: 700 ms before a label shows, then 300 ms in which the next one shows at once.
+      // Ours were 380 and 500: twice as eager to appear, and staying in
       // the instant mode nearly twice as long.
       const delay = instant ? 0 : sideBarTip(el0) ? SIDE_TIP_DELAY_MS : Date.now() - warm < TIP_WARM_MS ? 0 : TIP_DELAY_MS;
       timer = setTimeout(() => {
@@ -4489,8 +4488,8 @@
 
   // ---- 0.47 pinned prompt ----
   // The prompt you sent stays at the top of the transcript while you read its answer; the next prompt
-  // pushes it off, and scrolling back up hands the pin back -- the Claude Code extension's behaviour,
-  // and its method: pure CSS (main.css, "0.47 pinned prompt"). Each prompt is `position: sticky`
+  // pushes it off, and scrolling back up hands the pin back -- all of it
+  // in pure CSS (main.css, "0.47 pinned prompt"). Each prompt is `position: sticky`
   // INSIDE its own box (wrapTurn), so the end of that box is what pushes it off, with no scroll
   // handler. Script only decides what a box holds, keeps a prompt that is too tall for this window
   // from pinning, takes a click on a prompt back to where it was sent, and keeps keyboard focus out
@@ -4889,7 +4888,7 @@
       if (atts && !atts.id) atts.id = `prompt-atts-${++disclosureId}`;
       toggle.setAttribute("aria-controls", [atts?.id, body?.id].filter(Boolean).join(" "));
       toggle.onclick = () => togglePromptFold(bubble);
-      // A held key auto-repeats: one press is one toggle (Claude Code does the same).
+      // A held key auto-repeats: one press is one toggle.
       toggle.onkeydown = (event) => { if (event.repeat && (event.key === "Enter" || event.key === " ")) event.preventDefault(); };
       bubble.appendChild(toggle);
     }
@@ -5539,7 +5538,7 @@
       appendTarget.appendChild(note);head=note;
     } else if (kind === "resume" || kind === "continue") {
       const note = el("div", replaying ? "resume-note hist" : "resume-note");
-      // A goal's own next turn (Codex's shape, 12 Nov): DGC names it "Goal · turn 3"; any other resume keeps its words.
+      // A goal's own next turn (12 Nov): DGC names it "Goal · turn 3"; any other resume keeps its words.
       const goalTurn = kind === "resume" && /^Goal · turn \d{1,7}$/.test(String(prompt || "")) ? String(prompt) : "";
       if (goalTurn) note.classList.add("goal-turn-note");
       note.innerHTML = `<span class="note-icon" data-icon="${goalTurn ? "target" : "play"}">${icon(goalTurn ? "target" : "play")}</span>`
@@ -5874,7 +5873,7 @@
           : "Working";
     if (verb.textContent !== nextVerb) {
       verb.textContent = nextVerb;
-      // Codex starts a fresh sweep when the status wording changes, not on each clock tick.
+      // A fresh sweep starts when the status wording changes, not on each clock tick.
       if (!replaying && !waiting) {
         verb.style.animation = "none"; void verb.offsetWidth; verb.style.removeProperty("animation");
         if (!verb.style.length) verb.removeAttribute("style");
@@ -5932,8 +5931,8 @@
   // answered. What a reader still needs stays: a detailed message (a diagnosis, a plan), a message you
   // sent mid-turn, question and approval cards, notices, the files and artifacts the turn made, a
   // sub-agent still working, and the answer with what it changed. A stopped or failed turn does not
-  // fold: its work is all it has to show. Codex collapses its commentary the same way once the final
-  // answer is shown, and the model is told the answer must stand on its own (dgc/presentation.py).
+  // fold: its work is all it has to show. The commentary folds away once the final
+  // answer is shown, so the model is told the answer must stand on its own (dgc/presentation.py).
   // endTurn draws it, live and replayed alike, so a reload, a reattach and a resume draw the same fold.
   const WORK_STEPS = [".text.commentary:not(.commentary-detail)", ".tool-group", ".tg-live",
     '.tool:not([data-tool-name="propose_options"])', ".disclosure", ".reasoning", ".thought-note",
@@ -6189,7 +6188,7 @@
   // it, Undo, a chevron that folds the card, and Open diff; under it the files grouped by folder, each folder a row
   // with its own counts that folds, in the order their first file came. One file stays one row, its folder dimmed
   // before its name. A turn of more than TS_OPEN_FILES files starts with its folders folded, so a big turn stays short
-  // (Codex's three rows and "Show N more" did that before) and the header with Undo stays where it is.
+  // (three rows and "Show N more" did that before) and the header with Undo stays where it is.
   const TS_OPEN_FILES = 6;
   let tsSeq = 0;
   function turnSummaryCard(edits, prompt, cli = null) {
@@ -7219,7 +7218,7 @@
     // and without this a [task, bash] step put the bash group above the line after a reload and
     // below it live. The group the spawn left folds when the model moves on, like any other.
     // A question the chat's own model asked you is part of the conversation, not tool work: it stands in the
-    // transcript between the groups around it (Claude Code's "Questions"), rather than folding away inside
+    // transcript between the groups around it (its own "Questions" group), rather than folding away inside
     // "Used 1 tool" when the model moves on. A sub-agent's question stays with that agent's steps.
     if (card.dataset.toolName === "propose_options" && !agentIdFromCall(card.dataset.callId)) {
       if (turn.toolGroup) { (turn.leftGroups ||= []).push(turn.toolGroup); turn.toolGroup = null; }
@@ -7895,8 +7894,8 @@
       + `Pause, change or delete it any time in Pips.</div>`;
   }
   function requestCard(c, id) { c.dataset.requestId = String(id); c._requestEpoch = requestEpoch; renderTurnMeta(); return c; }
-  // ---- The approval dock (ui-04, asked 10 Nov): a waiting approval sits just above the prompt box, where Claude Code
-  // and Codex ask (Codex: one current request in its bottom pane, the rest queued), one at a time with "1 of 3".
+  // ---- The approval dock (ui-04, asked 10 Nov): a waiting approval sits just above the prompt box:
+  // one current request there, the rest queued, one at a time with "1 of 3".
   // Its place in the chat is kept; answered (here, by a rule, or by its backend going away) it goes back there, where
   // compactPermissionCard makes it the step's one quiet line.
   let dockBatch = 0;                        // asked since the dock was last empty: "2 of 3" counts through them
@@ -8608,7 +8607,7 @@ function permissionChoices(ev) {
     if (save) save.textContent = "Save";
   }
 
-  // ---- Codex-style composer rail: durable workspace changes and standing goal ----
+  // ---- the composer rail: durable workspace changes and standing goal ----
   let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
   let workspaceChangeState = { ...changeState }, reviewScope = "chat";
   // ---- invisible characters in a paste -------------------------------------------------------
@@ -10367,7 +10366,7 @@ function permissionChoices(ev) {
         window.DgcMcpApps?.event(ev);
         return;
       case "files_ready": {
-        // A file the model made, as a chip under the step that made it. Codex's model exactly:
+        // A file the model made, as a chip under the step that made it. By path alone:
         // the event carries a PATH, and clicking asks the editor to open it -- no bytes cross the
         // protocol, so a 300 MB recording chips just as cheaply as a one-line report.
         const items = Array.isArray(ev.items) ? ev.items.filter((f) => f && f.rel) : [];
@@ -11130,7 +11129,7 @@ function permissionChoices(ev) {
   function showPop(items) {
     popItems = items; popIdx = 0;
     if (!items.length) return hidePop();
-    // Codex's rows: an icon for WHAT this is, then the bare name. The sigil is redundant once an
+    // Each row: an icon for WHAT this is, then the bare name. The sigil is redundant once an
     // icon says the same thing, and "/goal" beside "$code-review" made the list read as two
     // alphabets. `label` keeps its sigil -- the matcher and the inserter both read it -- so this
     // is a rendering change only.
@@ -11496,8 +11495,8 @@ function permissionChoices(ev) {
     const query = token[2].slice(1).toLowerCase();
     if(pipPicker.active){const search=query==="pip"?"":query.startsWith("pip:")?query.slice(4):query;
       if(search!==pipPicker.query)requestPromptPips(search);else renderPipPicker();return;}
-    // A goal starts only when Goal is chosen from this menu (a click, Enter or Tab on its row), as in Codex in
-    // VS Code (decided 12 Nov). Typing the whole `/goal` token arms nothing: it lists Goal, as any command's name
+    // A goal starts only when Goal is chosen from this menu (a click, Enter or Tab on its row;
+    // decided 12 Nov). Typing the whole `/goal` token arms nothing: it lists Goal, as any command's name
     // lists it, and sent as typed it is plain text (submit, below). `/goal pause` and the other words that manage
     // a goal stay commands, typed or chosen.
     if (popMode === "/" || popMode === "$") {
@@ -11705,7 +11704,7 @@ function permissionChoices(ev) {
             sysLine("The pasted image could not be encoded safely.", true); return;
           }
           // An iPhone photo is labelled for what it is; DGC turns it into a JPEG for the model.
-          // The chip shows the file's own name, as Claude Code's does ("Screenshot 2026-10-22 at
+          // The chip shows the file's own name ("Screenshot 2026-10-22 at
           // 17.11.png"); see imageFileName for a screenshot copied straight to the clipboard.
           const fileName = String(file.name || "").trim();
           const image = heic
@@ -11788,7 +11787,7 @@ function permissionChoices(ev) {
     afterPaste(paste);
   }
   // A wall of pasted text buries the composer and hides the controls under it, so past
-  // PASTED_TEXT_LIMIT (Codex's threshold) it becomes a chip, recoverable with one click. The text in
+  // PASTED_TEXT_LIMIT it becomes a chip, recoverable with one click. The text in
   // it is cleaned as any other paste is: the chip is what reaches the model.
   function foldPastedText(paste) {
     const chipOf = (text) => ({ label: "Pasted text", pasted: text, chars: text.length });
@@ -11843,7 +11842,7 @@ function permissionChoices(ev) {
   $("btn-output").onclick = (e) => { e.stopPropagation(); toggleOutputMenu(); };
   // "+" is a menu, not a keystroke. It used to insert a literal "@", which meant the one control
   // most likely to be clicked first did the least discoverable thing in the panel. The shape is
-  // Codex's -- a leading Add section -- but every item is a capability DGC already has, including
+  // a leading Add section, and every item is a capability DGC already has, including
   // two that were previously reachable only from a settings page.
   function insertTrigger(ch) {
     input.focus();
@@ -14310,12 +14309,12 @@ function permissionChoices(ev) {
     if (img.getAttribute("src") !== src) img.setAttribute("src", src);
   }
   // ---- the lines in the transcript ----
-  // Codex's inline sub-agent line: compact, stable lines of at most four from each batch of
+  // The inline sub-agent line: compact, stable lines of at most four from each batch of
   // top-level agents started together, where each used to get a full-width row of its own. Faces first, then a sentence in
   // which only the names are controls, each opening that agent's page: "Durable rules review, Remote
   // web and Paper pip concept started working". The names keep their call order and never move --
-  // a user reported agents "switching their place" when every one had its own row, and Codex
-  // keeps an agent where it started. Only the words between the names change: one word per agent,
+  // a user reported agents "switching their place" when every one had its own row, so an
+  // agent stays where it started. Only the words between the names change: one word per agent,
   // and neighbours that share a word share it, "A and B finished · C running".
   const AGENT_START_MS = 2000, AGENT_NAMES_SHOWN = 3, AGENT_LINE_CAP = 4;
   // What splits a batch: only what the model itself wrote -- a visible tool group, prose, its
@@ -14698,8 +14697,8 @@ function permissionChoices(ev) {
   // a nested agent's name does. `told`: the agent's report is drawn beside these (above them on its
   // page, after them in the map's transcript, `below`).
   // A step's one-line summary when it came without one: a parallel sub-agent's live steps (agent_step) carry
-  // the call's name and arguments only, so its page and the map's transcript drew a bare "Read" where Claude Code
-  // shows "Read README.md" (real VS Code, 2026-10-18). The same rule as dgc/ui.py arg_summary's general case.
+  // the call's name and arguments only, so its page and the map's transcript drew a bare "Read" instead of
+  // "Read README.md" (real VS Code, 2026-10-18). The same rule as dgc/ui.py arg_summary's general case.
   const STEP_SUMMARY_KEYS = ["path", "command", "pattern", "url", "name", "memory", "symbol", "operation"];
   function stepSummary(name, args) {
     if (!args || typeof args !== "object") return "";
@@ -15446,7 +15445,7 @@ function permissionChoices(ev) {
     renderAgentsPill();
     agentMapChanged();
   }
-  // The pill says what runs NOW: the agents working (Claude Code's counting rule) and the background
+  // The pill says what runs NOW: the agents working (for the whole chat) and the background
   // tasks the map lists, counted from the map's own list so the two never disagree -- "2 agents",
   // "2 tasks", "1 agent · 2 tasks". Once the chat has had an agent the pill stays for the rest of it,
   // so the map is always one click away; a chat that never had one shows it only while a task runs
@@ -15534,7 +15533,7 @@ function permissionChoices(ev) {
   }
 
   // ---- the agent map ----
-  // Claude Code's map, drawn DGC's way. A dialog over the chat: the main agent, its sub-agents in a
+  // The agent map is a dialog over the chat: the main agent, its sub-agents in a
   // column beside it and theirs a column further on, as deep as the nesting goes; below that, what
   // runs in the background. Every agent the chat has had is on it, in any state, until the chat
   // resets. A dialog too narrow for the columns (a side bar) stands the tree on end instead: the
@@ -17916,7 +17915,7 @@ function permissionChoices(ev) {
     applyViewerZoom();
     renderViewerImage(true);
   }
-  // Codex shows a percentage with - and + beside it, so a reader can meet an image halfway
+  // A percentage with - and + beside it, so a reader can meet an image halfway
   // instead of choosing between "fits the panel" and "every pixel". The steps are coarse on
   // purpose: a slider in a preview is fiddly, and these are the sizes anyone actually wants.
   const ZOOM_STEPS = [0.25, 0.4, 0.55, 0.7, 0.85, 1, 1.25, 1.5, 2, 3, 4];
@@ -19042,7 +19041,7 @@ function permissionChoices(ev) {
   }
 
   // ---- the answered state, inside the step's tool card ----
-  // As Claude Code keeps it (reported 2026-10-17): "Questions · Answered · 4 questions", open, with every
+  // Kept in full (reported 2026-10-17): "Questions · Answered · 4 questions", open, with every
   // question and every option still there, the ones picked marked (a filled circle for one choice, a ticked
   // box for several) and the rest quieter, so the transcript says what was asked as well as what was chosen.
   function askedSummary(ev) {
@@ -19267,9 +19266,8 @@ function permissionChoices(ev) {
     // A half-typed answer is the user's work, and the card is about to be replaced by a one-line
     // "Not answered" -- so whatever is in its box would go with it, along with the question it was
     // answering. Hand it back to the composer instead, on its own line under whatever is already
-    // there, ready to send. This is what Codex does (take_question_drafts, recovered on a turn
-    // that completes, is interrupted OR fails), and the reason is the same: the question was ours
-    // to ask, the typing was theirs.
+    // there, ready to send: on a turn that completes, is interrupted OR fails. The question
+    // was ours to ask, the typing was theirs.
     //
     // Not on "skipped": that is the user deciding not to answer, and putting their abandoned words
     // back in the box would undo the dismissal they just made.
@@ -19322,7 +19320,7 @@ function permissionChoices(ev) {
     }
     const key = card._askedKey;
     const toggle = card.querySelector(".tool-toggle");
-    const open = !askedClosed.has(key);       // open, as Claude Code shows it, unless the reader closed it
+    const open = !askedClosed.has(key);       // open, unless the reader closed it
     card.classList.toggle("open", open);
     toggle.setAttribute("aria-expanded", String(open));
     if (!card._askedToggle) {

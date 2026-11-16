@@ -18,7 +18,7 @@ import { openRailScene } from "./support/rail-scene.mjs";
 import { openMapScene } from "./support/agent-map-scene.mjs";
 import { openAgentLines } from "./support/agent-lines-scene.mjs";
 import { READY } from "./support/work-buttons-scene.mjs";
-import { openChatDgc } from "./support/codex-look-scene.mjs";
+import { openChatDgc } from "./support/dgc-look-scene.mjs";
 import { openChat as openPip } from "./support/pip-chat-scene.mjs";
 import { openSettings } from "./support/mods-scene.mjs";
 import { readStylesheet } from "./support/stylesheet.mjs";

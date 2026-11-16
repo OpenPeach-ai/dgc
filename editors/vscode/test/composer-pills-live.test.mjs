@@ -246,7 +246,7 @@ test("each pill wears the sigil that picks it, and the one on its own chip", asy
   if (skipReason()) return t.skip(skipReason());
   // Each KIND gets its own mark, and it is the same mark the `/` menu row shows for that kind, so
   // picking a row and seeing the pill are the same object twice. A skill and a template take their
-  // codicon (Codex's treatment); a file keeps "@", which is both the key you press and what every
+  // codicon; a file keeps "@", which is both the key you press and what every
   // editor uses for a mention. A skill once had no rule at all and fell through to the default,
   // rendering the TEMPLATE's sigil above a chip carrying its own.
   await freshComposer(["fixture"]);
@@ -337,7 +337,7 @@ test("typing /goal lists Goal and pins nothing; choosing it there pins Goal to t
     window.__posted.filter((m) => m.type === "startGoal").length,
     window.__posted.filter((m) => m.type === "prompt").length]);
   await page.keyboard.type("finish the build /goal");
-  // A goal starts only when Goal is chosen from the "/" menu (12 Nov, as Codex in VS Code): the whole token typed
+  // A goal starts only when Goal is chosen from the "/" menu (12 Nov): the whole token typed
   // lists Goal first and changes nothing else.
   assert.equal(await page.locator("#btn-goal").isVisible(), false, "typing the token pins nothing");
   assert.equal(await value(), "finish the build /goal", "the token stays as typed");
@@ -572,8 +572,8 @@ test("pills on wrapped lines do not collide, and a pill does not grow the line",
 test("an answer typed into a question that expires is handed back, not thrown away", async (t) => {
   if (skipReason()) return t.skip(skipReason());
   // The card is replaced by a one-line "Not answered", so a half-typed answer went with it -- and
-  // so did the question it was answering. Codex hands those drafts back to the composer at turn
-  // end; so does this now. A deliberate skip is left alone.
+  // so did the question it was answering. Now those drafts go back to the composer at turn
+  // end. A deliberate skip is left alone.
   const recover = async (outcome, typed) => {
     await freshComposer([]);
     await page.evaluate(() => { window.postMessage({ type: "event",

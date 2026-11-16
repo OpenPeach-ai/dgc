@@ -262,7 +262,7 @@ test("the recovery commands are never hidden behind a backend that will not star
 test("the chat is offered in the secondary side bar as well as the activity bar", () => {
   // VS Code binds a container to exactly one location (the 1.107 contribution point takes
   // activitybar | panel | secondarySidebar), so a second container is the only way a view can
-  // live in both places — the same shape the Codex extension ships.
+  // live in both places.
   const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
   const containers = manifest.contributes.viewsContainers;
   assert.ok(containers.activitybar.some((c) => c.id === "dgc"), "the activity bar container stays");
@@ -282,7 +282,7 @@ test("the chat is offered in the secondary side bar as well as the activity bar"
 });
 
 test("an outdated CLI is offered the update, since the extension drives the CLI you installed", () => {
-  // Codex ships its binary inside a per-platform VSIX, so updating the extension updates the CLI.
+  // An extension that ships its binary inside a per-platform VSIX updates the CLI with itself.
   // DGC drives the CLI on your machine instead, so the mismatch has to be one click to fix.
   const backend = readFileSync(join(here, "../src/backend.ts"), "utf8");
   assert.match(backend, /cli_outdated: true/, "the backend marks an older CLI");

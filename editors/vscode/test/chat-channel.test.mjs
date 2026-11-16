@@ -1,4 +1,4 @@
-// Several chats on one `dgc serve`: Codex's model, every chat in its own folder.
+// Several chats on one `dgc serve`, every chat in its own folder.
 //
 // One process, many chats. The backend that started the process keeps its own chat on the plain
 // "event" channel; every other chat is an OpenedChat that hears only its own events and stamps its

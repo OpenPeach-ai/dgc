@@ -1,4 +1,4 @@
-// A Personal Pip's own apps, connected from its chat like Grok's connectors (pip_app_links). The Pip
+// A Personal Pip's own apps, connected from its chat (pip_app_links). The Pip
 // asks with connect_app; this card is the user's side: Connect (the host opens the sign-in page from
 // the backend's reply, never a link from here), then "I've signed in", or Not now.
 import {validAccountId} from './pipAccountId.js';
@@ -73,7 +73,7 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
       + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}" data-app-link-app="${app}">Browse plugins</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Connect ${app}</button>${no}</div>`;
   } else if (link.status === 'requested' && link.known_label !== undefined) {
-    // An account your other Pips already use: no sign-in, only your yes (Grok asks before a bot uses a connector).
+    // An account your other Pips already use: no sign-in, only your yes (a Pip asks before it uses an app).
     body = head(`Let ${esc(pipName)} use your ${app}?`, `${link.known_label ? `${esc(link.known_label)} · ` : ''}already connected. ${esc(link.reason)}`)
       + `<div class="dgc-card-actions app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Listing…' : 'Choose an account'}</button>${no}</div>`;
   } else if (link.status === 'failed') {
@@ -92,7 +92,7 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
   return `<div class="dgc-card app-link" data-app-link="${id}" data-state="${esc(link.status)}" role="group" aria-label="${link.status === 'connected' ? `${app} connected` : link.known_label !== undefined && link.status === 'requested' ? `Use ${app}` : `Connect ${app}`}">${body}</div>`;
 }
 
-/** A Pip's email draft as Grok's Allow card: what it would send, and the user's Send / Always allow.
+/** A Pip's email draft as an Allow card: what it would send, and the user's Send / Always allow.
  * Edit changes it right here (`edit` holds the fields as typed); Send sends what the card shows. */
 export function allowCardMarkup(draft, { esc, link = null, links = null, fromOpen = false, busy = false, pipName = 'Your Pip', edit = null }) {
   const several = Array.isArray(links) && links.length > 1, has = several || link;

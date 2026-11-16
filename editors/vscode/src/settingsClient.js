@@ -1169,8 +1169,8 @@ function connectorPanels(only = '') {
         return `<section class="connector-panel" aria-label="${esc(def.name)} connector"><div class="connector-heading">${logo(row)}<div class="copy"><h3>${esc(def.name)}</h3><p>${esc(def.kind)} · ${esc(def.summary)}</p></div><span class="status${row.connected ? ' connected' : ''}">${row.connected ? 'Connected' : row.installed ? state?.enabled === false ? 'Disabled' : 'Not connected' : 'Not connected'}</span></div><div class="actions"><button class="${row.connected ? 'secondary' : 'save'}" data-connector-setup="${id}">${row.connected ? 'Configure' : 'Connect '+esc(def.name)}</button><button class="secondary" data-connector-manage="${id}">${id==='n8n' && !row.installed ? 'Setup instructions' : def.kind==='Workflow connector' ? 'Manage workflows' : 'Manage apps'}</button>${!only ? `<button class="link" data-open="${id}">Details</button>` : ''}${row.installed ? `<button class="link" data-uninstall="${id}">Disconnect</button>` : ''}</div>${row.connection_error ? `<p class="error-message" role="status">${esc(row.connection_error)}</p>` : ''}</section>`;
     }).join('');
 }
-// Asana, Docusign and Zoom admit only apps registered with them, so the user creates one for DGC, as the vendors
-// document for Claude Code, Codex, Cursor and VS Code: each step, the exact redirect URL to register (with Copy), the
+// Asana, Docusign and Zoom admit only apps registered with them, so the user creates one for DGC, as each vendor
+// documents for an editor's client: each step, the exact redirect URL to register (with Copy), the
 // scopes to add where the vendor asks, and the ID (and secret) it gives back. A secret goes to the editor's secret
 // storage; Zoom's public client has none, so no secret field is shown. The sign-in itself is DGC's, in the keychain.
 function openOwnApp(id, def, row, server) {

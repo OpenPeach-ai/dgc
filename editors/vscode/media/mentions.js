@@ -945,7 +945,7 @@
   // One way of doing a link in all three chats: what a pasted link is, a sent prompt's links, and the one fallback for
   // a favicon that cannot load. Work's page, ChatDGC's and a Pip's keep no copy of any of it.
 
-  /** The link a paste is, or "". A pasted link becomes a pill, which is what Codex does and what was asked for. Only
+  /** The link a paste is, or "". A pasted link becomes a pill, as was asked for. Only
    *  when the clipboard is EXACTLY one URL: pasting a paragraph that happens to contain a link is pasting prose, and
    *  rewriting the middle of it would be presumptuous. Unlike a skill pill, this one's wire text is the URL ITSELF, so
    *  the model receives precisely the characters that were pasted. The pill is a way of SHOWING the link, not of
@@ -969,7 +969,7 @@
     return doc?.body?.dataset?.linkFavicons !== "off" && (typeof md?.faviconsOn === "function" ? md.faviconsOn() !== false : true);
   }
   /** A prompt's words in pieces: a string, or a link {raw, target, mark, icon}. `icon` is its favicon's address (the
-   *  ORIGIN alone is asked about, as Codex does), "" when favicons are off or that icon has already failed. */
+   *  ORIGIN alone is asked about), "" when favicons are off or that icon has already failed. */
   function linkPieces(body, doc) {
     const text = String(body || ""), md = markdown(), pieces = [], icons = faviconsOn(doc);
     let at = 0;

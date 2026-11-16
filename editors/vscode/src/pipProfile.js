@@ -1,4 +1,4 @@
-// A Personal Pip's own page, as on Grok's bots: its face and name at the top, then Info (Instructions,
+// A Personal Pip's own page: its face and name at the top, then Info (Instructions,
 // Routines, Notifications, Share as template), Links, Media and Files. The backend keeps the look,
 // title and notifications (pip_profile); nothing here grants or changes what the Pip can do.
 import {infoTip} from './pipInfoTip.js';

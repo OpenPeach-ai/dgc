@@ -1,4 +1,4 @@
-// A goal starts only when Goal is chosen from the "/" menu (decided 12 Nov, as Codex in VS Code), in real Chromium
+// A goal starts only when Goal is chosen from the "/" menu (decided 12 Nov), in real Chromium
 // with real keys and the panel's own page (test/support/options-scene.mjs): the whole token "/goal" typed lists Goal
 // and pins nothing; a click, Enter or Tab on Goal pins it to the draft, inside the prompt box, on nothing else; and
 // "/goal some text" typed and sent goes as plain text. Dark and light, at 700 px and in the side bar (300 px).

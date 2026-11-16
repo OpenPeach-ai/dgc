@@ -1,6 +1,6 @@
 // A finished background agent's report in the Work chat (ready.capabilities.agent_reports, 0.48).
 //
-// In Claude Code a background sub-agent's final report arrives as one muted line with a › that opens
+// A background sub-agent's final report belongs in the chat as one muted line with a › that opens
 // the whole report. DGC drew "Woke on agent · <label>" and nothing more: the report reached the model,
 // never the chat, and only the agent's page in the agent map showed it. Now the wake note is that line,
 // one per finished agent, folded; a click or Enter/Space opens the report the way the agent page draws

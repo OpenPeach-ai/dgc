@@ -83,7 +83,7 @@
 .msg-plugin-mark{display:inline-flex;width:14px;height:14px;flex:none}
 .msg-plugin-mark img{width:14px;height:14px;border-radius:3px;object-fit:contain}
 .msg-plugin-mark svg{width:13px;height:13px}
-/* Grok's A/B card: the Pip's choices under its latest reply. */
+/* The choices card: the Pip's choices under its latest reply. */
 .msg-choices{display:flex;flex-direction:column;gap:6px;margin:8px 0 2px;max-width:420px}
 .msg-choice{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 12px;border:1px solid var(--pip-edge,var(--vscode-widget-border));border-radius:10px;background:transparent;color:var(--vscode-foreground);font:inherit;cursor:pointer}
 .msg-choice:hover:not(:disabled){border-color:var(--pip-accent);background:color-mix(in srgb,var(--pip-accent) 8%,transparent)}

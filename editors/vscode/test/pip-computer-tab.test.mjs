@@ -5,7 +5,7 @@ import {JSDOM} from 'jsdom';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
 
-// A Pip's computer as an editor tab (Pips API 43), like Grok's bots: "Gmail · Computer" with its
+// A Pip's computer as an editor tab (Pips API 43): "Gmail · Computer" with its
 // Browser, Files and Terminal. The host opens one tab per Pip and pins it to that Pip's computer.
 const require=createRequire(import.meta.url),src=fileURLToPath(new URL('../src/',import.meta.url));
 const code=(await build({entryPoints:[src+'pipComputerClient.js'],bundle:true,write:false,loader:{'.css':'empty'},format:'iife',

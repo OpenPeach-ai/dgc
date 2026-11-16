@@ -4,7 +4,7 @@
 // or under it when there is no room over, and never off a side.
 //
 // A control keeps saying what it is with `title` (or `data-tip`), as before; nothing else in a page changes. While the
-// pointer rests on it (700 ms, Work's and Codex's delay; at once on the next control for a short while after) or the
+// pointer rests on it (700 ms, Work's delay; at once on the next control for a short while after) or the
 // Tab key reaches it, the label shows. Under a pointer the control's `title` is lifted so the system's tooltip stays
 // away, and put back when the label goes; a page that draws itself again while the label is up (the Pips view) puts
 // `title` back early, and it is lifted again.

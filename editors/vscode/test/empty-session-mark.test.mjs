@@ -1,5 +1,5 @@
-// A new session isn't a blank window: DGC's mark (the three slashes) sits in the middle of the empty transcript, muted,
-// as Codex shows its own; the first message takes its place and it doesn't come back. Checked in real Chromium from
+// A new session isn't a blank window: DGC's mark (the three slashes) sits in the middle of the empty transcript, muted;
+// the first message takes its place and it doesn't come back. Checked in real Chromium from
 // computed style: where the mark is laid out, its size and shape, a colour that's quiet in both themes and never the
 // accent, a short fade so a resumed chat whose history arrives at once doesn't flash it, and none under reduced motion.
 import { after, before, test } from "node:test";

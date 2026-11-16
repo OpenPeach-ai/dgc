@@ -1,4 +1,4 @@
-// The prompt cache's clock in the Work composer (0.48), copied from Claude Code.
+// The prompt cache's clock in the Work composer (0.48).
 //
 // warm -> a clock and the whole minutes left ("4m", tabular figures), changed at most once a minute,
 // never seconds, no animation; cold -> the clock alone in the mild notice's colour, with the reason in its
@@ -282,8 +282,8 @@ test("the popup says expired once: the headline, then what the next message cost
 });
 
 // ---- 0.52: an open chat that sits idle past its cache window says so once, at its end -------------------
-// Claude Code writes "Idle 1d 17h. The prompt cache has likely expired, so your next message will re-cache about 524k
-// tokens." under the last reply of a session left idle. Work wrote that line only when a chat was REOPENED cold; a chat
+// "Idle 1d 17h. The prompt cache has likely expired, so your next message will re-cache about 524k
+// tokens." goes under the last reply of a session left idle. Work wrote that line only when a chat was REOPENED cold; a chat
 // left open said nothing. Now the open chat says it too: when the clock's own timer runs out, when the provider says
 // the cache has gone, or when the window is shown again and finds it gone. One line an idle stretch, the same line as
 // the reopen note, its time brought up to date only when the window is shown again.

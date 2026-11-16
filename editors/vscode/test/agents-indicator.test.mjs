@@ -1,4 +1,4 @@
-// The agents indicator in the webview: the "● 2 sub-agents" pill (Claude Code's counting rule: the
+// The agents indicator in the webview: the "● 2 sub-agents" pill (its counting rule: the
 // agents working now, for the whole chat, and beside them the background tasks running now, "1 agent
 // · 2 tasks"), the agent map it opens, rows that open each agent's card and page, announcements,
 // chat boundaries and backend exits. The map itself is agent-map.test.mjs's.

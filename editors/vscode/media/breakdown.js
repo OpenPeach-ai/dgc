@@ -1,4 +1,4 @@
-// What fills a context window, drawn as Claude's Usage sheet draws it: a bar in one colour a part, then each part
+// What fills a context window, drawn as a usage sheet: a bar in one colour a part, then each part
 // with its tokens and its share of the window, a part's tools or files one by one under it, then the room kept free
 // before the chat is compacted, and what's free. ChatDGC, main DGC and Pips draw it alike (dgc/context_breakdown.py
 // makes the list). Text only: a label or a name is never markup.

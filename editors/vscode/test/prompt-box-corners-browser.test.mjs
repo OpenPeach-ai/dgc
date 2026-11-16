@@ -3,7 +3,7 @@
 // Work's box (and on the other two) follows it. Measured on the real pages, in real Chromium, dark and light.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { openRunningTurn, openChatDgc } from "./support/codex-look-scene.mjs";
+import { openRunningTurn, openChatDgc } from "./support/dgc-look-scene.mjs";
 import { openChat as openPipChat } from "./support/pip-chat-scene.mjs";
 
 let chromium;

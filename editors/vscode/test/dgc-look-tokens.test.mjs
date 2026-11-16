@@ -71,7 +71,7 @@ async function measure(theme) {
       return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100; };
     const r = {};
     for (const ink of ["--faint", "--muted-firm", "--home-count-ink"]) for (const ground of ["--bg", "--surface", "--surface2"]) r[`${ink} on ${ground}`] = ratio(ink, ground);
-    // (The muted grey is Codex's, for the page's own grounds; a raised ground takes --muted-firm: muted-grey.test.mjs.)
+    // (The muted grey is the text at 65%, for the page's own grounds; a raised ground takes --muted-firm: muted-grey.test.mjs.)
     for (const ground of ["--bg", "--surface"]) r[`--muted on ${ground}`] = ratio("--muted", ground);
     for (const ink of ["--text-2", "--home-quiet"]) for (const ground of ["--bg", "--surface"]) r[`${ink} on ${ground}`] = ratio(ink, ground);
     r["--on-solid on --solid"] = ratio("--on-solid", "--solid");

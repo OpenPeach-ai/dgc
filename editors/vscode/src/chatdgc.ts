@@ -160,7 +160,7 @@ interface Tab {
   opened: boolean;
   /** Messages for the page once its chat has opened (one sent from a canvas, before the tab was ready). */
   waitingSend?: Record<string, unknown>[];
-  /** A project's page (a new chat in that project, as ChatGPT's project page is), until it's sent. */
+  /** A project's page (a new chat in that project), until it's sent. */
   project?: string;
   /** Files this tab's picker returned: the only paths a send may name, so a page can never have the
    *  backend read a file the user didn't choose. */
@@ -785,7 +785,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.deliver({ kind }, { ...cmd, request_id: requestId });
   }
 
-  // ---- canvas (ChatGPT's): a document or code in a real editor beside the chat, that both of you change
+  // ---- canvas: a document or code in a real editor beside the chat, that both of you change
 
   /** The chat and canvas a file belongs to, when it's a canvas's file (`<chat root>/canvas/<chat>/<canvas>/<file>`). */
   canvasOf(path: string): { conversation: string; canvas: string } | undefined {
@@ -898,7 +898,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     if (left && canvasTabPath(tab) === here.path) await vscode.window.tabGroups.close(tab, true).then(undefined, () => undefined);
   }
 
-  /** ChatGPT's canvas shortcuts, for a document or for code. */
+  /** The canvas shortcuts, for a document or for code. */
   async canvasShortcut(): Promise<void> {
     const here = this.canvasHere();
     if (!here) return;
@@ -1923,7 +1923,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           // D14: the chat's own fallback, as kept with its last reply (a new chat's: the last one you chose).
           if (id && !this.fallbacks.has(id)) this.fallbacks.set(id, typeof ev.conversation?.fallback === "string" ? ev.conversation.fallback.slice(0, 200) : ""); }
         if (asker?.kind === "branch") {
-          // Branch in new chat: it opens in a tab of its own, as ChatGPT opens one; the chat it came from stays.
+          // Branch in new chat: it opens in a tab of its own; the chat it came from stays.
           this.requests.delete(requestId);
           const id = String(ev.conversation?.id || "");
           if (CONVERSATION_ID.test(id)) this.open(id);
@@ -2234,7 +2234,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const research = ev.research && typeof ev.research === "object" ? ev.research : {};
         const tabs = showing(conversation);
         for (const tab of tabs) this.post(tab, { type: "research", messageId: ev.message_id, research });
-        // Research takes minutes: when it ends out of sight, say so, as ChatGPT does.
+        // Research takes minutes: when it ends out of sight, say so.
         if ((research.status === "done" || research.status === "failed") && !tabs.some((tab) => tab.panel.visible)) {
           const title = String(research.plan?.title || "your research").slice(0, 120);
           const said = research.status === "done" ? `Deep research finished: ${title}` : `Deep research didn't finish: ${title}`;
@@ -3131,7 +3131,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     }
   }
 
-  /** Move to project…: a project, a new one, or out of the one it's in (ChatGPT's "Move to project"). */
+  /** Move to project…: a project, a new one, or out of the one it's in. */
   private async moveToProject(conversation: string, current: string, tab?: Tab): Promise<void> {
     const projects = await this.projectList();
     const picks: (vscode.QuickPickItem & { id: string })[] = [
@@ -3177,7 +3177,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     });
   }
 
-  /** Delete a project, as ChatGPT does (its chats with it), or keep its chats as your own. */
+  /** Delete a project with its chats, or keep its chats as your own. */
   private async deleteProject(project: string, name: string, chats: number, tab?: Tab): Promise<void> {
     if (!PROJECT_ID.test(project)) return;
     const ALL = chats ? `Delete space and ${chats} chat${chats === 1 ? "" : "s"}` : "Delete space";

@@ -125,8 +125,8 @@ export function modelFailure(text: string): (ModelWords & { detail: string }) | 
 // when it has nothing for that host.
 //
 // They used to be the ONLY mark model output got, on the reasoning that a link a model wrote is
-// not a link the user chose. Codex does not draw that line -- a link in one of its answers wears
-// the site's real favicon -- and the maintainers asked for that behaviour, having been shown what it
+// not a link the user chose. That line is no longer drawn -- a link in an answer wears
+// the site's real favicon -- because the maintainers asked for that behaviour, having been shown what it
 // discloses. The disclosure is bounded: the icon service is asked about an ORIGIN, it fetches the
 // site itself, so the site's operator sees a hit from Google rather than from the reader.
 const LINK_SOURCES: ReadonlyArray<readonly [RegExp, string]> = [
@@ -139,7 +139,7 @@ const LINK_SOURCES: ReadonlyArray<readonly [RegExp, string]> = [
   [/(^|\.)stackoverflow\.com$/i, "stackoverflow"],
 ];
 
-// Which kind of file a link points at, for the mark shown beside it. Codex names a file with its
+// Which kind of file a link points at, for the mark shown beside it. A file is named with its
 // icon rather than spelling the extension out in the sentence; the path stays in the hover label.
 // Bundled codicons again -- no network, nothing leaked.
 const FILE_KINDS: ReadonlyArray<readonly [RegExp, string]> = [
@@ -172,10 +172,10 @@ const FILE_KINDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\.(lock|sum)$/i, "lock"],
 ];
 
-// The favicon for a link the USER typed. Codex's mechanism exactly: Google's icon service, keyed
+// The favicon for a link the USER typed: Google's icon service, keyed
 // on the ORIGIN alone, so the path, query and fragment of the link never leave the machine -- a
-// URL carrying a token in it discloses only its host. The trade Codex makes, and we make with it,
-// is that Google learns that host. Never called for model output, which keeps the bundled marks.
+// URL carrying a token in it discloses only its host. The trade we make is that Google learns that
+// host. Never called for model output, which keeps the bundled marks.
 // Off switches every favicon in the panel at once, model output included, so `dgc.linkFavicons`
 // means what it says: no request leaves this machine for an icon.
 let faviconsEnabled = true;

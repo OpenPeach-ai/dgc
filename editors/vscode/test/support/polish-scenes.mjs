@@ -7,7 +7,7 @@ import { openGrid, EVERY, LISBON, THIRTY_FOLDERS, NOTES as OLD_NOTES } from "./h
 import { homeState, SESSIONS, CHATS } from "./home-scene.mjs";
 import { openCards } from "./home-cards-scene.mjs";
 import { sample } from "./notes-sample.mjs";
-import { openRunningTurn, openChatDgc } from "./codex-look-scene.mjs";
+import { openRunningTurn, openChatDgc } from "./dgc-look-scene.mjs";
 import { openMapScene } from "./agent-map-scene.mjs";
 import { openLibrary, ITEMS } from "./chat-scene.mjs";
 import { openOnePips, GST, LIME_DIR } from "./one-pips-scene.mjs";

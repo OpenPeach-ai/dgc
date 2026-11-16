@@ -735,7 +735,7 @@ test("however narrow the editor, the prompt box keeps one row: the tools turn to
         continue;
       }
       await s.frame();
-      // An empty box offers voice mode where Send is (as ChatGPT does); the row is measured with a word typed, so
+      // An empty box offers voice mode where Send is; the row is measured with a word typed, so
       // Send shows, and voice mode must have sat in exactly that place.
       const voice = await s.page.evaluate(() => { const n = document.querySelector("#cd-voicemode"); if (!n || n.hidden || !n.offsetWidth) return null; const r = n.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; });
       assert.ok(voice, `${width}px: an empty box offers voice mode`);
@@ -2200,7 +2200,7 @@ test("versions: edit a message, try a reply again, and step between versions", a
   } finally { await s.page.close(); }
 });
 
-test("keyboard shortcuts, as ChatGPT has them, and the list of them", async (t) => {
+test("keyboard shortcuts, and the list of them", async (t) => {
   if (skipOrFail(t)) return;
   const mod = process.platform === "darwin" ? "Meta" : "Control";
   const s = await openScreen();
@@ -2705,7 +2705,7 @@ test("a question in the answer: a card where it was asked, Continue sends the ch
   } finally { await s.page.close(); }
 });
 
-test("a card of several questions, as ChatGPT asks them: numbered, the first answers chosen, one button sends them all", async (t) => {
+test("a card of several questions: numbered, the first answers chosen, one button sends them all", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -2752,7 +2752,7 @@ test("a card of several questions, as ChatGPT asks them: numbered, the first ans
   } finally { await s.page.close(); }
 });
 
-test("Codex's queue: what you send while it answers waits above the box and goes when the reply finishes; Stop gives it all back", async (t) => {
+test("the queue: what you send while it answers waits above the box and goes when the reply finishes; Stop gives it all back", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -2776,7 +2776,7 @@ test("Codex's queue: what you send while it answers waits above the box and goes
     assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["And the budget?", "And the weather?"]);
     assert.match(await queue.locator(".cd-queue-head").textContent(), /^2 queued/);
     if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-queue.png") });
-    // Up in an empty box takes back the last one (Codex's "edit last queued message"); Enter queues it again.
+    // Up in an empty box takes back the last one to edit; Enter queues it again.
     await box.press("ArrowUp");
     assert.equal(await box.evaluate((n) => n.value), "And the weather?");
     assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["And the budget?"]);
@@ -2865,7 +2865,7 @@ test("a queued message with pasted attachments is returned for review after a re
   } finally { await second.page.close(); }
 });
 
-test("a reply that read a plugin says so under it (Used Aave), as ChatGPT names the apps it used", async (t) => {
+test("a reply that read a plugin says so under it (Used Aave), naming each one", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -2900,7 +2900,7 @@ test("a reply that read a plugin says so under it (Used Aave), as ChatGPT names 
   } finally { await s.page.close(); }
 });
 
-test("Codex's queue while it summarizes: a message sent during Compact now goes once the summary is in", async (t) => {
+test("the queue while it summarizes: a message sent during Compact now goes once the summary is in", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -3591,7 +3591,7 @@ test("a widget's page in a browser: put back as you left it (its code reruns), s
   } finally { await page.close(); }
 });
 
-test("maths in a reply, drawn by KaTeX as ChatGPT draws it: in a line and on its own; money stays money; Copy keeps the TeX", async (t) => {
+test("maths in a reply, drawn by KaTeX: in a line and on its own; money stays money; Copy keeps the TeX", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -3812,9 +3812,9 @@ test("widgets in a chat at side-bar width: the mark and the count, a list that f
   } finally { await s.page.close(); }
 });
 
-// The prompt rail (reported 2026-10-18: "The rail looks good"), ChatGPT's table of contents with ours added: a tick
+// The prompt rail (reported 2026-10-18: "The rail looks good"), a table of contents for the chat: a tick
 // per prompt from five prompts, the one being read bright; a card on hover with every prompt, its time under day
-// headings and the widget its reply made; a click or Alt+Up/Down goes there. ChatGPT's broke when a chat loaded in
+// headings and the widget its reply made; a click or Alt+Up/Down goes there. A rail can break when a chat loads in
 // pieces; this one lists every prompt from the chat's outline and loads what a jump needs first.
 const railChat = (count, { widgetsAt = [0, 7] } = {}) => {
   const P = (n) => `msg_${String(n).padStart(32, "0")}`;
@@ -3833,7 +3833,7 @@ const railState = (page) => page.evaluate(() => {
   const ticks = [...document.querySelectorAll("#cd-rail .prompt-tick")];
   return { shown: !document.getElementById("cd-rail").hidden, ticks: ticks.length, now: ticks.findIndex((t) => t.classList.contains("now")) };
 });
-// The card opens over the rail, as ChatGPT's does: the pointer goes there (a locator's hover waits for the rail to be on
+// The card opens over the rail: the pointer goes there (a locator's hover waits for the rail to be on
 // top, and the card it opened never lets it).
 const hoverRail = async (page) => { const b = await page.locator("#cd-rail").boundingBox(); await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); };
 const promptTop = (page, id) => page.evaluate((x) => {

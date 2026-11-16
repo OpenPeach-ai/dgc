@@ -8,7 +8,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openChat as openPipChat } from "./support/pip-chat-scene.mjs";
 import { openOnePips, GST } from "./support/one-pips-scene.mjs";
-import { openChatDgc } from "./support/codex-look-scene.mjs";
+import { openChatDgc } from "./support/dgc-look-scene.mjs";
 import { openSettings } from "./support/settings-scene.mjs";
 import { eachSurface } from "./support/marks-centred-scene.mjs";
 import { focusAudit } from "./support/polish-audit.mjs";

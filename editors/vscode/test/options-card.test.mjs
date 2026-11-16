@@ -505,7 +505,7 @@ test("the answered state renders inside the tool card, identical live, replayed 
   assert.equal(expected.verb, "Questions");
   assert.equal(expected.arg, "· Answered · 2 questions");
   assert.equal(expected.glyph, "circle-help");
-  assert.equal(expected.open, true, "open, as Claude Code keeps an answered question (reported 2026-10-17)");
+  assert.equal(expected.open, true, "an answered question stays open (reported 2026-10-17)");
   assert.equal(expected.badge, "");
   assert.deepEqual(shape(reversed), expected);
   assert.deepEqual(shape(replayed), expected);
@@ -551,7 +551,7 @@ test("the answered state renders inside the tool card, identical live, replayed 
 });
 
 test("a question the model asked stands in the transcript, between the tool groups, not folded inside one", () => {
-  // Reported 2026-10-17: kept the way Claude Code keeps "Questions". Inside "Used 1 tool" it folded away the
+  // Reported 2026-10-17: kept as its own "Questions" group. Inside "Used 1 tool" it folded away the
   // moment the model moved on. A sub-agent's question is that agent's step, and stays with its other steps.
   const bash = (id) => ({ type: "tool_call", call_id: id, name: "bash", args: { command: "ls" }, summary: "ls" });
   const done = (id) => ({ type: "tool_result", call_id: id, name: "bash", output: "a.txt", is_error: false, is_diff: false, diff: "" });

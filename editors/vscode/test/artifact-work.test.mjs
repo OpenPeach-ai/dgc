@@ -217,7 +217,7 @@ test("at 360px the chosen Output stays inside the composer with its choice acces
   } finally { await s.page.close(); }
 });
 
-// ui-04 (the user's note, 9 Nov, from Claude Code's chat): an artifact in a chat is one calm card on every surface: its
+// ui-04 (the user's note, 9 Nov): an artifact in a chat is one calm card on every surface: its
 // mark, its name and a quiet second line, and a click anywhere on it opens it. Its mark (approved 11 Nov) is a small
 // sheet of its kind with the kind's name on a coloured tab, where every kind had the same blue tile; Open is a pill in
 // the text colour and Download a round icon with that kind's formats, both in the editor's greys.

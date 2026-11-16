@@ -22,7 +22,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); });
 
-import { openSettingsGeneral } from "./support/codex-look-scene.mjs";
+import { openSettingsGeneral } from "./support/dgc-look-scene.mjs";
 
 const box = (page, selector) => page.evaluate((s) => { const r = document.querySelector(s).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; }, selector);
 

@@ -1,6 +1,6 @@
 @import url("./shared/tokens.css");
 @import url("./shared/dialog.css");
-/* ChatDGC's formatted canvas (src/canvasEditor.ts): ChatGPT's canvas, a page of writing in the editor's own colours,
+/* ChatDGC's formatted canvas (src/canvasEditor.ts): a page of writing in the editor's own colours,
    with a quiet row of formatting buttons above it. Only VS Code's theme variables, so it reads in every theme. */
 :root {
   color-scheme: light dark;

@@ -103,13 +103,13 @@ test("a pill is shorter than the line it sits on, and never wraps mid-label", ()
 });
 
 test("high contrast gets a visible pill border", () => {
-  // A pill carries no border of its own any more (Codex's treatment: a mark and the name in the
+  // A pill carries no border of its own any more (only a mark and the name in the
   // accent colour), so forced colours must supply the WHOLE border, not recolour one.
   assert.match(mentionsCss, /forced-colors: active\) \{ \.composer-pill \{ border: 1px solid CanvasText/);
 });
 
 // ---- link pills ------------------------------------------------------------------------------
-// Pasting a link shows it with its favicon, which is what Codex does. The difference from a skill
+// Pasting a link shows it with its favicon. The difference from a skill
 // pill is the whole point: this one's wire text IS the URL, so the model receives exactly the
 // characters that were pasted. The pill SHOWS the link; it does not stand in for it.
 

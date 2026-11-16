@@ -7,8 +7,8 @@ import { buildSync } from "esbuild";
 import { readStylesheet } from "./support/stylesheet.mjs";
 
 // The prompt box's own undo history, in a real browser, with the real keys on both platforms:
-// Cmd+Z / Cmd+Shift+Z / Cmd+Y on a Mac and Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y elsewhere -- the bindings
-// of Codex's composer. Each case here was wrong while the box leaned on Chromium's undo stack:
+// Cmd+Z / Cmd+Shift+Z / Cmd+Y on a Mac and Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y elsewhere -- the box's own
+// bindings. Each case here was wrong while the box leaned on Chromium's undo stack:
 // every insertText the panel made joined the typing run before it, a typing run never ended on a
 // pause, the selection a pill stands for was not in the stack at all, and a pill removed with
 // Backspace could not come back. jsdom has no editing commands and no undo, so only Chromium can
@@ -136,7 +136,7 @@ for (const { name, mod } of PLATFORMS) {
     assert.equal(await value(page), "note:", "what was said goes, what was typed stays");
   });
 
-  test(`${name}: a pause ends a typing run, as it does in Codex`, async (t) => {
+  test(`${name}: a pause ends a typing run`, async (t) => {
     if (skipOrFail(t)) return;
     const page = pages[name];
     await fresh(page);

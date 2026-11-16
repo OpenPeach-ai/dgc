@@ -9,7 +9,7 @@ import { readStylesheet } from "./support/stylesheet.mjs";
 // Undo in the prompt box, in a real browser. The box keeps its own history (main.js, "undo and redo"),
 // which is what Cmd+Z and Ctrl+Z act on; composer-history.test.mjs covers it key by key on both
 // platforms. The composer used to assign .value on every send and every inserted completion, which
-// wiped the browser's history, so undo did nothing — unlike Claude's and Codex's composers. jsdom has
+// wiped the browser's history, so undo did nothing. jsdom has
 // no editing commands and no undo, so only a real Chromium can prove this.
 const here = dirname(fileURLToPath(import.meta.url));
 let chromium;

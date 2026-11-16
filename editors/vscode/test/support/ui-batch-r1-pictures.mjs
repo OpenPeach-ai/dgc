@@ -51,7 +51,7 @@ PICTURES.menu = async ({ browser, shot }) => {
 
 // 4. The Work and Chat tabs' header row, beside the Pips tab's. 6. One corner shape. 7, 8. The cards' words. 10, 11.
 import { openDock } from "./dock-scene.mjs";
-import { openRunningTurn, openChatDgc } from "./codex-look-scene.mjs";
+import { openRunningTurn, openChatDgc } from "./dgc-look-scene.mjs";
 import { openChat as openPipChat } from "./pip-chat-scene.mjs";
 PICTURES.headers = async ({ browser, shot }) => {
   // (The Pips tab's own header row, to set beside these, is in the sweep below: 9-pips-list-list-*.)

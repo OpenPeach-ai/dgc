@@ -98,8 +98,8 @@ test("re-rendering does not stack copies", () => {
 });
 
 test("a hover label waits, and stops feeling instant sooner", () => {
-  // Codex's own numbers, read from its shipped webview bundle: delayDuration 700,
-  // skipDelayDuration 300. Ours were 380/500 -- twice as eager, and instant for longer.
+  // 700 ms before a label shows, then 300 ms in which its neighbours show at once. Ours were
+  // 380/500 -- twice as eager, and instant for longer.
   const js = mainJs;
   assert.match(js, /TIP_DELAY_MS = 700/, "a first hover waits 700ms");
   assert.match(js, /TIP_WARM_MS = 300/, "and the instant-for-neighbours window is 300ms");

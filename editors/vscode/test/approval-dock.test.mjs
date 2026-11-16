@@ -1,5 +1,5 @@
-// The approval dock (ui-04-dock-approvals, asked 10 Nov): a waiting approval sits just above the prompt box, as Claude
-// Code's and Codex's do (Codex: one current request in its bottom pane, the rest queued), one at a time with "1 of 3";
+// The approval dock (ui-04-dock-approvals, asked 10 Nov): a waiting approval sits just above the prompt box
+// (one current request there, the rest queued), one at a time with "1 of 3";
 // answered, it goes back to where its step is in the chat as its one quiet line. media/main.js in Chromium.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
