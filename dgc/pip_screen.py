@@ -21,7 +21,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import NamedTuple
 
 from .workspace_registry import RegistryError
 
@@ -47,24 +46,67 @@ DISPLAY = ":1"
 ASSETS = Path(__file__).with_name("desktop_assets")
 
 
-class Wallpaper(NamedTuple):
-    file: str
-    fg: str           # the desktop's icon labels
-    shadow: str       # and their shadow
+# One wallpaper in two versions (his call, 16 Nov): the teal one by day, the dark grey one by night, by this computer's
+# clock. Every computer of every Pip wears it.
+WALLPAPERS = {"light": "undertow-light.jpg", "dark": "undertow-dark.jpg"}
+DAY = (7, 19)                     # the light version from 07:00 until 19:00, local time
 
 
-# Each of a Pip's computers wears its own (asked 12 Nov): the first Dusk, the second Aurora, the third Daylight (light, so
-# its icon labels are dark), then round again.
-WALLPAPERS = (Wallpaper("wallpaper.jpg", "#ffffff", "#000000"), Wallpaper("wallpaper-2.jpg", "#ffffff", "#000000"),
-              Wallpaper("wallpaper-3.jpg", "#1f1b2e", "#ffffff"))
+def look_for_hour(hour: int) -> str:
+    """"light" in the day's hours, else "dark"."""
+    return "light" if DAY[0] <= int(hour) < DAY[1] else "dark"
 
 
-def wallpaper_for(number) -> Wallpaper:
-    try:
-        number = int(number)
-    except (TypeError, ValueError):
-        number = 1
-    return WALLPAPERS[(max(number, 1) - 1) % len(WALLPAPERS)]
+def look_switches(start: float | None = None, days: int = 366) -> list[tuple[int, str]]:
+    """When the desktop changes between its day and night looks, worked out from this computer's own clock and time zone
+    (clock changes included): ``(0, the look at start)``, then the next ``days`` × 2 of 07:00 and 19:00, as seconds since
+    1970. The desktop needs no time zone to follow it: it only compares these with its own clock's seconds."""
+    start = time.time() if start is None else float(start)
+    now = time.localtime(start)
+    out = [(0, look_for_hour(now.tm_hour))]
+    for day in range(days + 1):
+        for hour in DAY:
+            at = int(time.mktime((now.tm_year, now.tm_mon, now.tm_mday + day, hour, 0, 0, 0, 0, -1)))
+            if at > start:
+                out.append((at, look_for_hour(hour)))
+    return out[:1] + sorted(out[1:])[:2 * days]
+
+
+# The desktop's own reading of that list (conf/looks): the look of the last switch that has passed; dark when the list
+# is missing or says something else. ``NOW`` and ``LOOKS`` are only for the tests.
+LOOK_NOW_SH = """look_now() {
+  at_now=${NOW:-$(date +%s)}; found=dark
+  [ -r "${LOOKS:-/run/dgc/conf/looks}" ] || { echo dark; return; }
+  while read -r at mode; do
+    case "$at" in ''|*[!0-9]*) continue ;; esac
+    [ "$at" -le "$at_now" ] || break
+    case "$mode" in light|dark) found=$mode ;; *) found=dark ;; esac
+  done < "${LOOKS:-/run/dgc/conf/looks}"
+  echo "$found"
+}
+"""
+# After the wallpaper changes, the pointer is nudged one pixel and back: a screen reader that was connected before kept
+# the old wallpaper in a small square under the pointer until it moved (seen 16 Nov). Plain Xlib through ctypes, so
+# nothing more is installed; it does nothing when the display can't be opened.
+NUDGE_SH = """nudge_pointer() {
+  python3 -c '
+import ctypes
+try:
+    x = ctypes.CDLL("libX11.so.6")
+except OSError:
+    raise SystemExit
+x.XOpenDisplay.restype = ctypes.c_void_p
+x.XWarpPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong] + [ctypes.c_int] * 2 + [ctypes.c_uint] * 2 + [ctypes.c_int] * 2
+x.XFlush.argtypes = x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+d = x.XOpenDisplay(None)
+if d:
+    for step in (1, -1):
+        x.XWarpPointer(d, 0, 0, 0, 0, 0, 0, step, 0)
+        x.XFlush(d)
+    x.XCloseDisplay(d)
+' > /dev/null 2>&1
+}
+"""
 START_SECONDS = 15
 
 
@@ -227,13 +269,46 @@ def terminal_command(mac: bool = False) -> str:
 CONTROL_LINES = frozenset({"browser", "images", "documents", "pdf", "code"})
 
 
+# The dock, a rounded glass bar at the foot like a Mac's (16 Nov): close-set 48 px icons that light up under the pointer.
+DOCK_ICON = 48                    # each app's icon
+DOCK_GAP = 6                      # between two icons
+DOCK_PAD = (8, 2)                 # the bar's own padding at each end, and the icons' (tint2: panel, launcher)
+DOCK_HEIGHT = 62                  # the bar
+DOCK_MARGIN = 6                   # under the bar, above the screen's edge
+DOCK_BORDER = 1
+
+
 def dock_icon(index: int, count: int, screen=(WIDTH, HEIGHT)) -> tuple[int, int]:
-    """The centre of the dock's icon at ``index`` of ``count`` on a ``screen`` (width, height) (tint2rc below: 44 px icons
-    12 apart, the bar padded 12 + 2 at each end, centred at the bottom)."""
-    size, gap, pad = 44, 12, 12 + 2
-    width = 2 * pad + count * size + (count - 1) * gap
-    left = (screen[0] - width) // 2 + pad
-    return left + index * (size + gap) + size // 2, screen[1] - 42
+    """The centre of the dock's icon at ``index`` of ``count`` on a ``screen`` (width, height): the numbers above, as
+    the dock's tint2rc draws them, the bar centred at the foot."""
+    pad = sum(DOCK_PAD)
+    width = 2 * pad + count * DOCK_ICON + (count - 1) * DOCK_GAP + 2 * DOCK_BORDER
+    left = (screen[0] - width) // 2 + pad + DOCK_BORDER
+    return left + index * (DOCK_ICON + DOCK_GAP) + DOCK_ICON // 2, screen[1] - DOCK_MARGIN - DOCK_HEIGHT // 2
+
+
+# By day a light frosted glass, by night a dark one; a hairline edge either way (tint2's colours: "#rrggbb alpha%").
+DOCK_GLASS = {"light": ("#f6f7f8 34", "#ffffff 58"), "dark": ("#1c1d21 46", "#ffffff 22")}
+
+
+def dock_rc(look: str, apps) -> str:
+    """The dock's tint2rc for one look: background 1 the bar, background 2 an icon's name above it (its tooltip)."""
+    glass, edge = DOCK_GLASS[look]
+    return "\n".join([
+        f"rounded = 18", f"border_width = {DOCK_BORDER}", "border_sides = TBLR",
+        f"background_color = {glass}", f"border_color = {edge}",
+        "rounded = 6", "border_width = 1", "border_sides = TBLR",
+        "background_color = #1c1d21 92", "border_color = #ffffff 16",
+        "panel_items = L", f"panel_size = 100% {DOCK_HEIGHT}", "panel_shrink = 1", f"panel_margin = 0 {DOCK_MARGIN}",
+        f"panel_padding = {DOCK_PAD[0]} 0 0", "panel_position = bottom center horizontal", "panel_layer = top",
+        "panel_monitor = all", "strut_policy = follow_size", "panel_background_id = 1", "autohide = 0",
+        f"launcher_padding = {DOCK_PAD[1]} 0 {DOCK_GAP}", "launcher_background_id = 0",
+        f"launcher_icon_size = {DOCK_ICON}", "launcher_icon_asb = 100 0 0", "launcher_tooltip = 1",
+        *[f"launcher_item_app = /run/dgc/conf/apps/{key}.desktop" for key in apps],
+        "mouse_effects = 1", "mouse_hover_icon_asb = 100 0 14", "mouse_pressed_icon_asb = 100 0 -14",
+        "tooltip_show_timeout = 0.3", "tooltip_hide_timeout = 0.1", "tooltip_padding = 8 4",
+        "tooltip_background_id = 2", "tooltip_font = Sans 9", "tooltip_font_color = #ffffff 94",
+    ]) + "\n"
 
 
 def _xml(text: str) -> str:
@@ -272,18 +347,19 @@ def _write_top_bar(conf: Path) -> None:
     ]) + "\n")
 
 
-def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), number=1, mac: bool = False) -> None:
-    """The dock, its apps, the window manager's settings and the wallpaper. ``apps_shown``: the image editor,
-    document editor and PDF viewer this computer has (pip_apps), each on the dock after the Terminal. ``number``:
-    which of the Pip's computers this is, for its own wallpaper. ``mac``: the Mac's image (its Terminal is xterm)."""
+def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), mac: bool = False) -> None:
+    """The dock, its apps, the window manager's settings and the wallpaper in its day and night versions, with when to
+    change between them (look_switches). ``apps_shown``: the image editor, document editor and PDF viewer this computer
+    has (pip_apps), each on the dock after the Terminal. ``mac``: the Mac's image (its Terminal is xterm)."""
     terminal = terminal_command(mac)
     from . import pip_apps
     conf.mkdir(mode=0o700, parents=True, exist_ok=True)
     (conf / "apps").mkdir(mode=0o700, exist_ok=True)
     for asset in ("browser.png", "files.png", "terminal.png", "images.png", "documents.png", "pdf.png", "code.png"):
         shutil.copyfile(ASSETS / asset, conf / asset)
-    wallpaper = wallpaper_for(number)
-    shutil.copyfile(ASSETS / wallpaper.file, conf / "wallpaper.jpg")
+    for look, picture in WALLPAPERS.items():
+        shutil.copyfile(ASSETS / picture, conf / f"wallpaper-{look}.jpg")
+    _write(conf / "looks", "".join(f"{at} {look}\n" for at, look in look_switches()), 0o644)
     apps = {
         "browser": ("Browser", "sh -c 'echo browser > /run/dgc/sock/control'", "browser.png", "Its web browser"),
         "files": ("Files", FILES_COMMAND, "files.png", "Its Files folder"),
@@ -305,24 +381,15 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), n
            '<openbox_menu xmlns="http://openbox.org/3.4/menu">\n <menu id="root-menu" label="Apps">\n'
            f'{items} </menu>\n</openbox_menu>\n')
     # Apps open by one click, with no "run or open?" question (the Apps window and the desktop's icons).
-    _write(conf / "libfm.conf", "[config]\nquick_exec=1\nsingle_click=0\n[ui]\nbig_icon_size=48\n")
+    # The desktop's icons at 36 px (they were 48 and looked too big, 16 Nov), and so the Apps window's.
+    _write(conf / "libfm.conf", "[config]\nquick_exec=1\nsingle_click=0\n[ui]\nbig_icon_size=36\n")
     _write(conf / "lxterminal.conf", LXTERMINAL_CONF)
     gtk3, gtk2 = gtk_settings()
     (conf / "gtk-3.0").mkdir(mode=0o700, parents=True, exist_ok=True)
     _write(conf / "gtk-3.0" / "settings.ini", gtk3)
     _write(conf / "gtkrc-2.0", gtk2)
-    _write(conf / "tint2rc", "\n".join([
-        # Background 1: the dock's frosted, rounded bar.
-        "rounded = 16", "border_width = 1", "border_sides = TBLR",
-        "background_color = #2b2b30 62", "border_color = #ffffff 26",
-        "panel_items = L", "panel_size = 100% 64", "panel_shrink = 1", "panel_margin = 0 10",
-        "panel_padding = 12 7 12", "panel_position = bottom center horizontal", "panel_layer = top",
-        "panel_monitor = all", "strut_policy = follow_size", "panel_background_id = 1", "autohide = 0",
-        "launcher_padding = 2 2 12", "launcher_background_id = 0", "launcher_icon_size = 44",
-        "launcher_icon_asb = 100 0 0", "launcher_tooltip = 1",
-        *[f"launcher_item_app = /run/dgc/conf/apps/{key}.desktop" for key in apps],
-        "tooltip_show_timeout = 0.4", "tooltip_hide_timeout = 0.1",
-    ]) + "\n")
+    for look in WALLPAPERS:
+        _write(conf / f"tint2rc-{look}", dock_rc(look, apps))
     _write(conf / "openbox.xml", """<?xml version="1.0"?>
 <openbox_config xmlns="http://openbox.org/3.4/rc">
  <theme><name>Onyx</name><titleLayout>NLIMC</titleLayout><keepBorder>yes</keepBorder>
@@ -338,15 +405,21 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), n
 """)
     desktop = conf / "pcmanfm" / "dgc"
     desktop.mkdir(parents=True, exist_ok=True)
-    _write(desktop / "desktop-items-0.conf", "[*]\nwallpaper_mode=crop\nwallpaper_common=1\n"
-           f"wallpaper=/run/dgc/conf/wallpaper.jpg\ndesktop_bg=#171820\ndesktop_fg={wallpaper.fg}\n"
-           f"desktop_shadow={wallpaper.shadow}\nshow_wm_menu=1\nshow_documents=0\nshow_trash=0\nshow_mounts=0\n")
+    for look in WALLPAPERS:          # both versions are dark enough for white labels with a shadow
+        _write(desktop / f"desktop-items-{look}.conf", "[*]\nwallpaper_mode=crop\nwallpaper_common=1\n"
+               f"wallpaper=/run/dgc/conf/wallpaper-{look}.jpg\ndesktop_bg=#101215\ndesktop_fg=#ffffff\n"
+               "desktop_shadow=#000000\ndesktop_font=Sans 9\nshow_wm_menu=1\nshow_documents=0\nshow_trash=0\n"
+               "show_mounts=0\n")
     _write(desktop / "pcmanfm.conf", "[config]\nbm_open_method=0\n[ui]\nalways_show_tabs=0\nshow_hidden=0\n")
-    _write(conf / "desktop.sh", f"""
+    _write(conf / "desktop.sh", LOOK_NOW_SH + NUDGE_SH + f"""
 export LD_LIBRARY_PATH="${{DESK_LIB:-}}" PATH="${{DESK_BIN:-}}:/usr/bin:/bin" HOME=/home/pip XDG_CONFIG_HOME=/tmp/config
 for loaders in /opt/desk/usr/lib/*/imlib2/loaders; do [ -d "$loaders" ] && export IMLIB2_LOADER_PATH="$loaders"; done
 mkdir -p /tmp/config/pcmanfm /tmp/config/openbox /tmp/config/libfm /home/pip/Desktop
 cp -r /run/dgc/conf/pcmanfm/dgc /tmp/config/pcmanfm/dgc
+# Day or night by this computer's clock (conf/looks): the wallpaper's version and the dock's glass, before either draws.
+look=$(look_now)
+cp /run/dgc/conf/pcmanfm/dgc/desktop-items-$look.conf /tmp/config/pcmanfm/dgc/desktop-items-0.conf
+cp /run/dgc/conf/tint2rc-$look /tmp/config/tint2rc
 cp /run/dgc/conf/libfm.conf /tmp/config/libfm/libfm.conf
 mkdir -p /tmp/config/lxterminal && cp /run/dgc/conf/lxterminal.conf /tmp/config/lxterminal/lxterminal.conf
 # The machine's best dark theme and icons for the file manager and the desktop (pc-look).
@@ -365,7 +438,7 @@ for i in $(seq 1 100); do [ -S /tmp/.X11-unix/X{DISPLAY[1:]} ] && break; sleep 0
 export DISPLAY={DISPLAY}
 "$DESK_WM" --config-file /run/dgc/conf/openbox.xml > /run/dgc/log/openbox.log 2>&1 &
 "$DESK_FILES" --desktop --profile dgc > /run/dgc/log/wallpaper.log 2>&1 &
-"$DESK_DOCK" -c /run/dgc/conf/tint2rc > /run/dgc/log/dock.log 2>&1 &
+"$DESK_DOCK" -c /tmp/config/tint2rc > /run/dgc/log/dock.log 2>&1 &
 dock=$!
 "$DESK_DOCK" -c /run/dgc/conf/topbar.rc > /run/dgc/log/topbar.log 2>&1 &
 topbar=$!
@@ -380,6 +453,17 @@ topbar=$!
   done ) &
 # The dock can draw before the wallpaper and window manager settle; a reload redraws it on top.
 sleep 2; kill -USR1 "$dock" "$topbar" 2>/dev/null
+# Each minute: when a switch in conf/looks has passed, the other version of the wallpaper and the dock's other glass.
+( while sleep 60; do
+    now=$(look_now)
+    [ "$now" = "$look" ] && continue
+    look=$now
+    cp /run/dgc/conf/pcmanfm/dgc/desktop-items-$now.conf /tmp/config/pcmanfm/dgc/desktop-items-0.conf
+    cp /run/dgc/conf/tint2rc-$now /tmp/config/tint2rc
+    "$DESK_FILES" --profile dgc --set-wallpaper=/run/dgc/conf/wallpaper-$now.jpg --wallpaper-mode=crop > /dev/null 2>&1
+    kill -USR1 "$dock" 2>/dev/null
+    sleep 1; nudge_pointer
+  done ) &
 wait
 """, 0o700)
 
@@ -431,21 +515,20 @@ def desktop_argv(runtime: Path, files: Path, name: str, egress: Path | None = No
     return argv + ["sh", "/run/dgc/conf/desktop.sh"]
 
 
-def make_desktop(runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT), number=1):
+def make_desktop(runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT)):
     """This machine's kind of screen: a box here on Linux, the computer's VM on a Mac (where the screen is 1280x800 for
     now: its browser's window is sized for it)."""
     if sys.platform == "darwin":
         from .pip_container import ContainerDesktop
         return ContainerDesktop(runtime, files, name, egress)
-    return Desktop(runtime, files, name, egress, size=size, number=number)
+    return Desktop(runtime, files, name, egress, size=size)
 
 
 class Desktop:
     """One Pip computer's screen. Owned by its Host in the supervisor; started on first use."""
 
-    def __init__(self, runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT), number=1):
+    def __init__(self, runtime: Path, files: Path, name: str, egress: Path | None = None, size=(WIDTH, HEIGHT)):
         self.runtime, self.files, self.name = Path(runtime), Path(files), name
-        self.number = number              # which of the Pip's computers: its own wallpaper
         self.size = tuple(size) if tuple(size) in SIZES else (WIDTH, HEIGHT)
         self.egress = Path(egress) if egress is not None else None
         self.proc: subprocess.Popen | None = None
@@ -491,7 +574,7 @@ class Desktop:
                 pass
         from . import pip_apps
         write_config(self.runtime / "conf", self.name, [key for key in pip_apps.APPS if pip_apps.find(key) is not None],
-                     self.size, number=self.number)
+                     self.size)
         for fifo in ("control", "launch"):
             if not (self.runtime / "sock" / fifo).exists():
                 os.mkfifo(self.runtime / "sock" / fifo, 0o600)

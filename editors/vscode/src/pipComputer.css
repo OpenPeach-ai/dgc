@@ -111,10 +111,11 @@ li.pc-copying .pc-size{font-style:italic}
 .pc-log .pc-muted{font-family:var(--vscode-font-family,system-ui)}
 .pc-run{display:grid;gap:4px}.pc-prompt{margin:0}.pc-who{color:var(--lav)}.pc-run pre{background:transparent;border:0;padding:0;color:inherit}.pc-exit{margin:0;color:#ff8a80}
 #pc-run input{font-family:var(--mono)}
-/* The desktop: DGC's Graphite wallpaper (quiet dark surface and the DGC mark; the
-   same picture the full desktop shows, dgc/desktop_assets/wallpaper.jpg), apps in windows, a dock. */
+/* The desktop: the one wallpaper the full desktop wears (16 Nov), its teal version by day and its dark grey one at night
+   (body.pc-night, by this computer's clock: pipComputerClient.js), apps in windows, a dock. */
 .pc-desktop{position:relative;flex:1;min-height:0;overflow:hidden;
- background:#171820 url("../media/pips/computer-wallpaper.jpg") 78% 40%/cover no-repeat}   /* a narrow tab keeps the mark */
+ background:#0a2a30 url("../media/pips/computer-wallpaper-light.jpg") center/cover no-repeat}
+.pc-night .pc-desktop{background:#111214 url("../media/pips/computer-wallpaper-dark.jpg") center/cover no-repeat}
 .pc-window{position:absolute;inset:14px 14px 72px;display:flex;flex-direction:column;border-radius:10px;overflow:hidden;
  background:var(--vscode-editor-background);border:1px solid rgba(0,0,0,.25);box-shadow:0 14px 44px rgba(0,0,0,.38),0 2px 8px rgba(0,0,0,.2)}
 .pc-window.pc-note{inset:auto 14px 72px;padding:14px 16px}
@@ -129,7 +130,14 @@ li.pc-copying .pc-size{font-style:italic}
 .pc-window-body>.pc-pane{flex:1}
 .pc-dock{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;gap:8px;padding:6px 9px;border-radius:14px;
  background:rgba(255,255,255,.3);border:1px solid rgba(255,255,255,.45);box-shadow:0 8px 28px rgba(0,0,0,.28);backdrop-filter:blur(14px)}
-.vscode-dark .pc-dock,.vscode-high-contrast .pc-dock{background:rgba(30,30,34,.45);border-color:rgba(255,255,255,.14)}
+/* The dock's glass follows the wallpaper, not the editor's theme: light by day, dark at night, as on the full desktop. */
+.pc-night .pc-dock{background:rgba(28,29,33,.46);border-color:rgba(255,255,255,.22)}
+.vscode-high-contrast .pc-dock{border-color:var(--vscode-contrastBorder,rgba(255,255,255,.6))}
+/* Each app's picture: the very one the full desktop's dock wears (media/pips/apps = dgc/desktop_assets). */
+.pc-app-picture{display:block;flex:none;background:center/contain no-repeat;pointer-events:none}
+.pc-app-picture[data-pic="browser"]{background-image:url("../media/pips/apps/browser.png")}
+.pc-app-picture[data-pic="files"]{background-image:url("../media/pips/apps/files.png")}
+.pc-app-picture[data-pic="terminal"]{background-image:url("../media/pips/apps/terminal.png")}
 .pc-dock-app{position:relative;display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:10px;background:transparent;transition:transform .14s ease}
 .pc-dock-app:hover{transform:translateY(-3px);background:rgba(255,255,255,.12)}
 .pc-dock-app.open::after{content:"";position:absolute;bottom:-4px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:rgba(255,255,255,.95);box-shadow:0 0 2px rgba(0,0,0,.4)}

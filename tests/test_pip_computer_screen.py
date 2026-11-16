@@ -55,7 +55,7 @@ class TheScreenItself(unittest.TestCase):
         with mock.patch("dgc.pip_apps.find", return_value=None):
             pip_screen.write_config(conf, "Pip", (), (1920, 1080))
         self.assertIn("-geometry 1920x1080", (conf / "desktop.sh").read_text())
-        self.assertEqual(pip_screen.dock_icon(0, 3, (1920, 1080))[1], 1080 - 42)
+        self.assertEqual(pip_screen.dock_icon(0, 3, (1920, 1080))[1], 1080 - pip_screen.DOCK_MARGIN - pip_screen.DOCK_HEIGHT // 2)
         self.assertEqual(pip_screen.dock_icon(1, 3), pip_screen.dock_icon(1, 3, (1280, 800)), "the old size by default")
         self.assertGreater(pip_screen.dock_icon(1, 3, (1920, 1080))[0], pip_screen.dock_icon(1, 3)[0], "centred on the wider screen")
 

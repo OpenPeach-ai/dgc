@@ -543,7 +543,8 @@ class Host:
         return tuple(getattr(self.desktop, "size", None) or (pip_screen.WIDTH, pip_screen.HEIGHT))
 
     def ensure_desktop(self) -> bool:
-        """Start this computer's full screen if the machine can show one; the browser moves onto it."""
+        """Start this computer's full screen if the machine can show one, on its desktop with nothing open; the browser
+        draws on it from then on, when it's opened."""
         from . import pip_screen
         with self.lock:
             if self.desktop is not None and self.desktop.running():
@@ -553,7 +554,7 @@ class Host:
             from .pip_computer_files import files_root
             size = Host._screen_size(self)
             desktop = pip_screen.make_desktop(socket_dir() / f"{self.tag}-desk", self.files_dir, "Pip",
-                                              egress=self.proxy.path, size=size, number=getattr(self, "number", 1))
+                                              egress=self.proxy.path, size=size)
             # The browser's window fills the screen above the dock's strip.
             shown = getattr(desktop, "size", (pip_screen.WIDTH, pip_screen.HEIGHT))
             self.browser.window_size = (shown[0], shown[1] - pip_screen.TOP_BAR - pip_screen.BROWSER_STRIP)
@@ -562,15 +563,9 @@ class Host:
             self.desktop = desktop
             if self.browser.display_dir != desktop.x11_dir:
                 self.browser.display_dir = desktop.x11_dir
-                self.browser.close()          # a headless browser restarts as a window on the screen
-            from .browser import BrowserError
-            try:
-                if not getattr(self, 'browser_closed_by_request', False):
-                    self.browser.start()
-            except BrowserError:
-                # The screen, Terminal and Files work without it; the dock's Browser icon and the
-                # Pip's next browser step try again, and a run reports why.
-                self.browser.close()
+                self.browser.close()          # a headless browser comes back as a window on the screen
+            # The computer opens on its desktop (his call, 16 Nov): the browser starts when the Pip's next browser step
+            # or the dock's Browser icon asks for it, as a window on this screen.
             if self._pump_thread is None:
                 self._pump_thread = threading.Thread(target=self._pump_loop, name=f"pip-desktop-{self.pip_id[-8:]}",
                                                      daemon=True)
@@ -1144,9 +1139,10 @@ class Host:
                 return {"text": ("The browser is closed and its process has stopped. The computer's desktop remains "
                                  "available; saved sign-ins are kept. Open a page or launch the browser to use it again.")}
             if op == "status" and not self.browser.alive():
-                return {"text": "The browser is closed. Open a page or launch the browser to use it again."}
+                return {"text": ("The browser isn't open: the computer starts on its desktop, and the browser opens when "
+                                 "you open a page or launch it.")}
             if op == "tabs" and not self.browser.alive():
-                return {"text": "The browser is closed; it has no open tabs."}
+                return {"text": "The browser isn't open, so it has no tabs."}
             # Chrome runs as a window on the computer's screen whenever this machine can show one, as on
             # Grok's bots: headless Chrome names itself HeadlessChrome, and Google asked it for a robot check.
             if self.desktop is None or not self.desktop.running():

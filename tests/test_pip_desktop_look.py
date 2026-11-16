@@ -31,7 +31,7 @@ class DesktopLook(unittest.TestCase):
         self.assertIn("strut_policy = follow_size", bar, "a maximised window stays below it")
         script = (self.conf / "desktop.sh").read_text()
         self.assertIn('"$DESK_DOCK" -c /run/dgc/conf/topbar.rc', script)
-        self.assertIn('"$DESK_DOCK" -c /run/dgc/conf/tint2rc', script, "the dock stays")
+        self.assertIn('"$DESK_DOCK" -c /tmp/config/tint2rc', script, "the dock stays (its day or night copy)")
 
     def test_each_app_is_a_labelled_icon_on_the_desktop_and_in_the_menu(self):
         names = sorted(p.read_text().split("Name=", 1)[1].split("\n", 1)[0] for p in (self.conf / "apps").glob("*.desktop"))
@@ -47,7 +47,8 @@ class DesktopLook(unittest.TestCase):
         openbox = (self.conf / "openbox.xml").read_text()
         self.assertIn("<file>/run/dgc/conf/menu.xml</file>", openbox)
         self.assertIn('<mousebind button="Right" action="Press"><action name="ShowMenu"><menu>root-menu</menu>', openbox)
-        self.assertIn("show_wm_menu=1", (self.conf / "pcmanfm" / "dgc" / "desktop-items-0.conf").read_text())
+        for look in ("light", "dark"):
+            self.assertIn("show_wm_menu=1", (self.conf / "pcmanfm" / "dgc" / f"desktop-items-{look}.conf").read_text())
         self.assertIn("quick_exec=1", (self.conf / "libfm.conf").read_text(), "one click opens an app, no question")
 
     def test_the_mac_browser_also_starts_below_the_bar(self):

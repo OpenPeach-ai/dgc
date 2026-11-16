@@ -13,7 +13,7 @@ let built;
 export async function bundle() {
   if (!built) {
     const out = await build({ entryPoints: [src + "pipComputerClient.js"], bundle: true, write: false, format: "esm", outdir: "dist",
-      platform: "browser", target: "chrome108", loader: { ".jpg": "dataurl" }, logLevel: "silent" });
+      platform: "browser", target: "chrome108", loader: { ".jpg": "dataurl", ".png": "dataurl" }, logLevel: "silent" });
     built = { js: out.outputFiles.find((f) => f.path.endsWith(".js")).text, css: out.outputFiles.filter((f) => f.path.endsWith(".css")).map((f) => f.text).join("\n") };
   }
   return built;
@@ -29,7 +29,8 @@ function host(PIP, scene) {
   const post = (m) => window.postMessage(m, "*");
   const answers = {
     get_pip_computer: () => ({ computer: { pip_id: PIP.id, granted: true, available: true, reason: "", pending: (scene.actions || []).filter((a) => a.status === "pending").length, actions: scene.actions || [], ...(scene.screens ? { screen: scene.screen, screens: scene.screens } : {}) } }),
-    get_pip_computer_desktop: () => ({ desktop: { pip_id: PIP.id, available: true, reason: "", install: "", using: scene.using, browser: "Chromium", chrome_install: "" } }),
+    // (scene.flat: this machine can't show a live screen, so the tab draws its own desktop, with its own dock.)
+    get_pip_computer_desktop: () => ({ desktop: { pip_id: PIP.id, available: !scene.flat, reason: scene.flat ? "The desktop runs on Linux and macOS for now." : "", install: "", using: scene.using, browser: "Chromium", chrome_install: "" } }),
     use_pip_computer_view: () => ({ view: { ok: false, error: "" } }),
     // Its Files (scene.files: the top folder), for the Files panel under the screen.
     list_pip_computer_files: (r) => ({ path: r.path, entries: r.path ? [] : scene.files || [], more: false, total_bytes: (scene.files || []).reduce((n, f) => n + (f.bytes || 0), 0) }),
@@ -97,9 +98,10 @@ export async function openComputer(browser, opts = {}) {
   const { js, css } = await bundle();
   const t = THEMES[theme];
   const page = `<!DOCTYPE html><html><head><meta charset="utf-8">${VSCODE_WEBVIEW}<style>${t.css}</style><style>${css}</style></head><body class="${t.kind}"><main id="app"></main>`
-    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, using, screen, screens, files: opts.files || [], actions: opts.actions || [], code: opts.code || "ok", codeAfter: opts.codeAfter || 0, stopReason: opts.stopReason || "", stopFirst: !!opts.stopFirst })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
+    + `<script>(${host})(${JSON.stringify(PIP)}, ${JSON.stringify({ api, using, screen, screens, flat: !!opts.flat, files: opts.files || [], actions: opts.actions || [], code: opts.code || "ok", codeAfter: opts.codeAfter || 0, stopReason: opts.stopReason || "", stopFirst: !!opts.stopFirst })});</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, colorScheme: theme, hasTouch: !!opts.touch });   // (opts.touch: a finger, no pointer)
   const p = await context.newPage();
+  if (opts.now !== undefined) await p.clock.setFixedTime(opts.now);     // (opts.now: the page's clock, timers still run)
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e)));
   p.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });

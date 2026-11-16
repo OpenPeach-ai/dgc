@@ -300,11 +300,11 @@ function drawDrawer(fresh){
 function moreKeys(){const menu=$('pc-more-menu');if(menu)window.DgcMenu.keys(menu,{close:()=>{S.more=false;render();},trigger:()=>$('pc-more')});}
 // A desktop like Grok's bots' computers: a wallpaper, a dock with three apps, apps in windows.
 const APPS={browser:'Browser',files:'Files',terminal:'Terminal'};
+// Each app wears the picture the full desktop's dock does (dgc/desktop_assets, copied byte for byte into media/pips/apps,
+// drawn by pipComputer.css): one app, one picture, on every screen.
 function appIcon(app,size=34){
- const box=`width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true" focusable="false"`;
- if(app==='browser')return `<svg ${box}><circle cx="20" cy="20" r="17" fill="#2f7cf6"/><circle cx="20" cy="20" r="17" fill="none" stroke="#fff" stroke-opacity=".9" stroke-width="1.6"/><ellipse cx="20" cy="20" rx="7.5" ry="17" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M3.5 14h33M3.5 26h33M20 3v34" stroke="#fff" stroke-width="1.6" fill="none"/></svg>`;
- if(app==='files')return `<svg ${box}><path d="M4 11a3 3 0 0 1 3-3h9l4 4h13a3 3 0 0 1 3 3v16a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" fill="#f4b23e"/><path d="M4 16h32v15a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" fill="#ffc95c"/></svg>`;
- return `<svg ${box}><rect x="3" y="5" width="34" height="30" rx="5" fill="#1d2430"/><rect x="3" y="5" width="34" height="6" rx="3" fill="#2c3646"/><path d="M10 18l5 4-5 4" stroke="#7ee787" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 27h9" stroke="#e6edf3" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+ const pic=Object.hasOwn(APPS,app)?app:'terminal';
+ return `<span class="pc-app-picture" data-pic="${pic}" style="width:${size|0}px;height:${size|0}px" aria-hidden="true"></span>`;
 }
 function dockMarkup(){
  return `<nav class="pc-dock" aria-label="Apps">${Object.entries(APPS).map(([id,label])=>`<button type="button" class="pc-dock-app${S.open.includes(id)?' open':''}${S.app===id?' active':''}" data-app="${id}" aria-label="${label}" title="${label}" aria-pressed="${S.app===id}">${appIcon(id)}</button>`).join('')}</nav>`;
@@ -1039,5 +1039,12 @@ window.addEventListener('message',event=>{
 setInterval(()=>broker.expire(Date.now()),5000);
 S.app=['browser','files','terminal',''].includes(vscode.getState()?.app)?vscode.getState().app:'';S.open=S.app?[S.app]:[];S.fit=vscode.getState()?.fit!==false;
 const style=document.createElement('style');style.textContent=window.PipConcepts?.plush?.styles||'';document.head.append(style);
+// One wallpaper in two versions (16 Nov), as the full desktop wears it: the teal one from 07:00 to 19:00 and the dark grey
+// one at night, by this computer's clock; the dock's glass follows (pipComputer.css, body.pc-night). Checked each minute,
+// and at once when the tab is looked at again.
+const DAY=[7,19];
+function applyLook(){const h=new Date().getHours();document.body.classList.toggle('pc-night',!(h>=DAY[0]&&h<DAY[1]));}
+applyLook();setInterval(applyLook,60000);addEventListener('focus',applyLook);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)applyLook();});
 render();
 vscode.postMessage({type:'pipsReady'});

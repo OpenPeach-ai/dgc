@@ -27,7 +27,7 @@ after(async () => { await browser?.close(); });
 const src = fileURLToPath(new URL("../src/", import.meta.url));
 // As esbuild.js builds it for the extension: an ES module (noVNC uses top-level await), its stylesheet beside it.
 const out = await build({ entryPoints: [src + "pipComputerClient.js"], bundle: true, write: false, format: "esm", outdir: "dist",
-  platform: "browser", target: "chrome108", loader: { ".jpg": "dataurl" },
+  platform: "browser", target: "chrome108", loader: { ".jpg": "dataurl", ".png": "dataurl" },
   alias: { "@novnc/novnc": fileURLToPath(new URL("./support/novnc-stub.mjs", import.meta.url)) } });
 const js = out.outputFiles.find((f) => f.path.endsWith(".js")).text;
 const css = out.outputFiles.filter((f) => f.path.endsWith(".css")).map((f) => f.text).join("\n");

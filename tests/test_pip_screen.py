@@ -133,9 +133,10 @@ class DesktopBoxTests(unittest.TestCase):
         self.assertNotIn("chrome", apps["browser"].lower(), "the dock never starts a browser of its own")
         self.assertIn("pcmanfm /home/pip/Files", apps["files"])
         self.assertIn("cd /home/pip/Files", apps["terminal"])
-        rc = (conf / "tint2rc").read_text()
-        self.assertIn("panel_position = bottom center horizontal", rc)
-        self.assertEqual(rc.count("launcher_item_app"), 3)
+        for look in ("light", "dark"):          # the dock's day and night glass (16 Nov), the same three apps
+            rc = (conf / f"tint2rc-{look}").read_text()
+            self.assertIn("panel_position = bottom center horizontal", rc)
+            self.assertEqual(rc.count("launcher_item_app"), 3)
         self.assertIn("-rfbport -1", (conf / "desktop.sh").read_text(), "no network listener, only the Unix socket")
         self.assertIn("-nolisten tcp", (conf / "desktop.sh").read_text())
 
@@ -280,9 +281,10 @@ class WhoseSubmitTests(unittest.TestCase):
 
 
 class DesktopWithoutBrowserTests(unittest.TestCase):
-    """A browser that cannot start does not take the screen down: Terminal and Files still work."""
+    """The screen opens without the browser (his call, 16 Nov: the computer opens on its desktop; the Pip or the user
+    opens the browser). A browser that couldn't start never comes into it: Terminal and Files work."""
 
-    def test_the_screen_opens_when_the_browser_fails_to_start(self):
+    def test_the_screen_opens_without_starting_the_browser(self):
         from dgc.pip_computer_box import BoxError
         root = Path(tempfile.mkdtemp()); self.addCleanup(__import__("shutil").rmtree, root, True)
         closed = []
@@ -310,12 +312,12 @@ class DesktopWithoutBrowserTests(unittest.TestCase):
         # This machine's kind of screen is the stand-in: a box on Linux, the computer's VM on a Mac. Replacing only
         # Linux's let this test start a real VM on a Mac and leave it running.
         with patch.object(pip_screen, "availability", return_value={"available": True, "reason": ""}), \
-                patch.object(pip_screen, "make_desktop", lambda runtime, files, name, egress=None, size=None, number=1: Screen(runtime, files, name, egress)):
+                patch.object(pip_screen, "make_desktop", lambda runtime, files, name, egress=None, size=None: Screen(runtime, files, name, egress)):
             self.assertTrue(pip_computer.Host.ensure_desktop(host))
         self.assertIsInstance(host.desktop, Screen)
         self.assertTrue(host.desktop.started)
         self.assertEqual(browser.display_dir, host.desktop.x11_dir)
-        self.assertGreaterEqual(len(closed), 2, "the failed browser is closed, so the dock or the next step retries")
+        self.assertEqual(len(closed), 1, "only the headless browser it had is closed; nothing tries to start one")
 
 
 class BrowserOnTheScreenTests(unittest.TestCase):
@@ -574,8 +576,8 @@ class RealScreenTests(unittest.TestCase):
         while not line.endswith(b"\n"):
             line += viewer.recv(1)
         self.assertEqual(json.loads(line), {"ok": True})
-        self.assertTrue(host.browser.alive(), "the browser runs as a window on the screen")
-        self.assertEqual(host.browser.display_dir, host.desktop.x11_dir)
+        self.assertFalse(host.browser.alive(), "the screen opens on its desktop, with no browser (16 Nov)")
+        self.assertEqual(host.browser.display_dir, host.desktop.x11_dir, "when it opens, it is a window on the screen")
         # The desktop's Terminal is online through the computer's egress, like the browser: the desktop
         # box runs its own relay to it (Grok's terminal has internet; a user: "lets copy grok").
         def parent(pid):
@@ -626,7 +628,7 @@ class RealScreenTests(unittest.TestCase):
         viewer.sendall(struct.pack(">BBHHHH", 3, 0, 0, 0, pip_screen.WIDTH, pip_screen.HEIGHT))
         self.assertNotEqual(viewer.recv(1), b"", "the screen is still open after typing")
         threading.Thread(target=_drain, args=(viewer,), daemon=True).start()     # the rest of that frame
-        # Closed by the user, the browser comes back from the dock's Browser icon, through DGC.
+        # Not open yet (or closed by the user), the browser comes from the dock's Browser icon, through DGC.
         with host.lock:
             host.browser.close()
         self.assertFalse(host.browser.alive())
