@@ -41,7 +41,7 @@ test("Work: the Agents row says what this session's agents use; an older CLI has
   assert.deepEqual(a.errors, []);
 
   const none = opened(AGENTS({ model: "", settings_model: "" }));
-  assert.equal(none.row().title.replace(/^Sub-agents: /, ""), "Same as this chat’s model");
+  assert.equal(none.row().title.replace(/^Sub-agents: /, ""), "Same as this session’s model");
 
   const own = opened(AGENTS({ own: true, model: "own-coder", base_url: "https://spare.example/v1" }));
   assert.equal(own.row().title.replace(/^Sub-agents: /, ""), "own-coder · Spare");

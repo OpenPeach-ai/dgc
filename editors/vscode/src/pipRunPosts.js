@@ -68,7 +68,7 @@ export function runFixesPage(value,pip,workspace){
  *  held (some changes held back), unchanged, failed, or undone (the post offers Ask DGC to fix again, as before). */
 export function fixWords(f){
   const files=Array.isArray(f.files)?f.files.length:0,held=Array.isArray(f.held)?f.held.length:0;
-  const chat='Open the Work chat it ran in';
+  const chat='Open the Work session it ran in';
   if(FIX_ACTIVE.includes(f.state))return {state:'fixing',text:'DGC is fixing this',title:`DGC is fixing this in the background. ${chat} to watch or stop it.`};
   if(f.state==='applied')return {state:'fixed',text:files?`Fixed · ${plural(files,'file')}`:'Fixed',title:`DGC fixed this. ${chat} to review or undo it.`};
   if(f.state==='partial')return {state:'held',text:`Fixed ${plural(files,'file')} · ${held} held back`,title:`DGC fixed this but held back what you changed on the same lines. ${chat} to review or undo it.`};
@@ -309,8 +309,8 @@ function timesMarkup(runs,now){
 function fixMarkup(p,{ask,asked,asking,fix,openFix}){
   const id=esc(p.run_id),words=fix?fixWords(fix):null;
   const again=words&&words.state==='failed',undone=words?.state==='undone';
-  const askChip=asking?chip(`data-post-fix="${id}" data-state="asking" disabled title="DGC is starting the fix in the Work chat."`,`${icon('fix')}<span>Asking DGC…</span>`,'run-post-fix asked')
-    :asked&&!fix?chip(`data-post-fix="${id}" data-state="asked" disabled title="DGC was asked to fix this run, in the Work chat it reports to."`,`${icon('fix')}<span>Asked DGC</span>`,'run-post-fix asked')
+  const askChip=asking?chip(`data-post-fix="${id}" data-state="asking" disabled title="DGC is starting the fix in the Work session."`,`${icon('fix')}<span>Asking DGC…</span>`,'run-post-fix asked')
+    :asked&&!fix?chip(`data-post-fix="${id}" data-state="asked" disabled title="DGC was asked to fix this run, in the Work session it reports to."`,`${icon('fix')}<span>Asked DGC</span>`,'run-post-fix asked')
     :chip(`data-post-fix="${id}" data-state="ask"${undone?' title="DGC’s fix of this run was undone."':''}`,`${icon('fix')}<span>${again?'Ask DGC to fix again':'Ask DGC to fix'}</span>`,'run-post-fix');
   if(!ask&&!fix)return '';
   if(!words||undone)return ask?askChip:'';

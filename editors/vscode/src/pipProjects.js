@@ -206,7 +206,7 @@ export function projectCardMarkup(change, { esc, open = new Set(), diffs = new M
       // (One Pips: Apply · Review · Discard. No way into a Work session from a Pip's card: his call, 14 Nov.)
       + (one ? `<button type="button" class="dgc-card-btn" data-project-review="${id}"${hold} title="See what changed in each file">Review</button><span class="pip-project-gap"></span><button type="button" class="dgc-card-btn pip-project-quiet" data-project-discard="${id}"${hold} title="Throw away what the Pip changed in its copy">Discard</button></div>`
         : `<button type="button" class="dgc-card-btn" data-project-discard="${id}"${hold} title="Throw away what the Pip changed in its copy">Discard</button>`
-      + `<button type="button" class="dgc-card-btn pip-project-work" data-project-work="${id}"${hold} title="A new Work chat in ${esc(name)} with these changes as a patch file">${busy === 'work' ? 'Opening…' : 'Continue in Work'}</button></div>`);
+      + `<button type="button" class="dgc-card-btn pip-project-work" data-project-work="${id}"${hold} title="A new Work session in ${esc(name)} with these changes as a patch file">${busy === 'work' ? 'Opening…' : 'Continue in Work'}</button></div>`);
   const tested = one ? [change.tests === 'passed' ? 'tests passed in its copy' : change.tests === 'failed' ? 'tests failed in its copy' : '', 'not in your folder yet'].filter(Boolean).map(w => ` · ${w}`).join('') : '';
   return box('pending', one ? `Changes for ${name}` : `Changes to ${name}`,
     head(one ? `Changes for ${name}` : `Changes to ${name}`, `${plural(total, 'file')}${plus || minus ? ` · +${plus.toLocaleString('en-US')} −${minus.toLocaleString('en-US')}` : ''}${tested}`, esc)

@@ -52,6 +52,8 @@
   font: var(--w-semi) 10px/16px var(--sans); font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: center;
 }
 .dgc-tab-count[hidden] { display: none; }
+/* Only news, nothing waiting for you: the number is quiet (H1: one filled badge read as "things that need me"). */
+.dgc-tab-count[data-news-only] { background: color-mix(in srgb, var(--text) 22%, transparent); color: var(--text-strong); }
 /* Each tab's icon (Home, Work, Chat, Library) is in the page beside its word, and is not drawn while the words fit. */
 .dgc-tab .dgc-tab-icon.codicon { display: none; }
 /* A narrow side bar. Since 15 Nov there are five tabs (Library is the fifth), and the five names with Home's number and

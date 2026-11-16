@@ -50,13 +50,15 @@
     rail.type = "button"; rail.id = o.id; rail.hidden = true;
     rail.setAttribute("aria-haspopup", "dialog"); rail.setAttribute("aria-expanded", "false");
     rail.setAttribute("aria-keyshortcuts", "Alt+ArrowUp Alt+ArrowDown");
-    rail.setAttribute("aria-label", "Prompts in this chat");
+    // (`o.where`: what this page calls itself: "session" in Work, "chat" in ChatDGC.)
+    const where = o.where === "session" ? "session" : "chat";
+    rail.setAttribute("aria-label", `Prompts in this ${where}`);
     const ticks = el("span", "prompt-rail-ticks");
     ticks.setAttribute("aria-hidden", "true");
     rail.append(ticks);
     const card = el("div", "prompt-rail-card dgc-popover");
     card.id = `${o.id}-card`; card.hidden = true;
-    card.setAttribute("role", "dialog"); card.setAttribute("aria-label", "Prompts in this chat");
+    card.setAttribute("role", "dialog"); card.setAttribute("aria-label", `Prompts in this ${where}`);
     document.body.append(rail, card);
     let list = [], key = "", current = -1, timer = 0, quiet = false;
     const widgetsOf = (p) => (Array.isArray(p.widgets) ? p.widgets : []);
@@ -70,7 +72,7 @@
       if (now !== key) {
         key = now; current = -1;
         ticks.replaceChildren(...list.map(() => el("span", "prompt-tick")));
-        rail.setAttribute("aria-label", `Prompts in this chat: ${list.length}. Alt+Up and Alt+Down go to the one before or after`);
+        rail.setAttribute("aria-label", `Prompts in this ${where}: ${list.length}. Alt+Up and Alt+Down go to the one before or after`);
         if (!card.hidden) fill();
       }
       track();

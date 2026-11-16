@@ -160,8 +160,8 @@ test("a Pip's own tools say what they do and to which Pip, never the call's JSON
   const rows = [
     ["pause_pip", { ...base, expected_lifecycle_revision: 0 }, /Pause Order Keeper\?/, /waits until you resume it/],
     ["resume_pip", { ...base, expected_lifecycle_revision: 0 }, /Resume Order Keeper\?/, /can run again/],
-    ["attach_pip_to_session", { ...base, expected_lifecycle_revision: 0 }, /Attach Order Keeper to this chat\?/, /no new tools/],
-    ["run_pip_now", base, /Run Order Keeper now\?/, /comes back to this chat/],
+    ["attach_pip_to_session", { ...base, expected_lifecycle_revision: 0 }, /Attach Order Keeper to this session\?/, /no new tools/],
+    ["run_pip_now", base, /Run Order Keeper now\?/, /comes back to this session/],
     ["pips_adapt", { ...base, changes: { name: "Seed Keeper" } }, /Change Order Keeper\?/, /New name\s*Seed Keeper/],
     ["handoff_to_pip", { source_kind: "personal_result", scope: "personal", source_run_id: run, target_pip_id: pip, task: "Write it up", shared_text: "Peas are late", request_key: "k", pip_name: "Order Keeper" },
       /Hand this to Order Keeper\?/, /Task\s*Write it up[\s\S]*Shared\s*Peas are late[\s\S]*Nothing runs until you accept/],

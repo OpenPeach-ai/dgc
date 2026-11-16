@@ -47,6 +47,7 @@ function harness(t,state,{api=48}={}){
     queueMicrotask(()=>reply(m,!state.refuseRead,state.refuseRead?'Read refused':{pip_id:m.request.pip_id}));return;
    }
    if(m.request.type==='list_pip_unread'&&state.unreadFail){queueMicrotask(()=>reply(m,false,'Unread updates unavailable.'));return;}
+   if(m.request.type==='list_workspaces'&&state.workspacesFail){queueMicrotask(()=>reply(m,false,'The personal workspace binding changed.'));return;}
    const make=answers[m.request.type];if(make)queueMicrotask(()=>reply(m,true,make(m.request)));},
   onOpen:v=>opened.push(JSON.parse(JSON.stringify(v))),onModel:m=>models.push(JSON.parse(JSON.stringify(m))),setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval:()=>{}});
  t.after(()=>{strip.dispose();w.close();});
@@ -319,4 +320,21 @@ test('a Pip whose routines can\'t run gets its card, in the words its Pips row s
  state.attention=undefined;
  state.list=[pip(1,'Daily check'),pip(2,'Morning',{routine_health:{...blocked,blocked:null}})];await x.poll();
  assert.deepEqual(x.rows(),[],'signed in again: the card goes');
+});
+
+// User test H3 (15 Nov): a notification said "DGC Pips: 2 things are waiting for you" while Home said "Needs you 0 ·
+// Nothing needs you". DGC couldn't list the Pips for the side bar (their workspace had moved), and Home took "couldn't
+// say" for "nothing". The model now says when it is unknown, and Home's Needs you card says so.
+test('H3: when DGC cannot list the Pips the model says so (unknown), and stops saying it once it can',async t=>{
+ const state={list:[pip(1,'Daily check')],digest:digest([]),workspacesFail:true};
+ const h=harness(t,state);
+ assert.equal(h.model()?.unknown??false,false,'before DGC is asked, nothing is unknown: it is only not ready');
+ await h.connect();
+ assert.equal(h.model().ready,false);
+ assert.equal(h.model().unknown,true,'asked, and DGC could not say');
+ assert.deepEqual(h.model().cards,[]);
+ state.workspacesFail=false;
+ await h.poll();
+ assert.equal(h.model().ready,true);
+ assert.equal(h.model().unknown??false,false);
 });

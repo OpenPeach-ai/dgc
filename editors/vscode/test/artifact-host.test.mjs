@@ -170,9 +170,11 @@ test("Save sends the whole content from the version it started at; a conflict co
 });
 
 test("a change from elsewhere reaches its panel and every screen; a Work turn's goes on to its chat too", () => {
-  const heard = [];
-  hub.listen((m) => heard.push(m));
+  const heard = [], opened = [];
+  // (Opening one says so too, for Home, where an opened thing is no longer news: H1. Counted apart from the changes.)
+  hub.listen((m) => (m.type === "artifactOpened" ? opened : heard).push(m));
   hub.open(ID, { type: "slides" });
+  assert.deepEqual(opened, [{ type: "artifactOpened", id: ID }]);
   const [panel] = world.panels;
   panel.say({ type: "ready" });
   assert.equal(hub.onEvent({ type: "artifact_changed", artifact: { ...VIEW, version: 5 }, op: "changed", surface: "chat", conversation_id: "chat_x" }), true);

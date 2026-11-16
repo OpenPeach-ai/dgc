@@ -437,7 +437,7 @@ test("a folder outside the window's is asked about first, and a reload brings it
   try {
     const { sidebar, tabs, made } = windowWith();
     assert.equal(await sidebar.continueInWork(outside, BRIEF), false, "said no: nothing opens");
-    assert.match(world.warnings[0], /Open a DGC chat in .*dgc-work-elsewhere-/);
+    assert.match(world.warnings[0], /Open a DGC session in .*dgc-work-elsewhere-/);
     assert.equal(world.panels.length, 0);
     world.answer = "Trust it and open";
     assert.equal(await sidebar.continueInWork(outside, BRIEF), true);
@@ -747,7 +747,7 @@ test("Project Folder: another folder outside the window's is asked about first; 
     const { sidebar, made } = folderWindow({ rows: everywhereRows(outside), folders: folderRows(outside) });
     await sidebar.onMessage({ type: "sessionsList" }); await settled();
     await sidebar.onMessage({ type: "openSessionInEditor", id: "g1", title: "Water the tomatoes" }); await settled();
-    assert.match(world.warnings[0], /Open a DGC chat in .*dgc-garden-elsewhere-/);
+    assert.match(world.warnings[0], /Open a DGC session in .*dgc-garden-elsewhere-/);
     assert.equal(world.panels.length, 0, "said no: nothing opens");
     world.answer = "Trust it and open";
     await sidebar.onMessage({ type: "openSessionInEditor", id: "g1", title: "Water the tomatoes" }); await settled();
@@ -801,7 +801,7 @@ test("New Session: Add a folder… is VS Code's own folder picker, and the sessi
     assert.equal(world.panels.length, 0, "closed without a folder: nothing opens");
     world.picked = picked;
     await sidebar.onMessage({ type: "newSessionAddFolder" }); await settled();
-    assert.match(world.warnings.at(-1) || "", /Open a DGC chat in .*dgc-picked-folder-/, "a folder outside the window's is asked about first");
+    assert.match(world.warnings.at(-1) || "", /Open a DGC session in .*dgc-picked-folder-/, "a folder outside the window's is asked about first");
     assert.equal(world.panels.length, 0);
     world.answer = "Trust it and open";
     await sidebar.onMessage({ type: "newSessionAddFolder" }); await settled();

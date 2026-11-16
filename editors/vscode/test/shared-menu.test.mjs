@@ -128,7 +128,7 @@ test("rows in groups: a heading each, a hairline between, a key cap for a key, q
   const menu = dom.window.document.getElementById("menu");
   menu.innerHTML = dom.window.DgcMenu.html([
     { name: "Add to the message", rows: [{ id: "files", icon: "file-directory", label: "Files and folders", hint: "@" }, { id: "mcp", label: "MCP context", hint: "Resources and prompts" }] },
-    { name: "This chat", rows: [] },
+    { name: "This session", rows: [] },
     { name: "Go to", rows: [{ id: "pips", label: "Pips", hint: "Your Pips" }] }], { data: "add", rowClass: "mrow" });
   assert.deepEqual([...menu.querySelectorAll(".dgc-menu-head")].map((h) => h.textContent), ["Add to the message", "Go to"], "an empty group is left out");
   assert.equal(menu.querySelectorAll(".dgc-menu-div").length, 1);
@@ -165,7 +165,7 @@ test("Work's + menu: three groups with headings, key caps for the keys, plain wo
                hintFont: getComputedStyle(m.querySelector(".dgc-menu-hint")).fontFamily,
                focused: document.activeElement?.dataset?.add };
     });
-    assert.deepEqual(menu.heads, ["Add to the message", "This chat", "Go to"]);
+    assert.deepEqual(menu.heads, ["Add to the message", "This session", "Go to"]);
     assert.deepEqual(menu.keys, ["@", "$", "/"], "the keys you can type instead, as key caps");
     assert.deepEqual(menu.rows.filter((r) => r !== "mcp"), ["files", "skill", "command", "goal", "plan", "pips", "memory"]);
     assert.doesNotMatch(menu.hintFont, /mono/i, "hints in the UI font, not monospace");

@@ -80,20 +80,20 @@ test("the Sub-agents tab: a Thinking dropdown with no Ultra, a Context window dr
     assert.ok(await top(page, "#modelmenu .model-summary") && await top(page, "#modelmenu .effort-slider"), "the model row and the main slider stay");
     const think = await top(page, "#modelmenu [data-agents-drop='thinking']"), ctx = await top(page, "#modelmenu [data-agents-drop='context']"), list = await top(page, "#modelmenu .model-list-scroll"), tabs = await top(page, "#modelmenu .model-tabs");
     assert.ok(think && ctx && list); assert.ok(tabs.bottom <= think.top + 1 && think.bottom <= ctx.top + 1 && ctx.bottom <= list.top + 1, "tabs, Thinking, Context window, the list");
-    assert.deepEqual([await page.innerText("#modelmenu [data-agents-drop='thinking']"), await page.innerText("#modelmenu [data-agents-drop='context']")].map((s) => s.trim()), ["Same as the chat", "Same as the chat"]);
+    assert.deepEqual([await page.innerText("#modelmenu [data-agents-drop='thinking']"), await page.innerText("#modelmenu [data-agents-drop='context']")].map((s) => s.trim()), ["Same as the session", "Same as the session"]);
     const first = await page.evaluate(() => { const rows = [...document.querySelectorAll("#modelmenu .model-list-scroll .mrow")]; return [rows[0].querySelector(".dgc-menu-label").textContent, rows[0].getAttribute("aria-checked"), rows.slice(1).map((r) => r.querySelector(".dgc-menu-label")?.textContent || r.textContent.trim())]; });
     assert.equal(first[0], "Settings’ choice"); assert.equal(first[1], "true");
     assert.deepEqual(first[2].slice(0, 3), ["Ollama", "Spare GPU box", "Claude Code"]);
     assert.equal(await page.locator("#modelmenu [data-provider-back], #modelmenu [data-i]").count(), 0, "nothing of the main model's list is here");
     // Thinking: its six choices, no Ultra; choosing one tells the host and shows at once.
     await page.click("#modelmenu [data-agents-drop='thinking']"); await page.waitForTimeout(150);
-    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#modelmenu .agents-drop-list [role='option']")].map((o) => o.textContent.trim())), ["Same as the chat", "Off", "Low", "Medium", "High", "Extra high"]);
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#modelmenu .agents-drop-list [role='option']")].map((o) => o.textContent.trim())), ["Same as the session", "Off", "Low", "Medium", "High", "Extra high"]);
     await page.click("#modelmenu .agents-drop-list [data-value='low']"); await page.waitForTimeout(150);
     assert.deepEqual(await posted(page, "setAgentsThinking"), [{ type: "setAgentsThinking", level: "low" }]);
     assert.equal((await page.innerText("#modelmenu [data-agents-drop='thinking']")).trim(), "Low");
     assert.equal(await page.locator("#modelmenu .agents-drop-list").count(), 0, "the dropdown closed");
     await page.click("#modelmenu [data-agents-drop='context']"); await page.waitForTimeout(150);
-    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#modelmenu .agents-drop-list [role='option']")].map((o) => o.textContent.trim())), ["Same as the chat", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "Another size…"]);
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#modelmenu .agents-drop-list [role='option']")].map((o) => o.textContent.trim())), ["Same as the session", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "Another size…"]);
     await page.click("#modelmenu .agents-drop-list [data-value='32768']"); await page.waitForTimeout(150);
     assert.deepEqual(await posted(page, "setAgentsContext"), [{ type: "setAgentsContext", size: 32768 }]);
     assert.equal((await page.innerText("#modelmenu [data-agents-drop='context']")).trim(), "32K");

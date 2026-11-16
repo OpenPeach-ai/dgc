@@ -91,6 +91,7 @@ body:is(.vscode-light, .vscode-high-contrast-light) .pip-message.user .bubble .p
 .composer-artifact-mark { position: relative; top: .5px; }
 .composer-plugin-mark img { display: block; width: 15px; height: 15px; object-fit: contain; }
 .composer-artifact-mark { color: var(--mark-icon); -webkit-text-fill-color: var(--mark-icon); font-size: 14px; }
+.composer-artifact-mark svg { display: block; width: 14px; height: 14px; margin: 1px; }
 .composer-plugin-mark img { filter: var(--mark-logo-filter, none); }
 .prompt-text .sent-mention { user-select: text; cursor: text; }
 .prompt-text .sent-mention.pill-plugin { color: var(--mark-sent);
@@ -185,3 +186,6 @@ body:is(.vscode-light, .vscode-high-contrast-light) .pip-message.user .bubble .p
   .pop .pi.sel { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; box-shadow: none; }
   .pop .pi.sel * { color: inherit; }
 }
+/* An output's row where the page has no icon font (a Pip's chat): its own drawing, the size of a plugin's logo. */
+.pop .pi-output-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; }
+.pop .pi-output-mark svg { display: block; width: 14px; height: 14px; }

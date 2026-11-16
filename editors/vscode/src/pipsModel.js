@@ -63,7 +63,7 @@ export function activityLabel(event) {
     if (p.kind === 'error') return 'Something went wrong';
     return typeof p.message === 'string' ? p.message : 'Working';
   }
-  return {pip_run_queued:'Waiting to start',pip_run_started:'Started',pip_run_snapshot:'Getting ready',pip_run_succeeded:'Report ready',pip_run_failed:'Run failed',pip_run_cancelled:'Run cancelled',pip_run_cancelling:'Stopping',workspace_session_turn_completed:'A DGC chat turn was saved',workspace_committed_paths_changed:'Watched paths changed in a commit'}[event.event_type] || 'Step';
+  return {pip_run_queued:'Waiting to start',pip_run_started:'Started',pip_run_snapshot:'Getting ready',pip_run_succeeded:'Report ready',pip_run_failed:'Run failed',pip_run_cancelled:'Run cancelled',pip_run_cancelling:'Stopping',workspace_session_turn_completed:'A Work session turn was saved',workspace_committed_paths_changed:'Watched paths changed in a commit'}[event.event_type] || 'Step';
 }
 export function report(value) {
   if (!record(value) || typeof value.summary !== 'string' || value.tests_executed !== false || typeof value.verification !== 'string' || !Array.isArray(value.findings) || value.findings.length > 16 || !Array.isArray(value.limitations) || value.limitations.length > 12 || !value.limitations.every(v => typeof v === 'string')) return null;
@@ -598,7 +598,7 @@ export function commitPathObservation(value,pip){
  }return value;
 }
 
-export const EVENT_TRIGGER_NAMES={context_updated:'Workspace context changes',finding_accepted:'A finding is accepted',commit_changed:'A new commit on its branch',session_turn_completed:'A DGC chat turn is saved',committed_paths_changed:'Watched paths change in a commit'};
+export const EVENT_TRIGGER_NAMES={context_updated:'Workspace context changes',finding_accepted:'A finding is accepted',commit_changed:'A new commit on its branch',session_turn_completed:'A Work session turn is saved',committed_paths_changed:'Watched paths change in a commit'};
 export function eventTrigger(value){
  if(value==null)return null;
  const fail=()=>{throw new Error('Choose one to four supported events and an interval from 5 to 10,080 minutes.');};
@@ -613,7 +613,7 @@ export function eventTriggerFromDraft(draft,rules){
  return eventTrigger({events:[...(draft.triggerContext?['context_updated']:[]),...(draft.triggerFinding?['finding_accepted']:[]),...(draft.triggerCommit?['commit_changed']:[]),...(draft.triggerSession?['session_turn_completed']:[]),...(draft.triggerPaths?['committed_paths_changed']:[])],minimum_minutes:Number(draft.triggerMinutes),missed_policy:'coalesce_latest',...(draft.triggerPaths?{commit_paths:rules}:{})});
 }
 /** What an event was, in words, never its stored type. */
-export const eventWords = event => ({workspace_context_recorded:'A context note was added',workspace_context_archived:'A context note was archived',workspace_finding_accepted:'A finding was saved to context',workspace_execution_recorded:'A run result was saved to context',pip_finding_accepted:'A finding was accepted',workspace_commit_changed:'A new commit',workspace_session_turn_completed:'A DGC chat turn was saved',workspace_committed_paths_changed:'Watched paths changed in a commit'}[event?.event_type] || String(event?.event_type ?? 'An event').replaceAll('_',' '));
+export const eventWords = event => ({workspace_context_recorded:'A context note was added',workspace_context_archived:'A context note was archived',workspace_finding_accepted:'A finding was saved to context',workspace_execution_recorded:'A run result was saved to context',pip_finding_accepted:'A finding was accepted',workspace_commit_changed:'A new commit',workspace_session_turn_completed:'A Work session turn was saved',workspace_committed_paths_changed:'Watched paths changed in a commit'}[event?.event_type] || String(event?.event_type ?? 'An event').replaceAll('_',' '));
 export function eventRunPin(manifest){
  if(manifest?.trigger!=='event')return null;
  const p=manifest.event_trigger,e=p?.event,fail=()=>{throw new Error('This run has an invalid event-trigger receipt.');};

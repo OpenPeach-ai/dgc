@@ -97,7 +97,10 @@ for (const width of [300, 700]) {
       const hub = await x.hub();
       assert.ok(hub.cards.length >= 4, "Home has its cards");
       assert.equal(tab(bar, "home").count, String(hub.cards.length), "Home's number is how many cards wait or are new");
-      assert.match(tab(bar, "home").label, new RegExp(`^Home: ${hub.cards.length} things need you or are new$`), "and a screen reader hears it");
+      // (Its two counts by name, since 16 Nov: one number read as "things that need me" over a Needs you of 0. H1.)
+      const heard = /^Home: (\d+) needs? you, (\d+) new$/.exec(tab(bar, "home").label);
+      assert.ok(heard, `and a screen reader hears which is which (${tab(bar, "home").label})`);
+      assert.equal(Number(heard[1]) + Number(heard[2]), hub.cards.length, "the two counts are the number");
       assert.equal(bar.overflowX, false);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }

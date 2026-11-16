@@ -1748,8 +1748,8 @@
     button.hidden = !project || isProjectPage();
     if (button.hidden) return;
     button.replaceChildren(folderIcon(project), el("span", "cd-crumb-name", project.name), icon("chevron-right"));
-    button.title = `Open the project ${project.name}`;
-    button.setAttribute("aria-label", `Project: ${project.name}. Open its page`);
+    button.title = `Open the space ${project.name}`;
+    button.setAttribute("aria-label", `Space: ${project.name}. Open its page`);
   }
   $("cd-crumb").addEventListener("click", () => {
     const project = projectOf(state.conversation);
@@ -1761,12 +1761,12 @@
     const page = el("div", "cd-project");
     const head = el("div", "cd-project-head");
     head.append(folderIcon(project), el("h2", "cd-project-name", project.name),
-                action("settings-gear", "Project settings", () => openProjectPanel(project)));
+                action("settings-gear", "Space settings", () => openProjectPanel(project)));
     const instructions = el("button", "cd-project-card");
     instructions.type = "button";
     instructions.append(el("span", "cd-project-card-title", "Instructions"),
       el("span", "cd-project-card-text", project.instructions ? firstWords(project.instructions)
-        : "Tell ChatDGC how to answer in this project: a voice, a format, what to keep in mind."));
+        : "Tell ChatDGC how to answer in this space: a voice, a format, what to keep in mind."));
     instructions.addEventListener("click", () => openProjectPanel(project, "instructions"));
     const files = el("div", "cd-project-card cd-project-files");
     const top = el("div", "cd-project-card-row");
@@ -1779,17 +1779,17 @@
     files.append(top);
     if (count) {
       const list = el("ul", "cd-chips cd-project-chips");
-      list.setAttribute("aria-label", "The project's files");
+      list.setAttribute("aria-label", "The space's files");
       for (const file of project.files) list.append(chip(file, () => vscode.postMessage({ type: "projectRemoveFile", id: project.id, fileId: file.id })));
       files.append(list);
-    } else files.append(el("span", "cd-project-card-text", "Every chat in this project reads them."));
+    } else files.append(el("span", "cd-project-card-text", "Every chat in this space reads them."));
     const cards = el("div", "cd-project-cards");
     cards.append(instructions, files);
     const memory = el("p", "cd-project-memory", project.memory === "project"
-      ? "Memory: this project's only. Its chats don't see your saved memories."
+      ? "Memory: this space's only. Its chats don't see your saved memories."
       : "Memory: shared with your other chats, Work and Pips.");
     const chats = el("section", "cd-project-chats");
-    chats.setAttribute("aria-label", "Chats in this project");
+    chats.setAttribute("aria-label", "Chats in this space");
     chats.append(el("h3", "", "Chats"));
     const known = state.projectChats?.project === project.id ? state.projectChats.items : null;
     if (!known) {
@@ -1822,12 +1822,12 @@
     $("cd-project-panel")?.remove();
     const panel = el("aside", "cd-panel cd-project-panel");
     panel.id = "cd-project-panel";
-    panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Project settings");
+    panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Space settings");
     const back = document.activeElement;
     const done = () => { panel.remove(); (back && back.isConnected ? back : input).focus(); };
     const top = el("header", "cd-panel-head");
     const close = action("close", "Close", done);
-    top.append(el("h2", "cd-panel-title", "Project settings"), close);
+    top.append(el("h2", "cd-panel-title", "Space settings"), close);
     const form = el("form", "cd-project-form");
     const nameLabel = el("label", "cd-field-label", "Name");
     const name = el("input", "cd-field"); name.id = "cd-project-name"; name.value = project.name; name.maxLength = 80;
@@ -1845,7 +1845,7 @@
     }
     const instLabel = el("label", "cd-field-label", "Instructions");
     const inst = el("textarea", "cd-field cd-project-instructions"); inst.id = "cd-project-instructions"; inst.rows = 8; inst.maxLength = 8000;
-    inst.value = project.instructions || ""; inst.placeholder = "How ChatDGC should answer in this project. Your own instructions still apply; these win where they differ.";
+    inst.value = project.instructions || ""; inst.placeholder = "How ChatDGC should answer in this space. Your own instructions still apply; these win where they differ.";
     instLabel.htmlFor = inst.id;
     const counter = el("span", "cd-field-note", "");
     const tally = () => { counter.textContent = `${inst.value.length.toLocaleString()} / 8,000`; };
@@ -1854,7 +1854,7 @@
     memory.append(el("legend", "cd-field-label", "Memory"));
     for (const [value, label, about] of [
       ["shared", "Shared", "Chats here use the memory you share with your other chats, Work and Pips."],
-      ["project", "Project-only", "Chats here don't see your saved memories, and nothing is saved to them. They know this project's other chats."]]) {
+      ["project", "Space-only", "Chats here don't see your saved memories, and nothing is saved to them. They know this space's other chats."]]) {
       const option = el("label", "cd-radio");
       const radio = el("input"); radio.type = "radio"; radio.name = "cd-project-memory"; radio.value = value;
       radio.checked = (project.memory || "shared") === value;
@@ -1865,7 +1865,7 @@
     const cancel = el("button", "cd-edit-cancel", "Cancel"); cancel.type = "button"; cancel.addEventListener("click", done);
     const save = el("button", "cd-continue", "Save"); save.type = "submit";
     row.append(cancel, save);
-    const remove = el("button", "cd-project-delete", "Delete project…"); remove.type = "button";
+    const remove = el("button", "cd-project-delete", "Delete space…"); remove.type = "button";
     remove.addEventListener("click", () => vscode.postMessage({ type: "projectDelete", id: project.id, name: project.name, chats: Number(project.chats) || 0 }));
     form.append(nameLabel, name, colors, instLabel, inst, counter, memory, row, remove);
     form.addEventListener("submit", (e) => {

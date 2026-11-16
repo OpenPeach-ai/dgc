@@ -250,7 +250,7 @@ export class Dictation {
   private async start(owner: DictationOwner): Promise<void> {
     if (this.owner) {
       owner.post({ type: "mic", state: this.owner === owner ? "recording" : "idle",
-                   ...(this.owner === owner ? {} : { error: "Another chat is recording: stop it there first." }) });
+                   ...(this.owner === owner ? {} : { error: "Another tab is recording: stop it there first." }) });
       return;
     }
     this.owner = owner;

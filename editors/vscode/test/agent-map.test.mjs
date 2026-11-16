@@ -76,7 +76,7 @@ test("/agents opens the map from the composer, typed or picked; focus goes back 
   assert.equal(p.isOpen(), true, "typed and sent");
   assert.equal(input.value, "", "the command does not stay in the box");
   assert.deepEqual(p.posts("slashText"), [], "nothing goes to the CLI, whose /agents opened settings");
-  assert.equal(p.$("agent-map-subtitle").textContent, "No agents in this chat yet");
+  assert.equal(p.$("agent-map-subtitle").textContent, "No agents in this session yet");
   assert.deepEqual(p.keys(), ["root"], "a chat with no agent shows the main agent alone");
   p.key(p.doc.activeElement, "Escape");
   assert.equal(p.isOpen(), false);
@@ -88,7 +88,7 @@ test("/agents opens the map from the composer, typed or picked; focus goes back 
     { name: "tasks", description: "list, show, apply, or drop retained sub-agent work", action: "tasks" }] });
   input.value = "/agen";
   input.dispatchEvent(new p.dom.window.Event("input", { bubbles: true }));
-  assert.match(p.$("pop").textContent, /agents\s*command\s*open the agent map: every agent and background task in this chat/);
+  assert.match(p.$("pop").textContent, /agents\s*command\s*open the agent map: every agent and background task in this session/);
   assert.doesNotMatch(p.$("pop").textContent, /sub-agent configuration/);
   p.key(input, "Enter");
   assert.equal(p.isOpen(), true, "picked from the popup");
@@ -510,17 +510,17 @@ test("the main agent's row and card: the chat's name, its model and what is in c
   root.click();
   assert.equal(p.$("agent-card-title").textContent, "Harden the auth flow");
   assert.equal(p.$("agent-card-meta").textContent, "Working · qwen3.8:27b · 464.4k tokens in context");
-  assert.match(p.card().textContent, /2 agents in this chat/);
+  assert.match(p.card().textContent, /2 agents in this session/);
   assert.deepEqual([...p.card().querySelectorAll(".am-states li")].map((li) => li.textContent),
     ["1 waiting for your permission", "1 failed"]);
   assert.match(p.card().textContent, /464,400 of 1,048,576 tokens in its context window/);
   p.event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 });
   assert.match(p.$("agent-card-meta").textContent, /^Idle · /);
   p.$("agent-card-back").click();
-  // A chat with no name yet is "This chat".
+  // A chat with no name yet is "This session".
   p.event({ type: "session", kind: "new", message_count: 0, session_id: "s9" });
   p.open();
-  assert.equal(p.row("root").querySelector(".am-desc").textContent, "This chat");
+  assert.equal(p.row("root").querySelector(".am-desc").textContent, "This session");
   assert.deepEqual(p.errors, []);
 });
 
@@ -555,7 +555,7 @@ test("an agent's card: meta, spawned by, live numbers, activity, prompt and its 
   p.advance(1000);
   assert.match(text(), /3s · 142\.6k tokens/, "the numbers tick while the card is open");
   p.update(sid(1), { state: "waiting", waiting_for: "permission" });
-  assert.match(text(), /Waiting for your permission\. Answer it in the chat's permission card\./);
+  assert.match(text(), /Waiting for your permission\. Answer it in the session's permission card\./);
   // The nested agent's card names its parent, which opens the parent's card.
   p.$("agent-card-back").click();
   p.row(`agent:${sid(2)}`).click();
@@ -594,8 +594,8 @@ test("an ended agent's card: the failure in its own words, the report with Files
   assert.deepEqual([...p.card().querySelectorAll(".agent-file")].map((b) => b.textContent), ["src/settings.ts"]);
   assert.match(p.card().textContent, /3m 32s · 97\.2k tokens/);
   assert.equal(p.card().querySelectorAll("details summary")[1].textContent, "Tool calls (44)", "the count is in the disclosure");
-  assert.match(p.card().textContent, /This agent's prompt was not kept in the chat\./);
-  assert.match(p.card().textContent, /Its steps were not kept in this chat\. Its transcript has its report\./);
+  assert.match(p.card().textContent, /This agent's prompt was not kept in the session\./);
+  assert.match(p.card().textContent, /Its steps were not kept in this session\. Its transcript has its report\./);
   assert.deepEqual(p.errors, []);
 });
 
@@ -751,7 +751,7 @@ test("a CLI without background_tasks: no shells, no output fetch; a monitor's ca
   p.advance(3000);
   assert.deepEqual(p.posts("getBackgroundOutput"), [], "never asked for");
   assert.equal(p.card().querySelector(".am-output").textContent, "ready on :5173\nGET / 200");
-  assert.match(p.card().textContent, /The lines this monitor reported to the chat\./);
+  assert.match(p.card().textContent, /The lines this monitor reported to the session\./);
   assert.deepEqual(p.errors, []);
 });
 

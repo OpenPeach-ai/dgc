@@ -230,13 +230,13 @@ test("a model's Thinking: a choice only for a model that can think, its own comm
   assert.ok(helpers.thinkingWords({ thinks: true }) === "Same as the helper" && helpers.thinkingWords({}) === "Not known yet");
 });
 
-test("Sub-agents → Thinking: Same as the main chat by default, saved with Save all, and only from a CLI that answers it", async () => {
+test("Sub-agents → Thinking: Same as the main session by default, saved with Save all, and only from a CLI that answers it", async () => {
   for (const routed of [false, true]) {
     const x = setup({ routerStatus: status({ enabled: routed }), extra: { subagent_thinking_settable: true, subagent_thinking: "" } });
     await x.settle();
     const pick = x.d.querySelector("#subagent_thinking");
     assert.ok(pick, `the field is there (Router ${routed ? "on" : "off"})`);
-    assert.deepEqual([...pick.options].map((o) => o.textContent), ["Same as the main chat", "Off", "Low", "Medium", "High", "Extra high"]);
+    assert.deepEqual([...pick.options].map((o) => o.textContent), ["Same as the main session", "Off", "Low", "Medium", "High", "Extra high"]);
     assert.equal(pick.value, "");
     assert.ok(pick.closest("#models-subagents"), "under Sub-agents");
   }

@@ -1832,6 +1832,9 @@ export class PipsEditor implements vscode.Disposable {
       const marks = this.displayMentions ? displayMentions(request.display_mentions, this.apiVersion >= PROJECTS_API ? ['project'] : []) : undefined;
       if (marks) request.display_mentions = marks; else delete request.display_mentions;
     }
+    // The output a message asks its reply to make (Pips API 100): one of Work's five, and only to a DGC that takes it.
+    if (request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'output')
+        && (this.apiVersion < 100 || !['document', 'slides', 'spreadsheet', 'page', 'dashboard'].includes(request.output))) delete request.output;
     if (request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'chat_options') && this.apiVersion < 24) { fail('Update DGC to change context and thinking.'); return; }
     if (request.type === 'send_pip_message' && Number(request.chat_options?.context_size) > 32768 && this.apiVersion < 25) { fail('Update DGC for a context window above 32K tokens.'); return; }
     if (['propose_pip_calendar_action','prepare_pip_calendar_draft'].includes(request.type) && request.event && ['attendees','repeat','send_invitations'].some(key => Object.prototype.hasOwnProperty.call(request.event,key)) && this.apiVersion < 38) { fail('Update DGC for calendar invitations and repeating events.'); return; }

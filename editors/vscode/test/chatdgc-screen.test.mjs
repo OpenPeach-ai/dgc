@@ -1485,9 +1485,9 @@ test("projects in a chat's tab: the project's page, its settings, and the projec
     assert.deepEqual(await s.posted("projectRemoveFile"), [{ type: "projectRemoveFile", id: P, fileId: att("b") }]);
     if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-project-page.png") });
     // Settings: name, colour, instructions, memory; Save, and a refused save can be fixed and saved again.
-    await s.page.locator('.cd-project-head button[aria-label="Project settings"]').click();
+    await s.page.locator('.cd-project-head button[aria-label="Space settings"]').click();
     const panel = s.page.locator("#cd-project-panel");
-    assert.equal(await panel.getAttribute("aria-label"), "Project settings");
+    assert.equal(await panel.getAttribute("aria-label"), "Space settings");
     await panel.locator("#cd-project-name").fill("Goa, December");
     await panel.locator('input[name="cd-project-color"][value="orange"]').check();
     await panel.locator("#cd-project-instructions").fill("Vegetarian food only.");
@@ -1504,9 +1504,9 @@ test("projects in a chat's tab: the project's page, its settings, and the projec
     await s.frame();
     assert.equal(await panel.count(), 0, "saved: the panel closes");
     assert.equal(await s.page.locator(".cd-project-name").textContent(), "Goa, December");
-    assert.match(await s.page.locator(".cd-project-memory").textContent(), /this project's only/);
-    await s.page.locator('.cd-project-head button[aria-label="Project settings"]').click();
-    await panel.locator("button", { hasText: "Delete project…" }).click();
+    assert.match(await s.page.locator(".cd-project-memory").textContent(), /this space's only/);
+    await s.page.locator('.cd-project-head button[aria-label="Space settings"]').click();
+    await panel.locator("button", { hasText: "Delete space…" }).click();
     assert.deepEqual(await s.posted("projectDelete"), [{ type: "projectDelete", id: P, name: "Goa, December", chats: 2 }]);
     await s.page.keyboard.press("Escape");
     // A chat in the project: its name in the header, which opens the project's page.
@@ -1669,7 +1669,7 @@ test("the Library's Files: every file you attached, by kind, searched by name, e
     assert.equal(await page.locator('#library-list img[src^="javascript"]').count(), 0, "only a picture's own data is ever shown");
     if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library.png") });
     const second = page.locator("#library-list .lib-row").nth(1);
-    for (const label of ["Open the chat it's in", "Use in a new chat", "Save a copy…", "Add a copy to a project…", "Delete from your Library…"]) {
+    for (const label of ["Open the chat it's in", "Use in a new chat", "Save a copy…", "Add a copy to a space…", "Delete from your Library…"]) {
       await second.locator(`button[aria-label="${label}"]`).click();
     }
     // (Open, Save a copy… and Delete are three of the eight an item's menu has: they ask the host its one way, itemAct,
@@ -1677,7 +1677,7 @@ test("the Library's Files: every file you attached, by kind, searched by name, e
     assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.file || m.type === "itemAct"))).map((m) => (m.type === "itemAct" ? [m.act, m.item] : [m.type, m.file.id])),
       [["image", `att_${"1".repeat(32)}`], ...["open", "use", "save", "toProject", "remove"].map((type) => (type === "use" || type === "toProject" ? [type, `att_${"2".repeat(32)}`]
         : [type, { kind: "file", id: `att_${"2".repeat(32)}`, source: "chat", chat_id: `chat_${"b".repeat(32)}` }]))]);
-    assert.equal(await page.locator("#library-list .lib-row").nth(2).locator('button[aria-label^="Open the project"]').getAttribute("aria-label"), "Open the project Goa trip");
+    assert.equal(await page.locator("#library-list .lib-row").nth(2).locator('button[aria-label^="Open the space"]').getAttribute("aria-label"), "Open the space Goa trip");
     await pick("kind", "PDFs");
     assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "pdf", offset: 0 });
     assert.equal(await page.evaluate(() => window.__state?.library?.filters?.files?.kind), "pdf", "remembered");

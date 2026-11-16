@@ -570,7 +570,7 @@
       const list = el("ul", "mod-asks");
       for (const line of (Array.isArray(ev.asks) ? ev.asks : []).slice(0, 40)) list.append(el("li", "", str(line, 300)));
       card.append(el("p", "mod-asks-head", "It can:"), list,
-                  tone(el("p", "mod-offer-note", "For this session only: it runs while this chat is open, and is reloaded as DGC changes it."), "muted"));
+                  tone(el("p", "mod-offer-note", "For now only: it runs while this tab is open, and is reloaded as DGC changes it."), "muted"));
       const buttons = el("div", "btns");
       const answer = (allow) => {
         if (card.classList.contains("resolved")) return;

@@ -122,6 +122,23 @@ const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel"
   "options_response", "mcp_input_response", "askSkip", "steerQueued", "queueRemove", "queueReorder", "rerunTask", "learnSave", "clear_todos", "undoTurn",
   "startGoal", "updateGoal", "clearGoal", "resumeGoal", "drop_uris", "stopAgent", "stopMonitor", "restartMonitor",
   "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix", "backgroundNow", "continueAgent"]);
+/** The rules that go with an Allow card's "Always allow edits in this project" (media/shared/rulewords.js makes them;
+ *  the card's own answer carries the first): each must be an edit tool's rule over the very folder the answer's rule
+ *  names, and that folder must be this session's project. Anything else adds nothing. */
+export function projectEditRules(more: unknown, answered: unknown, projectRoot: unknown): string[] {
+  const shape = /^(Write|Edit|MultiEdit|ApplyPatch)\((.{1,1000})\)$/;
+  const first = typeof answered === "string" ? shape.exec(answered) : null;
+  const root = typeof projectRoot === "string" ? projectRoot.replace(/[\\/]+$/, "") : "";
+  if (!first || !root || !Array.isArray(more)) return [];
+  const pattern = first[2], folder = pattern.replace(/[\\/]\*$/, "").replace(/\[([[\]*?])\]/g, "$1");
+  if (folder !== root || !/[\\/]\*$/.test(pattern)) return [];
+  const out: string[] = [];
+  for (const rule of more.slice(0, 3)) {
+    const m = typeof rule === "string" ? shape.exec(rule) : null;
+    if (m && m[2] === pattern && m[1] !== first[1] && !out.includes(rule as string)) out.push(rule as string);
+  }
+  return out;
+}
 /** The Sessions home's last backend, by its chat's session: a reload asks for it back (it may be writing a ChatDGC reply). */
 // The opt-in fields of the `config` event this editor reads (an older editor never sees them; every supported CLI takes
 // `fields` and ignores names it doesn't know). Each get_config that names fields replaces the ones asked before, so
@@ -193,13 +210,13 @@ const TERMINAL_COMMANDS: Record<string, { say: string; section?: string }> = {
   cheatsheet: { say: "Keyboard shortcuts are VS Code's here: open them with Preferences: Open Keyboard Shortcuts." },
   history: IN_TERMINAL("history", "it searches past prompts in the terminal's own box"),
   hist: IN_TERMINAL("hist", "it searches past prompts in the terminal's own box"),
-  jump: { say: "Past turns are on the prompt rail at the right of this chat." },
+  jump: { say: "Past turns are on the prompt rail at the right of this session." },
   expand: { say: "Click a tool's row to open it." },
   expandall: { say: "Click a tool's row to open it." },
-  recall: { say: "Earlier messages are at the top of this chat: Show earlier messages." },
-  earlier: { say: "Earlier messages are at the top of this chat: Show earlier messages." },
+  recall: { say: "Earlier messages are at the top of this session: Show earlier messages." },
+  earlier: { say: "Earlier messages are at the top of this session: Show earlier messages." },
   files: { say: "Files are in VS Code's Explorer here. To give one to DGC, type @ and its name." },
-  diff: { say: "This chat's changes are in the row above the box: Review." },
+  diff: { say: "This session's changes are in the row above the box: Review." },
   eta: { say: "The running turn's time is on its status line here." },
   notify: { say: "This editor tells you itself when a turn ends." },
   troupes: { say: "A troupe shows in the row above the box while it runs." },
@@ -229,9 +246,9 @@ const TERMINAL_COMMANDS: Record<string, { say: string; section?: string }> = {
   trust: IN_TERMINAL("trust", "it lists and revokes the folders you trusted"),
   search: { say: "Web search is in Settings here.", section: "web" },
   models: { say: "Click the model name in the box to see the models." },
-  quit: { say: "Close this tab to end the chat here." },
-  q: { say: "Close this tab to end the chat here." },
-  exit: { say: "Close this tab to end the chat here." },
+  quit: { say: "Close this tab to end the session here." },
+  q: { say: "Close this tab to end the session here." },
+  exit: { say: "Close this tab to end the session here." },
 };
 // The web search providers this editor can offer in Settings; a CLI says which of them it takes.
 const SEARCH_PROVIDERS = ["duckduckgo", "brave", "tavily", "searxng", "ollama"];
@@ -1133,6 +1150,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const pages = noteHomePage(this.context, message);
         if (pages && this.home && this.webviewReady) this.post({ type: "homePages", pages });
       }
+      // Opened anywhere (a session's card, a chat's, the Library): its "made" card on Home goes, as if opened there. It
+      // stayed, and Home's number counted it, until it was dismissed on Home itself (H1, user test 15 Nov).
+      if (message.type === "artifactOpened" && home && typeof message.id === "string" && homePages(this.context).some((page) => page.id === message.id)) {
+        rememberHomePagesDismissed(this.context, { type: "homePagesDismissed", ids: [message.id] });
+        if (this.home && this.webviewReady) this.post({ type: "homePages", pages: homePages(this.context).filter((page) => page.id !== message.id) });
+      }
     });
     this.context.subscriptions.push(listening);
   }
@@ -1518,6 +1541,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private async postSessions(): Promise<void> {
     if (!this.home || !this.places) { return; }
     const request = ++this.sessionsRequest;
+    this.sessionsAsked = true;
     let items: any[] = [];
     let error = "";
     // The Project Folder dropdown: the folders with a session or a Project Pip, then the sessions of the one chosen
@@ -1563,6 +1587,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** The list as last shown, so the running marks can be repainted without asking for it again. */
   private lastSessionItems: any[] | undefined;
+  /** The list was asked for at least once (its answer may still be on its way). */
+  private sessionsAsked = false;
   private lastSessionError = "";
   private liveSessionsTimer?: ReturnType<typeof setTimeout>;
 
@@ -2057,7 +2083,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private chatLabel(): string {
     return (this.currentSessionName || "").trim()
       || (this.currentSessionId ? this.currentSessionId.slice(-6) : "")
-      || "New chat";
+      || "New session";
   }
 
   private slotById(id: string): ChatSlot | undefined {
@@ -2137,7 +2163,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.atChatLimit()) { return; }          // before the picker, not after a folder is chosen
     const picked = await vscode.window.showOpenDialog({
       canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
-      openLabel: "Open chat here", title: "Open a DGC chat in a folder",
+      openLabel: "Open session here", title: "Open a DGC session in a folder",
     });
     const folder = picked?.[0]?.fsPath;
     if (!folder) { return; }
@@ -2158,7 +2184,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       .some((root) => { const base = real(root.uri.fsPath); return target === base || target.startsWith(base + sep); });
     if (inWindow || this.foldersOpenedHere.has(target)) { return true; }
     const open = "Trust it and open";
-    const choice = await vscode.window.showWarningMessage(`Open a DGC chat in ${target}?`, {
+    const choice = await vscode.window.showWarningMessage(`Open a DGC session in ${target}?`, {
       modal: true,
       detail: "DGC starts your MCP servers there and runs your hooks with that folder as their working "
         + "directory, so scripts it contains can run. Open it only if you trust what is in it.",
@@ -2174,7 +2200,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.slots.length < maxLiveChats()) { return false; }
     // Only reachable when the user set a ceiling themselves.
     void vscode.window.showInformationMessage(
-      `DGC is running ${this.slots.length} chats, the limit set in "dgc.maxLiveChats". `
+      `DGC is running ${this.slots.length} sessions, the limit set in "dgc.maxLiveChats". `
       + "Close one, or raise the setting.");
     return true;
   }
@@ -2182,7 +2208,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private openChatSlot(cwd?: string, sessionId = ""): void {
     if (this.atChatLimit()) { return; }
     this.parkActiveSlot();
-    const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: "New chat", busy: false, needsYou: false, unread: 0,
+    const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: "New session", busy: false, needsYou: false, unread: 0,
                              ...(cwd && cwd !== this.cwd() ? { cwd } : {}) };
     this.slots.push(slot);
     this.activeSlotId = slot.id;
@@ -2260,9 +2286,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** Palette: DGC: Switch Chat. Lists the running chats and what each is doing. */
   async pickChat(): Promise<void> {
     if (this.slots.length < 2) {
-      const start = "Open a second chat";
+      const start = "Open a second session";
       const choice = await vscode.window.showInformationMessage(
-        "Only one chat is running.", start);
+        "Only one session is running.", start);
       if (choice === start) { this.newParallelChat(); }
       return;
     }
@@ -2275,12 +2301,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         : !showing && slot.needsYou ? "waiting for you"
         : busy ? "working" : !showing && slot.done ? "finished · not read yet" : "idle";
       return {
-        label: slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New chat"),
+        label: slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New session"),
         description: showing ? `$(check) showing · ${detail}` : detail,
         slotId: slot.id,
       };
     });
-    const picked = await vscode.window.showQuickPick(items, { placeHolder: "Switch to a running chat" });
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: "Switch to a running session" });
     if (picked) { this.focus(); this.inVisiblePanel(() => this.switchToSlot(picked.slotId)); }
   }
 
@@ -2341,7 +2367,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       activeId: this.activeSlotId,
       items: this.slots.map((slot) => ({
         id: slot.id,
-        label: slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New chat"),
+        label: slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New session"),
         active: slot.id === this.activeSlotId,
         busy: slot.id === this.activeSlotId ? this.confirmedTurnActive : slot.busy,
         needsYou: slot.id === this.activeSlotId ? false : slot.needsYou,
@@ -2516,7 +2542,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "session":
         slot.label = String((ev as any).name || "").trim()
-          || String((ev as any).session_id || "").slice(-6) || "New chat";
+          || String((ev as any).session_id || "").slice(-6) || "New session";
         break;
       case "session_named":
         slot.label = String((ev as any).name || "").trim() || slot.label;
@@ -2612,7 +2638,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     void this.context.workspaceState.update("dgc.activeSession.v1", {
       scope: this.draftScope(), id: this.currentSessionId, saved: this.currentSessionSaved,
     }).then(undefined, () => this.post({ type: "event", event: { type: "error",
-      message: "DGC could not remember this chat for window reload. The saved conversation remains available under Resume." } }));
+      message: "DGC could not remember this session for window reload. The saved conversation remains available under Resume." } }));
   }
 
   /** The `dgc.ready` context key gates palette entries that need a running backend. */
@@ -2679,7 +2705,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
     this.pipsTab?.ready(this.lastReadyEvent?.capabilities, this.backend);
     // A list drawn before DGC said what it offers has no Project Folder dropdown yet: it is read again with it.
-    if (this.home && this.webviewReady && this.lastSessionItems && this.projectFoldersOffered() !== !!this.folderRowsShown) { void this.postSessions(); }
+    // (And one still being read: asked before DGC said it lists every project's, its answer is this folder's sessions
+    // only, which said "No sessions in this project yet" over a full list until something else read it again. W1.)
+    if (this.home && this.webviewReady && (this.lastSessionItems || this.sessionsAsked) && this.projectFoldersOffered() !== !!this.folderRowsShown) { void this.postSessions(); }
     this.startPipsAttention();
     // A reattached chat's turn did not stop: it is still running, or it finished with no window.
     if (!reattached) { void this.resumeInterruptedWork(be); }
@@ -3487,7 +3515,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       if (session !== this.currentSessionId || epoch !== this.processEpoch || (this.turnActive && !liveGoalReplace) ||
           ["id", "text", "status", "token_budget"].some(key => (this.state.goal as any)[key] !== (prior as any)[key])) {
-        reject("The chat or goal changed while you reviewed it. Review the current goal before replacing it."); return;
+        reject("The session or goal changed while you reviewed it. Review the current goal before replacing it."); return;
       }
     }
     const expectedGoalId = prior.text ? String((prior as any).id || "") : "";
@@ -3887,11 +3915,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           be.close("chat restoration timed out");
           if (this.backend === be) { this.retireBackend(); }    // its process may live on for other chats
           this.post({ type: "event", event: { type: "error",
-            message: "Chat restoration did not complete. Your draft is retained; restart DGC to reconnect." } });
+            message: "Session restoration did not complete. Your draft is retained; restart DGC to reconnect." } });
           return;
         }
         this.post({ type: "event", event: { type: "info",
-          message: "The previous chat is unavailable. DGC opened a new chat and retained its unsent draft." } });
+          message: "The previous session is unavailable. DGC opened a new session and retained its unsent draft." } });
         this.sessionRestoreFinished = true;
         this.sessionDraftSource = previous;
         this.maybeCompleteHandshake(be);
@@ -3923,7 +3951,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const be = this.backend;
     const sessionId = this.currentSessionId;
     if (chat && !this.lastReadyEvent?.capabilities?.chat_inspection) {
-      return { files: [], total: 0, notices: ["Update DGC CLI to review changes recorded during this chat."] };
+      return { files: [], total: 0, notices: ["Update DGC CLI to review changes recorded during this session."] };
     }
     if (this.workspaceRootsInFlight || this.workspaceRootsDirty) {
       return { files: [], total: 0, notices: ["Workspace changes are waiting for the current folder access to be confirmed."] };
@@ -4070,7 +4098,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const right = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/after/${leaf}` });
       this.reviewDocuments.set(left.toString(), result.before);
       this.reviewDocuments.set(right.toString(), result.after);
-      const label = chat ? "DGC chat changes" : result.kind === "staged" ? "DGC staged review" : "DGC workspace review";
+      const label = chat ? "DGC session changes" : result.kind === "staged" ? "DGC staged review" : "DGC workspace review";
       await vscode.commands.executeCommand("vscode.diff", left, right, `${change.displayPath} (${label})`, { preview: true });
     } catch (error) {
       void vscode.window.showInformationMessage(error instanceof Error ? error.message : "The change preview could not be read.");
@@ -4563,7 +4591,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       Object.assign(saved, { sessionRestoreCandidate: session, sessionRestoreSaved: true, sessionRestoreSuppressed: true,
                              currentSessionId: session, currentSessionSaved: true,
                              turnActive: !!chat.turn, confirmedTurnActive: !!chat.turn });
-      const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: session.slice(-6) || "Chat", busy: !!chat.turn,
+      const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: session.slice(-6) || "Session", busy: !!chat.turn,
                                needsYou: Array.isArray(chat.waiting) && chat.waiting.length > 0, unread: 0, saved,
                                ...(cwd !== this.cwd() ? { cwd } : {}) };
       this.slots.push(slot);
@@ -5336,7 +5364,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Voice: the page's own state and progress, and only its own errors (a chat's dictation reports its own).
     const settingsVoice = ["voice_state", "voice_progress"].includes(ev.type)
       || (ev.type === "voice_error" && String((ev as any).request_id || "").startsWith("settings-voice"));
-    if (this.settingsEditor && (settingsRejection || settingsVoice || ["config", "server_window", "usage_report", "pip_usage_report", "mcp_servers", "memory_state", "memory_history"].includes(ev.type))) {
+    if (this.settingsEditor && (settingsRejection || settingsVoice || ["config", "server_window", "usage_report", "pip_usage_report", "mcp_servers", "permissions", "memory_state", "memory_history"].includes(ev.type))) {
       const managed = ev.type === "mcp_servers" ? new Map(this.managedMcpServers().map((m) => [m.name, m])) : null;
       // The form shows a server's own OAuth app (its public client id and port); never its secret.
       const event = managed && Array.isArray((ev as any).items) ? { ...ev, items: (ev as any).items.map((item: any) => {
@@ -5345,6 +5373,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }) }
         // Settings -> Web search offers the providers this CLI takes, from its handshake, and (from a CLI that keeps
         // one key per provider) which of them have a key saved. Never a key itself.
+        // Settings -> Security lists the rules in words: "this project" is this DGC's own folder.
+        : ev.type === "permissions" ? { ...ev, project_root: typeof this.lastReadyEvent?.project_root === "string" ? this.lastReadyEvent.project_root : "" }
         : ev.type === "config" ? { ...ev, search_providers: this.searchProviders(),
                                    ...(this.searchKeyState() ? { search_keys: Object.fromEntries(this.searchKeyState()!) } : {}),
                                    // Not protocol fields: the cache_settings event that came just before.
@@ -5697,10 +5727,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (slot.announced) return;
     if (!vscode.workspace.getConfiguration("dgc").get<boolean>("notifyWhenWaiting", true)) return;
     slot.announced = true;
-    const name = slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New chat");
+    const name = slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New session");
     const what = type === "permission_request" ? "is waiting for your approval"
       : type === "plan_proposal" ? "has a plan for you to review" : "has a question for you";
-    const open = "Open chat";
+    const open = "Open session";
     void Promise.resolve(vscode.window.showInformationMessage(`DGC: "${name}" ${what}.`, open)).then((choice) => {
       if (choice !== open || !this.slotById(slot.id)) return;
       this.focus();
@@ -5955,7 +5985,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const css = "font:13px var(--vscode-font-family);color:var(--vscode-descriptionForeground);"
       + "padding:16px;line-height:1.5";
     return `<!DOCTYPE html><html><body style="${css}">DGC is open in ${where}.` +
-      ` This copy stays out of the way — close it, or run <b>DGC: Focus Chat</b> to come back.</body></html>`;
+      ` This copy stays out of the way — close it, or run <b>DGC: Focus Side Bar</b> to come back.</body></html>`;
   }
 
   /** A Pip's run, asked about from its own chat: this chat sends the Work chat card's prompt when it is ready. */
@@ -6106,7 +6136,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           || msg.limit !== undefined && (!Number.isSafeInteger(msg.limit) || msg.limit < 1 || msg.limit > 20)) { fail("Invalid Pip reference search."); return; }
         if (this.promptPipRequests.size >= 32) this.promptPipRequests.delete(this.promptPipRequests.keys().next().value!);
         this.promptPipRequests.set(id,{backend:be,session:this.currentSessionId,generation:this.sessionHandshakeGeneration});
-        if (!be.send({...msg} as any)) { this.promptPipRequests.delete(id);fail("DGC could not search this chat’s Pips."); }
+        if (!be.send({...msg} as any)) { this.promptPipRequests.delete(id);fail("DGC could not search this session’s Pips."); }
         return;
       }
       case "micStart":
@@ -6386,6 +6416,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         be.send({ type: "permission_response", id: msg.id, decision: msg.decision, rule: msg.rule,
                   ...(typeof msg.reason === "string" && msg.reason.trim()
                       ? { reason: msg.reason.trim().slice(0, 2000) } : {}) });
+        // "Always allow edits in this project" (W8): the card's answer carries the rule for the tool that asked; the
+        // other edit tools' rules over the same folder are added beside it, so the next edit, whichever tool makes
+        // it, doesn't ask. Only ever an edit tool's rule over this session's own project.
+        if (msg.decision === "always") {
+          const more = projectEditRules(msg.projectRules, msg.rule, this.lastReadyEvent?.project_root);
+          for (const rule of more) {
+            be.send({ type: "add_permission_rule", request_id: this.nextRequestId("permission-add"), action: "allow", rule });
+          }
+          // The other sessions open on this project hear it too (each `dgc serve` holds its own copy of the rules):
+          // "this project" is not only the one session that asked.
+          if (more.length) {
+            const host = this.tab?.host ?? this, root = this.lastReadyEvent?.project_root;
+            for (const owner of [host, ...host.tabProviders]) {
+              if (owner === this || !owner.backend?.ready || owner.lastReadyEvent?.project_root !== root) continue;
+              for (const rule of [String(msg.rule), ...more]) { try { owner.backend.send({ type: "add_permission_rule", request_id: owner.nextRequestId("permission-add"), action: "allow", rule } as any); } catch { /* that session is going away */ } }
+            }
+          }
+        }
         break;
       case "drop_uris": {
         // files dragged into the chat from the explorer or a tab
@@ -6571,7 +6619,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "agentsContextTyped":
         if (this.subagentWindowSettable) {
-          const typed = await vscode.window.showInputBox({ prompt: "Context window for this session’s sub-agents", placeHolder: "A size like 24K or 24576; nothing for the same as the chat",
+          const typed = await vscode.window.showInputBox({ prompt: "Context window for this session’s sub-agents", placeHolder: "A size like 24K or 24576; nothing for the same as the session",
             validateInput: (value) => (!value.trim() || subagentWindow(value) > 0 ? undefined : "Type a size like 24K or 24576.") });
           if (typed !== undefined) await this.setSessionAgentsSetting({ subagent_context_size: subagentWindow(typed) });
         }
@@ -6783,8 +6831,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                   action: msg.action, rule: String(msg.rule || "") });
         break;
       case "permissionRemove":
-        be.send({ type: "remove_permission_rule", request_id: this.nextRequestId("permission-remove"),
-                  action: msg.action, rule: String(msg.rule || "") });
+        this.removePermissionRule(msg.action, String(msg.rule || ""));
         break;
       case "memoryAdd":
         be.send({ type: "add_memory", request_id: this.nextRequestId("memory-add"),
@@ -8062,7 +8109,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // A session one of the open chats is on opens there. A second chat on it was refused as held
     // by "another DGC process", which it was not.
     if (picked && picked === this.currentSessionId) {
-      void vscode.window.showInformationMessage("That session is the chat on screen.");
+      void vscode.window.showInformationMessage("That session is the one on screen.");
       return;
     }
     const holder = this.slots.find((slot) => slot.id !== this.activeSlotId
@@ -8357,7 +8404,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         be, "session", { type: "fork_session", name }, "session", 5000);
     } catch (err: any) {
       void vscode.window.showErrorMessage(
-        err?.message || "DGC could not branch this chat into a new one.");
+        err?.message || "DGC could not branch this session into a new one.");
     }
   }
 
@@ -9625,7 +9672,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await this.rememberSubscription(route.engine);
     } else {
       if ((this.lastReadyEvent?.capabilities as any)?.model_defaults !== true) {
-        throw new Error("Update DGC CLI to set a default for new chats.");
+        throw new Error("Update DGC CLI to set a default for new sessions.");
       }
       if (!model) throw new Error("Choose a model for this provider.");
       await this.requestState(be, "model-defaults", {
@@ -9699,6 +9746,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** A rule removed (Settings -> Security, Work's Permission rules): this DGC is told, and so is every other session
+   *  open in this window. Each `dgc serve` holds the rules it started with and the ones it added: a session that made
+   *  "edits in this project" would go on editing without asking after the rule was removed somewhere else. */
+  private removePermissionRule(action: unknown, rule: string): void {
+    const host = this.tab?.host ?? this;
+    const command = () => ({ type: "remove_permission_rule", request_id: this.nextRequestId("permission-remove"), action, rule });
+    this.ensureBackend().send(command() as any);
+    for (const owner of [host, ...host.tabProviders]) {
+      if (owner !== this && owner.backend?.ready) { try { owner.backend.send(command() as any); } catch { /* that session is going away */ } }
+    }
+  }
+
   private async onSettingsMessage(msg: any): Promise<void> {
     const be = this.ensureBackend();
     if (msg?.type === "ready") {
@@ -9711,6 +9770,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // Applies at once, in every window: each side bar's dock follows it (src/dock.ts).
       await setDockSetting(msg);
       this.settingsEditor?.webview.postMessage({ type: "dockSettings", ...dockSettings() });
+    } else if (msg?.type === "permissionsList") {
+      // Settings -> Security: the rules DGC always follows (Always allow on a card made them), listed with Remove.
+      be.send({ type: "list_permissions", request_id: this.nextRequestId("permissions") });
+    } else if (msg?.type === "permissionsRemove") {
+      const action = ["allow", "ask", "deny"].includes(msg.action) ? msg.action : "";
+      for (const rule of action && Array.isArray(msg.rules) ? msg.rules.slice(0, 8) : []) {
+        if (typeof rule === "string" && rule && rule.length <= 1000) this.removePermissionRule(action, rule);
+      }
     } else if (msg?.type === "devModeWarned") {
       // Settings → Dev Mode's warning shows once in this editor.
       await this.context.globalState.update(DEV_WARNED_KEY, true);
@@ -10968,6 +11035,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const composerJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "composer.js"));
     // The bar for what is going on above the prompt box, the same in ChatDGC and a Pip's chat (media/shared/tray.js, window.DgcTray).
     const trayJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "tray.js"));
+    // A permission rule in a person's words, and "edits in this project" (media/shared/rulewords.js, window.DgcRuleWords).
+    const ruleWordsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "rulewords.js"));
     // One card for everything that asks or reports, the same in ChatDGC and a Pip's chat (media/shared/card.js, window.DgcCard).
     const cardJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "card.js"));
     // A card's answers as icons that turn into the full button, on Home's cards (media/shared/iconactions.js, window.DgcIconActions).
@@ -11074,11 +11143,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${pipSetupStyle}">
 <link rel="stylesheet" href="${mcpAppsCss}">
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}" data-pictures-folded="${picturesFolded() ? "1" : ""}">
-<header id="phead"><button type="button" id="btn-pips-back" class="pips-back" title="Back to DGC chat" aria-label="Back to DGC chat" hidden><span class="codicon codicon-chevron-left" aria-hidden="true"></span>Chat</button><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="btn-pips" class="pips-nav" title="Open Pips" aria-label="Open Pips" aria-pressed="false"><span class="pips-wordmark">Pips</span><span class="pips-nav-core" aria-hidden="true"></span></button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
-<nav id="side-tabs" class="dgc-tabs" aria-label="DGC" hidden><div class="dgc-tabs-bar" role="tablist" aria-label="Home, Work, Chat, Library and Pips"><button type="button" role="tab" id="side-tab-home" class="dgc-tab" data-tab="home" aria-controls="home-hub" aria-selected="false" tabindex="-1" title="Home: everything that needs you or is new"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Home"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-home" aria-hidden="true"></span><span class="dgc-tab-word">Home</span></span></span><span id="side-tab-home-count" class="dgc-tab-count" aria-hidden="true" hidden></span></button><button type="button" role="tab" id="side-tab-work" class="dgc-tab" data-tab="work" aria-controls="work-home" aria-selected="false" tabindex="-1" title="Work: your Work sessions"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Work"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-briefcase" aria-hidden="true"></span><span class="dgc-tab-word">Work</span></span></span></button><button type="button" role="tab" id="side-tab-chat" class="dgc-tab" data-tab="chat" aria-controls="chats-home" aria-selected="false" tabindex="-1" title="Chat: your ChatDGC chats, the same in every folder"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Chat"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-comment-discussion" aria-hidden="true"></span><span class="dgc-tab-word">Chat</span></span></span></button><button type="button" role="tab" id="side-tab-library" class="dgc-tab" data-tab="library" aria-controls="library-home" aria-selected="false" tabindex="-1" title="Library: everything DGC made for you, and who made it"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Library"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-library" aria-hidden="true"></span><span class="dgc-tab-word">Library</span></span></span></button><button type="button" role="tab" id="side-tab-pips" class="dgc-tab" data-tab="pips" aria-controls="pips-host" aria-selected="false" tabindex="-1" title="Pips: your Personal and Project Pips"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Pips"><span class="dgc-tab-front"><span class="dgc-tab-word">Pips</span></span></span><span class="dgc-tab-face" aria-hidden="true"></span></button></div></nav>
+<header id="phead"><button type="button" id="btn-pips-back" class="pips-back" title="Back to the session" aria-label="Back to the session" hidden><span class="codicon codicon-chevron-left" aria-hidden="true"></span>Session</button><button type="button" id="agent-back" class="agent-back" hidden title="Back to session" aria-label="Back to session"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current session — click to rename" aria-label="Current session: New session. Click to rename">New session</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="btn-pips" class="pips-nav" title="Open Pips" aria-label="Open Pips" aria-pressed="false"><span class="pips-wordmark">Pips</span><span class="pips-nav-core" aria-hidden="true"></span></button><button type="button" id="chat-add" class="chat-add" title="Open a second session" aria-label="Open a second session"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a session in another folder" aria-label="Open a session in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
+<nav id="side-tabs" class="dgc-tabs" aria-label="DGC" hidden><div class="dgc-tabs-bar" role="tablist" aria-label="Home, Work, Chat, Library and Pips"><button type="button" role="tab" id="side-tab-home" class="dgc-tab" data-tab="home" aria-controls="home-hub" aria-selected="false" tabindex="-1" title="Home: everything that needs you or is new"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Home"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-home" aria-hidden="true"></span><span class="dgc-tab-word">Home</span></span></span><span id="side-tab-home-count" class="dgc-tab-count" aria-hidden="true" hidden></span></button><button type="button" role="tab" id="side-tab-work" class="dgc-tab" data-tab="work" aria-controls="work-home" aria-selected="false" tabindex="-1" title="Work: your Work sessions"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Work"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-briefcase" aria-hidden="true"></span><span class="dgc-tab-word">Work</span></span></span></button><button type="button" role="tab" id="side-tab-chat" class="dgc-tab" data-tab="chat" aria-controls="chats-home" aria-selected="false" tabindex="-1" title="Chat: your ChatDGC chats, the same in every folder"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Chat"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-comment-discussion" aria-hidden="true"></span><span class="dgc-tab-word">Chat</span></span></span></button><button type="button" role="tab" id="side-tab-library" class="dgc-tab" data-tab="library" aria-controls="library-home" aria-selected="false" tabindex="-1" title="Library: everything DGC made for you, and who made it"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Library"><span class="dgc-tab-front"><span class="dgc-tab-icon codicon codicon-library" aria-hidden="true"></span><span class="dgc-tab-word">Library</span></span></span></button><button type="button" role="tab" id="side-tab-pips" class="dgc-tab" data-tab="pips" aria-controls="pips-host" aria-selected="false" tabindex="-1" title="Pips: your Pips"><span class="dgc-tab-glow" aria-hidden="true"></span><span class="dgc-tab-flip" data-label="Pips"><span class="dgc-tab-front"><span class="dgc-tab-word">Pips</span></span></span><span class="dgc-tab-face" aria-hidden="true"></span></button></div></nav>
 <section id="pips-host" data-style-uri="${pipsStyle}" data-cards-style-uri="${mcpAppsCss}" aria-label="DGC Pips" hidden></section>
-<section id="sessions-host" class="sessions-home" aria-label="DGC" hidden><section id="home-hub" class="dgc-hub" role="tabpanel" aria-labelledby="side-tab-home"></section><section id="work-home" class="home-work" role="tabpanel" aria-labelledby="side-tab-work" hidden><header id="work-head" class="dgc-pagehead" data-title="Work"></header><div class="home-bar"><input id="sessions-search" class="sessions-search" type="search" placeholder="Search Work sessions" aria-label="Search this project's sessions: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="sessions-new" class="home-new" title="New session: it opens in an editor tab" aria-label="New session"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><div id="work-folder-line" class="home-folder-line"></div><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul><button type="button" id="sessions-more" class="sessions-more" title="Show 200 more sessions" hidden>Load more</button></section><section id="chats-home" class="home-chats" role="tabpanel" aria-labelledby="side-tab-chat" hidden><header id="chats-head" class="dgc-pagehead" data-title="Chat"></header><div class="home-bar"><input id="chats-search" class="sessions-search" type="search" placeholder="Search chats" aria-label="Search your chats: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="chats-new" class="home-new" title="New chat: it opens in an editor tab" aria-label="New chat"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><div id="projects-home" class="home-projects" hidden><div class="home-sub-head"><h3 id="projects-title" class="home-sub">Projects</h3><button type="button" id="projects-new" class="home-sub-add" title="New project: chats, files and instructions together" aria-label="New project"><span class="codicon codicon-new-folder" aria-hidden="true"></span></button></div><ul id="projects-list" class="projects-list" aria-labelledby="projects-title"></ul></div><h3 id="chats-sub" class="home-sub home-sub-chats" hidden>Chats</h3><p id="chats-status" class="sessions-status" role="status" hidden></p><ul id="chats-list" class="sessions-list" aria-label="Your chats"></ul><button type="button" id="chats-more" class="sessions-more" title="Show more of your chats" hidden>Show more</button></section><section id="library-home" class="home-shelf" role="tabpanel" aria-labelledby="side-tab-library" hidden></section></section>
-<nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
+<section id="sessions-host" class="sessions-home" aria-label="DGC" hidden><section id="home-hub" class="dgc-hub" role="tabpanel" aria-labelledby="side-tab-home"></section><section id="work-home" class="home-work" role="tabpanel" aria-labelledby="side-tab-work" hidden><header id="work-head" class="dgc-pagehead" data-title="Work"></header><div class="home-bar"><input id="sessions-search" class="sessions-search" type="search" placeholder="Search Work sessions" aria-label="Search this project's sessions: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="sessions-new" class="home-new" title="New session: it opens in an editor tab" aria-label="New session"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><div id="work-folder-line" class="home-folder-line"></div><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul><button type="button" id="sessions-more" class="sessions-more" title="Show 200 more sessions" hidden>Load more</button></section><section id="chats-home" class="home-chats" role="tabpanel" aria-labelledby="side-tab-chat" hidden><header id="chats-head" class="dgc-pagehead" data-title="Chat"></header><div class="home-bar"><input id="chats-search" class="sessions-search" type="search" placeholder="Search chats" aria-label="Search your chats: names and everything said" autocomplete="off" maxlength="200"><button type="button" id="chats-new" class="home-new" title="New chat: it opens in an editor tab" aria-label="New chat"><span class="codicon codicon-add" aria-hidden="true"></span><span>New</span></button></div><div id="projects-home" class="home-projects" hidden><div class="home-sub-head"><h3 id="projects-title" class="home-sub">Spaces</h3><button type="button" id="projects-new" class="home-sub-add" title="New space: chats, files and instructions together" aria-label="New space"><span class="codicon codicon-new-folder" aria-hidden="true"></span></button></div><ul id="projects-list" class="projects-list" aria-labelledby="projects-title"></ul></div><h3 id="chats-sub" class="home-sub home-sub-chats" hidden>Chats</h3><p id="chats-status" class="sessions-status" role="status" hidden></p><ul id="chats-list" class="sessions-list" aria-label="Your chats"></ul><button type="button" id="chats-more" class="sessions-more" title="Show more of your chats" hidden>Show more</button></section><section id="library-home" class="home-shelf" role="tabpanel" aria-labelledby="side-tab-library" hidden></section></section>
+<nav id="chatbar" class="chatbar" hidden aria-label="Running sessions"></nav>
 <aside id="pip-session-note" class="psn" role="note" aria-label="Pips report in their own chats now" hidden></aside>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <section id="agent-page" hidden>
@@ -11177,7 +11246,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="approval-dock" class="approval-dock" role="region" aria-label="Waiting for your answer" hidden></div>
   <!-- The bar for what is going on: one line of pills on the box, in its shell (media/main.js syncComposerRail). -->
   <div id="rail-line" class="rail-line">
-    <div id="rail-chips" class="rail-chips" role="toolbar" aria-label="Running in this chat" hidden></div>
+    <div id="rail-chips" class="rail-chips" role="toolbar" aria-label="Running in this session" hidden></div>
     <div id="queued" role="status" aria-live="polite"></div>
     <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit"><span class="codicon codicon-diff" aria-hidden="true"></span><span class="workspace-changes-label">Workspace changes</span></button>
     <div id="rail-pop" class="rail-pop dgc-popover" role="dialog" aria-modal="false" aria-labelledby="rail-pop-title" tabindex="-1" hidden>
@@ -11217,8 +11286,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <span id="troupe-status" class="sr-only" role="status"></span>
     </section>
-    <section id="changesbar" class="rail-item" aria-label="Changes in this chat" hidden>
-      <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files" title="Every file this chat has changed, with its diff"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed in this chat</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
+    <section id="changesbar" class="rail-item" aria-label="Changes in this session" hidden>
+      <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files" title="Every file this session has changed, with its diff"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed in this session</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
       <button type="button" id="changes-review-button" class="rail-text-action" title="Open the list of changed files">Review</button>
     </section>
     <section id="tasksbar" class="rail-item" aria-label="Session tasks" data-status="pending" hidden>
@@ -11293,7 +11362,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           <div class="context-head"><div><span class="context-kicker">Prompt cache</span><strong id="cache-state">No timer</strong></div></div>
           <p id="cache-said" class="cache-said"></p>
           <p id="cache-next" class="cache-said" hidden></p>
-          <div id="cache-usage" class="context-usage" title="So far in this chat">0 cached</div>
+          <div id="cache-usage" class="context-usage" title="So far in this session">0 cached</div>
         </section>
       </div>
       <button type="button" id="btn-settings" class="fbtn" title="Settings" aria-label="Open settings"><span class="codicon codicon-settings-gear" aria-hidden="true"></span></button>
@@ -11326,7 +11395,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="followup-hint" hidden></div>
 </footer>
 <script nonce="${nonce}" src="${menuJs}"></script>
-<script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script>
+<script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
 <script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${effortJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>

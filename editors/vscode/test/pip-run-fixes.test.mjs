@@ -127,7 +127,7 @@ test('only runs with something to fix are asked about, and a fix this editor can
   assert.deepEqual([...fixes.keys()],[R1,R2]);
   assert.equal(fixes.get(R1).state,'running','the first per run is the newest');
   assert.throws(()=>posts.runFixesPage({pip_id:'pip_other',workspace_id:'ws',fixes:[]},PIP,'ws'));
-  assert.deepEqual(posts.fixWords(fix({state:'applied',files:files(3)})),{state:'fixed',text:'Fixed · 3 files',title:'DGC fixed this. Open the Work chat it ran in to review or undo it.'});
+  assert.deepEqual(posts.fixWords(fix({state:'applied',files:files(3)})),{state:'fixed',text:'Fixed · 3 files',title:'DGC fixed this. Open the Work session it ran in to review or undo it.'});
   const x=setup();await openChat(x);
   assert.equal(x.d.querySelector(`[data-run-post="${R2}"] .run-post-fix`),null,'an all-clear run has nothing to fix');
 });

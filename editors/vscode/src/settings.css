@@ -610,3 +610,6 @@ input[type=checkbox],input[type=radio]{height:auto;padding:0;accent-color:var(--
  #page .chips>button{flex:none}
  #page button.info{flex:none;min-width:16px}
 }
+/* Security -> Always allowed: a rule in words, where it applies under it, and Remove at the row's end. */
+.rule-line{gap:12px}.rule-line .rule-detail{overflow-wrap:anywhere;font-family:var(--mono,var(--vscode-editor-font-family,monospace));font-size:11px}.rule-line>button{flex:none}
+@media (max-width:520px){.rule-line{flex-wrap:wrap;gap:8px}.rule-line>.words{flex-basis:100%}}

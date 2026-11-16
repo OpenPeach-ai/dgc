@@ -55,7 +55,7 @@ import '../media/pasteclean.js';  // window.DgcPasteClean: what a paste becomes,
 import '../media/mentions.js';   // window.DgcMentions: @ marks in the box and the bubble, the same in all three chats
 import '../media/mentions.css';
 import '../media/shared/links.css';   // a link's favicon and its bundled mark, the same in Work and ChatDGC
-import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
+import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon,outputIcon} from './pipsTranscript.js';
 import {patchChildren} from './pipsDomPatch.js';
 import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
 import {latestActivity,activityEnded,activityParts,activityText,startedWords,routineStartedWords,elapsed} from './pipRunActivity.js';
@@ -285,16 +285,22 @@ const messageWords=text=>globalThis.DgcPasteClean?.trimDraft(text)??String(text|
 const Mentions=remoteHost?null:globalThis.DgcMentions;
 const chatMarks=new Map();
 let chatBox=null,chatPop=null,chatPicker=null,boxPip='',projectFiles=[],projectFilesAsked=false;
+// Work's outputs, as its Output menu and its @ list name them (media/main.js OUTPUT_CHOICES), each with a drawing of its
+// own: the side bar's Pips have no icon font.
+const PIP_OUTPUTS=[['document','Document','A document to keep editing','file-text'],['slides','Slides','A deck to present','preview'],['spreadsheet','Spreadsheet','A sheet, formulas and all','table'],['page','Page','One self-contained web page','browser'],['dashboard','Dashboard','Charts over data you allow','dashboard']];
+const messageOutput=marks=>{const kind=S.apiVersion>=100?(marks||[]).find(m=>m&&m.kind==='artifact')?.identity:'';return PIP_OUTPUTS.some(([value])=>value===kind)?kind:'';};
 const rowTerminal='<svg class="pi-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 4 3.5 3.5L3 11M8 12h5"/></svg>';
-function chatMarkLook(part){return{logo:part.kind==='plugin'?pluginLogoSrc(part.identity):'',plug:transcriptIcon('plug'),folder:FOLDER_ICON,faceStyles:false};}
+function chatMarkLook(part){return{logo:part.kind==='plugin'?pluginLogoSrc(part.identity):'',plug:transcriptIcon('plug'),folder:FOLDER_ICON,glyphMark:part.kind==='artifact'?outputIcon(part.identity):'',faceStyles:false};}
 function rememberMarks(pip=S.selected){if(!chatBox||!pip)return;const parts=chatBox.parts();if(parts)chatMarks.set(pip,{text:chatBox.el.value,parts});else chatMarks.delete(pip);}
 // What this Pip can reach, and nothing else: the plugins it can call (DGC lets a Pip with no folder call them so far),
 // the other Pips of its own workspace (what it can hand work to and be told about; each row says where that Pip works),
-// and its folder's files for a Pip that has one. It makes no Outputs: a Pip's chat has no Output menu and no artifact
-// tools.
+// and its folder's files for a Pip that has one. Work's outputs too (Pips API 100): a Document, Slides, a Spreadsheet, a
+// Page or a Dashboard, one a message, sent as that message's `output`; an older DGC is offered none.
+const outputsOn=()=>S.apiVersion>=100&&!archived();
+const boxOutput=()=>{const parts=chatBox?.parts();return (parts||[]).find(part=>typeof part!=='string'&&part.kind==='artifact')?.identity||'';};
 function chatMentionSources(){
  const others=(S.jobs||[]).filter(p=>p.id!==S.selected&&p.status!=='archived'&&p.name).slice(0,100).map(p=>{const body=profile(p.profile).body;return{pip_id:p.id,name:p.name,pip_type:body||p.pip_type,kind:`${p.pip_type} Pip`,detail:`${pipPlace(p)} · v${p.current_version} · ${p.id.slice(-8)}`};}).filter(p=>Mentions.PIP_TYPES.includes(p.pip_type));
- return{plugins:personalPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:[],pips:others,pipsEmpty:'No other Pips here',files:personalPip()?[]:projectFiles,
+ return{plugins:personalPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:outputsOn()&&!boxOutput()?PIP_OUTPUTS:[],pips:others,pipsEmpty:'No other Pips here',files:personalPip()?[]:projectFiles,
   // This computer's projects (pips-21, API 91): naming one gives this Pip a private copy of it.
   projects:projectMentionsOn()?S.projectChoices:[]};
 }
@@ -302,7 +308,7 @@ if(Mentions){
  const el=owner.createElement('div');el.id='chatText';el.className='mention-box';el.dataset.draft='chatText';el.setAttribute('data-dom-own','1');el.setAttribute('contenteditable','true');el.setAttribute('role','textbox');el.setAttribute('aria-multiline','true');el.setAttribute('aria-controls','chat-pop');el.setAttribute('aria-autocomplete','list');el.setAttribute('aria-haspopup','listbox');el.setAttribute('aria-expanded','false');
  chatPop=owner.createElement('div');chatPop.id='chat-pop';chatPop.className='pop pop-over';chatPop.setAttribute('role','listbox');chatPop.setAttribute('aria-label','Suggestions');chatPop.setAttribute('data-dom-own','1');
  chatBox=Mentions.box(el,{maxLength:CHAT_MAX_CHARS,faceStyles:false,edit:change=>chatEdit(change),pillOptions:chatMarkLook,cleanedChanged:()=>drawChatTray(),
-  pasteBack:part=>part.kind==='plugin'?chatMentionSources().plugins.some(p=>p.id===part.identity):part.kind==='pip'?chatMentionSources().pips.some(p=>p.pip_id===part.identity)
+  pasteBack:part=>part.kind==='artifact'?outputsOn()&&!boxOutput()&&PIP_OUTPUTS.some(([value,label])=>value===part.identity&&label===part.label):part.kind==='plugin'?chatMentionSources().plugins.some(p=>p.id===part.identity):part.kind==='pip'?chatMentionSources().pips.some(p=>p.pip_id===part.identity)
    :part.kind==='project'?!!S.pip?.computer_plan&&chatMentionSources().projects.some(p=>p.workspace_id===part.identity):part.kind==='file'&&!personalPip()});
  chatPicker=Mentions.picker(chatBox,chatPop,{edit:change=>chatEdit(change),sources:chatMentionSources,pipsDetail:'This Pip\u2019s workspace · no work starts',
   refresh(){if(!personalPip()&&!projectFilesAsked){projectFilesAsked=true;vscode.postMessage({type:'pipsFiles'});}if(projectMentionsOn())void loadProjectChoices();},
@@ -310,7 +316,7 @@ if(Mentions){
   // A Pip with no computer has nowhere to keep the copy: it is told to get one first, and no mark goes in.
   projectPick:()=>{if(S.pip?.computer_plan)return true;askForComputer();return false;},
   face:(it,i)=>{const index=it.pipRow?Mentions.PIP_TYPES.indexOf(it.pipRow.pip_type):-1;return index>=0?`<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:it.pipRow.name},'idle',`pickerPip${i}`,{includeStyles:false})}</span>`:'';},
-  icon:it=>{if(it.projectRow)return `<span class="pi-icon pi-project-mark" aria-hidden="true">${FOLDER_ICON}</span>`;if(!it.pluginId)return rowTerminal;const src=pluginLogoSrc(it.pluginId);return `<span class="pi-icon pi-plugin-mark" aria-hidden="true" data-plugin-mark="${esc(it.pluginId)}">${src?`<img alt="" src="${esc(src)}">`:transcriptIcon('plug')}</span>`;},
+  icon:it=>{if(it.projectRow)return `<span class="pi-icon pi-project-mark" aria-hidden="true">${FOLDER_ICON}</span>`;if(it.artifactKind)return `<span class="pi-icon pi-output-mark" aria-hidden="true">${outputIcon(it.artifactKind)}</span>`;if(!it.pluginId)return rowTerminal;const src=pluginLogoSrc(it.pluginId);return `<span class="pi-icon pi-plugin-mark" aria-hidden="true" data-plugin-mark="${esc(it.pluginId)}">${src?`<img alt="" src="${esc(src)}">`:transcriptIcon('plug')}</span>`;},
   drawn:()=>hydratePluginLogos(),
   // The name is the words: the model reads "ask Scout", and what a Pip is comes beside them (named_pips).
   pipPart:p=>{const name=p.name.replace(/\s+/g,' ').trim();return{kind:'pip',label:name,wire:name,identity:p.pip_id,pipType:p.pip_type};},
@@ -633,8 +639,8 @@ function welcome() {
 function createMarkup() {
   if(S.workspace?.kind==='personal'&&S.createStep!=='describe')return `<section class="setup-compose"><h2>Your personal Pip</h2><p class="muted">Available across your projects on this computer. No project files or app access are inherited.</p><form id="create-form" class="form"><label for="personal-character">Character</label><select id="personal-character">${S.types.filter(t=>t.available).map(t=>`<option value="${esc(t.id)}"${t.id===S.createType?' selected':''}>${esc(t.name)}</option>`).join('')}</select>${field('name','Name')}${field('goal','What would you like help with?',true)}${modelPicker('createModel','Model',draft.createModel,S.workspace?.kind==='personal')}<p class="muted">Start a private conversation. App access must be separately supported and reviewed before email or calendar jobs can run.</p><button type="submit" class="primary">Create personal Pip</button>${button('cancel-create','Cancel',S.busy)}</form></section>`;
 
-  if(S.workspace?.kind==='personal'&&S.createStep==='describe')return `<section class="setup-compose"><p class="step">Personal · across your projects</p><h2>What would you like a hand with?</h2>${startersMarkup('personal')}${importMarkup()}<p class="muted">Describe the task in your own words. DGC will prepare a setup card for your review.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Help me plan my week every Sunday at 6 pm. Ask me what to include.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary">Describe to DGC</button>':'<p>Describe the task in the main DGC chat.</p>'}</form><p class="muted">Private to this DGC profile. No project files or connected apps are included automatically.</p><div class="actions">${button('advanced-create','Choose a Pip myself',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
-  if(S.createStep==='describe')return `<section class="setup-compose" aria-labelledby="setup-compose-title"><p class="step">Start with the job</p><h2 id="setup-compose-title">What should your Pip look after?</h2>${startersMarkup('project')}${importMarkup()}<p class="muted">Tell DGC the project, the task and when to do it. You check it on one card before anything starts.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Review committed changes in this project daily at 11:00 in Asia/Kolkata. Also run once today.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary"'+(S.busy||!usable()?' disabled':'')+'>Describe to DGC</button>':'<p class="notice">Describe it in the DGC chat on your computer. This view can’t send it there.</p>'}</form><p class="muted">Project: ${esc(S.workspace.name)}. DGC confirms the project folder with you. To check a running app, you approve its test commands separately.</p><div class="actions">${button('advanced-create',simpleMode()?'Choose a Pip myself':'Advanced: choose a Pip',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
+  if(S.workspace?.kind==='personal'&&S.createStep==='describe')return `<section class="setup-compose"><p class="step">Personal · across your projects</p><h2>What would you like a hand with?</h2>${startersMarkup('personal')}${importMarkup()}<p class="muted">Describe the task in your own words. DGC will prepare a setup card for your review.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Help me plan my week every Sunday at 6 pm. Ask me what to include.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary">Describe to DGC</button>':'<p>Describe the task in a Work session.</p>'}</form><p class="muted">Private to this DGC profile. No project files or connected apps are included automatically.</p><div class="actions">${button('advanced-create','Choose a Pip myself',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
+  if(S.createStep==='describe')return `<section class="setup-compose" aria-labelledby="setup-compose-title"><p class="step">Start with the job</p><h2 id="setup-compose-title">What should your Pip look after?</h2>${startersMarkup('project')}${importMarkup()}<p class="muted">Tell DGC the project, the task and when to do it. You check it on one card before anything starts.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Review committed changes in this project daily at 11:00 in Asia/Kolkata. Also run once today.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary"'+(S.busy||!usable()?' disabled':'')+'>Describe to DGC</button>':'<p class="notice">Describe it in a Work session on your computer. This view can’t send it there.</p>'}</form><p class="muted">Project: ${esc(S.workspace.name)}. DGC confirms the project folder with you. To check a running app, you approve its test commands separately.</p><div class="actions">${button('advanced-create',simpleMode()?'Choose a Pip myself':'Advanced: choose a Pip',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
 
   if(S.createStep==='type')return `<section class="type-picker" aria-labelledby="type-picker-title"><p class="step">Step 1 of 2 · Choose your Pip</p><h2 id="type-picker-title">Who’s right for this job?</h2><p class="muted">Scout, Lens, Rook and Lock read committed code. Patch fixes files and Pulse runs tests, each in a private copy and only as you approve. Quill writes private documentation drafts. Chatting with any Pip never changes your files.</p>${S.types.length?`<div class="type-grid">${S.types.map(t=>`<article class="type-card${t.available?'':' planned'}" data-type-card="${esc(t.id)}">${avatar(t.available?'idle':'offline',t,`choose-${t.id}`)}<div class="type-copy"><h3>${esc(t.name)}<span class="badge">${t.available?(executionPip(t)?'You approve each run':documentationPip(t)?'Drafts only':'Reads only'):'Planned'}</span></h3><p class="type-role">${esc(t.role)}</p><p class="muted">${esc(t.description)}</p>${!t.available?`<p class="type-reason">${esc(t.unavailable_reason)}</p>`:''}</div><button type="button" data-pip-type="${esc(t.id)}"${!t.available||S.busy||!usable()?' disabled':''}>${t.available?`Choose ${esc(t.name)}`:'Not available yet'}</button></article>`).join('')}</div>`:'<p class="notice error">Pip types are unavailable. Reconnect to retry.</p>'}<div class="actions">${button('cancel-create','Cancel',S.busy)}</div></section>`;
   const type=S.types.find(t=>t.id===S.createType);
@@ -1239,7 +1245,7 @@ async function loadFixes(){
 function openFixChat(runId){
   const fix=S.fixes.get(runId);if(!fix?.session_id||typeof options.onOpenFix!=='function'||remoteHost)return;
   const result=options.onOpenFix({session:fix.session_id,run_id:runId});
-  if(result!==true)setError(typeof result==='string'?result:'DGC could not open the Work chat this fix ran in.');
+  if(result!==true)setError(typeof result==='string'?result:'DGC could not open the Work session this fix ran in.');
 }
 async function loadPosts(more=false){
   if(!postsShown()||!S.selected||!usable()||(more&&(!S.postsCursor||S.postsLoading)))return;
@@ -1264,11 +1270,11 @@ function askDgcAbout(runId){
   const live=fixesShown(),{fix,asking}=live?fixState(runId):{};
   if(live?asking||FIX_ACTIVE.includes(fix?.state):askedRuns.has(runId))return;
   const result=options.onAskDgc({report:post,session:typeof S.pip?.report_session==='string'?S.pip.report_session:''});
-  if(result!==true){setError(typeof result==='string'?result:'DGC could not reach the Work chat.');return;}
+  if(result!==true){setError(typeof result==='string'?result:'DGC could not reach the Work session.');return;}
   // From Pips API 65 the post says what the fix does, read from DGC; before, that it was asked, kept with the view.
   if(live){askingFix.set(runId,Date.now());for(const ms of [1500,5000,12000])window.setTimeout(()=>void loadFixes(),ms);}
   else{askedRuns.add(runId);rememberView();}
-  S.notice='Asked DGC in the Work chat.';render();
+  S.notice='Asked DGC in the Work session.';render();
 }
 function runNow(){if(livePip(S.pip)){try{if(S.apiVersion<60)throw Error('Update DGC to run a live-data Pip.');if(!S.runner?.online||S.runner.paused||S.pip.status!=='active'||S.pip.active_run||S.runs.some(r=>active(r.status)))return;void mutate({type:'run_pip',pip_id:S.selected,idempotency_key:`editor-${globalThis.crypto.randomUUID()}`},async result=>{await loadRun(result.run.id);});}catch(error){setError(error);}return;}if(pulsePip(S.pip)){try{if(S.apiVersion<21)throw Error('Update DGC to run Pulse’s command plan.');if(!supportedSource()||!S.runner?.online||S.runner.paused||S.pip.status!=='active'||S.pip.active_run||S.runs.some(r=>active(r.status)))return;const pins=pulseRunPins(S.pip);void mutate({type:'run_pip',pip_id:S.selected,idempotency_key:`editor-${globalThis.crypto.randomUUID()}`,...pins},async result=>{await loadRun(result.run.id);});}catch(error){setError(error);}return;}if(supportedSource()&&!executionPip(S.pip)&&S.runner?.online&&!S.runner.paused&&S.pip?.status==='active'&&pipType(S.pip,S.types)?.available&&!S.pip.active_run)void mutate({type:'run_pip',pip_id:S.selected,idempotency_key:`editor-${Date.now()}-${globalThis.crypto.randomUUID()}`},async result=>{await loadRun(result.run.id);});return;}
 async function toggleChatActivity(runId){
@@ -1773,14 +1779,17 @@ async function sendChat(sent={}){
   // A card number never leaves the box: not sent, not kept as a draft. The user types it on the Pip's screen.
   if(cardNumber(text)){refuseCard(S.selected);return;}{const tooLong=chatTooLong(text);if(tooLong){setError(tooLong+' Nothing was sent.');return;}}
   const boxText=!!chatBox&&messageWords(chatBox.el.value)===text,marks=S.displayMentions?(sent.marks||(boxText?chatBox.marks(text):[])):[],parts=sent.parts||(boxText?chatBox.parts():null);
-  const options=S.apiVersion>=24?chosenChatOptions():undefined,signature=JSON.stringify({text,...(options?{chat_options:options}:{}),...(images.length?{images:images.map(i=>i.length+':'+i.slice(-64))}:{}),...(files.length?{files:files.map(f=>f.name+':'+f.data.length+':'+f.data.slice(-64))}:{})});const token=scope(),id=S.selected,conv=S.conv,generation=selectionGeneration,epoch=S.epoch;
+  // What this message asks its reply to make (API 100): the output marked in it, its own whenever it is sent (now, on
+  // the way while the Pip works, or from the queue). An older DGC is never sent one.
+  const output=messageOutput(marks);
+  const options=S.apiVersion>=24?chosenChatOptions():undefined,signature=JSON.stringify({text,...(output?{output}:{}),...(options?{chat_options:options}:{}),...(images.length?{images:images.map(i=>i.length+':'+i.slice(-64))}:{}),...(files.length?{files:files.map(f=>f.name+':'+f.data.length+':'+f.data.slice(-64))}:{})});const token=scope(),id=S.selected,conv=S.conv,generation=selectionGeneration,epoch=S.epoch;
   // The quote in the box goes with what was typed there; a message that waited in the queue was written before it.
   const reply=sent.marks?null:pendingReply();
-  let pending=chatRequests.get(id);if(!pending||pending.signature!==signature||(pending.reply?.id||'')!==(reply?.id||'')){pending={text,signature,options,images,files,marks,parts,reply,key:`pip-chat-${globalThis.crypto.randomUUID()}`};chatRequests.set(id,pending);}S.busy=true;S.error='';
+  let pending=chatRequests.get(id);if(!pending||pending.signature!==signature||(pending.reply?.id||'')!==(reply?.id||'')){pending={text,signature,options,images,files,marks,parts,reply,output,key:`pip-chat-${globalThis.crypto.randomUUID()}`};chatRequests.set(id,pending);}S.busy=true;S.error='';
   // Your message is in the chat at once, as in DGC's own chat: the box clears now, not when the reply
   // is queued (a Pip's first step lists its workflow connectors' tools, which can take seconds).
   appLinkSettled.clear();S.sending={pip:id,conv,text,key:pending.key,marks:pending.marks,reply:pending.reply,at:new Date().toISOString()};markLiveCut(pending.key,text);chatFollow.sending();if(pending.reply)chatReplies.delete(id);chatEdit(()=>{if(messageWords(draft.chatText)===text){draft.chatText='';if(boxText)chatMarks.delete(id);}render();});
-  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{}),...(pending.marks?.length?{display_mentions:pending.marks}:{}),...(conv?{conversation_id:conv}:{}),...(pending.reply?{reply_to:pending.reply.id}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');nameFromFirstMessage(id,conv,text);
+  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{}),...(pending.marks?.length?{display_mentions:pending.marks}:{}),...(conv?{conversation_id:conv}:{}),...(pending.reply?{reply_to:pending.reply.id}:{}),...(pending.output?{output:pending.output}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');nameFromFirstMessage(id,conv,text);
     {const cut=S.stream?.cuts.find(c=>c.key===pending.key&&!c.id);if(cut&&typeof result.message.id==='string')cut.id=result.message.id;}
     // Its conversation left the screen meanwhile: what it kept is settled there, and the one shown is left alone.
     if(S.selected===id&&S.conv!==conv){settleStashedSend(id,conv,pending,text,false);void loadConversations();return;}
@@ -3085,7 +3094,7 @@ function hydrateSchedule(pip) {
   draft.scheduleTime=value?.time||'09:00';draft.scheduleZone=value?.timezone||defaultZone;draft.scheduleAt=value?.at||'';draft.scheduleCron=value?.cron||'0 9 * * 1-5';
   S.scheduleDraftVersion=pip.current_version;
 }
-const sessionTurnNotice='Runs after a turn in a DGC chat on this computer is saved. The chat itself isn’t shared. It doesn’t mean the work is finished or that tests passed. The audit reads the committed code on its branch when it starts, not what the chat saw.';
+const sessionTurnNotice='Runs after a turn in a Work session on this computer is saved. The session itself isn’t shared. It doesn’t mean the work is finished or that tests passed. The audit reads the committed code on its branch when it starts, not what the session saw.';
 const quillAutomationNotice='Quill writes private drafts with the model. It doesn’t publish anything, change shared context, or check its prose or tests. Each draft reads the latest local commit on its branch when it starts, which may be newer than the event that started it. No chat is shared.';
 const commitPathNotice='Watches these paths in new local commits on its branch. Uncommitted edits and anything on a remote don’t count. The first check only notes where things are. Each run reads the latest commit when it starts, which may be newer than the one that woke it.';
 function commitRulesMarkup(value,title='Paths it watches'){

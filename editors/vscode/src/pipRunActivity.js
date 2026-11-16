@@ -56,7 +56,7 @@ const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
 const PROJECT_EVENTS={workspace_commit_changed:'From a new commit',workspace_committed_paths_changed:'From a new commit',
   workspace_context_recorded:'From a context change',workspace_context_archived:'From a context change',
   workspace_finding_accepted:'From an accepted finding',pip_finding_accepted:'From an accepted finding',
-  workspace_execution_recorded:'From a saved result',workspace_session_turn_completed:'From a DGC chat'};
+  workspace_execution_recorded:'From a saved result',workspace_session_turn_completed:'From a Work session'};
 /** How a run started, in a few words: "Started by you", "On schedule · 9:00 AM", "From a new commit", "Asked by DGC",
  *  "From another Pip" or "First run". `run`: the run as get_pip_run or list_pip_runs gives it (its manifest's
  *  trigger, and the time it was due); `first`: it is the Pip's first run, started on its own setup card. */

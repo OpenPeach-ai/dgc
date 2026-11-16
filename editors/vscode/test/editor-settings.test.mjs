@@ -1100,8 +1100,8 @@ test('Agents: the sub-agents\' Context size, blank for the main model\'s window,
   const size=()=>x.d.querySelector('#subagent_context_size');
   assert.equal(size().disabled,false);
   assert.equal(size().value,'','0 is shown as blank');
-  // 0.51: the same box as DGC Router's Context each, its first choice "Same as the main chat" (src/contextCombo.js).
-  assert.equal(size().placeholder,'Same as the main chat');
+  // 0.51: the same box as DGC Router's Context each, its first choice "Same as the main session" (src/contextCombo.js).
+  assert.equal(size().placeholder,'Same as the main session');
   assert.equal(size().closest('.group').querySelector('h3').textContent,'Sub-agents');
   x.message({type:'event',event:{...x.config,subagent_context_size:65536}});
   assert.equal(size().value,'64K','a size, as the list says it');
@@ -1548,17 +1548,17 @@ test('a plugin\'s page: no maintainers\' notes, no "Not provided" rows; director
   assert.doesNotMatch(x.d.querySelector('.directory-card-footer').textContent,/dgc-curated|MIT|License/);
 });
 
-test('Permission mode says it is this Work chat\'s, and that a new chat never starts in Auto',()=>{
+test('Permission mode says it is this Work session\'s, and that a new session never starts in Auto',()=>{
   // The field sends set_mode, which since 0.50.1 changes only this Work chat, and an editor process holds a saved
   // Auto to Default. Read as a default for every chat, Auto chosen here was quietly undone by the next reload.
   const x=setup();
   x.click('[data-nav=general]');
   const mode=x.d.querySelector('#mode');
   assert.deepEqual([...mode.options].map(o=>o.value),['default','acceptEdits','plan','auto']);
-  assert.match(rowHint(mode),/this Work chat/);
-  assert.match(rowDetail(mode),/Auto[^.]*one Work chat at a time/);
-  assert.match(rowDetail(mode),/new chat[^.]*starts in Default/);
-  assert.match(rowDetail(mode),/chat you reopen, or this one after a reload, comes back in the mode it had/);
+  assert.match(rowHint(mode),/this Work session/);
+  assert.match(rowDetail(mode),/Auto[^.]*one Work session at a time/);
+  assert.match(rowDetail(mode),/new session[^.]*starts in Default/);
+  assert.match(rowDetail(mode),/session you reopen, or this one after a reload, comes back in the mode it had/);
 });
 
 // ---- Settings › Models › Sub-agents (0.52, 14 Nov): its Model is a provider-and-models choice. A model from another
@@ -1581,7 +1581,7 @@ test('Sub-agents: the provider choice lists every saved provider, greys Claude C
   assert.ok(pick,'Sub-agents has its provider choice');
   assert.ok(x.d.querySelector('#models-subagents').contains(pick));
   const options=[...pick.options].map(o=>[o.value,o.textContent,o.disabled]);
-  assert.deepEqual(options,[['','Same as the main chat',false],[SPARE_ID,'Spare',false],[OPEN_ID,'Open host',false],
+  assert.deepEqual(options,[['','Same as the main session',false],[SPARE_ID,'Spare',false],[OPEN_ID,'Open host',false],
     ['subscription_claude','Claude Code (can’t run DGC’s agents)',true],['custom','Another host…',false]]);
   assert.equal(pick.value,'','nothing chosen: the main chat’s');
   assert.match(rowSaid(pick),/Claude Code and Codex run their own tools, so they can’t run DGC’s agents/);

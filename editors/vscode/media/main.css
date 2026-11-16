@@ -3794,6 +3794,32 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
 /* A provider row's chevron sits at the row's right end, as the Sub-agents row's does (not right after its name). */
 #modelmenu .model-options .mrow > .codicon-chevron-right:last-child { margin-left: auto; }
 
+/* Permission rules: each rule in words, with where it applies (or the rule as written) on a quiet line under it. */
+.rule-row .surface-badge { margin-left: 0; align-self: flex-start; margin-top: 2px; }
+.rule-row .rule-words { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.rule-row .rule-where, .rule-row .rule-raw { display: block; margin-top: var(--sp-1); font-size: var(--t-xs); overflow-wrap: anywhere; }
+.rule-row .rule-raw { color: var(--faint); background: transparent; padding: 0; }
+/* What Always allow covers on an edit's card (W8, his call of 15 Nov): said in a quiet line of the card, under its
+   question. The three answers stay the family's own boxes: a button as wide as a sentence is not one of DGC's. */
+.card.perm-card > .perm-always { grid-row: 2; margin: var(--sp-1) 0 0; color: var(--muted-firm, var(--muted)); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.card.perm-card.resolved > .perm-always, .card.perm-card[data-deny] > .perm-always { display: none; }
+/* (Under about 560 px the three answers don't fit beside "Run write_file": they lay on its words. On this card they
+   go under what it shows, as in a narrow panel, and the line under them: a card taller than its dock keeps its
+   answers in sight, and the line is one scroll away.) */
+@media (max-width: 560px) {
+  .card.perm-card:has(> .perm-always):not([data-deny]) > .btns { grid-column: 1 / -1; grid-row: auto; justify-content: flex-start; flex-wrap: wrap; margin-top: var(--sp-2); }
+  .card.perm-card > .perm-always { grid-row: auto; margin-top: var(--sp-2); }
+}
+/* A plan on its card (W29): drawn as a reply is (headings, lists, code), in the box a card's detail has; long, it scrolls
+   inside. One line says what approving does; its answers are the family's boxes. */
+.card .plan-body { margin: var(--sp-1) 0 var(--sp-2); padding: var(--sp-2) var(--sp-3); max-height: min(60vh, 520px); overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--code); color: var(--text); font: var(--w-reg) var(--t-sm)/1.55 var(--sans); overflow-wrap: anywhere; }
+.card .plan-body :is(h1, h2, h3, h4) { margin: var(--sp-3) 0 var(--sp-1); font: var(--w-semi) var(--t-base)/1.35 var(--sans); color: var(--text-strong); }
+.card .plan-body > :first-child { margin-top: 0; }
+.card .plan-body pre { margin: var(--sp-2) 0; }
+.card .plan-says { margin: var(--sp-2) 0; color: var(--muted-firm, var(--muted)); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+/* A preview's line: plain words (its address is what a pointer reads), not the code face an address had. */
+.artifact .aurl.aurl-words { font: var(--w-reg) var(--t-sm)/1.45 var(--sans); word-break: normal; overflow-wrap: break-word; }   /* (words wrap between words: an address broke anywhere) */
 /* ---- DGC's one button, in Work (the definition: media/shared/tokens.css, "The button"). Every button the chat draws
    reads it: a command's Allow once / Always allow / Deny and a plan's answers (button.act), the listing cards' and an
    artifact's buttons (.abtn), a question's answers (.ask-act; Send and Skip under an open question), the dialogs'

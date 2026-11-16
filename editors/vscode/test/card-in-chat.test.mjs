@@ -71,7 +71,7 @@ test("the Work chat warns once about a card number; Enter again sends it as it i
   await page.keyboard.type("Pay it with 4242 4242 4242 4242 12/34");
   await page.keyboard.press("Enter");
   assert.equal((await posted()).length, 1, "a card is not sent on the first Enter");
-  assert.match(await page.evaluate(() => document.body.textContent), /That looks like a payment card number\. Whatever you send here goes to the model, so card numbers stay out of the chat\./);
+  assert.match(await page.evaluate(() => document.body.textContent), /That looks like a payment card number\. Whatever you send here goes to the model, so card numbers stay out of the session\./);
   await page.keyboard.press("Enter");
   assert.deepEqual((await posted()).at(-1), "Pay it with 4242 4242 4242 4242 12/34", "Enter again sends it as it is");
 });

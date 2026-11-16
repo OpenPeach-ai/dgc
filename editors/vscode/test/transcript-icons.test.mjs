@@ -216,7 +216,7 @@ test("the notices that carry a mark carry the right one", () => {
   event({ type: "rule_added", rule: "bash(npm test)" });
   const rule = [...doc.querySelectorAll(".sys")].at(-1);
   assert.equal(rule.querySelector("svg").dataset.icon, "shield-plus");
-  assert.equal(rule.textContent, "rule: bash(npm test)");
+  assert.equal(rule.textContent, "Rule added: always allow the command npm test");   // in words (media/shared/rulewords.js)
   assert.doesNotMatch(rule.textContent, OLD_GLYPHS);
   // Older conversation, summarised.
   event({ type: "compacted", before_tokens: 60000, after_tokens: 20000, context_size: 128000,

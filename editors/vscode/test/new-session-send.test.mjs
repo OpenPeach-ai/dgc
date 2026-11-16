@@ -19,7 +19,7 @@ test("Enter in a new session before it's ready: it says it's starting, sends onc
   input.value = "Write a haiku about rivers";
   x.doc.getElementById("send").click();
   assert.equal(prompts(x).length, 0, "nothing is sent before the chat is ready");
-  assert.deepEqual(lines(x), ["Starting this chat. Your message sends as soon as it's ready."]);
+  assert.deepEqual(lines(x), ["Starting this session. Your message sends as soon as it's ready."]);
   assert.doesNotMatch(x.doc.body.textContent, /reconnecting/i, "a first start is not a reconnect");
   connect(x, "s-new");
   x.advance(2000);
@@ -40,7 +40,7 @@ test("a chat that was ready and is reconnecting says so, and sends when it's bac
   input.value = "carry on";
   x.doc.getElementById("send").click();
   assert.equal(prompts(x).length, 0);
-  assert.ok(lines(x).includes("DGC is reconnecting to this chat. Your message sends as soon as it's back."), lines(x).join(" | "));
+  assert.ok(lines(x).includes("DGC is reconnecting to this session. Your message sends as soon as it's back."), lines(x).join(" | "));
   connect(x, "s-back");
   x.advance(2000);
   assert.deepEqual(prompts(x).map((m) => m.text), ["carry on"]);

@@ -622,6 +622,8 @@ export class Artifacts implements vscode.Disposable {
    *  card or the Library already knows, so a document opens without asking first. */
   open(id: string, hint?: Partial<ArtifactView>): void {
     if (!ARTIFACT_ID.test(id)) return;
+    // Opened, from wherever (its card in a session or a chat, the Library, Home): it is no longer news on Home (H1).
+    this.tell({ type: "artifactOpened", id });
     // No check of the capability here: the side bar's process may still be starting (a card is only drawn by a CLI
     // that offers artifacts). Its answer says, and an older CLI's refusal reads "needs a newer DGC CLI".
     const existing = this.panels.get(id);

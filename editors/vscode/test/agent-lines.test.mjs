@@ -259,7 +259,7 @@ test("only the names open pages; Back and Escape return focus to the name that w
   b.click();
   assert.equal(p.doc.body.dataset.agentPage, sid(2));
   assert.equal(p.$("thread-title").textContent, "B");
-  assert.equal(p.$("agent-back").getAttribute("title"), "Back to chat");
+  assert.equal(p.$("agent-back").getAttribute("title"), "Back to session");
   p.$("agent-back").click();
   assert.equal(p.doc.body.dataset.agentPage, undefined);
   assert.equal(p.doc.activeElement, b, "focus is back on the name that opened the page");
@@ -435,7 +435,7 @@ test("a nested agent is a line on its parent's page, and Back steps back one pag
   assert.equal(p.doc.body.dataset.agentPage, sid(1), "Back returns to the parent's page");
   assert.equal(p.doc.activeElement, page.querySelector(`.agent-name[data-agent-id="${sid(2)}"]`),
     "with focus on the nested agent's name");
-  assert.equal(p.$("agent-back").getAttribute("title"), "Back to chat");
+  assert.equal(p.$("agent-back").getAttribute("title"), "Back to session");
   p.$("agent-back").click();
   assert.equal(p.doc.body.dataset.agentPage, undefined, "and again to the chat");
   assert.equal(p.doc.activeElement, parentName, "with focus on the parent's name in the chat");

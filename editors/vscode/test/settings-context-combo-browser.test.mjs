@@ -45,7 +45,7 @@ test("a size reads the same however it's typed, and says what will be saved", ()
   for (const bad of ["lots", "16M", "16.5", "-4K"]) assert.equal(parseContext(bad), null, bad);
   assert.equal(contextSaid(24576), "24K = 24,576 tokens");
   assert.equal(contextSaid(30000), "30,000 tokens");
-  assert.equal(contextSaid("", "Same as the main chat"), "Same as the main chat");
+  assert.equal(contextSaid("", "Same as the main session"), "Same as the main session");
   assert.equal(contextNote(1024), "Below 2K: DGC needs at least 2K (2,048 tokens) for its own instructions.");
   assert.equal(contextNote(262144, 131072), "This model handles up to 128K; DGC will use 128K.");
   assert.equal(contextNote(65536, 131072), "", "and back under it, no note: the check works both ways");
@@ -175,7 +175,7 @@ for (const theme of ["dark", "light"]) {
       } finally { await context.close(); }
     });
 
-    test(`${theme} at ${width}px: Sub-agents' Context window, the same box, Same as the main chat first`, async (t) => {
+    test(`${theme} at ${width}px: Sub-agents' Context window, the same box, Same as the main session first`, async (t) => {
       if (skipOrFail(t)) return;
       const { context, p, errors } = await open(theme, width, false);
       try {
@@ -183,13 +183,13 @@ for (const theme of ["dark", "light"]) {
         await p.waitForSelector(sel);
         let seen = await box(p, sel);
         assert.equal(seen.value, "");
-        assert.equal(seen.options[0], "Same as the main chat");
+        assert.equal(seen.options[0], "Same as the main session");
         assert.deepEqual(seen.options.slice(1), ["4K", "8K", "16K", "32K", "64K", "128K", "256K"]);
-        assert.equal(seen.said, "Same as the main chat");
+        assert.equal(seen.said, "Same as the main session");
         assert.equal(seen.overflow, false);
         await p.focus(sel);
         await p.keyboard.press("ArrowDown");
-        assert.equal((await box(p, sel)).active, "Same as the main chat");
+        assert.equal((await box(p, sel)).active, "Same as the main session");
         for (let i = 0; i < 4; i++) await p.keyboard.press("ArrowDown");
         await p.keyboard.press("Enter");
         seen = await box(p, sel);

@@ -104,7 +104,7 @@
     "commands": [
       {
         "command": "dgc.focus",
-        "title": "Focus Chat",
+        "title": "Focus Side Bar",
         "category": "DGC"
       },
       {
@@ -169,19 +169,19 @@
       },
       {
         "command": "dgc.newParallelChat",
-        "title": "Open a Second Chat",
+        "title": "Open a Second Session",
         "category": "DGC",
         "icon": "$(split-horizontal)"
       },
       {
         "command": "dgc.newChatInFolder",
-        "title": "Open a Chat in Another Folder…",
+        "title": "Open a Session in Another Folder…",
         "category": "DGC",
         "icon": "$(folder-opened)"
       },
       {
         "command": "dgc.switchChat",
-        "title": "Switch Chat",
+        "title": "Switch Session",
         "category": "DGC"
       },
       {
@@ -672,13 +672,13 @@
         "dgc.shareBackend": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Run the chats in one panel in one `dgc serve`, the way Codex runs its threads — each chat still in its own folder, with its own project, trust, MCP servers and mode. Turn it off to give each chat a process of its own. A session's editor tab always has a process of its own. A backend pinned to one project (`DGC_PROJECT_ROOT`) cannot hold chats in other folders, so those get a process of their own."
+          "markdownDescription": "Run the sessions in one panel in one `dgc serve`, the way Codex runs its threads — each session still in its own folder, with its own project, trust, MCP servers and mode. Turn it off to give each session a process of its own. A session's editor tab always has a process of its own. A backend pinned to one project (`DGC_PROJECT_ROOT`) cannot hold sessions in other folders, so those get a process of their own."
         },
         "dgc.maxLiveChats": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "markdownDescription": "How many chats may hold a live `dgc serve` at once. **0 (the default) means no limit** — open as many as your machine and your model budget allow. Each chat is its own backend with its own model context and session, so the chat you switch away from keeps working. A backend itself is small (about 9 MB); the real cost of another chat is another model context. Set a positive number if you want DGC to stop you at a ceiling, or 1 to keep it single-chat."
+          "markdownDescription": "How many sessions may hold a live `dgc serve` at once. **0 (the default) means no limit** — open as many as your machine and your model budget allow. Each session is its own backend with its own model context, so the session you switch away from keeps working. A backend itself is small (about 9 MB); the real cost of another session is another model context. Set a positive number if you want DGC to stop you at a ceiling, or 1 to keep it to one session."
         },
         "dgc.closingAWorkingTab": {
           "type": "string",
@@ -727,7 +727,7 @@
           "type": "boolean",
           "default": true,
           "scope": "window",
-          "description": "Show a notification when a DGC chat you are not looking at needs your answer: an approval, a question or a plan. Open chat goes straight to it."
+          "description": "Show a notification when a DGC session you are not looking at needs your answer: an approval, a question or a plan. Open session goes straight to it."
         },
         "dgc.picturesInReplies": {
           "type": "string",

@@ -42,7 +42,7 @@
     const input = () => (typeof o.input === "function" ? o.input() : o.input) || null;
     const shown = o.shown || ((node) => !!node && node !== doc.body && node.isConnected && !node.closest("[hidden]"));
     const wide = o.wide || 520, keep = o.keep || [];
-    const words = { more: "Show the rest of what is running", list: "The rest of what is running in this chat", ...(o.words || {}) };
+    const words = { more: "Show the rest of what is running", list: "The rest of what is running here", ...(o.words || {}) };
     const popId = pop.id || "";
 
     let hiddenKinds = [];                        // the kinds behind "+N", in the bar's order

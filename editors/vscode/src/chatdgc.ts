@@ -1137,7 +1137,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (!ref) return;
         const projects = await this.projectList();
         const choice = await vscode.window.showQuickPick(projects.map((p) => ({ label: `$(folder) ${p.name}`, id: p.id })),
-          { placeHolder: projects.length ? "Add a copy to a project: every chat in it can read it" : "No projects yet: make one from the side bar" });
+          { placeHolder: projects.length ? "Add a copy to a space: every chat in it can read it" : "No spaces yet: make one from the side bar" });
         if (!choice) return;
         this.libraryAsk(panel, "libraryChange", { type: "chatdgc_library_file", op: "to_project", ...ref, target_project: choice.id });
         return;
@@ -1303,7 +1303,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   openProject(project: string): void {
     if (!PROJECT_ID.test(project)) return;
     for (const tab of this.tabs) { if (tab.project === project) { tab.panel.reveal(); return; } }
-    const panel = vscode.window.createWebviewPanel(CHATDGC_EDITOR, "Project", vscode.ViewColumn.Active, this.options());
+    const panel = vscode.window.createWebviewPanel(CHATDGC_EDITOR, "Space", vscode.ViewColumn.Active, this.options());
     this.adopt(panel, "", false, project);
   }
 
@@ -1848,7 +1848,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           // Home's Widgets card: the newest sixty, each with what its tile says and what opens it.
           const widgets = (Array.isArray(ev.widgets) ? ev.widgets : []).filter((w: any) => WIDGET_ID.test(String(w?.id || "")) && CONVERSATION_ID.test(String(w?.chat_id || "")))
             .map((w: any) => ({ id: String(w.id), title: widgetName(w.title), chat_id: String(w.chat_id), chat_title: String(w.chat_title || "").slice(0, 200), project_name: String(w.project_name || "").slice(0, 120), created_at: String(w.created_at || "") }));
-          this.host?.postHome({ type: "homeWidgets", offered: true, widgets, more: ev.next_offset !== null && ev.next_offset !== undefined });
+          this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...widgets, ...this.homeCards], more: ev.next_offset !== null && ev.next_offset !== undefined });
           return;
         }
         const w = ev.widget && typeof ev.widget === "object" ? ev.widget : null;
@@ -2111,7 +2111,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.([]); return; }
         if (asker && !asker.tab && asker.kind !== "list") { void vscode.window.showErrorMessage(message); return; }
         if (asker?.tab) { this.post(asker.tab, { type: "error", message, opening: asker.kind === "open" }); return; }
-        if (asker?.kind === "homeWidgets") { this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [] }); return; }      // Home's card says none, quietly
+        if (asker?.kind === "homeWidgets") { this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...this.homeCards] }); return; }      // Home's card says none of ChatDGC's, quietly
         if (asker?.home) { this.host?.postHome({ type: "chatdgc_list", available: true, error: message, items: [], query: this.homeQuery }); return; }
         for (const tab of showing(conversation)) this.post(tab, { type: "error", message });
         return;
@@ -2595,8 +2595,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         // Picked here, sent from here: a page never names a file for the backend to read.
         const project = String(message.id || "");
         if (!PROJECT_ID.test(project)) return;
-        const chosen = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: "Add to project",
-          title: "Add files to this project: every chat in it can read them" });
+        const chosen = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: "Add to space",
+          title: "Add files to this space: every chat in it can read them" });
         const items = (chosen || []).filter((uri) => uri.scheme === "file").slice(0, this.attachmentLimit())
           .map((uri) => ({ kind: "file", path: uri.fsPath }));
         if (items.length) {
@@ -2841,7 +2841,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       { label: "$(edit) Rename", id: "rename" },
       { label: pinned ? "$(pinned) Unpin" : "$(pin) Pin", id: "pin" },
       { label: "$(archive) Archive", id: "archive" },
-      { label: "$(folder) Move to project…", id: "move" },
+      { label: "$(folder) Move to space…", id: "move" },
       { label: "$(export) Export…", id: "export" },
       { label: "$(trash) Delete", id: "delete" },
     ];
@@ -2883,15 +2883,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const projects = await this.projectList();
     const picks: (vscode.QuickPickItem & { id: string })[] = [
       ...projects.filter((p) => p.id !== current).map((p) => ({ label: `$(folder) ${p.name}`, description: `${p.chats} chat${p.chats === 1 ? "" : "s"}`, id: p.id })),
-      { label: "$(new-folder) New project…", id: "new" },
-      ...(current ? [{ label: "$(close) Remove from project", description: projects.find((p) => p.id === current)?.name, id: "" }] : []),
+      { label: "$(new-folder) New space…", id: "new" },
+      ...(current ? [{ label: "$(close) Remove from space", description: projects.find((p) => p.id === current)?.name, id: "" }] : []),
     ];
-    const choice = await vscode.window.showQuickPick(picks, { placeHolder: "Move this chat to a project" });
+    const choice = await vscode.window.showQuickPick(picks, { placeHolder: "Move this chat to a space" });
     if (!choice) return;
     let target = choice.id;
     if (target === "new") {
-      const name = await vscode.window.showInputBox({ prompt: "Name the new project", placeHolder: "Goa trip",
-        validateInput: (value) => (value.trim() ? undefined : "Give the project a name.") });
+      const name = await vscode.window.showInputBox({ prompt: "Name the new space", placeHolder: "Goa trip",
+        validateInput: (value) => (value.trim() ? undefined : "Give the space a name.") });
       if (!name) return;
       target = (await this.createProject(name)) || "";
       if (!target) return;
@@ -2927,10 +2927,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   /** Delete a project, as ChatGPT does (its chats with it), or keep its chats as your own. */
   private async deleteProject(project: string, name: string, chats: number, tab?: Tab): Promise<void> {
     if (!PROJECT_ID.test(project)) return;
-    const ALL = chats ? `Delete project and ${chats} chat${chats === 1 ? "" : "s"}` : "Delete project";
-    const KEEP = "Delete project, keep its chats";
+    const ALL = chats ? `Delete space and ${chats} chat${chats === 1 ? "" : "s"}` : "Delete space";
+    const KEEP = "Delete space, keep its chats";
     const choice = await vscode.window.showWarningMessage(
-      `Delete the project “${chatTitle(name)}”? Its files and instructions go${chats ? `; its chats too, unless you keep them` : ""}. This can't be undone.`,
+      `Delete the space “${chatTitle(name)}”? Its files and instructions go${chats ? `; its chats too, unless you keep them` : ""}. This can't be undone.`,
       { modal: true }, ALL, ...(chats ? [KEEP] : []));
     if (!choice) return;
     this.ask({ tab, kind: "projectDelete", project }, { type: "chatdgc_project", op: "delete", project_id: project,
@@ -2982,16 +2982,27 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   /** Home's Widgets and Artifacts cards (media/shared/homecards.js): what the Library lists, as the cards take it, and
    *  what a card opens. Nothing here is the page's word for what to open: ids are checked as the Library's are. */
+  /** The cards a reply drew, as Home's Widgets card lists them beside ChatDGC's widgets (read when the card asks). */
+  private homeCards: Array<{ id: string; title: string; card: boolean; surface: string; created_at: string }> = [];
   async homeCardsMessage(message: any): Promise<void> {
     switch (message?.type) {
-      case "homeWidgetsGet":
-        if (!this.widgetLibrary()) { this.host?.postHome({ type: "homeWidgets", offered: false, widgets: [] }); return; }
+      case "homeWidgetsGet": {
+        // What the Library's Widgets tab lists: ChatDGC's widgets, and the cards a reply drew (artifacts made as a
+        // card; made as a widget too, when this ChatDGC lists none). Home said "No widgets yet" over a Library with one,
+        // and counted the cards among its artifacts (L2, user test 15 Nov).
+        const live = this.widgetLibrary();
+        try { this.homeCards = (this.artifacts && this.artifactsOffer() ? await this.artifacts.list() : []).filter((a: any) => ARTIFACT_ID.test(String(a?.id || "")) && (a.made_as === "card" || (a.made_as === "widget" && !live)))
+          .map((a: any) => ({ id: String(a.id), title: String(a.title || "").slice(0, 200), card: true, surface: String(a.origin?.surface || ""), created_at: String(a.updated || a.created || "") })).slice(0, 60); }
+        catch { this.homeCards = []; }
+        if (!live) { this.host?.postHome({ type: "homeWidgets", offered: this.homeCards.length > 0, widgets: this.homeCards }); return; }
         this.ask({ kind: "homeWidgets" }, { type: "chatdgc_widgets", op: "list", limit: 60, offset: 0 });
         return;
+      }
       case "homeArtifactsGet": {
         if (!this.artifacts || !this.artifactsOffer()) { this.host?.postHome({ type: "homeArtifacts", offered: false, items: [] }); return; }
         try {
-          const items = (await this.artifacts.list()).filter((a: any) => ARTIFACT_ID.test(String(a?.id || ""))).map((a: any) => ({ id: String(a.id), type: String(a.type || ""), title: String(a.title || "").slice(0, 200),
+          // (As the Library's Artifacts tab: a reply's card and a ChatDGC widget are Widgets, not counted here.)
+          const items = (await this.artifacts.list()).filter((a: any) => ARTIFACT_ID.test(String(a?.id || "")) && !a.made_as).map((a: any) => ({ id: String(a.id), type: String(a.type || ""), title: String(a.title || "").slice(0, 200),
             version: Number(a.version) || 1, surface: String(a.origin?.surface || ""), at: String(a.updated || a.created || "") }))
             .sort((a, b) => b.at.localeCompare(a.at));
           this.host?.postHome({ type: "homeArtifacts", offered: true, items: items.slice(0, 60), more: items.length > 60 });
@@ -3036,8 +3047,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.openProject(String(message.id || ""));
         return true;
       case "chatdgcProjectNew": {
-        const name = await vscode.window.showInputBox({ prompt: "Name the new project: its chats, files and instructions stay together",
-          placeHolder: "Goa trip", validateInput: (value) => (value.trim() ? undefined : "Give the project a name.") });
+        const name = await vscode.window.showInputBox({ prompt: "Name the new space: its chats, files and instructions stay together",
+          placeHolder: "Goa trip", validateInput: (value) => (value.trim() ? undefined : "Give the space a name.") });
         if (!name) return true;
         const id = await this.createProject(name);
         if (id) this.openProject(id);

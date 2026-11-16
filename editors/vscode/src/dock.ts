@@ -28,7 +28,7 @@ export const DOCK_MOST = 16, DOCK_MOST_DEFAULT = 8, DOCK_SIZE_MIN = 24, DOCK_SIZ
 const KINDS = ["pip", "work", "chat", "artifact", "file", "widget", "project", "folder"] as const;
 export type DockKind = typeof KINDS[number];
 const ID = /^[A-Za-z0-9_.:|-]{1,200}$/;
-const NAMES: Record<DockKind, string> = { pip: "Pip", work: "Work session", chat: "ChatDGC chat", artifact: "Artifact", file: "Library file", widget: "Widget", project: "Project", folder: "Folder" };
+const NAMES: Record<DockKind, string> = { pip: "Pip", work: "Work session", chat: "ChatDGC chat", artifact: "Artifact", file: "Library file", widget: "Widget", project: "Space", folder: "Folder" };
 
 /** One pinned thing. `ref` is what opens it (ids only); `look` is how to draw it when its list isn't loaded (a Pip's
  *  body, a file's kind); `where` is the folder a project's thing was pinned in ("" shows in every window). */

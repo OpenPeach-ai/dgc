@@ -223,7 +223,7 @@ export function routineFormMarkup(d, { esc, busy = false, error = '', gmail = fa
   return `<li class="routine-form-row"><form id="routine-form" class="routine-form form">`
     + `<label for="routineTitle">Name</label><input id="routineTitle" data-draft="routineTitle" maxlength="160" placeholder="Morning brief" value="${esc(d.routineTitle)}"${off}>`
     + `<label for="routinePrompt">What it does</label><textarea id="routinePrompt" data-draft="routinePrompt" rows="3" maxlength="4000" placeholder="Check my calendar and the weather, and tell me what today looks like."${troupe ? ' readonly aria-describedby="routineTroupeNote"' : ''}${off}>${esc(d.routinePrompt)}</textarea>`
-    + (troupe ? `<p class="muted" id="routineTroupeNote">This routine runs a troupe on ${esc(troupe.project || 'a project')}: ${esc(troupe.items || '')}. To change what it does, ask for a new one in a DGC chat.</p>` : '')
+    + (troupe ? `<p class="muted" id="routineTroupeNote">This routine runs a troupe on ${esc(troupe.project || 'a project')}: ${esc(troupe.items || '')}. To change what it does, ask for a new one in a Work session.</p>` : '')
     + `<label for="routineKind">When</label><div class="routine-when"><select id="routineKind" data-draft="routineKind"${off}>${kinds.map(([k, l]) => `<option value="${k}"${d.routineKind === k ? ' selected' : ''}>${l}</option>`).join('')}</select>${at}</div>`
     + (note ? `<p class="muted">${note}</p>` : '') + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '')
     + `<div class="actions"><button type="submit" class="primary"${off}>${isNew ? 'Add routine' : 'Save'}</button><button type="button" class="quiet" data-routine-cancel${off}>Cancel</button>`

@@ -94,7 +94,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
       const expected = {
         once: "Allowed once",
         deny: "Denied · note for the model: Use the fixture database instead",
-        always: "Always allowed · Bash(npm test:*)",
+        always: "Always allowed · commands that start with npm test",   // the rule in words (media/shared/rulewords.js)
         backend: "Denied by a rule",
       };
       for (const [id, words] of Object.entries(expected)) {
@@ -144,8 +144,8 @@ for (const theme of ["dark-modern", "light-modern"]) {
       const plans = await s.page.evaluate(() => window.__posted.filter((m) => m.type === "plan_response").map((m) => [m.id, m.decision]));
       assert.deepEqual(plans, cards.map(([id, d]) => [`req-${id}`, d]));
       const expected = {
-        "plan-approve": "Approved · acceptEdits mode",
-        "plan-auto": "Approved · auto mode",
+        "plan-approve": "Approved · asks before commands",       // in words, not a mode's code name (W29)
+        "plan-auto": "Approved · never asks",
         "plan-keep": "Kept planning · feedback: Cover the migration first",
         "plan-keep-bare": "Kept planning",
         sampling: "Approved once",

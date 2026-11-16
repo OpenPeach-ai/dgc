@@ -209,7 +209,7 @@ test("an icon tab keeps its name for a screen reader and its tooltip: Home, Work
       const { nodes } = await cdp.send("Accessibility.getFullAXTree");
       const heard = nodes.filter((n) => n.role?.value === "tab" && !n.ignored).map((n) => n.name?.value);
       assert.equal(heard.length, 5, `${width}px: five tabs are heard (${heard})`);
-      assert.match(heard[0], /^Home: \d+ things need you or are new$/, `${width}px: Home, with what waits`);
+      assert.match(heard[0], /^Home: (\d+ needs? you(, \d+ new)?|\d+ new)$/, `${width}px: Home, with what waits and what is new`);
       assert.deepEqual(heard.slice(1), ["Work", "Chat", "Library", "Pips"], `${width}px: the names a screen reader hears`);
       for (const name of ["Work", "Chat", "Pips", "Library"]) assert.equal(await x.page.getByRole("tab", { name, exact: true }).count(), 1, `${width}px: one tab named ${name}`);
       // The tooltip begins with the tab's name.

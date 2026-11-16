@@ -173,7 +173,7 @@ test("one box records at a time; another is told so; the one recording hears its
   await dictation.handle(chat, { type: "micStart" });
   assert.deepEqual(chat.said, [{ type: "mic", state: "recording" }]);
   await dictation.handle(pips, { type: "micStart" });
-  assert.deepEqual(pips.said, [{ type: "mic", state: "idle", error: "Another chat is recording: stop it there first." }]);
+  assert.deepEqual(pips.said, [{ type: "mic", state: "idle", error: "Another tab is recording: stop it there first." }]);
   await until(() => chat.said.filter((m) => m.type === "micLevels").length >= 3, LEVEL_POLL_MS * 10);
   const levels = chat.said.filter((m) => m.type === "micLevels");
   assert.ok(levels.every((m) => m.levels.length === 2 && m.levels.every((v) => v > 0.09 && v < 0.2)), JSON.stringify(levels));

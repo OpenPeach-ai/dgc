@@ -104,7 +104,7 @@ test("an agent with no prompt anywhere still says so", async (t) => {
   try {
     await send(started());           // no fix record for it: nothing to show
     const shown = await promptShown(page);
-    assert.equal(shown.card.text, "This agent's prompt was not kept in the chat.");
+    assert.equal(shown.card.text, "This agent's prompt was not kept in the session.");
     assert.equal(shown.card.quiet, true);
     assert.match(shown.transcript.note, /prompt was not kept/);
     assert.deepEqual(errors, []);

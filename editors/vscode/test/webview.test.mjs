@@ -1069,11 +1069,11 @@ test("stream batching flushes final text and partial changes stay explicit", () 
   assert.equal(doc.querySelector(".text.final").textContent.trim(), "Complete answer with formatting.");
   // A partial scan's counts are a floor: "+1 −82173 · partial scan" read as a total and was wrong.
   send({ type: "chat_changes", total: 900, additions: 12, deletions: 3, files: [], notices: ["Showing 500 of 900 changed files."] });
-  assert.equal(doc.getElementById("changes-count").textContent, "At least 900 files changed in this chat");
+  assert.equal(doc.getElementById("changes-count").textContent, "At least 900 files changed in this session");
   assert.match(doc.getElementById("changesbar").title, /real totals may be higher/);
   assert.equal(doc.getElementById("changes-add").textContent, "+12");
   send({ type: "chat_changes", total: 1, additions: 1, deletions: 1, files: [], notices: ["Some changes could not be recorded."] });
-  assert.equal(doc.getElementById("changes-count").textContent, "At least 1 file changed in this chat");
+  assert.equal(doc.getElementById("changes-count").textContent, "At least 1 file changed in this session");
   // A bounded scan that recorded NOTHING is the same kind of statement, not a failure: it is the
   // ordinary mid-turn state on a large repository. It used to read "Changes unavailable", which
   // says the feature is broken rather than that the scan could not reach that far.
@@ -2650,7 +2650,9 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
   const fold = plan.querySelector(":scope > details.plan-fold");
   assert.ok(fold && fold.open, "a waiting plan shows open, under a header that folds it");
   assert.match(fold.querySelector(":scope > summary").textContent, /Plan ready/);
-  assert.equal(fold.querySelector(":scope > pre").textContent, "1. Change it");
+  // (Drawn as a reply is, never the Markdown as written: W29.)
+  assert.equal(fold.querySelector(":scope > .plan-body").textContent.trim(), "Change it");
+  assert.ok(fold.querySelector(":scope > .plan-body ol > li"), "its numbered step is a list item");
   assert.equal(fold.querySelector("button, textarea"), null, "the answer and feedback stay outside the fold");
   plan.querySelector(".feedback").value = "Keep the public API compatible";
   plan.querySelector('button[data-d="reject"]').click();
@@ -2845,7 +2847,7 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
     { path: "src/new.ts", additions: 0, deletions: 0, counted: false, error: "Preview limit", untracked: true },
   ] });
   assert.equal(doc.getElementById("changesbar").hidden, false);
-  assert.equal(doc.getElementById("changes-count").textContent, "2 files changed in this chat");
+  assert.equal(doc.getElementById("changes-count").textContent, "2 files changed in this session");
   doc.getElementById("changes-review-button").click();
   assert.equal(doc.getElementById("changes-review").hidden, false);
   assert.equal(doc.querySelectorAll(".change-row").length, 2);
@@ -2948,8 +2950,10 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   high.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(posted.at(-1).type, "setReasoningProfile");
   assert.equal(posted.at(-1).level, "high");
-  // A rejected vendor effort must not leave an optimistic selection behind. Only a backend
-  // state/think_changed acknowledgement is allowed to change the visible value.
+  // The button says the level chosen at once (W15, user test 15 Nov: it showed the level before for seconds), but a
+  // rejected vendor effort must not leave that selection behind: DGC's refusal puts back what DGC last said.
+  assert.equal(doc.getElementById("effortname").textContent, "High");
+  send({ type: "event", event: { type: "command_rejected", command: "set_config", reason: "invalid_config_value", message: "Codex does not expose that effort" } });
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: [], current: "", subscription: true,
     supportsEffort: true, label: "Codex" });
@@ -2975,6 +2979,7 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
     supportsEffort: true, label: "Codex" });
   assert.ok(modelMenu.querySelector(".reasoning-card.is-ultra"));
   const off = modelMenu.querySelector(".effort-slider");
+  off.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));      // (a drag: its release is the choice)
   off.value = "0"; off.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(posted.at(-1).type, "setReasoningProfile");
   assert.equal(posted.at(-1).level, "off");
@@ -3269,7 +3274,7 @@ test("a new chat excludes pre-existing workspace changes and rejects stale chat 
   assert.equal(doc.getElementById("changesbar").hidden, false);
   assert.equal(doc.getElementById("changes-add").textContent, "+1");
   doc.getElementById("changes-main").click();
-  assert.equal(doc.getElementById("changes-review-title").textContent, "Changes in this chat");
+  assert.equal(doc.getElementById("changes-review-title").textContent, "Changes in this session");
   doc.querySelector(".change-row").click();
   assert.equal(posted.at(-1).scope, "chat");
   send({ type: "event", event: { type: "session", session_id: "chat-two" } });
@@ -4133,7 +4138,7 @@ test("a /monitors listing is a card with Stop on running monitors; a new chat cl
   event({ type: "session", kind: "new", message_count: 0, session_id: "s2" });
   assert.equal(doc.getElementById("monitorsbar").hidden, true);
   event({ type: "monitors", request_id: "monitors-list-2-2", wake_paused: false, pending_events: 0, items: [] });
-  assert.match([...doc.querySelectorAll(".sys")].at(-1).textContent, /No background monitors in this chat/);
+  assert.match([...doc.querySelectorAll(".sys")].at(-1).textContent, /No background monitors in this session/);
   assert.deepEqual(errors, []);
 });
 
@@ -4832,8 +4837,11 @@ test("Work's thinking slider: an arrow key steps it and the menu stays open; a d
   slider.value = String(Number(slider.value) + 1);
   slider.dispatchEvent(new W.Event("input", { bubbles: true }));
   slider.dispatchEvent(new W.Event("change", { bubbles: true }));
-  assert.ok(posted.some((m) => m.type === "setReasoningProfile"), "the step is chosen");
+  // (Keys are one choice when they rest, or when the slider is left: W15. uir2b-thinking-slider.test.mjs times it.)
+  assert.equal(posted.some((m) => m.type === "setReasoningProfile"), false, "a key's step isn't sent while more may follow");
   assert.equal(open(), was, "and the menu stays open for the next one");
+  slider.dispatchEvent(new W.Event("blur"));
+  assert.ok(posted.some((m) => m.type === "setReasoningProfile"), "the step is chosen once the slider is left");
   slider.dispatchEvent(new W.Event("pointerdown", { bubbles: true }));
   slider.value = "0";
   slider.dispatchEvent(new W.Event("change", { bubbles: true }));

@@ -37,9 +37,9 @@ const ITEMS = {
   widget: { tab: "widgets", key: `widget:${WID.id}`, item: { kind: "widget", id: WID.id, chat_id: WID.chat_id }, can: ["open", "remove"], more: ["Open the chat it's in", "Pin to the dock"] },
   image: { tab: "images", key: `image:${IMG.path}`, item: { kind: "image", path: IMG.path }, can: ["open", "editor", "save", "copy", "path", "reveal", "remove"], more: ["Save to project…"] },
   video: { tab: "videos", key: `video:${VID.path}`, item: { kind: "video", path: VID.path }, can: ["open", "editor", "save", "path", "reveal", "remove"], more: ["Open it in your player", "Save to project…"] },
-  picture: { tab: "files", key: `file:${PIC.id}`, item: { kind: "file", id: PIC.id, source: "chat", chat_id: PIC.chat_id }, can: ["open", "save", "copy", "remove"], more: ["Use in a new chat", "Save to project…", "Add a copy to a project…", "Pin to the dock"] },
-  pdf: { tab: "files", key: `file:${PDF.id}`, item: { kind: "file", id: PDF.id, source: "chat", chat_id: PDF.chat_id }, can: ["open", "save", "remove"], more: ["Use in a new chat", "Add a copy to a project…", "Pin to the dock"] },
-  csv: { tab: "files", key: `file:${CSV.id}`, item: { kind: "file", id: CSV.id, source: "project", project_id: CSV.project_id }, can: ["open", "save", "remove"], more: ["Use in a new chat", "Add a copy to a project…", "Pin to the dock"] },
+  picture: { tab: "files", key: `file:${PIC.id}`, item: { kind: "file", id: PIC.id, source: "chat", chat_id: PIC.chat_id }, can: ["open", "save", "copy", "remove"], more: ["Use in a new chat", "Save to project…", "Add a copy to a space…", "Pin to the dock"] },
+  pdf: { tab: "files", key: `file:${PDF.id}`, item: { kind: "file", id: PDF.id, source: "chat", chat_id: PDF.chat_id }, can: ["open", "save", "remove"], more: ["Use in a new chat", "Add a copy to a space…", "Pin to the dock"] },
+  csv: { tab: "files", key: `file:${CSV.id}`, item: { kind: "file", id: CSV.id, source: "project", project_id: CSV.project_id }, can: ["open", "save", "remove"], more: ["Use in a new chat", "Add a copy to a space…", "Pin to the dock"] },
 };
 const rowOf = (x, key) => x.page.locator(`#library-list .lib-row[data-key="${key}"]`);
 /** The menu that is open, as drawn: each row's words, whether it is off and why, "—" for a hairline; and where it is. */

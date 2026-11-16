@@ -185,7 +185,7 @@ export const host = (opts) => `(${function (PIP, opts) {
   ];
   const messages = opts.empty ? [] : opts.sent ? sentChat : opts.details ? (project ? detailsProject : detailsChat) : project ? projectChat : opts.ticks ? ticksChat : personal;
   // opts.said: more messages after those, each {role, text} (a prompt with links in it, a reply with links).
-  (opts.said || []).forEach((m, i) => messages.push(say("x" + i, m.role, m.text, "8", Math.max(1, 6 - i))));
+  (opts.said || []).forEach((m, i) => messages.push(say("x" + i, m.role, m.text, "8", Math.max(1, 6 - i), m.more || {})));   // (m.more: what else the message carries)
   // opts.reply: one more prompt and the Pip's answer to it, as given (a reply with code blocks, say).
   // (opts.replyMarks: that prompt's marks, as DGC keeps them: a project, a file, a Pip named in it.)
   if (opts.reply && !opts.empty) messages.push(say("u8", "user", opts.replyTo || "Show me.", "8", 3, opts.replyMarks ? { display_mentions: opts.replyMarks } : {}), say("a8", "assistant", opts.reply, "8", 2));
@@ -425,11 +425,11 @@ export const host = (opts) => `(${function (PIP, opts) {
       list_pip_messages: (r) => { const id = r.conversation_id || firstId(), c = state.list.find((v) => v.id === id); if (!c) throw Error("That conversation isn't this Pip's.");
         return { pip_id: PIP, workspace_id: W, conversation_id: id, messages: (state.messages[id] || []).slice(-50), next_before_id: null, active_run: c.replying ? { id: run(id.slice(-1)), status: "running", started_at: new Date(Date.now() - 42000).toISOString() } : null,
           history_context_omitted_count: 0, chat_controls: controls }; },
-      send_pip_message: (r) => { const id = r.conversation_id || firstId(), c = state.list.find((v) => v.id === id); state.sent.push({ conversation: r.conversation_id || null, text: r.text, key: r.idempotency_key, ...("reply_to" in r ? { reply_to: r.reply_to } : {}) });
+      send_pip_message: (r) => { const id = r.conversation_id || firstId(), c = state.list.find((v) => v.id === id); state.sent.push({ conversation: r.conversation_id || null, text: r.text, key: r.idempotency_key, ...("reply_to" in r ? { reply_to: r.reply_to } : {}), ...("output" in r ? { output: r.output } : {}) });
         if (state.fail === "send") throw Error("The model didn't take that. Try again.");
         const quoted = "reply_to" in r ? state.messages[id].find((m) => m.id === r.reply_to && m.role === "assistant") : null;
         if ("reply_to" in r && !quoted) throw Error("Reply to one of this Pip's messages in this conversation.");
-        const message = { ...say("s" + state.sent.length, "user", r.text, "5", 0), conversation_id: id, status: "queued", created_at: new Date().toISOString(), ...(quoted ? { reply_to: { id: quoted.id, text: quoted.text.slice(0, 600) } } : {}) }; state.messages[id].push(message); c.updated_at = message.created_at; c.replying = true;
+        const message = { ...say("s" + state.sent.length, "user", r.text, "5", 0), conversation_id: id, status: "queued", created_at: new Date().toISOString(), ...(r.display_mentions ? { display_mentions: r.display_mentions } : {}), ...(quoted ? { reply_to: { id: quoted.id, text: quoted.text.slice(0, 600) } } : {}) }; state.messages[id].push(message); c.updated_at = message.created_at; c.replying = true;
         return { message, run: { id: message.run_id, pip_id: PIP, status: "queued" } }; },
       mark_pip_read: (r) => { state.read.push({ conversation: r.conversation_id || null, message: r.message_id || null }); const m = Object.values(state.messages).flat().find((v) => v.id === r.message_id); const c = state.list.find((v) => v.id === (m?.conversation_id || r.conversation_id || firstId())); if (c) c.unread = 0;
         return { pip_id: PIP, count: 0, messages: 0, posts: 0, latest: "", latest_at: "", latest_message_id: null, latest_post_id: null }; },
@@ -770,7 +770,8 @@ export const host = (opts) => `(${function (PIP, opts) {
         const bytes = b64 ? Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)) : null;
         setTimeout(() => window.postMessage(bytes && file ? { type: "pipsFileData", requestId: m.requestId, mime: file.mime, data: bytes, bytes: bytes.length } : { type: "pipsFileData", requestId: m.requestId, error: "That file is no longer available." }, "*"), opts.answerAfter || 1); }
       return; }
-    const make = answers[m.request.type];
+    // (opts.stubs {type: result}: plain answers for what a scene doesn't otherwise stand in for.)
+    const make = answers[m.request.type] || (opts.stubs && m.request.type in opts.stubs ? () => opts.stubs[m.request.type] : undefined);
     if (!make) window.__unanswered.push(m.request.type);
     (window.__sent ||= []).push(m.request.type === "fill_pip_code" ? { ...m.request } : m.request);   // (as posted: the real channel copies a message as it is sent)
     let reply;
@@ -779,7 +780,7 @@ export const host = (opts) => `(${function (PIP, opts) {
     setTimeout(() => window.postMessage(reply, "*"), (m.request.tunnel === "tailscale" && window.__slow?.[m.request.type]) || (m.request.type === "fill_pip_code" && window.__code?.after) || opts.answerAfter || 1);   // (opts.answerAfter: a backend that takes a while, in ms)
   } });
   // Called once the page has mounted the client (the side bar mounts it after its other scripts).
-  window.__connect = () => window.postMessage({ type: "pipsConnection", apiVersion: opts.api || 78, generation: 1, connected: true, supported: true, enabled: true, ...(opts.projects ? { displayMentions: true } : {}) }, "*");   // (opts.projects: a DGC that keeps a message's marks)
+  window.__connect = () => window.postMessage({ type: "pipsConnection", apiVersion: opts.api || 78, generation: 1, connected: true, supported: true, enabled: true, ...(opts.projects || opts.marks ? { displayMentions: true } : {}) }, "*");   // (opts.projects: a DGC that keeps a message's marks)
 }})(${JSON.stringify(PIP)}, ${JSON.stringify(opts)});`;
 
 /** Runs in the page before anything else: on every frame, what Pips shows, as one word (window.__frames, in order, a

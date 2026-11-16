@@ -173,3 +173,5 @@ details[open]>summary .run-post-chev{transform:rotate(90deg)}
 .message-failure span{display:block;margin-top:4px;overflow-wrap:anywhere;font-family:var(--vscode-editor-font-family,monospace)}
 /* A reply being written, in a view with no working row: one quiet line under its words. */
 .live-status{font-size:11px;margin:-8px 0 16px;color:var(--muted)}
+/* The output a message asked for wasn't made (Pips API 100): Work's own system line (.sys), under the reply. */
+.pip-message .output-missing{margin:6px 0 2px;font:400 11px/1.45 var(--sans,inherit);color:var(--faint,var(--muted));white-space:pre-wrap;overflow-wrap:anywhere}

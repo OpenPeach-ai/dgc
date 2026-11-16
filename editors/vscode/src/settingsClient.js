@@ -6,6 +6,7 @@ import './settings.css';
 // DGC's own hover label, drawn in the page: the browser's own `title` tooltip is cut by the window's edge (window.DgcTip).
 import '../media/shared/tip.css';
 import '../media/shared/tip.js';
+import '../media/shared/rulewords.js';   // globalThis.DgcRuleWords: a permission rule in a person's words (Security)
 import {watchButtons} from './buttonFit.js';
 import {parseMcpPaste} from './mcpPaste.js';
 import zapierLogo from '../media/plugin-logos/zapier.ico';
@@ -82,6 +83,8 @@ const switchHTML = (on, label, attrs = '', disabled = false) => `<button type="b
 // "?" beside a row's name or a page's line: the longer words, one click away, remembered across redraws.
 const INFO = new Set();
 const plain = s => String(s ?? '').replace(/<[^>]*>/g, '');
+// Settings -> Security -> Always allowed: null until DGC has listed its rules.
+const rules = { rows: null, asked: false };
 const ui = {
     // A row: its name (a real <label> for its control), a one-line hint, and the rest behind "?".
     field: (label, hint, control, more = '') => {
@@ -318,7 +321,7 @@ function snapshot() {
 // `mcp_servers` reply that every arrival at this page asks for repaints a live one.
 // Old names for a place on Models: Agents (until 0.51) and its blocks, and DGC Router.
 const MODEL_PLACES = { agents: 'models-subagents', subagents: 'models-subagents', router: 'models-router', pips: 'models-pips', images: 'models-images' };
-function navTo(next, nextRange) { snapshot(); if (next === 'running') running.asked = false; directory = false;
+function navTo(next, nextRange) { snapshot(); if (next === 'running') running.asked = false; rules.asked = false; directory = false;
     const place = MODEL_PLACES[next] || '';
     if (place) next = 'models';
     if (next === 'dev' && !draft.dev_capable) next = 'general';     // an older DGC has no Dev Mode
@@ -417,7 +420,16 @@ function render() {
     ui.providerProfiles=savedProfiles;ui.providerDraft=providerForm;ui.defaultProviderId=defaultProviderId;ui.defaultProviderModel=defaultProviderModel;ui.directProvider=directProvider;
     ui.choosingDefaultId=choosingDefaultId;ui.providerModels=providerModelLists;ui.typingDefaultModel=typingDefaultModel;
     const savedFormOpen=section==='models' && main.querySelector('details[data-more="saved-providers"]')?.open;
+    // Security lists the rules an Always allow made, in words, each with Remove: asked of DGC when the page opens.
+    ui.rules = rules.rows;
+    if (section === 'security' && !rules.asked) { rules.asked = true; vscode.postMessage({ type: 'permissionsList' }); }
     renderFields(section, main, draft, providers, ui);
+    if (section === 'security') main.querySelectorAll('[data-rule-remove]').forEach(button => button.addEventListener('click', () => {
+        const row = (rules.rows || [])[Number(button.dataset.ruleRemove)];
+        if (!row) return;
+        button.disabled = true;
+        vscode.postMessage({ type: 'permissionsRemove', action: row.action, rules: row.rules });
+    }));
     if(section==='models'){
         if(savedFormOpen)main.querySelector('details[data-more="saved-providers"]').open=true;
         const form={saved_provider_name:'name',saved_provider_url:'base_url',saved_provider_model:'model',saved_provider_mode:'api_mode',saved_provider_key:'api_key'};
@@ -1738,6 +1750,11 @@ window.addEventListener('message', event => {
             if (row?.querySelector('.detail')) row.querySelector('.detail').textContent = contextSizeMore(draft);
             const box = $('context_size');
             if (box && !dirty.has('context_size') && document.activeElement !== box) box.value = String(contextSizeShown(draft));
+        }
+        else if (ev.type === 'permissions') {
+            // The rules as DGC lists them, in words (a project's four edit rules are the one a person made).
+            rules.rows = globalThis.DgcRuleWords.rows(ev.items, ev.project_root).filter(row => row.action === 'allow' && !row.invalid);
+            if (config && section === 'security') { snapshot(); render(); }
         }
         else if (ev.type === 'usage_report')
             usage?.receive(ev);

@@ -46,9 +46,9 @@ for (const [theme, forcedColors] of THEMES) for (const width of [300, 700, 1000]
       const by = Object.fromEntries(found.buttons.map((b) => [b.word, b]));
       if (part === "asks") {
         assert.deepEqual(["Allow once", "Always allow", "Deny"].map((w) => [by[w].kind, Math.round(by[w].height), by[w].width]), [["filled", found.tokens.h, found.tokens.w], ["outline", found.tokens.h, found.tokens.w], ["outline", found.tokens.h, found.tokens.w]], "a command: one filled answer, two outlines, each the one roomy box whatever its words");
-        assert.equal(found.buttons.find((b) => /^Approve/.test(b.word)).width, found.tokens.wWide, "a plan's Approve is the one wide button");
+        assert.equal(found.buttons.find((b) => /^Ask before commands/.test(b.word)).width, found.tokens.wWide, "a plan's first answer is the one wide button");
         assert.deepEqual(["Send", "Skip"].map((w) => by[w].kind), ["filled", "outline"], "a question: Send is its one filled button (the text's colour, not purple), Skip an outline");
-        assert.equal(found.buttons.filter((b) => b.kind === "filled" && /^Approve/.test(b.word)).length, 1, "a plan: Approve is its one filled answer");
+        assert.equal(found.buttons.filter((b) => b.kind === "filled" && /^(Ask before commands|Ask each time|Never ask|Keep planning)$/.test(b.word)).length, 1, "a plan: one filled answer (W29: its answers say how much DGC asks, no longer \"Approve → acceptEdits\")");
       } else {
         assert.deepEqual(["Fix", "Open"].map((w) => [by[w]?.kind, Math.round(by[w]?.height), by[w]?.width]), [["filled", found.tokens.hSm, found.tokens.wSm], ["outline", found.tokens.hSm, found.tokens.wSm]], "a Pip's report: Fix is its one filled answer; Fix and Open are one small box");
         assert.deepEqual(["Review", "Undo"].map((w) => [by[w].kind, Math.round(by[w].height)]), [["link", found.tokens.hSm], ["link", found.tokens.hSm]], "its fix row: links, 22 px to hit");

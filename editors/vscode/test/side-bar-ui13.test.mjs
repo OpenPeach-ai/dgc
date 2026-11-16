@@ -827,7 +827,7 @@ test("17. a project is pinned from its row, the dock shows its pinwheel and name
     assert.equal(tile.mark, (await projectRows(p))[0].mark, "its tile is its pinwheel, in its palette");
     await p.focus("#dgc-dock .dgc-dock-item"); await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowLeft"); await settle(p, 150);
     const d = await dockNow(p);
-    assert.deepEqual([d.tip?.title, d.tip?.state], ["Goa trip", "Project · 2 chats"], "its name, and how many chats it has");
+    assert.deepEqual([d.tip?.title, d.tip?.state], ["Goa trip", "Space · 2 chats"], "its name, and how many chats it has");
     await p.click(`#dgc-dock .dgc-dock-item[data-key="project:${A}"]`); await settle(p);
     assert.deepEqual((await x.posted("dockOpen")).map((m) => m.key), [`project:${A}`], "a click asks the host to open it");
     // Its “…”: the pin, and its colour.

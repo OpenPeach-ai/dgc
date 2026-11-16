@@ -1217,10 +1217,10 @@ test("a project's page is a tab of its own, and its settings, files and deletion
   chat.open(ID(4));
   world.panels[1].say({ type: "ready" });
   opened(world.panels[1], { id: ID(4), title: "Where we stay", project: PROJ("a") });
-  world.answer = "Delete project and 2 chats";
+  world.answer = "Delete space and 2 chats";
   page.say({ type: "projectDelete", id: PROJ("a"), name: "Goa, December", chats: 2 });
   await tick();
-  assert.match(world.warnings.at(-1), /Delete the project “Goa, December”\?.*its chats too, unless you keep them/);
+  assert.match(world.warnings.at(-1), /Delete the space “Goa, December”\?.*its chats too, unless you keep them/);
   const gone = last("chatdgc_project");
   assert.deepEqual([gone.op, gone.keep_chats], ["delete", false]);
   chat.onEvent({ type: "chatdgc_project", request_id: gone.request_id, project: null, deleted: [ID(4)] });
@@ -2478,5 +2478,42 @@ test("an item's menu asks one way (itemAct): each of the eight is done only for 
   } finally {
     Object.assign(fs, { readFile: kept.readFile, copy: kept.copy, delete: kept.delete }); vs.window.setStatusBarMessage = kept.status;
     delete host.imagesOffered; delete host.imagesLibrary; delete host.videosOffered; delete host.videosLibrary; world.choose = undefined;
+  }
+});
+
+// User test L2 (15 Nov): Home's Artifacts card said 5 over a Library → Artifacts of 4, and Home's Widgets card said
+// "No widgets yet" over a Library → Widgets with one in it. Home counted a reply's card among its artifacts and listed
+// only ChatDGC's own widgets; the Library's tabs put a reply's card under Widgets. Home's two cards now list what the
+// Library's two tabs list.
+test("L2: Home's Artifacts and Widgets cards list what the Library's tabs list: a reply's card is a widget, not an artifact", async () => {
+  const ar = (c) => "ar_" + c.repeat(16), WG = "wg_" + "5".repeat(16);
+  const made = [{ id: ar("1"), type: "dashboard", title: "Orders", version: 1, origin: { surface: "work" }, updated: "2026-11-15T20:02:00Z" },
+    { id: ar("2"), type: "sheet", title: "Budget", version: 2, origin: { surface: "work" }, updated: "2026-11-15T19:59:00Z" },
+    { id: ar("3"), type: "page", title: "UK heat pump tariffs, 2026", version: 1, made_as: "card", origin: { surface: "work" }, updated: "2026-11-15T05:10:00Z" },
+    { id: ar("4"), type: "page", title: "EMI calculator", version: 1, made_as: "widget", origin: { surface: "chat" }, updated: "2026-11-14T05:10:00Z" }];
+  chat.useArtifacts(Object.assign(fakeArtifacts(), { async list() { return made; } }));
+  host.offers = { version: 1, widget_library: 1 };
+  await chat.homeCardsMessage({ type: "homeArtifactsGet" });
+  const artifacts = host.home.filter((m) => m.type === "homeArtifacts").at(-1);
+  assert.deepEqual(artifacts.items.map((a) => a.title), ["Orders", "Budget"], "the two the Library's Artifacts tab lists: never a reply's card or a widget's page");
+  await chat.homeCardsMessage({ type: "homeWidgetsGet" });
+  const asked = last("chatdgc_widgets");
+  assert.ok(asked, "ChatDGC is asked for its own widgets");
+  {
+    // This ChatDGC lists its own widgets: they come first from it, and the reply's card joins them.
+    chat.onEvent({ type: "chatdgc_widgets", request_id: asked.request_id, op: "list", total: 1, next_offset: null,
+      widgets: [{ id: WG, title: "EMI calculator", chat_id: ID(7), chat_title: "Loans", created_at: "2026-11-14T05:10:00Z" }] });
+    const widgets = host.home.filter((m) => m.type === "homeWidgets").at(-1);
+    assert.equal(widgets.offered, true);
+    assert.deepEqual(widgets.widgets.map((w) => [w.title, w.card === true]), [["EMI calculator", false], ["UK heat pump tariffs, 2026", true]], "ChatDGC's widget, and the card a Work reply drew");
+    assert.deepEqual({ id: widgets.widgets[1].id, surface: widgets.widgets[1].surface }, { id: ar("3"), surface: "work" }, "the card opens as the artifact it is");
+  }
+  {
+    // A ChatDGC that lists no widgets: the cards, and a widget's page too (as the Library's Widgets tab then shows it).
+    host.offers = { version: 1 }; host.home.length = 0;
+    await chat.homeCardsMessage({ type: "homeWidgetsGet" });
+    const widgets = host.home.filter((m) => m.type === "homeWidgets").at(-1);
+    assert.deepEqual(widgets.widgets.map((w) => w.title), ["UK heat pump tariffs, 2026", "EMI calculator"]);
+    assert.equal(widgets.offered, true);
   }
 });

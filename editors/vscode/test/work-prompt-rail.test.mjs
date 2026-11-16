@@ -179,7 +179,7 @@ test("the Work chat's rail: from five prompts a tick each in the transcript's ri
     await s.page.keyboard.press("Escape");
     assert.equal(await card.isHidden(), true);
     assert.equal(await s.page.evaluate(() => document.activeElement?.id), "prompt-rail");
-    assert.match(await s.page.locator("#prompt-rail").getAttribute("aria-label"), /^Prompts in this chat: 23\./);
+    assert.match(await s.page.locator("#prompt-rail").getAttribute("aria-label"), /^Prompts in this session: 23\./);
     assert.equal(await s.page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth), 0, "no sideways scroll");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }

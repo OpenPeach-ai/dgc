@@ -84,7 +84,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
       // A new session with no name yet: the same row.
       const fresh = await headerNow(x.page, "#phead", "#thread-title");
       held(fresh, "a new session");
-      assert.equal(fresh.name, "New chat");
+      assert.equal(fresh.name, "New session");
       await x.send(DOCK);
       await x.send(ready("Visits page alignment"));
       await x.send({ type: "chat_tab", session: SESSION });

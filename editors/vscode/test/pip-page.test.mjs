@@ -97,7 +97,7 @@ test('a routine that runs a troupe says so, and its form keeps what it does',asy
  x.click(`[data-routine-edit="${R1}"]`);
  const prompt=x.d.querySelector('#routinePrompt');
  assert.ok(prompt.readOnly,'what it does was approved in a chat');
- assert.match(x.d.querySelector('#routineTroupeNote').textContent,/runs a troupe on repo: the files changed since it last ran\. To change what it does, ask for a new one in a DGC chat\./);
+ assert.match(x.d.querySelector('#routineTroupeNote').textContent,/runs a troupe on repo: the files changed since it last ran\. To change what it does, ask for a new one in a Work session\./);
  const kinds=[...x.d.querySelectorAll('#routineKind option')].map(o=>o.value);
  assert.ok(!kinds.includes('email')&&!kinds.includes('calendar'),'on a schedule only');
  assert.equal(routines.routine({...routine(),troupe:{title:1}},PIP).troupe,undefined,'a malformed summary is dropped');

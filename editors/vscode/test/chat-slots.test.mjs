@@ -529,7 +529,7 @@ test("a chat parked mid-handshake finishes it when you come back", () => {
   const { provider, spawned } = harness();
   makeLive(provider, { sessionId: "alpha", name: "First" });
 
-  // Open a second chat and put it in the state a cold-starting backend leaves behind: `ready`
+  // Open a second session and put it in the state a cold-starting backend leaves behind: `ready`
   // arrived and the handshake began, but neither the native settings promise nor the roots
   // acknowledgement has landed.
   provider.openChatSlot();
@@ -787,7 +787,7 @@ test("picking a saved session while this chat's turn runs opens it in a chat of 
   const { provider, spawned } = harness();
   makeLive(provider, { sessionId: "alpha", name: "Working" });
   const working = provider.activeSlotId;
-  provider.confirmedTurnActive = true;                 // a turn is running in this chat
+  provider.confirmedTurnActive = true;                 // a turn is running in this session
   provider.openPastSession(provider.backend, "/proj/.dgc/sessions/20260930-old-chat.json");
   assert.equal(provider.slots.length, 2, "the switch was refused instead of opening the session");
   assert.notEqual(provider.activeSlotId, working, "the new chat is the one on screen");
@@ -1137,7 +1137,7 @@ test("a background chat still waiting after you looked in and left keeps its dot
   assert.equal(slotsPost(posted).items.find((item) => item.id === first).needsYou, true);
 });
 
-test("a background chat that needs you says so once, and Open chat goes straight to it", async () => {
+test("a background chat that needs you says so once, and Open session goes straight to it", async () => {
   const win = globalThis.__DGC_TEST_VSCODE.window, original = win.showInformationMessage, shown = [];
   win.showInformationMessage = async (message, ...buttons) => { shown.push({ message, buttons }); return buttons[0]; };
   try {
@@ -1150,9 +1150,9 @@ test("a background chat that needs you says so once, and Open chat goes straight
     provider.routeEvent(provider.slotById(first), { type: "options_request", id: "o1" });
     assert.equal(shown.length, 1, "one notice for one wait, however many decisions it holds");
     assert.match(shown[0].message, /"First" is waiting for your approval/);
-    assert.deepEqual(shown[0].buttons, ["Open chat"]);
+    assert.deepEqual(shown[0].buttons, ["Open session"]);
     await settle();
-    assert.equal(provider.activeSlotId, first, "Open chat shows that chat");
+    assert.equal(provider.activeSlotId, first, "Open session shows that chat");
   } finally { win.showInformationMessage = original; }
 });
 

@@ -16,6 +16,11 @@ export function transcriptIcon(name) {
   return `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]||''}</svg>`;
 }
 
+// An output's own drawing (a Document, Slides, a Spreadsheet, a Page, a Dashboard), for its @ mark and its row.
+const OUTPUT_ICONS={document:'<path d="M4 1.8h5.2L12 4.6v9.6H4Z"/><path d="M9.2 1.8v2.8H12M6 8h4M6 10.6h4"/>',slides:'<rect x="2" y="2.8" width="12" height="8" rx="1"/><path d="M8 10.8v2.6M5.5 13.4h5"/>',
+ spreadsheet:'<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M2.5 6.2h11M2.5 9.8h11M6.5 2.5v11"/>',page:'<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 5.6h12M4.2 4.1h.01M6 4.1h.01"/>',
+ dashboard:'<rect x="2.5" y="2.5" width="4.6" height="6.2" rx="1"/><rect x="9" y="2.5" width="4.5" height="3.4" rx="1"/><rect x="9" y="7.9" width="4.5" height="5.6" rx="1"/><rect x="2.5" y="10.6" width="4.6" height="2.9" rx="1"/>'};
+export const outputIcon=kind=>OUTPUT_ICONS[kind]?`<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${OUTPUT_ICONS[kind]}</svg>`:'';
 const phase=status=>({queued:'Queued',running:'Working',cancelling:'Stopping',failed:'Failed',cancelled:'Stopped'}[status]||'');
 // Read aloud (media/readaloud.js keeps it in step): a speaker, and Stop while it reads.
 const readAction=id=>`<button type="button" class="ract" data-chat-action="read" data-message-id="${esc(id)}" data-read-aloud="${esc(id)}" aria-label="Read aloud" title="Read aloud" aria-pressed="false"><span class="ra-play">${transcriptIcon('speaker')}</span><span class="ra-stop">${transcriptIcon('stop')}</span><span class="sr-only">Read aloud</span></button>`;
@@ -61,7 +66,7 @@ function promptWithMarks(m,pluginLogo){
   // (The words between the marks: their links are links, built where no image loads until the page draws them.)
   const words=text=>{const held=globalThis.document.createElement('template');held.innerHTML=`<div>${M.linkWordsHtml(text,{doc:globalThis.document})}</div>`;return held.content.firstChild;};
   const node=M.sentNode(String(m.text),m.display_mentions,{doc:globalThis.document,words,
-    pillFor:mark=>({logo:mark.kind==='plugin'?pluginLogo(mark.identity):'',plug:transcriptIcon('plug'),folder:FOLDER_ICON,faceStyles:false,faceId:`sent-${m.id}-${++n}`}),
+    pillFor:mark=>({logo:mark.kind==='plugin'?pluginLogo(mark.identity):'',plug:transcriptIcon('plug'),folder:FOLDER_ICON,glyphMark:mark.kind==='artifact'?outputIcon(mark.identity):'',faceStyles:false,faceId:`sent-${m.id}-${++n}`}),
     decorate:(pill,mark)=>{if(mark.kind!=='pip')return;const face=pill.querySelector('.composer-pip-face');if(face){face.setAttribute('data-avatar-key',`mention-${m.id}-${n}`);face.setAttribute('data-character',mark.pip_type);face.setAttribute('data-pose','idle');}}});
   return node?node.innerHTML:'';
 }
@@ -253,6 +258,8 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // A reply in pieces: its first words carry what a reply opens with (What it did, a plugin's card), each message it read
   // follows the words before it, and its last words are the reply itself, with everything a reply ends with. One reply
   // to copy, read aloud and reply to, whatever it read on the way.
+  // The output its message asked for wasn't made (Pips API 100, `output_missing`: DGC's own words): Work's line, under the reply.
+  const missing=!user&&!live&&typeof m.output_missing==='string'&&m.output_missing.trim()?`<p class="sys output-missing" data-output-missing>${esc(m.output_missing.trim().slice(0,300))}</p>`:'';
   const role=`<span class="sr-only role">${esc(label)}</span>`,opens=`${user?'':head}${role}${quoted}${activityRow}${shownCards}`;
   const drawn=id=>`<div class="steer-inline" data-steer-inline="${esc(id)}">${inline.get(id)}</div>`;
   let before='',after='',opened=false;
@@ -261,7 +268,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
     if(i===lastWords)return;
     before+=`<article class="pip-message msg assistant dgc reply-piece" data-reply-piece="${esc(m.id)}:${i}">${opened?role:opens}${words(p.text)}</article>`;opened=true;
   });
-  return `${before}<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}${parted?' reply-piece reply-end':''}${live?' live-reply':''}" ${live?`data-live-reply="${esc(m.run_id)}" aria-label="Live reply"`:`data-message="${esc(m.id)}"`}>${opened?role:opens}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${status}${live?'</article>'+after:`<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${yesAction}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>${after}`}`;
+  return `${before}<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}${parted?' reply-piece reply-end':''}${live?' live-reply':''}" ${live?`data-live-reply="${esc(m.run_id)}" aria-label="Live reply"`:`data-message="${esc(m.id)}"`}>${opened?role:opens}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${missing}${status}${live?'</article>'+after:`<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${yesAction}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>${after}`}`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

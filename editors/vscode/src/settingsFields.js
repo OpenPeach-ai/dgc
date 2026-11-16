@@ -77,7 +77,7 @@ export function contextSizeMore(c) {
 // 16,777,216 tokens. The box shows 0 as blank, under "Same as the main model".
 export const SUBAGENT_WINDOW_MIN = 2048, SUBAGENT_WINDOW_MAX = 16777216;
 /** Settings -> Models -> Sub-agents -> Thinking: "" is the main chat's level. */
-export const SUBAGENT_THINKING_CHOICES = [["", "Same as the main chat"], ["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]];
+export const SUBAGENT_THINKING_CHOICES = [["", "Same as the main session"], ["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]];
 export function subagentWindowShown(c) {
     const tokens = Number(c?.subagent_context_size) || 0;
     return tokens > 0 ? String(tokens) : "";
@@ -92,11 +92,11 @@ export function subagentWindowProblem(text) {
         : "Leave it blank for the main model's window, or enter 2K to 16,384K (2,048 to 16,777,216 tokens), like 24K.";
 }
 /** Settings -> Models -> Sub-agents -> Context window: the same box as DGC Router's Context each (src/contextCombo.js),
- *  its first choice "Same as the main chat" (blank: subagent_context_size 0). */
+ *  its first choice "Same as the main session" (blank: subagent_context_size 0). */
 function subagentWindowBox(c) {
     const tokens = parseContext(c?.subagent_context_size);
     return contextComboHTML({ id: "subagent_context_size", value: typeof tokens === "number" && tokens > 0 ? tokens : "",
-        blank: "Same as the main chat", label: "Context window", disabled: !c?.subagent_window_settable });
+        blank: "Same as the main session", label: "Context window", disabled: !c?.subagent_window_settable });
 }
 
 /** The number Context size shows: the window in use, so never more than a server's own window (above it can't apply). */
@@ -170,8 +170,8 @@ export function renderFields(section, main, config, providers, ui) {
         const think = c.subscription_engine ? (c.subscription_effort || "off") : (c.think || "off");
         const shown = c.show_reasoning === false ? "hidden" : c.thinking_inline === false ? "collapsed" : "inline";
         main.innerHTML = head("General", "How DGC works on this computer.")
-            + group("Turns", field("Permission mode", "What DGC may do in this Work chat.", sel("mode", [["default", "Default"], ["acceptEdits", "Accept edits"], ["plan", "Plan"], ["auto", "Auto"]], c.mode || "default"),
-                    "Default asks before it changes anything. Accept edits applies file edits without asking. Plan reads and proposes only. Auto acts without asking, so it is chosen for one Work chat at a time, here or in the mode menu. A new chat starts in Default, or in the mode you saved with dgc in a terminal unless that is Auto. A chat you reopen, or this one after a reload, comes back in the mode it had, Auto included, in a folder that is still trusted. Security's sandbox applies in every mode.")
+            + group("Turns", field("Permission mode", "What DGC may do in this Work session.", sel("mode", [["default", "Default"], ["acceptEdits", "Accept edits"], ["plan", "Plan"], ["auto", "Auto"]], c.mode || "default"),
+                    "Default asks before it changes anything. Accept edits applies file edits without asking. Plan reads and proposes only. Auto acts without asking, so it is chosen for one Work session at a time, here or in the mode menu. A new session starts in Default, or in the mode you saved with dgc in a terminal unless that is Auto. A session you reopen, or this one after a reload, comes back in the mode it had, Auto included, in a folder that is still trusted. Security's sandbox applies in every mode.")
                 + field("Thinking", "How hard the model thinks first.", sel("think", [["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], think),
                     "Applies from the next model round.")
                 + field("DGC Ultra", "Splits big turns across sub-agents.", bool("ultra_mode", c.ultra_mode === true),
@@ -225,7 +225,7 @@ export function renderFields(section, main, config, providers, ui) {
             const named = [...new Set([...(current ? [current] : []), ...(Array.isArray(list.ids) ? list.ids.filter(Boolean) : [])])];
             const first = subscribed ? [["", "CLI default"]] : current ? [] : [["", list.loading ? "Listing its models…" : list.error ? "Couldn't list its models" : named.length ? "Choose a model" : "It lists no models"]];
             const options = [...first, ...named.map(id => [id, id]), ["--other--", "Enter another model…"]];
-            return `<select class="provider-default-model" data-provider-default-model="${escapeHtml(row.id)}" aria-label="${label}" title="The model new chats and Pips on Default start on">${options.map(([value, words]) => `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(words)}</option>`).join("")}</select>`;
+            return `<select class="provider-default-model" data-provider-default-model="${escapeHtml(row.id)}" aria-label="${label}" title="The model new sessions, chats and Pips on Default start on">${options.map(([value, words]) => `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(words)}</option>`).join("")}</select>`;
         };
         const savedRows = savedProviders.map(row => {
             const state = row.kind === "subscription" ? subscriptionState(row) : null;
@@ -261,7 +261,7 @@ export function renderFields(section, main, config, providers, ui) {
             + (addingSubscription ? field("Model", "Blank uses the signed-in CLI's default.", inp("saved_provider_model", providerDraft.model || ""))
                 : field("Name", "Shown in the model menu.", inp("saved_provider_name", providerDraft.name || ""))
                 + field("Host", "Reachable from this computer.", inp("saved_provider_url", providerDraft.base_url || ""))
-                + model("saved_provider_model", "Model", "Each chat can choose, or name one.", providerDraft.model || "All models")
+                + model("saved_provider_model", "Model", "Each session or chat can choose, or name one.", providerDraft.model || "All models")
                 + field("Transport", "Auto works for most hosts.", sel("saved_provider_mode", TRANSPORTS, providerDraft.api_mode || "auto"))
                 + (keysPreset
                     // A preset with a keys page of its own (Ollama Cloud): Get a key opens it; you create one there and paste it.
@@ -287,7 +287,7 @@ export function renderFields(section, main, config, providers, ui) {
             c.cache_settable ? "Anthropic only. 5 minutes suits replies that follow each other; 1 hour keeps the cache between replies further apart, and each write costs more." : "");
         main.innerHTML = head("Models", "Choose the providers DGC can use in Work, ChatDGC and Pips.")
             + group("Providers", directRow + savedRows + addSaved,
-                "With no model yet, the first provider becomes the default. With several, choose the default for new chats and Pips here; each chat can switch providers in its model menu.")
+                "With no model yet, the first provider becomes the default. With several, choose the default for new sessions, chats and Pips here; each can switch providers in its model menu.")
             + group("Cache", field("Prompt cache", "Reuses what the model already read.", bool("prompt_cache", c.prompt_cache !== false))
                 + (anthropic ? cacheLife : "")
                 + (localOllama(c) ? field("Keep the model loaded", c.cache_settable ? "After the last reply, so the next is quick." : old,
@@ -357,13 +357,13 @@ export function renderFields(section, main, config, providers, ui) {
         const from = fromProvider && !agentsAnotherHost ? fromProvider.id : subHost || agentsAnotherHost ? "custom" : "";
         if (agentsHostShown && from !== "custom") OPEN.delete("subagent-host");
         agentsHostShown = from === "custom";
-        const fromChoices = [["", "Same as the main chat", false],
+        const fromChoices = [["", "Same as the main session", false],
             ...saved.map((row) => (row.kind === "subscription" ? [row.id, `${row.name} (can’t run DGC’s agents)`, true] : [row.id, row.name, false])),
             ["custom", "Another host…", false]];
         const fromSelect = `<select id="subagent_from" aria-label="Provider for sub-agents" title="Whose models sub-agents use">`
             + fromChoices.map(([value, words, off]) => `<option value="${escapeHtml(value)}"${value === from ? " selected" : ""}${off ? " disabled" : ""}>${escapeHtml(words)}</option>`).join("") + `</select>`;
         const agentsModel = () => model("subagent_model", "Model", "A provider, and one of its models.", c.subagent_model || "",
-            { before: fromSelect, more: `Same as the main chat uses the main chat's provider; with no model named, its model too. A model from another provider brings its address, API and key with it. ${AGENTS_CLI_REASON} Each Work session can choose its own in its model menu, for that session only.` });
+            { before: fromSelect, more: `Same as the main session uses the main session's provider; with no model named, its model too. A model from another provider brings its address, API and key with it. ${AGENTS_CLI_REASON} Each Work session can choose its own in its model menu, for that session only.` });
         const anotherHost = () => more("subagent-host", from === "custom" && subHost ? `Another host · ${escapeHtml(hostName(subHost))}` : "Another host", routeRows("subagent", "subagent_provider"), from === "custom");
         const usual = agentsModel()
             + field("Context window", c.subagent_window_settable ? "Tokens each keeps before it compacts." : old,
@@ -374,7 +374,7 @@ export function renderFields(section, main, config, providers, ui) {
         // model's own choice, then the agent file's effort:, then this, then the main chat's.
         const thinking = c.subagent_thinking_settable ? field("Thinking", "How hard each helper thinks.",
             sel("subagent_thinking", SUBAGENT_THINKING_CHOICES, SUBAGENT_THINKING_CHOICES.some(([v]) => v === c.subagent_thinking) ? c.subagent_thinking : ""),
-            "Same as the main chat follows the chat's own level. An agent file's effort: wins over this, and on DGC Router a model's own Thinking wins over both; a model that can't think ignores it.") : "";
+            "Same as the main session follows the session's own level. An agent file's effort: wins over this, and on DGC Router a model's own Thinking wins over both; a model that can't think ignores it.") : "";
         const subagents = routed
             ? group("Sub-agents", `<div class="row-line router-chosen"><span class="words"><span class="name" id="router-subagents-line">${escapeHtml(router.summary())}</span>`
                     + `<span class="hint">DGC picks a free worker for each. <button type="button" class="link" data-router-goto>See systems</button></span></span></div>`
@@ -468,6 +468,13 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Serve pages as they're made", "And bring them back after a restart.", bool("artifact_autostart", c.artifact_autostart !== false))
                 + field("Pages in plan mode", "Plan mode may serve pages too.", bool("artifact_in_plan", c.artifact_in_plan === true),
                     "Off keeps plan mode to reading and proposing: it can't start a preview."))
+            // What an Always allow on a card made, in words, each with Remove (user test W8). Removed at once: not
+            // part of Save.
+            + group("Always allowed", ui.rules == null ? '<div class="row-line rule-line"><span class="words"><span class="hint" role="status">Reading the rules from DGC…</span></span></div>'
+                : !ui.rules.length ? '<div class="row-line rule-line"><span class="words"><span class="hint">Nothing yet. Always allow on a card adds a rule here.</span></span></div>'
+                : ui.rules.map((row, i) => `<div class="row-line rule-line"><span class="words"><span class="name">${escapeHtml(row.words)}</span>${row.detail && row.detail !== row.words ? `<span class="hint rule-detail">${escapeHtml(row.detail)}</span>` : ""}</span>`
+                    + `<button type="button" class="secondary" data-rule-remove="${i}" title="Remove this rule: DGC asks again" aria-label="Remove: ${escapeHtml(row.words)}">Remove</button></div>`).join(""),
+                "What DGC does without asking, because you chose Always allow on a card. Remove one and it asks again.", "security-rules")
             + saveBar;
         // The network switch means nothing while the sandbox is off.
         const sandbox = main.querySelector("#sandbox"), network = main.querySelector("#sandbox_network");

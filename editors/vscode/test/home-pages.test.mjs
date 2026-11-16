@@ -76,7 +76,9 @@ test("a page made in a Work session and a document made in a ChatDGC chat each a
     assert.deepEqual(made.map((c) => c.group), ["new", "new"], 'under "New"');
     assert.deepEqual(made.map((c) => c.who), ["sheet:doc", "sheet:page"], "the output card's sheet of its kind, where a face or a blob would be");
     assert.deepEqual(made.map((c) => c.title), ["Rent or buy, in one page", "Login redirect map"], "its title");
-    assert.deepEqual(made.map((c) => c.from), [`Document made · version 1 · ${CHAT.title}`, `Page made · version 1 · ${WORK_NAME}`], "what it is, its version, and the session or chat that made it");
+    // (In a side bar this narrow the line says what fits whole: what it is and who made it; its version is in the whole
+    // line, which a pointer reads. H2, user test 15 Nov: it was cut mid-word, "Document made · versi…".)
+    assert.deepEqual(made.map((c) => c.from), [`Document made · ${CHAT.title}`, `Page made · ${WORK_NAME}`], "what it is, and the session or chat that made it");
     assert.deepEqual(made.map((c) => c.source), ["chat", "work"], "each from where it was made");
     assert.deepEqual(made.map((c) => c.actions), [["Open*", "Dismiss"], ["Open*", "Dismiss"]], "Open and Dismiss");
     assert.deepEqual(made.map((c) => c.chips), [["Chat", "Just now"], ["Work", "Just now"]]);
@@ -101,9 +103,9 @@ test("version 2 updates the card and never adds one; removed takes it off", asyn
   try {
     const n = await homeCount(x);
     await tell(x, h, change(1, "slides", "Q3 plan", fromWork));
-    assert.deepEqual(pages(await x.hub()).map((c) => [c.key, c.from]), [[KEY(1), `Slides made · version 1 · ${WORK_NAME}`]]);
+    assert.deepEqual(pages(await x.hub()).map((c) => [c.key, c.from]), [[KEY(1), `Slides made · ${WORK_NAME}`]]);
     await tell(x, h, change(1, "slides", "Q3 plan, final", fromWork, "changed", 2));
-    assert.deepEqual(pages(await x.hub()).map((c) => [c.key, c.title, c.from]), [[KEY(1), "Q3 plan, final", `Slides changed · version 2 · ${WORK_NAME}`]], "the same card, at version 2");
+    assert.deepEqual(pages(await x.hub()).map((c) => [c.key, c.title, c.from]), [[KEY(1), "Q3 plan, final", "Slides changed · version 2"]], "the same card, at version 2 (the news: it stays, whole, where the line has no room for the session's name too)");
     assert.equal(await homeCount(x), n + 1, "still one");
     // A change to something that has no card on Home (made long ago, or dismissed) adds none.
     assert.equal(await tell(x, h, change(7, "sheet", "Old budget", fromWork, "changed", 9)), null);
@@ -137,7 +139,7 @@ test("Open opens it as the chat's card does; Dismiss takes it off; both are kept
     await x.close();
     // The side bar is reloaded: its page is built again from what the host kept.
     x = await open({ pages: h.stamped() });
-    assert.deepEqual(pages(await x.hub()).map((c) => [c.key, c.title, c.from]), [[KEY(3), "Q3 plan", `Slides made · version 1 · ${WORK_NAME}`]], "what was left is still there; what was opened or dismissed is not");
+    assert.deepEqual(pages(await x.hub()).map((c) => [c.key, c.title, c.from]), [[KEY(3), "Q3 plan", `Slides made · ${WORK_NAME}`]], "what was left is still there; what was opened or dismissed is not");
     // A later change to a dismissed one does not bring it back.
     assert.equal(await tell(x, h, change(2, "doc", "Rent or buy, in one page", fromChat, "changed", 2)), null);
     assert.deepEqual(pages(await x.hub()).map((c) => c.key), [KEY(3)]);

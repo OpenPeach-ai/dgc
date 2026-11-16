@@ -79,7 +79,7 @@ test("one kind is one line on the bar; a second joins it as a pill, in a fixed o
   assert.ok(c.chip("troupe").querySelector(".chip-mark svg .tm-part"), "the troupe's own mark");
   assert.equal(c.chip("troupe").querySelector(".chip-mini > span").style.width, "63%");
   assert.equal(c.chip("goal").getAttribute("aria-label"), "Goal, pursuing: Ship it");
-  assert.equal(c.chip("changes").getAttribute("aria-label"), "6 files changed in this chat, 214 lines added, 37 lines removed");
+  assert.equal(c.chip("changes").getAttribute("aria-label"), "6 files changed in this session, 214 lines added, 37 lines removed");
   for (const node of c.chips()) {
     assert.equal(node.getAttribute("aria-haspopup"), "dialog");
     assert.equal(node.getAttribute("aria-expanded"), "false");

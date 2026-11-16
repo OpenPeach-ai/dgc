@@ -57,7 +57,7 @@ test("a troupe is one slim row above the prompt, never a card in the chat, and S
   const bars = [...doc.querySelectorAll("#troupe-panel .troupe-bar")];
   assert.equal(bars[0].getAttribute("aria-valuenow"), "4");
   assert.equal(bars[1].querySelector("span").style.width, "33%");
-  assert.match(doc.querySelector("#troupe-panel .troupe-note").textContent, /About 16 agents\. This chat continues when it ends\./);
+  assert.match(doc.querySelector("#troupe-panel .troupe-note").textContent, /About 16 agents\. This session continues when it ends\./);
   assert.equal(doc.querySelector("#troupe-panel [data-troupe-stop]"), null, "one troupe: its Stop is the row's");
 
   $("troupe-stop").click();

@@ -1,7 +1,7 @@
 // The agent map shows what matters now; the rest is one click away (reported 25 Oct). A long chat
 // lists every helper it ever ran, so the map opens on: every agent working, every agent the chat's
 // latest turn that started any started, and any older one whose changes were held back -- each with its
-// parents, so the tree stays honest. Everything else is one row, "Earlier in this chat · N agents", a
+// parents, so the tree stays honest. Everything else is one row, "Earlier in this session · N agents", a
 // real button that opens to them grouped by the prompt that started them, newest group first, and is
 // remembered per chat. The subtitle counts: "2 working · 3 this turn · 14 earlier". Which turn started
 // an agent is what the chat already holds -- its claimed spawn card's turn, else agent_started.turn_id --
@@ -73,7 +73,7 @@ test("recent vs earlier: the latest turn's agents are shown; the two turns befor
   p.turn("t3", "Recheck the invoice totals", [{ n: 5, name: "Recheck invoice totals" }]);
   p.open();
   assert.deepEqual(p.now(), ["root", a(5), "earlier"], "the main agent, this turn's helper, and the folded row");
-  assert.equal(p.fold().textContent, "Earlier in this chat · 4 agents");
+  assert.equal(p.fold().textContent, "Earlier in this session · 4 agents");
   assert.equal(p.$("agent-map-earlier").hidden, true, "folded");
   assert.equal(p.doc.querySelectorAll("#agent-map-earlier .am-row").length, 0, "a folded row's agents are out of the document");
   assert.equal(p.subtitle(), "1 this turn · 4 earlier");
@@ -102,7 +102,7 @@ test("a held-back helper from an older turn stays shown, its row saying Held bac
   assert.match(p.meta(1), /^Held back/);
   assert.match(p.meta(2), /^Held back/);
   assert.match(p.meta(4), /^Finished/);
-  assert.equal(p.fold().textContent, "Earlier in this chat · 1 agent");
+  assert.equal(p.fold().textContent, "Earlier in this session · 1 agent");
   p.fold().click();
   assert.deepEqual(p.groups(), [{ label: "Migrate the GST tables", rows: [a(3)] }]);
   assert.equal(p.subtitle(), "1 this turn · 1 earlier", "a held-back one is shown, not counted as this turn's");
@@ -177,7 +177,7 @@ test("the latest-turn rule: a follow-up turn that starts none leaves the map as 
 test("the counts: 2 working · 3 this turn · 14 earlier; a part that is 0 is left out; no agents keeps today's sentence", () => {
   const p = view();
   p.open();
-  assert.equal(p.subtitle(), "No agents in this chat yet");
+  assert.equal(p.subtitle(), "No agents in this session yet");
   p.close();
   let n = 0;
   const helpers = (count, extra = {}) => Array.from({ length: count }, () => ({ n: ++n, name: `helper ${n + 1}`, ...extra }));
@@ -186,7 +186,7 @@ test("the counts: 2 working · 3 this turn · 14 earlier; a part that is 0 is le
   p.turn("t3", "Fix the rounding", [...helpers(2, { state: "running" }), ...helpers(1)], { end: false });
   p.open();
   assert.equal(p.subtitle(), "2 working · 3 this turn · 14 earlier");
-  assert.equal(p.fold().textContent, "Earlier in this chat · 14 agents");
+  assert.equal(p.fold().textContent, "Earlier in this session · 14 agents");
   assert.equal(p.now().filter((k) => k.startsWith("agent:")).length, 4, "this turn's three and the held-back one");
   p.close();
   for (const id of [16, 17]) p.event({ type: "agent_ended", id: sid(id), state: "finished", duration_ms: 1000, tool_calls: 1 });
@@ -206,7 +206,7 @@ test("a snapshot's cap: the agents it did not itemise are earlier ones, counted 
   p.open();
   assert.equal(p.subtitle(), "1 this turn · 69 earlier");
   assert.equal(p.$("agent-map-more").hidden, true, "the line is not under the tree");
-  assert.equal(p.fold().textContent, "Earlier in this chat · 69 agents");
+  assert.equal(p.fold().textContent, "Earlier in this session · 69 agents");
   p.fold().click();
   const note = p.$("agent-map-earlier").querySelector(".am-note");
   assert.equal(note.textContent, "68 more agents not listed.");
@@ -226,7 +226,7 @@ test("the fold is a real button with aria-expanded: arrows and End reach it, it 
   assert.equal(fold.getAttribute("aria-controls"), "agent-map-earlier");
   assert.ok(p.$("agent-map-earlier"), "it controls a real element");
   assert.equal(p.$("agent-map-earlier").getAttribute("role"), "group");
-  assert.equal(p.$("agent-map-earlier").getAttribute("aria-label"), "Earlier in this chat");
+  assert.equal(p.$("agent-map-earlier").getAttribute("aria-label"), "Earlier in this session");
   assert.equal(p.doc.activeElement, p.row(a(3)), "the map opens on this turn's agent");
   p.key(p.doc.activeElement, "ArrowDown");
   assert.equal(p.doc.activeElement, fold, "the arrow reaches it");

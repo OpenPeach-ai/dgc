@@ -31,6 +31,9 @@
    *   onDraw(host)      after a redraw: the page starts its faces and blobs moving
    * update({ cards, more, partial, notes }) draws.
    *   cards: [{ key, source, group: "needs" | "new", who: { html }, from, title, chips, actions: [{ id, label, primary?, title? }], label }]
+   *          (fromShort: [shorter ways to say `from`, the longest first]: the line is never cut mid-word where one of
+   *          them fits. A way that ends in a name is { text, lead }: its `lead` and a little of the name must fit; the
+   *          name itself may be cut, as names are.)
    *     A card answered where it is also has `full` (the one line it must show whole to be answered here; `mono` for a
    *     command), `more` (a quiet third answer, the way to all of it) and `fallback` (its answers when that line or its
    *     sentence does not fit: it opens instead, with its chips as before).
@@ -61,7 +64,7 @@
       const chips = here ? [] : (c.chips || []).filter((chip) => word(chip) && !said.includes(word(chip).toLowerCase()));
       return Card.html({ id: `hub-${c.key}`, cls: `dgc-card-thin dgc-hub-card${here ? " dgc-hub-answers" : ""}${here && c.mono ? " dgc-hub-mono" : ""}${c.held ? " dgc-hub-held" : ""}`,
         label: `${c.label || `${c.from}: ${c.title}`}${here ? `: ${c.full}` : chips.length ? `. ${chips.map(word).join(", ")}` : ""}`,
-        attrs: { "data-key": c.key, "data-source": c.source, "data-group": c.group },
+        attrs: { "data-key": c.key, "data-source": c.source, "data-group": c.group, ...(Array.isArray(c.fromShort) && c.fromShort.length ? { "data-from": JSON.stringify([c.from, ...c.fromShort.slice(0, 4)]) } : {}) },
         icon: { html: c.who?.html || "", face: true }, title: c.title, sub: c.from, chips, note: here ? c.full : undefined,
         actionsHtml: icons,
         actions: icons ? [] : answers.map((a) => ({ label: a.label, primary: !!a.primary, title: a.title, attrs: { "data-hub-act": a.id, ...(a.say ? { "aria-label": a.say } : {}) } })) });
@@ -85,7 +88,21 @@
         const title = card.querySelector(".dgc-card-title"), sub = card.querySelector(".dgc-card-sub");
         if (!title || !title.clientWidth) continue;       // not laid out (another tab is shown)
         if (card.querySelector(".dgc-card-chips")) card.classList.toggle("dgc-hub-nochips", title.scrollHeight > parseFloat(view.getComputedStyle(title).lineHeight) * 1.5);
-        for (const n of [title, sub]) { if (!n) continue; if (n.scrollHeight > n.clientHeight + 1 || n.scrollWidth > n.clientWidth + 1) n.title = n.textContent; else n.removeAttribute("title"); }
+        // The quiet line over the sentence says as much as fits whole: "Spreadsheet changed · version 2 · Budget", then
+        // without its version, then "Spreadsheet changed" (H2, user test 15 Nov: "Dashboard made · v…"). The whole line
+        // is what a pointer reads.
+        if (sub && card.dataset.from) {
+          let ways = []; try { ways = JSON.parse(card.dataset.from); } catch { ways = []; }
+          // (Measured as drawn: a line half a pixel too long is cut, and scrollWidth, a whole number, doesn't say so.)
+          const fits = () => { const range = doc.createRange(); range.selectNodeContents(sub); return range.getBoundingClientRect().width <= sub.getBoundingClientRect().width + 0.25; };
+          for (const way of ways) {
+            if (typeof way === "string") { sub.textContent = way; if (fits()) break; continue; }
+            sub.textContent = `${way.lead}${String(way.text).slice(way.lead.length, way.lead.length + 8)}…`;
+            if (fits()) { sub.textContent = way.text; break; }
+          }
+          if (ways.length && sub.textContent !== ways[0]) sub.dataset.whole = ways[0]; else delete sub.dataset.whole;
+        }
+        for (const n of [title, sub]) { if (!n) continue; if (n.dataset.whole) n.title = n.dataset.whole; else if (n.scrollHeight > n.clientHeight + 1 || n.scrollWidth > n.clientWidth + 1) n.title = n.textContent; else n.removeAttribute("title"); }
       }
       Card.fit(host);
     }

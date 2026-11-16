@@ -286,7 +286,7 @@
     }
     function needsCard(form, d) {
       const x = d.needs || { count: 0, faces: [] };
-      if (form === "s") return `<span class="hc-lbl">Needs you</span><span class="hc-big">${x.count}</span><span class="hc-sub hc-grow">${x.count ? "waiting for you" : "Nothing needs you"}</span><span class="hc-row hc-faces">${(x.faces || []).slice(0, 4).map((f) => `<span class="hc-ico hc-ico-f">${f}</span>`).join("")}</span>`;
+      if (form === "s") return `<span class="hc-lbl">Needs you</span><span class="hc-big">${x.count}</span><span class="hc-sub hc-grow">${x.count ? "waiting for you" : x.unknown ? "Your Pips couldn’t be checked" : "Nothing needs you"}</span><span class="hc-row hc-faces">${(x.faces || []).slice(0, 4).map((f) => `<span class="hc-ico hc-ico-f">${f}</span>`).join("")}</span>`;
       return '<div data-slot="needs"></div>';
     }
     function runningCard(form, d, tight) {
@@ -303,9 +303,19 @@
       const x = d.folders || { rows: [] }, rows = x.rows || [];
       if (!rows.length) return (form === "s" ? '<span class="hc-lbl">Folders</span><span class="hc-grow"></span><span class="hc-sub">No folders yet</span>' : `${headOf("Folders")}<p class="hc-quiet">No folders yet. A folder shows here once it has a Work session or a Pip.</p>`);
       const most = form === "s" ? 1 : form === "m" ? 4 : form === "l" ? 8 : 24, size = form === "s" ? 52 : form === "m" ? 72 : 64;
-      const tile = (r) => { const counts = [r.sessions ? plural(r.sessions, "session") : "", r.pips ? plural(r.pips, "Pip") : ""].filter(Boolean).join(" · ") || "Nothing yet";
+      // Two folders with one name (a copy of a project elsewhere) each say where they are, under their count: the
+      // nearest folder above them that differs, "2 sessions · in usertest". One name over two counts read as one folder
+      // that couldn't count its sessions (H6, user test 15 Nov).
+      const up = (r) => String(r.shown || r.folder || "").split(/[\\/]+/).filter(Boolean).reverse().slice(1);
+      const whereOf = (r) => {
+        const same = rows.filter((o) => o.name === r.name && o.folder !== r.folder);
+        if (!same.length) return "";
+        const mine = up(r);
+        return mine.find((part, k) => same.every((o) => up(o)[k] !== part)) || "";
+      };
+      const tile = (r) => { const where = whereOf(r), counts = [r.sessions ? plural(r.sessions, "session") : "", r.pips ? plural(r.pips, "Pip") : "", where ? `in ${where}` : ""].filter(Boolean).join(" · ") || "Nothing yet";
         return `<div class="hc-tile${r.exists === false ? " hc-gone" : ""}" data-name="${esc(r.name)}"><button type="button" class="hc-tile-open" data-folder="${esc(r.folder)}" title="${esc(r.exists === false ? `${r.shown || r.folder}: not found` : `${r.shown || r.folder} · ${counts}${r.here ? " · this window’s folder" : ""}: open its Work sessions`)}">${x.mark ? x.mark(r.folder, size, size >= 64 ? r.name : "") : ""}`
-          + `${size >= 64 ? "" : `<span class="hc-tile-name">${esc(r.name)}</span>`}${form === "s" ? "" : `<span class="hc-tile-sub">${r.exists === false ? "Not found" : esc(counts)}</span>`}</button>`
+          + `${size >= 64 ? "" : `<span class="hc-tile-name">${esc(r.name)}</span>`}${form === "s" ? "" : `<span class="hc-tile-sub">${r.exists === false ? esc(where ? `Not found · in ${where}` : "Not found") : esc(counts)}</span>`}</button>`
           + (r.exists === false ? "" : `<button type="button" class="hc-here" data-here="${esc(r.folder)}" title="New session here" aria-label="New session in ${esc(r.name)}">${PLUS}</button>`
             + (x.pinned ? ((on) => `<button type="button" class="hc-pin" data-pin-folder="${esc(r.folder)}" aria-pressed="${on}" title="${on ? "Unpin from the dock" : "Pin to the dock"}" aria-label="${on ? "Unpin from the dock" : "Pin to the dock"}: ${esc(r.name)}">${pinSvg(on)}</button>`)(!!x.pinned(r.folder)) : "")) + "</div>"; };
       const shown = rows.slice(0, most), rest = rows.length - shown.length;
@@ -380,11 +390,12 @@
     }
     function tileOf(id, r, d, form) {
       const picture = id === "widgets" ? (d.widgets?.mark ? d.widgets.mark(r.id) : "") : (d.artifacts?.sheet ? d.artifacts.sheet(r.type) : "");
-      const sub = id === "widgets" ? [`in “${r.chat_title || "a chat"}”`, r.project_name || "", madeWhen(r.created_at)].filter(Boolean).join(" · ") : [A_KIND[r.type] || "Artifact", A_MADE[r.surface] || "", madeWhen(r.at)].filter(Boolean).join(" · ");
+      // (Under Widgets a reply's card says so, and where it was drawn; ChatDGC's own widget names its chat.)
+      const sub = id === "widgets" ? (r.card ? ["A reply’s card", A_MADE[r.surface] || "", madeWhen(r.created_at)] : [`in “${r.chat_title || "a chat"}”`, r.project_name || "", madeWhen(r.created_at)]).filter(Boolean).join(" · ") : [A_KIND[r.type] || "Artifact", A_MADE[r.surface] || "", madeWhen(r.at)].filter(Boolean).join(" · ");
       const title = r.title || (id === "widgets" ? "Interactive" : A_KIND[r.type] || "Artifact");
       const inner = `<span class="hc-tile-pic">${picture}</span><span class="hc-tile-tx"><span class="hc-tile-t">${esc(title)}</span><span class="hc-tile-s">${esc(sub)}</span></span>`;
       // On a Small card the square itself opens the card whole; from Medium up each one opens what it is.
-      return form === "s" ? `<span class="hc-mtile" data-tile="${esc(r.id)}">${inner}</span>` : `<button type="button" class="hc-mtile" data-tile="${esc(r.id)}" title="${esc(id === "widgets" ? `Open ${title} beside you` : `Open ${title} in an editor tab`)}">${inner}</button>`;
+      return form === "s" ? `<span class="hc-mtile" data-tile="${esc(r.id)}">${inner}</span>` : `<button type="button" class="hc-mtile" data-tile="${esc(r.id)}" title="${esc(id === "widgets" && !r.card ? `Open ${title} beside you` : `Open ${title} in an editor tab`)}">${inner}</button>`;
     }
     function stackCard(id, form, d) {
       const name = CARDS[id].name, said = made[id], rows = rowsOf(id), all = id === "widgets" ? "All widgets" : "All artifacts";
@@ -814,7 +825,9 @@
           + (adding ? '<span class="hc-fine">The letters you type are sent to Open-Meteo to look the place up. Nothing else is sent, and nothing is guessed from this computer.</span>' : "")
           + `<div class="hc-lib-act">${adding ? placeForm("Add", "hc-add-city")
             : on ? `<span class="hc-onhome">${TICK}On Home</span><span class="hc-sp"></span><button type="button" class="hc-btn hc-remove" aria-label="Remove ${esc(CARDS[id].name)} from Home">Remove</button>`
-            : `<span class="hc-sp"></span><button type="button" class="hc-btn hc-solid hc-add" aria-label="Add ${esc(CARDS[id].name)} to Home">Add</button>`}</div>`;
+            // (Weather asks for its place first: its button says there is a step to come, "Add…". H7, user test 15 Nov:
+            // "the first Add does nothing visible".)
+            : `<span class="hc-sp"></span><button type="button" class="hc-btn hc-solid hc-add" aria-label="Add ${esc(CARDS[id].name)} to Home${id === "weather" ? ": choose its place first" : ""}"${id === "weather" ? ' title="Choose its place, then Add"' : ""}>${id === "weather" ? "Add…" : "Add"}</button>`}</div>`;
         if (item.__html === html) continue;
         const had = item.contains(doc.activeElement) ? (doc.activeElement.classList.contains("hc-add") ? ".hc-remove" : doc.activeElement.classList.contains("hc-remove") ? ".hc-add" : "") : "";
         item.__html = html; item.innerHTML = html;
@@ -824,6 +837,12 @@
           const field = item.querySelector(".hc-city"), kept = layout.settings?.weather?.place;
           if (field && kept?.name && Number.isFinite(kept.lat) && Number.isFinite(kept.lon)) { field.value = placeWords(kept); field.__place = kept; const save = saveOf(field); if (save) { save.disabled = false; save.title = `${save.textContent}: ${field.value}`; } }
           field?.focus(); field?.select();
+          // The whole of it in sight, with room under the field for the places it lists: the form opened under the fold
+          // of a long list read as a button that did nothing (H7).
+          const list = library.querySelector(".hc-lib-list"), box = item.getBoundingClientRect(), view = list.getBoundingClientRect();
+          if (box.bottom + 96 > view.bottom) list.scrollTop += Math.min(box.top - view.top - 8, box.bottom + 96 - view.bottom);
+          else if (box.top < view.top) list.scrollTop -= view.top - box.top + 8;
+          if (!item.__asked) { item.__asked = true; say("Choose a place for Weather, then Add."); }
         } else if (had) item.querySelector(had)?.focus();
       }
       try { onDraw?.(library); } catch { /* the faces are the page's */ }
@@ -911,7 +930,7 @@
         const turner = t.closest(".hc-prev, .hc-next, .hc-dot"), tile = t.closest("button[data-tile]");
         if (turner) { turn(id, card.dataset.form, turner.classList.contains("hc-prev") ? "prev" : turner.classList.contains("hc-next") ? "next" : turner.dataset.page); if (!card.contains(doc.activeElement)) card.querySelector(".hc-stack")?.focus({ preventScroll: true }); return; }
         if (t.closest("[data-library]")) { act?.("library", id); return; }
-        if (tile) { const row = rowsOf(id).find((r) => r.id === tile.dataset.tile); if (row) act?.(id === "widgets" ? "widget" : "artifact", row); return; }
+        if (tile) { const row = rowsOf(id).find((r) => r.id === tile.dataset.tile); if (row) act?.(id === "widgets" && !row.card ? "widget" : "artifact", row.card ? { ...row, type: "page" } : row); return; }
       }
       // Notes answers its own presses, on Home and opened (media/shared/notes.js).
       if (id === "note") return;
@@ -1035,6 +1054,7 @@
         if (kind !== "widgets" && kind !== "artifacts") return;
         const rows = (Array.isArray(kind === "widgets" ? said?.widgets : said?.items) ? (kind === "widgets" ? said.widgets : said.items) : []).filter((r) => r && typeof r.id === "string" && r.id).slice(0, 200);
         if (kind === "artifacts") rows.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+        else rows.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));      // (ChatDGC's widgets and replies' cards, together, the newest first)
         made[kind] = { offered: said?.offered !== false, rows, more: said?.more === true }; madeAt[kind] = Date.now(); draw();
       },
       /** The host's Notes messages (the list, a note's words, a search): the notes app's. */

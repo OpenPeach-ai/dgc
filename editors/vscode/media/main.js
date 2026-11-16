@@ -8,7 +8,7 @@
   const composerPlaceholder = input.dataset.placeholder;
   let composerLocked = false;
   // What the locked box says, and its Send: an agent's page ("Return to the chat…"), or a session open elsewhere.
-  let composerLockWords = "Return to the chat to send a message";
+  let composerLockWords = "Return to the session to send a message";
 
   // ---- the composer's five primitives ----------------------------------------------------
   // Everything that touches the draft goes through these, and nothing else reads `input.value`
@@ -626,8 +626,8 @@
         onHowPipsWork:() => vscode.postMessage({ type: "pipsWelcomeOpen" }),
         onSetupPrompt:prompt => {
           // Preparing a message is never sending it or replacing the user's work.
-          if (composerText() || input.querySelector(".composer-pill") || attachments.length || pendingImageFiles || pendingImageBytes) return 'The main chat already has a draft or attachments. Send or save that draft before describing this setup.';
-          if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 10000) return 'The setup prompt is invalid. Nothing was added to the main chat.';
+          if (composerText() || input.querySelector(".composer-pill") || attachments.length || pendingImageFiles || pendingImageBytes) return 'The main session already has a draft or attachments. Send or save that draft before describing this setup.';
+          if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 10000) return 'The setup prompt is invalid. Nothing was added to the main session.';
           setComposerText(prompt); onInput(); persistDraft(); closePips();
           setComposerRange(composerText().length);
           input.focus();
@@ -1249,7 +1249,7 @@
         if (live?.name) item.title = String(live.name);
         item.colour = colourOf("project", pin.id);
         item.dot = running ? "live" : "";
-        item.state = live ? `Project · ${plural(Number(live.chats) || 0, "chat")}` : "Project";
+        item.state = live ? `Space · ${plural(Number(live.chats) || 0, "chat")}` : "Space";
         item.icon = markHtml("project", pin.id, running);
       } else if (pin.kind === "folder") {
         // A Work folder: his folder icon in the folder's own palette, its name on the label; still unless something
@@ -1582,9 +1582,9 @@
       const start = el("li", "project-item");
       const button = el("button", "project-start"); button.type = "button";
       const glyph = el("span", "codicon codicon-new-folder"); glyph.setAttribute("aria-hidden", "true");
-      const words = el("span"); words.textContent = "New project";
+      const words = el("span"); words.textContent = "New space";
       button.append(glyph, words);
-      button.title = "Keep chats, files and instructions together, as ChatGPT's projects do";
+      button.title = "A space keeps chats, files and instructions together";
       button.onclick = () => vscode.postMessage({ type: "chatdgcProjectNew" });
       start.append(button);
       list.append(start);
@@ -1592,12 +1592,12 @@
     // Each project's pinwheel wears a palette of its own, given once and kept (as a session's mark is).
     wearMarks("project", projects.map((project) => ({ id: String(project.id || "") })));
     for (const project of projects) {
-      const id = String(project.id || ""), named = String(project.name || "Project");
+      const id = String(project.id || ""), named = String(project.name || "Space");
       const item = el("li", "project-item");
       const row = el("div", "session-row project-row");
       row.tabIndex = 0; row.dataset.id = id;
       row.setAttribute("role", "button");
-      row.setAttribute("aria-label", `Open the project ${named}: ${project.chats || 0} chat${project.chats === 1 ? "" : "s"}`);
+      row.setAttribute("aria-label", `Open the space ${named}: ${project.chats || 0} chat${project.chats === 1 ? "" : "s"}`);
       const open = projectsOpen.has(id);
       const toggle = sessionButton("project-toggle", open ? "chevron-down" : "chevron-right", () => toggleProject(id));
       toggle.setAttribute("aria-expanded", String(open));
@@ -1634,7 +1634,7 @@
           vscode.postMessage({ type: "chatdgcProjectChats", id });
           const wait = el("li", "project-empty"); wait.textContent = "Loading…"; inner.append(wait);
         } else if (!chats.length) {
-          const none = el("li", "project-empty"); none.textContent = "No chats yet: open the project to start one."; inner.append(none);
+          const none = el("li", "project-empty"); none.textContent = "No chats yet: open the space to start one."; inner.append(none);
         } else for (const chat of chats) inner.append(chatRow(chat, true));
         item.append(inner);
       }
@@ -1935,6 +1935,8 @@
       const card = { key: c.key, source: c.scope, group: c.group, at: Date.parse(c.at) || 0, who: { html: hubFace(c) },
         // (A Project Pip's card names its project, when the list says it: the Project Folder dropdown shows every folder's.)
         from: [c.kind === "setup" && c.name === "New Pip" ? "" : c.name, c.kind === "setup" ? "New Pip" : c.scope === "project" ? "Project Pip" : "Pip", c.scope === "project" && projectFolders && c.project ? c.project : "", age].filter(Boolean).join(" · "), title: c.title, chips: c.chips,
+        // (Narrow: its name and how old, then its name alone; never "Billing review · Project Pip · s…".)
+        fromShort: c.kind === "setup" ? [] : [[c.name, age].filter(Boolean).join(" · "), c.name].filter((way, k, all) => way && all.indexOf(way) === k),
         actions: [{ id: "open", label: review ? "Review" : "Open", primary: true, title: review ? "Open what waits for you, in Pips" : `Open ${c.name} in Pips` },
           c.canRead ? { id: "read", label: "Mark read", title: "Mark as read, without opening its chat" }
           : c.canDismiss ? { id: "dismiss", label: "Dismiss", title: `Dismiss: ${c.line}. It comes back if ${c.name} has something new.` } : null] };
@@ -1950,6 +1952,10 @@
       const line = [`${kind} ${ARTIFACT_OP[p.op] || "made"}`, `version ${version}`, where].filter(Boolean).join(" · ");
       fresh.push({ key: `page:${p.id}`, source: p.surface === "work" || p.surface === "chat" ? p.surface : "", group: "new", at: Number(p.at) || 0,
         who: { html: window.DgcFileSheet ? window.DgcFileSheet.html(p.type) : "" }, from: line, title: name, label: `${name}: ${line}`,
+        // (Shorter ways to say it, for a narrow side bar. A new version is the news, so it stays and where it was made
+        // goes; "version 1" says nothing, so it goes and where it was made stays, its name cut as a name is.)
+        fromShort: [version > 1 ? `${kind} ${ARTIFACT_OP[p.op] || "made"} · version ${version}` : where ? { text: `${kind} ${ARTIFACT_OP[p.op] || "made"} · ${where}`, lead: `${kind} ${ARTIFACT_OP[p.op] || "made"} · ` } : null,
+          `${kind} ${ARTIFACT_OP[p.op] || "made"}`].filter(Boolean),
         chips: [p.surface === "work" ? "Work" : p.surface === "chat" ? "Chat" : "", age === "now" ? "Just now" : age ? `${age} ago` : ""].filter(Boolean),
         actions: [{ ...open, title: p.type === "doc" ? "Open it in the editor, over its own file" : "Open it in a panel of its own" }, dismiss] });
     }
@@ -1962,11 +1968,13 @@
     const notes = [];
     if (pipModel?.unreadFailure) notes.push({ text: "Couldn’t check for new Pip messages.", retry: true });
     if (pipModel?.failure) notes.push({ text: pipModel.failure });
+    // (Home can't say "nothing needs you" when DGC couldn't list the Pips: it says that instead, with a way to ask again. H3.)
+    if (pipModel?.unknown) notes.push({ text: "DGC couldn’t list your Pips, so what they need isn’t shown here.", retry: true });
     if (hubSaid) notes.push({ text: hubSaid });
     const cards = hubCards(), said = { cards, more: pipModel?.more || 0, partial: pipModel?.partial === true, notes: [] };
     homeNow = { cards, notes };
     hub.update(said); hubNew?.update(said);
-    paintHomeCount(cards.length);
+    paintHomeCount(cards.length, cards.filter((c) => c.group === "needs").length);
     home?.update();
   }
   // ---- Home's cards: what each shows, from the lists this page has (media/shared/homecards.js draws them) ---------------
@@ -1996,8 +2004,10 @@
     const quickMark = (kind) => (kind === "pip" ? `<span class="hc-qface">${pipFace("core", "Core", "idle", "quick")}</span>` : window.DgcMarks?.html ? window.DgcMarks.html(kind === "work" ? "voxel" : "mote", kind === "work" ? "ember" : "peach", {}) : "");
     return {
       notes: homeNow.notes,
-      needs: { count: needs.length + (pipModel?.more || 0), faces: needs.map((c) => c.who?.html || "") },
-      news: fresh.map((c) => ({ key: `hub:${c.key}`, icon: c.who?.html || "", name: c.title, meta: c.from, title: `Open: ${c.title}` })),
+      // (unknown: DGC couldn't list the Pips, so "nothing needs you" isn't something Home can say. H3.)
+      needs: { count: needs.length + (pipModel?.more || 0), faces: needs.map((c) => c.who?.html || ""), unknown: pipModel?.unknown === true },
+      // (On the card's own rows, the short way to say where it is from: a row has less room than an opened card. H2.)
+      news: fresh.map((c) => ({ key: `hub:${c.key}`, icon: c.who?.html || "", name: c.title, meta: Array.isArray(c.fromShort) && typeof c.fromShort.at(-1) === "string" ? c.fromShort.at(-1) : c.from, title: `Open: ${c.title} · ${c.from}` })),
       recent,
       work: { rows: [...work].sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0)), total: work.length, more: sessionsMoreToLoad, running: work.filter((r) => r.running).length, folder: folderNow, empty: "No sessions yet. Start one with New." },
       chats: { offered: chatsAvailable, why: "Chats aren’t set up in this DGC.", rows: chats, total: chats.length, fresh: chats.filter((r) => r.fresh).length, empty: "No chats yet. Start one with New chat." },
@@ -2057,13 +2067,17 @@
     else for (const key of mine) { const c = every.find((x) => x.key === key); if (c?.canRead) homePips?.read(key); else if (c?.canDismiss) homePips?.dismiss(key); }
     paintHub();
   }
-  /** Home's number: everything that waits or is new, whatever Show is on. */
-  function paintHomeCount(total) {
+  /** Home's number: everything that waits or is new, whatever Show is on. It says which is which (H1, user test 15 Nov:
+   *  "two meanings, one badge"): with nothing waiting for you it is quiet (only news), and its words name both counts. */
+  function paintHomeCount(total, needs = 0) {
     const badge = $("side-tab-home-count"), tab = $("side-tab-home");
     if (!badge || !tab) return;
-    const text = total > 99 ? "99+" : String(total);
+    const text = total > 99 ? "99+" : String(total), fresh = Math.max(0, total - needs);
     if (badge.textContent !== text || badge.hidden !== !total) { badge.textContent = text; badge.hidden = !total; }
-    tab.setAttribute("aria-label", total ? `Home: ${total} ${total === 1 ? "thing needs you or is new" : "things need you or are new"}` : "Home");
+    badge.toggleAttribute("data-news-only", total > 0 && !needs);
+    const words = [needs ? `${needs} ${needs === 1 ? "needs" : "need"} you` : "", fresh ? `${fresh} new` : ""].filter(Boolean).join(", ");
+    tab.setAttribute("aria-label", total ? `Home: ${words}` : "Home");
+    badge.title = words;
   }
   function mountHub() {
     if (chatPlace !== "home" || hub || !window.DgcHub || !window.DgcCard || !$("home-hub")) return;
@@ -2317,12 +2331,12 @@
     const safeName = String(name || "").replace(/\s+/g, " ").trim();
     chatTitleName = safeName.slice(0, 200);
     const safeId = String(sessionId || "").replace(/[^A-Za-z0-9_-]/g, "");
-    const fallback = fresh ? "New chat" : (safeId ? `Chat · ${safeId.slice(-8)}` : "Untitled chat");
+    const fallback = fresh ? "New session" : (safeId ? `Session · ${safeId.slice(-8)}` : "Untitled session");
     const title = (safeName || fallback).slice(0, 200);
     const node = $("thread-title");
     node.textContent = title;
     node.title = `${title} — click to rename`;
-    node.setAttribute("aria-label", `Current chat: ${title}. Click to rename`);
+    node.setAttribute("aria-label", `Current session: ${title}. Click to rename`);
     document.title = `${title} — DGC`;
     agentMapChanged();
   }
@@ -2895,11 +2909,36 @@
     // The slider itself is the shared one (media/shared/effort.js): its fill, its word and its bump follow the hand.
     slider.oninput = () => { window.DgcEffort.follow(slider); };
     slider.onchange = () => {
-      vscode.postMessage({ type: "setReasoningProfile", level: slider.dataset.profiles.split(",")[Number(slider.value)] });
-      // A drag's release closes the menu; an arrow key keeps it open for the next step (it closed after one: final check,
-      // 2026-11-07). Escape or a click outside closes it.
-      if (slider.classList.contains("by-pointer")) hideModelMenu();
+      // The level is chosen when the hand lets go (W15, user test 15 Nov): the button says it at once, and DGC is told
+      // once. A drag's release is that moment, and closes the menu; arrow keys keep the menu open for the next step (it
+      // closed after one: final check, 2026-11-07) and are one choice when they rest, or when the slider is left. Each
+      // step used to be its own request, a couple of seconds each: the button showed the level before, then every
+      // step in turn, and each left its own "Thinking → x" line in the session.
+      const level = slider.dataset.profiles.split(",")[Number(slider.value)];
+      if (slider.classList.contains("by-pointer")) { chooseThink(level, 0); hideModelMenu(); }
+      else chooseThink(level, THINK_KEYS_REST);
     };
+    slider.onblur = () => { if (thinkChosen && thinkChosen.timer) chooseThink(thinkChosen.level, 0); };
+  }
+  // What was just chosen on the slider: shown at once, told to DGC once (after `wait` ms with no further step), and kept
+  // on the button until DGC says the same; what DGC says meanwhile (the level before, a step on the way) is not shown.
+  const THINK_KEYS_REST = 650, THINK_SETTLE = 6000;
+  let thinkChosen = null, thinkSaid = { think: "off", ultra: false };
+  function thinkShown(level) { curUltra = level === "ultra"; if (!curUltra) curThink = level; updateModelControl(); }
+  function chooseThink(level, wait) {
+    if (thinkChosen) { clearTimeout(thinkChosen.timer); clearTimeout(thinkChosen.settle); }
+    const send = () => {
+      if (!thinkChosen) return;
+      thinkChosen.timer = 0;
+      // (Back where it was: nothing to tell DGC, and no line in the session.)
+      if (level === (thinkSaid.ultra ? "ultra" : thinkSaid.think)) { thinkChosen = null; return; }
+      vscode.postMessage({ type: "setReasoningProfile", level });
+      // DGC never said it (refused, or gone): the button goes back to what DGC last said.
+      thinkChosen.settle = setTimeout(() => { thinkChosen = null; thinkShown(thinkSaid.ultra ? "ultra" : thinkSaid.think); }, THINK_SETTLE);
+    };
+    thinkChosen = { level, timer: 0, settle: 0 };
+    thinkShown(level);
+    if (wait > 0) thinkChosen.timer = setTimeout(send, wait); else send();
   }
   let lastModelMenu = null;
   function showProviderStep() {
@@ -2930,9 +2969,9 @@
   let agentsModel = { ...AGENTS_NONE };
   let agentsStep = null;          // null: the Main model tab; {provider: null}: the Sub-agents tab's list; {provider: row}: its models
   let agentsDrop = "";            // the Sub-agents tab's open dropdown: "thinking" | "context" | ""
-  const AGENTS_THINK = [["", "Same as the chat"], ["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]];
+  const AGENTS_THINK = [["", "Same as the session"], ["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]];
   const AGENTS_SIZES = [4096, 8192, 16384, 32768, 65536, 131072, 262144];       // the sizes Settings offers (src/contextCombo.js)
-  const agentsSizeWords = (n) => (n > 0 && n % 1024 === 0 ? `${n / 1024}K` : n > 0 ? n.toLocaleString("en-US") : "Same as the chat");
+  const agentsSizeWords = (n) => (n > 0 && n % 1024 === 0 ? `${n / 1024}K` : n > 0 ? n.toLocaleString("en-US") : "Same as the session");
   const AGENTS_CLI_REASON = "Runs its own tools, so it can’t run DGC’s agents";
   function setAgentsModel(view) {
     const text = (value) => (typeof value === "string" ? value.slice(0, 2048) : "");
@@ -2950,7 +2989,7 @@
     const routes = agentsRoutes();
     if (!agentsModel.base_url) {
       const here = routes.find((row) => row.key === lastModelMenu?.currentRouteKey && row.kind !== "subscription");
-      return here ? agentsHostLabel(here) : "this chat’s host";
+      return here ? agentsHostLabel(here) : "this session’s host";
     }
     const saved = routes.find((row) => row.kind !== "subscription" && row.base_url && row.base_url === agentsModel.base_url);
     if (saved) return agentsHostLabel(saved);
@@ -2961,7 +3000,7 @@
   function agentsWords() {
     if (agentsModel.own) return `${agentsModel.model || "its own model"} · ${agentsWhere()}`;
     const settings = agentsSettingsWords();
-    return settings ? `Same as settings · ${settings}` : "Same as this chat’s model";
+    return settings ? `Same as settings · ${settings}` : "Same as this session’s model";
   }
   /** "Same as settings · qwen3-coder" with each part kept whole: a narrow menu breaks the line at a " · ", never inside
    *  a model's name ("qwen3-" / "coder"); a part wider than the row ends in "…" (its whole text is the row's title). */
@@ -3013,7 +3052,7 @@
     }
     if (agentsModel.context_settable) {
       const now = agentsModel.context_size, sizes = [...new Set([...AGENTS_SIZES, ...(now > 0 ? [now] : [])])].sort((a, b) => a - b);
-      rows.push(drop("context", "Context window", agentsSizeWords(now), [["0", "Same as the chat", !(now > 0)], ...sizes.map((n) => [String(n), agentsSizeWords(n), n === now]), ["typed", "Another size…", false]]));
+      rows.push(drop("context", "Context window", agentsSizeWords(now), [["0", "Same as the session", !(now > 0)], ...sizes.map((n) => [String(n), agentsSizeWords(n), n === now]), ["typed", "Another size…", false]]));
     }
     return rows.length ? `<div class="agents-set">${rows.join("")}</div>` : "";
   }
@@ -3052,7 +3091,7 @@
     const check = (on) => `<span class="mi dgc-menu-icon ${on ? "codicon codicon-check" : ""}" aria-hidden="true"></span>`;
     // Two lines, never cut: "Same as settings", and under it what that is now (Settings' model, DGC Router, or this
     // chat's own model when Settings names none). Found live 14 Nov: one line read "Same as settings · this chat's …".
-    const sameWhat = agentsModel.router ? "Now: DGC Router, which picks a free worker for each sub-agent" : settings ? `Now: ${settings}` : "Now: same as this chat’s model";
+    const sameWhat = agentsModel.router ? "Now: DGC Router, which picks a free worker for each sub-agent" : settings ? `Now: ${settings}` : "Now: same as this session’s model";
     const sameRow = `<button type="button" role="menuitemradio" aria-checked="${same}" class="mrow dgc-menu-row dgc-menu-row-sub${same ? " sel" : ""}" data-agents-same="1" title="${esc(`Settings’ choice. ${sameWhat}`)}">${check(same)}`
       + `<span class="dgc-menu-words"><span class="dgc-menu-label">Settings’ choice</span><span class="dgc-menu-sub agents-same-what">${esc(sameWhat)}</span></span></button>`;
     options.innerHTML = agentsSetHtml() + `<div class="model-list-scroll" role="group" aria-label="Model for this session’s sub-agents">` + sameRow
@@ -3584,7 +3623,7 @@
   // `/agents` is the agent map, opened in the panel (the CLI's own /agents opened the sub-agent
   // settings, which the map links to). `/tasks` keeps its meaning: retained worktrees.
   function agentMapCommands(list) {
-    const entry = { name: "agents", description: "open the agent map: every agent and background task in this chat", action: "agentMap" };
+    const entry = { name: "agents", description: "open the agent map: every agent and background task in this session", action: "agentMap" };
     const out = list.map((c) => (c && c.name === "agents" ? { ...c, ...entry, accepts_args: false } : c));
     return goalHistoryCommand(out.some((c) => c && c.name === "agents") ? out : [...out, entry]);
   }
@@ -3849,7 +3888,7 @@
       if (returnedNodes.get(row.id)?.isConnected) continue;     // its not-sent bubble offers the restore
       const node = el("div", "sys draft-delivery-notice");
       node.textContent = row.rejected ? "A rejected message is available to restore."
-        : "Delivery of a message from the previous connection was not confirmed. Check the chat before retrying.";
+        : "Delivery of a message from the previous connection was not confirmed. Check the session before retrying.";
       const button = el("button", "act", "Restore message to draft"); button.type = "button";
       button.onclick = () => {
         if (composerText() || attachments.length) { sysLine("Send or clear the current draft first."); return; }
@@ -3884,7 +3923,7 @@
     if (role && role.textContent.startsWith("you")) role.textContent = confirmed ? "you · not sent" : "you · delivery unconfirmed";
     const restore = () => {
       if (pending.session && pending.session !== draftSession) {
-        sysLine("Reopen this message's original chat to restore its draft."); return;
+        sysLine("Reopen this message's original session to restore its draft."); return;
       }
       if (composerText() || attachments.length) {
         sysLine("Send or clear the current draft before restoring this message."); return;
@@ -4645,7 +4684,7 @@
     while (seeking && railSeeking === seeking) {
       if (railNode(seeking.id)) { railSeeking = null; seeking.then(); return; }
       const older = railOlder();
-      if (!older || older.hidden || seeking.pages++ > 5000) { railSeeking = null; speak("That part of the chat isn't shown here."); return; }
+      if (!older || older.hidden || seeking.pages++ > 5000) { railSeeking = null; speak("That part of the session isn't shown here."); return; }
       if (older.disabled) return;                  // the archive's next page is on its way: its answer carries on
       older.click();
     }
@@ -4685,6 +4724,7 @@
     setTimeout(() => node.classList.remove("prompt-flash"), 1600);
   }
   const promptRail = window.DgcPromptRail?.create({
+    where: "session",                    // (its name: "Prompts in this session")
     id: "prompt-rail", scroller: log, input, reveal: "hover",
     visible: () => log.clientHeight > 0 && !document.body.hasAttribute("data-agent-page"),
     prompts: railPrompts,
@@ -6150,7 +6190,7 @@
       + `<span class="ts-actions">`
       + `<button type="button" class="ts-undo" title="Put these files back as they were before this turn">Undo <span class="codicon codicon-discard" aria-hidden="true"></span></button>`
       + `<button type="button" class="ts-fold" aria-expanded="true" aria-controls="${listId}" aria-label="Fold the changed files" title="Fold the changed files"><span class="ts-chev">${icon("chevron-down", "sm")}</span></button>`
-      + `<button type="button" class="act ts-review" title="Open the diff for every file this chat changed">${icon("file-text", "sm")}<span>Open diff</span></button>`
+      + `<button type="button" class="act ts-review" title="Open the diff for every file this session changed">${icon("file-text", "sm")}<span>Open diff</span></button>`
       + `</span></div>`
       + `<div class="ts-list" id="${listId}">${body}</div>`;
     card.querySelectorAll(".ts-folder-row").forEach((button) => button.onclick = () => {
@@ -6428,7 +6468,7 @@
         ["down", "thumbsdown", "Poor response \u2014 kept in this workspace, sent nowhere"]]) {
         add(act, icon, label).setAttribute("aria-pressed", "false");
       }
-      add("branch", "git-branch", "Branch into a new chat from here");
+      add("branch", "git-branch", "Branch into a new session from here");
       // Recurring work belongs in a Pip. This only drafts the ask; nothing is sent or created.
       if (pipsOffered && String(prompt || "").trim()) add("pip", "calendar", "Make this a Pip that does it on a schedule");
     }
@@ -7322,7 +7362,7 @@
       if (owner?.liveStep) paintLiveStep(owner);     // its folded group's live row shows it at once
     }, RUN_BG_AFTER_MS);
     b.setAttribute("aria-label", "Run this command in the background");
-    b.title = "Stop waiting for it: the turn carries on, the command keeps running, and its exit wakes this chat";
+    b.title = "Stop waiting for it: the turn carries on, the command keeps running, and its exit wakes this session";
     b.onclick = (event) => {
       event.stopPropagation();          // the head is a toggle; this must not open the card
       if (b.disabled) return;
@@ -7554,7 +7594,7 @@
         }
         node.classList.add("stopped");
         node.querySelectorAll("button").forEach((button) => { button.disabled = true; });
-        const label = node.querySelector(".anm"); if (label) label.textContent = "Artifact stopped";
+        const label = node.querySelector(".anm"); if (label) label.textContent = "Preview stopped";
         if (stop) stop.textContent = "Stopped";
       } else if (message.state === "error" && stop) {
         stop.disabled = false;
@@ -7683,7 +7723,7 @@
     panel.innerHTML = [...runs].reverse().map((ev) => {
       const id = String(ev.run_id), state = String(ev.state || "running"), planned = Number(ev.agents_planned) || 0, reused = Number(ev.reused) || 0;
       const note = state === "running"
-        ? `About ${planned} agents. This chat continues when it ends.` + (reused ? ` ${reused} results reused.` : "")
+        ? `About ${planned} agents. This session continues when it ends.` + (reused ? ` ${reused} results reused.` : "")
         : `Results: ${String(ev.journal || "")}`;
       const stopButton = state === "running" && runs.length > 1
         ? `<button type="button" class="rail-text-action" data-troupe-stop="${esc(id)}"${troupeStopping.has(id) ? " disabled" : ""}>${troupeStopping.has(id) ? "Stopping…" : "Stop"}</button>` : "";
@@ -7741,7 +7781,7 @@
           + `<div class="muted pip-permission-note">Allow adds it to the Pip's routines, on at once. It only reads this project's committed code. Turn it off in the Pip's Settings, Routines.</div>`;
       }
       return `<dl class="pip-permission">${row("Work", args.title)}${row("Plan", plan)}${row("Goal", args.goal)}${row(`Items (${items.length})`, listed)}${row("Resume", args.resume)}</dl>`
-        + `<div class="muted pip-permission-note">Allow starts it in the background: one agent per item. Its progress shows above the message box, where you can stop it, and this chat continues when it ends.</div>`;
+        + `<div class="muted pip-permission-note">Allow starts it in the background: one agent per item. Its progress shows above the message box, where you can stop it, and this session continues when it ends.</div>`;
     }
     const row = (label, value) => (value ? `<dt>${label}</dt><dd>${esc(String(value))}</dd>` : "");
     // A Pip's model and context window in the user's words (the main chat changes them from Pips API 66).
@@ -7835,7 +7875,9 @@
   // folded once answered, as a finished step folds; the buttons and feedback stay outside it.
   function planFold(title, plan) {
     return `<details class="plan-fold" open><summary class="q">${icon("clipboard-list")} <span class="plan-fold-title">${esc(title)}</span>`
-      + `<span class="plan-fold-chev" aria-hidden="true">${icon("chevron-down", "sm")}</span></summary><pre>${esc(plan)}</pre></details>`;
+      // The plan as a reply reads: its headings, lists and code drawn (it showed as raw Markdown in a code box, "## Goal"
+      // and backticks and all. W29, user test 15 Nov).
+      + `<span class="plan-fold-chev" aria-hidden="true">${icon("chevron-down", "sm")}</span></summary><div class="plan-body surface-markdown">${md(String(plan ?? ""))}</div></details>`;
   }
   function resolveCard(c, decision = "") {
     if (!c || c.classList.contains("resolved")) return false;
@@ -7964,7 +8006,7 @@ function permissionChoices(ev) {
     const card = (shown, title, rows, note) => ({ name: shown, title, labels: {}, edit: null, note: true, rule: false,
       detail: `${rows ? `<dl class="pip-permission">${rows}</dl>` : ""}<div class="muted pip-permission-note">${esc(note)}</div>` });
     const why = row("Why", plainWords(a.reason, 300));
-    const undoable = settingsUndoLive ? " The line it leaves in the chat has Undo." : "";
+    const undoable = settingsUndoLive ? " The line it leaves in the session has Undo." : "";
     if (a.action === "setting" || a.action === "dev_limit") {
       const key = plainWords(a.key, 80), label = plainWords(a.setting_label, 160) || (key.replace(/[_-]+/g, " ").replace(/^./, (c) => c.toUpperCase()) || "A setting");
       const change = "before" in a ? `${settingValue(a.before)} → ${settingValue(a.value)}` : `to ${settingValue(a.value)}`;
@@ -7975,7 +8017,7 @@ function permissionChoices(ev) {
     if (a.action === "rule") {
       const does = { allow: "Always allow", ask: "Always ask", deny: "Never allow" }[a.rule_action] || "Always allow", text = plainWords(a.rule, 500);
       return a.remove === true ? card(`Remove the rule ${text}`, "Remove a permission rule?", row("Rule", text) + why, `DGC stops following this rule.${undoable}`)
-        : card(`Permission rule · ${does} ${text}`, "Add a permission rule?", row("Rule", text) + row("It will", does) + why, `DGC follows this rule in every chat from now on.${undoable}`);
+        : card(`Permission rule · ${does} ${text}`, "Add a permission rule?", row("Rule", text) + row("It will", does) + why, `DGC follows this rule in every session and chat from now on.${undoable}`);
     }
     if (a.action === "undo") return card("Put a setting back", "Put a setting back?", why, "A change DGC made earlier goes back to what it was.");
     return null;
@@ -7992,8 +8034,8 @@ function permissionChoices(ev) {
     const named = `<b>${esc(pip)}</b>`;
     if (name === "pause_pip") return card(`Pause ${pip}`, `Pause ${named}?`, why, "Its queued and scheduled work waits until you resume it. Its chat stays open, and a reply already running may finish.");
     if (name === "resume_pip") return card(`Resume ${pip}`, `Resume ${named}?`, why, "Work it already has, queued or on its schedule, can run again. Nothing new is approved.");
-    if (name === "attach_pip_to_session") return card(`Attach ${pip}`, `Attach ${named} to this chat?`, why, "You can ask about it here. It gets no access to this chat, no new tools and no new permissions.");
-    if (name === "run_pip_now") return card(`Run ${pip}`, `Run ${named} now?`, why, "It runs in the background under its own job and model. Its report comes back to this chat.");
+    if (name === "attach_pip_to_session") return card(`Attach ${pip}`, `Attach ${named} to this session?`, why, "You can ask about it here. It gets no access to this session, no new tools and no new permissions.");
+    if (name === "run_pip_now") return card(`Run ${pip}`, `Run ${named} now?`, why, "It runs in the background under its own job and model. Its report comes back to this session.");
     if (name === "pips_adapt") {
       const changes = a.changes && typeof a.changes === "object" ? a.changes : {};
       return card(`Change ${pip}`, `Change ${named}?`, row("New name", changes.name) + row("Branch", changes.source_ref) + why, "Allow applies this to the Pip. It starts no work, and what the Pip may do stays the same.");
@@ -8039,9 +8081,20 @@ function permissionChoices(ev) {
     return { name: `${action} · ${plugin}`, title: `Use <b>${esc(action)}</b> from <b>${esc(plugin)}</b>?`, detail,
       labels: {}, edit: null, note: true };
   }
+  // This session's project, as DGC names its folder (ready.project_root): what "edits in this project" covers.
+  let projectRoot = "";
+  /** The four rules behind "Always allow edits in this project" for an Allow card (media/shared/rulewords.js): only for
+   *  an edit of a file inside the project, by a DGC that says where the project is. None: the card keeps its own rule. */
+  function projectEditRules(ev) {
+    const words = window.DgcRuleWords;
+    if (!words || !projectRoot || !ev || !words.isEdit(ev.name) || !words.inProject(ev.args?.path, projectRoot)) return [];
+    return words.projectRules(projectRoot, ev.name);
+  }
+  /** A rule in a person's words, for a receipt: "edits in this project", "the command npm test". */
+  const ruleAbout = (rule) => (window.DgcRuleWords ? window.DgcRuleWords.about(rule, projectRoot) : String(rule || ""));
   function permissionDecision(decision, rule, note) {
     if (decision === "once") return "Allowed once";
-    if (decision === "always") return rule ? `Always allowed · ${rule}` : "Always allowed";
+    if (decision === "always") return rule ? `Always allowed · ${ruleAbout(rule)}` : "Always allowed";
     return note ? `Denied · note for the model: ${note}` : "Denied";
   }
   function compactPermissionCard(card, name) {
@@ -8057,8 +8110,17 @@ function permissionChoices(ev) {
     card.removeAttribute("aria-disabled");
   }
   // A plan review keeps its feedback only when planning goes on (the backend drops it on approval).
+  // A plan's answers, in words (they were the modes' code names, "Approve → acceptEdits", "auto", "default": W29). The
+  // card's own line says that each of the first three approves the plan; a button says how much DGC then asks, in the
+  // family's own box (the filled one is the wide box), and its title says the rest.
+  const PLAN_ANSWERS = [
+    ["acceptEdits", "Ask before commands", "Approve the plan. DGC edits files without asking, and still asks before a command.", true],
+    ["default", "Ask each time", "Approve the plan. DGC asks before each edit and each command.", false],
+    ["auto", "Never ask", "Approve the plan. DGC carries it out without asking for anything. You confirm that first.", false],
+    ["reject", "Keep planning", "Nothing is changed. What you wrote above goes to DGC, and it plans again.", false]];
+  const PLAN_APPROVED = { acceptEdits: "Approved · asks before commands", default: "Approved · asks each time", auto: "Approved · never asks" };
   function planDecision(decision, feedback) {
-    if (decision !== "reject") return `Approved · ${decision} mode`;
+    if (decision !== "reject") return PLAN_APPROVED[decision] || `Approved · ${decision} mode`;
     return feedback ? `Kept planning · feedback: ${feedback}` : "Kept planning";
   }
   const MCP_DECISIONS = { accept: "Approved once", decline: "Declined", cancel: "Cancelled" };
@@ -8258,7 +8320,7 @@ function permissionChoices(ev) {
     placeRestartNote(line, ev, live);
   }
   function renderMonitorsList() {
-    if (!monitorItems.length) { sysLine("No background monitors in this chat."); return; }
+    if (!monitorItems.length) { sysLine("No background monitors in this session."); return; }
     const c = decisionCard(`<div class="q">${icon("activity")} Background monitors</div><div class="monitor-list"></div>`, "Background monitors");
     const list = c.querySelector(".monitor-list");
     monitorItems.forEach((item) => {
@@ -8549,11 +8611,11 @@ function permissionChoices(ev) {
     // instead. "Changes unavailable" read as "this is broken" for the empty case, which is the same
     // statement with nothing recorded yet. The reason itself is on the bar's title.
     const partialChanges = changeState.notices.length > 0;
-    const changedFiles = `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed in this chat`;
+    const changedFiles = `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed in this session`;
     $("changes-count").textContent = partialChanges
       ? (changeState.total ? `At least ${changedFiles}` : "Changes not recorded · partial scan")
       : changedFiles;
-    changesBar.title = ["Changes recorded during runs in this chat; existing workspace changes are excluded",
+    changesBar.title = ["Changes recorded during runs in this session; existing workspace changes are excluded",
       ...(partialChanges && changeState.total ? ["Not every file could be checked, so the real totals may be higher."] : []),
       ...changeState.notices].join("\n");
     $("changes-add").hidden = $("changes-del").hidden = changeState.total === 0;
@@ -8564,10 +8626,10 @@ function permissionChoices(ev) {
   }
   function renderChangesReview() {
     const changeState = reviewScope === "chat" ? currentChatChanges() : workspaceChangeState;
-    $("changes-review-title").textContent = reviewScope === "chat" ? "Changes in this chat" : "Workspace changes";
+    $("changes-review-title").textContent = reviewScope === "chat" ? "Changes in this session" : "Workspace changes";
     $("changes-review-description").textContent = reviewScope === "chat"
-      ? "Saved before/after snapshots from this chat’s runs in this chat’s folder. Existing changes and edits between runs are excluded. Concurrent edits during a run may be included."
-      : "All pending changes since the last Git commit, including edits made before this chat or by other tools.";
+      ? "Saved before/after snapshots from this session’s runs in this session’s folder. Existing changes and edits between runs are excluded. Concurrent edits during a run may be included."
+      : "All pending changes since the last Git commit, including edits made before this session or by other tools.";
     const summary = $("changes-review-summary"), list = $("changes-review-list");
     const floor = reviewScope === "chat" && changeState.total && changeState.notices?.length ? "At least " : "";
     summary.replaceChildren(
@@ -8841,7 +8903,7 @@ function permissionChoices(ev) {
   // Where each row lives in the rail, so a row a popover borrowed goes back to its own place.
   const RAIL_ROW_ORDER = ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
   const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
-    changes: "Changes in this chat", pips: "Pips", queue: "Queued messages", pipfixes: "Pip fixes", piprunning: "Pips running",
+    changes: "Changes in this session", pips: "Pips", queue: "Queued messages", pipfixes: "Pip fixes", piprunning: "Pips running",
     wakeups: "Wake-ups", goalruns: "This session's goals", paste: "Pasted text" };
   // Which kinds stay on the bar longest when it is short of room; a kind that needs you outstays them all.
   const RAIL_KEEP = ["queue", "changes", "tasks", "pipfixes", "troupe", "piprunning", "wakeups", "monitors", "goal", "pips", "goalruns", "paste"];
@@ -9342,9 +9404,13 @@ function permissionChoices(ev) {
     // let someone read their own `deny` back and believe it was in force; the terminal listings
     // have always said so. Same idiom as the hooks surface below.
     const brokenRules = surfaceRows.filter((rule) => rule && rule.invalid).length;
-    surfaceBody.innerHTML = `<form id="permission-form" class="surface-inline-form"><select id="permission-action" aria-label="Rule action"><option>deny</option><option>ask</option><option>allow</option></select><input id="permission-rule" required aria-label="Permission rule" placeholder="Bash(npm test *)"><button class="act primary" type="submit">Add</button></form>` + (brokenRules ? `<div class="err surface-notice">${brokenRules} rule${brokenRules === 1 ? " does" : "s do"} not parse and ${brokenRules === 1 ? "is" : "are"} not in force</div>` : "") + (surfaceRows.map((rule, i) => `<article class="surface-card compact" data-filter="${esc(`${rule.action} ${rule.rule}`.toLowerCase())}"><div class="surface-card-head"><span class="surface-badge ${esc(rule.action)}">${esc(rule.action)}</span><code>${esc(rule.rule)}</code>${rule.invalid ? '<span class="surface-state err">invalid</span>' : ""}<button type="button" class="icon-action" aria-label="Remove rule" data-rule-remove="${i}">×</button></div></article>`).join("") || '<div class="surface-empty">No custom permission rules. Mode defaults still apply.</div>');
+    // Each rule in words, with the rule as written under it; a project's four edit rules are the one a person made
+    // (media/shared/rulewords.js). Remove takes away every rule its row stands for.
+    const ruleRows = window.DgcRuleWords ? window.DgcRuleWords.rows(surfaceRows, projectRoot)
+      : surfaceRows.map((rule) => ({ action: rule.action, words: rule.rule, detail: "", rules: [rule.rule], invalid: rule.invalid === true }));
+    surfaceBody.innerHTML = `<form id="permission-form" class="surface-inline-form"><select id="permission-action" aria-label="Rule action"><option>deny</option><option>ask</option><option>allow</option></select><input id="permission-rule" required aria-label="Permission rule" placeholder="Bash(npm test *)"><button class="act primary" type="submit">Add</button></form>` + (brokenRules ? `<div class="err surface-notice">${brokenRules} rule${brokenRules === 1 ? " does" : "s do"} not parse and ${brokenRules === 1 ? "is" : "are"} not in force</div>` : "") + (ruleRows.map((row, i) => `<article class="surface-card compact rule-row" data-filter="${esc(`${row.action} ${row.words} ${row.detail}`.toLowerCase())}"><div class="surface-card-head"><span class="surface-badge ${esc(row.action)}">${esc(row.action)}</span><span class="rule-words">${esc(row.words)}</span>${row.invalid ? '<span class="surface-state err">invalid</span>' : ""}<button type="button" class="icon-action" aria-label="Remove rule: ${esc(row.words)}" title="Remove this rule" data-rule-remove="${i}">×</button></div>${row.detail && row.detail !== row.words ? (row.project ? `<div class="muted rule-where">${esc(row.detail)}</div>` : `<code class="rule-raw">${esc(row.detail)}</code>`) : ""}</article>`).join("") || '<div class="surface-empty">No custom permission rules. Mode defaults still apply.</div>');
     $("permission-form").onsubmit = (event) => { event.preventDefault(); vscode.postMessage({ type: "permissionAdd", action: $("permission-action").value, rule: $("permission-rule").value }); };
-    surfaceBody.querySelectorAll("[data-rule-remove]").forEach((button) => button.onclick = () => { const rule = surfaceRows[+button.dataset.ruleRemove]; vscode.postMessage({ type: "permissionRemove", action: rule.action, rule: rule.rule }); });
+    surfaceBody.querySelectorAll("[data-rule-remove]").forEach((button) => button.onclick = () => { const row = ruleRows[+button.dataset.ruleRemove]; for (const rule of row.rules) vscode.postMessage({ type: "permissionRemove", action: row.action, rule }); });
     surfaceButtons(); filterSurface();
   }
   function renderMemory(ev) {
@@ -9394,6 +9460,7 @@ function permissionChoices(ev) {
     if (ev.type !== "ready" && modsUi?.event(ev)) return;
     switch (ev.type) {
       case "ready": {
+        projectRoot = typeof ev.project_root === "string" ? ev.project_root : "";      // (what "this project" is, for a rule's words)
         requestEpoch += 1;             // a backend (re)started: its request ids start again
         refreshDock();
         modsUi?.ready(ev.capabilities);
@@ -9522,8 +9589,8 @@ function permissionChoices(ev) {
         if (ev.kind === "cleared" || ev.kind === "new") renderTodos([]);
         // A branch keeps the conversation on screen — that is the whole point of it.
         if (ev.kind === "forked") {
-          sysLine(`Branched into a new chat${ev.name ? ` — ${ev.name}` : ""}. `
-            + "The chat you came from keeps everything up to this point.");
+          sysLine(`Branched into a new session${ev.name ? ` — ${ev.name}` : ""}. `
+            + "The session you came from keeps everything up to this point.");
         }
         setThreadTitle(ev.name, ev.session_id, ev.kind === "cleared" || ev.kind === "new");
         if (ev.session_id) selectDraftSession(ev.session_id);
@@ -9857,7 +9924,9 @@ function permissionChoices(ev) {
         const c = decisionCard(`<div class="q">${icon("shield")}<span>${asked}</span></div>${detail}`, "Recorded permission decision");
         c.dataset.historyApproval = "true";
         // No request id, response handler or editable controls: replay is display only.
-        resolveCard(c, String(ev.message || "Recorded decision"));
+        // (A reopened session's "Always allowed · Write(/home/…/*)" says the rule in words too, as the live card did.)
+        const recorded = String(ev.message || "Recorded decision"), ruled = /^Always allowed · (.+)$/s.exec(recorded);
+        resolveCard(c, ruled ? `Always allowed · ${ruleAbout(ruled[1])}` : recorded);
         compactPermissionCard(c, plainDecision ? plainDecision.name : ev.name);
         break;
       }
@@ -9896,12 +9965,14 @@ function permissionChoices(ev) {
         // (router_update) and a look on the network (router_find) send ["once", "deny"], asked every time, so they get
         // no Always allow. An older CLI sends no list (or all three): every button, as before.
         const offered = permissionChoices(ev);
+        // An edit inside the project: Always allow means edits in this project (W8, his call of 15 Nov), and says so.
+        const projectRules = fixAsk ? [] : projectEditRules(ev);
         // The same order on every card (ui-04, U5): Always allow, Deny, then Allow once, the only filled button, at the
         // right end, where the eye ends and the hand already is.
         const buttons = fixFile
           ? `<button type="button" class="act" data-d="deny">Not now</button><button type="button" class="act primary" data-d="once">Copy it</button>`
           : (plain?.edit != null && offered.has("deny") ? '<button type="button" class="act" data-edit-prompt aria-expanded="false">Edit</button>' : "")
-            + (offered.has("always") ? `<button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : esc(plain?.labels.always || "Always allow")}</button>` : "")
+            + (offered.has("always") ? `<button type="button" class="act" data-d="always"${projectRules.length ? ' aria-label="Always allow edits in this project" title="Always allow edits in this project: DGC stops asking before it edits a file here. Remove the rule in Settings → Security."' : ""}>${signedIn ? `Always allow ${esc(site || "this site")}` : esc(plain?.labels.always || "Always allow")}</button>` : "")
             + (offered.has("deny") ? `<button type="button" class="act" data-d="deny">${esc(plain?.labels.deny || "Deny")}</button>` : "")
             + (offered.has("once") ? `<button type="button" class="act primary" data-d="once"${plain?.blocked ? ' disabled title="It would pass this month\'s limit"' : ""}>${esc(plain?.labels.once || "Allow once")}</button>` : "");
         // Edit: the prompt in a box; "Ask again with this prompt" answers the card with the new prompt for the model,
@@ -9914,7 +9985,7 @@ function permissionChoices(ev) {
         // A plugin's tool whose logo this page doesn't have yet: the shield for now, and the host is asked for it.
         const logoFor = !fixAsk && !logo ? (/^mcp__([a-z0-9_-]{1,64})__/.exec(String(ev.name || "")) || [])[1] : "";
         if (logoFor) vscode.postMessage({ type: "pluginLogos", plugins: [logoFor] });
-        const inner = `<div class="q">${logo ? `<span class="perm-logo">${logo}</span>` : logoFor ? `<span data-logo-for="${esc(logoFor)}">${icon("shield")}</span>` : icon("shield")}<span>${title}</span></div>${helperHeading}${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile || plain && !plain.note ? "" : `<textarea class="feedback deny-note" rows="1" hidden aria-label="A note for the model (optional)" placeholder="A note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>${editor}`;
+        const inner = `<div class="q">${logo ? `<span class="perm-logo">${logo}</span>` : logoFor ? `<span data-logo-for="${esc(logoFor)}">${icon("shield")}</span>` : icon("shield")}<span>${title}</span></div>${helperHeading}${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile || plain && !plain.note ? "" : `<textarea class="feedback deny-note" rows="1" hidden aria-label="A note for the model (optional)" placeholder="A note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>${projectRules.length && offered.has("always") ? '<p class="perm-always">Always allow means edits in this project: DGC stops asking before it edits a file here.</p>' : ""}${editor}`;
         // On the fix's card it is built there: drawn into a running turn first, it would break that turn's prose.
         const c = requestCard(fixAsk ? fixAskCard(fixAsk, inner) : decisionCard(inner, "Tool permission request"), ev.id);
         if (!fixAsk) c.classList.add("perm-card");      // one line, then what it does (media/main.css, ui-04)
@@ -9930,10 +10001,14 @@ function permissionChoices(ev) {
           // Read by the model and shown in the step's row: plain words for both.
           const note = edited ? `Changed the prompt to: ${edited} — make it with this prompt instead (same generator, ${plain?.video ? "length and resolution" : "size and count"}).`
             : b.hasAttribute("data-no-note") ? "" : (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
-          if (!resolveCard(c, edited ? "Asked again with your prompt" : permissionDecision(b.dataset.d, plain?.rule === false ? "" : ev.suggested_rule, note))) return;
+          const always = b.dataset.d === "always", wide = always && projectRules.length > 0;
+          if (!resolveCard(c, edited ? "Asked again with your prompt" : permissionDecision(b.dataset.d, plain?.rule === false ? "" : wide ? projectRules[0] : ev.suggested_rule, note))) return;
           compactPermissionCard(c, plain ? plain.name : ev.name);
+          // (Edits in this project: the rule for the tool that asked answers the card, and the host adds the other edit
+          // tools' rules beside it, so the next edit, whichever tool makes it, doesn't ask.)
           vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d,
-            rule: b.dataset.d === "always" ? ev.suggested_rule : undefined,
+            rule: always ? (wide ? projectRules[0] : ev.suggested_rule) : undefined,
+            ...(wide ? { projectRules: projectRules.slice(1) } : {}),
             reason: b.dataset.d === "deny" && note ? note : undefined });
         };
         c.querySelectorAll("button[data-d], button[data-edit-prompt]").forEach((b) => b.onclick = () => {
@@ -9975,7 +10050,7 @@ function permissionChoices(ev) {
         ensureTurn();
         imageViewerAttention("plan_proposal");
         speak("Plan ready for review");
-        const c = requestCard(decisionCard(`${planFold("Plan ready", ev.plan)}<textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
+        const c = requestCard(decisionCard(`${planFold("Plan ready", ev.plan)}<textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><p class="plan-says">Approve the plan by choosing how much DGC asks while it carries it out, or keep planning.</p><div class="btns plan-btns" role="group" aria-label="Approve the plan, or keep planning">${PLAN_ANSWERS.map(([d, label, title, primary]) => `<button type="button" class="act${primary ? " primary wide" : ""}" data-d="${d}" title="${esc(title)}">${esc(label)}</button>`).join("")}</div>`, "Plan approval"), ev.id);
         c.querySelectorAll("button[data-d]").forEach((b) => b.onclick = () => {
           const feedback = c.querySelector(".feedback").value.trim();
           const choice = b.dataset.d;
@@ -10285,11 +10360,14 @@ function permissionChoices(ev) {
         amPreviewReady(ev);
         ensureTurn();
         const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
-        c.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">${icon("app-window")}</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><button type="button" class="aurl">${esc(ev.url)}</button>`;
+        c.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">${icon("app-window")}</span><span class="anm">Preview ready</span><span class="alabel">${esc(ev.name)}</span></div><button type="button" class="aurl aurl-words" title="${esc(ev.url)}">A page on this computer only</button>`;
         const row = el("div", "abtns");
         const open = el("button", "abtn primary wide", "Open in browser"); open.type = "button";   // (the wide box: its words are 8px too long for the one box, and were cut)
         open.onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
-        const stop = el("button", "abtn", "Stop"); stop.type = "button"; stop.dataset.artifactStop = "1";
+        // (A page DGC serves for a look, not one of the Library's artifacts: "Preview", its address behind the words, and
+        // a Stop that says what it stops. W29: "Artifact ready · Plan · http://127.0.0.1:45001/… · Stop".)
+        const stop = el("button", "abtn wide", "Stop preview"); stop.type = "button"; stop.dataset.artifactStop = "1";
+        stop.title = "Stop serving this page. What it shows stays in the session.";
         stop.onclick = () => requestArtifactStop(ev.id, c, stop);
         row.appendChild(open); row.appendChild(stop); c.appendChild(row);
         c.querySelector(".aurl").onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
@@ -10401,7 +10479,8 @@ function permissionChoices(ev) {
           + (ev.ultra_mode ? " · Ultra" : "")
           + (ev.goal && ev.goal.text ? ` · goal ${ev.goal.status}` : ""));
         break;
-      case "rule_added": sysLine("rule: " + ev.rule, false, "shield-plus"); break;
+      // (In words: "Rule added: always allow edits in this project", never the rule's own line. W8.)
+      case "rule_added": sysLine(window.DgcRuleWords ? `Rule added: ${window.DgcRuleWords.sentence("allow", ev.rule, projectRoot).replace(/^./, (c) => c.toLowerCase())}` : "rule: " + ev.rule, false, "shield-plus"); break;
       case "info":
         // A sub-agent's spawn notices ("⟳ sub-task: …", "↳ isolated checkout: …", "↯ running N
         // isolated sub-tasks in parallel") are what its line in the transcript now says, and the
@@ -10424,6 +10503,9 @@ function permissionChoices(ev) {
         if (!replaying) sysLine(ev.message, ev.decision === "no"); break;
       case "prompt_pips": receivePromptPips(ev); break;
       case "command_rejected":
+        // A thinking level DGC refused: the button goes back to what DGC last said, at once (a refused level never
+        // stays on it).
+        if (thinkChosen && ["set_think", "set_config"].includes(ev.command)) { clearTimeout(thinkChosen.timer); clearTimeout(thinkChosen.settle); thinkChosen = null; thinkShown(thinkSaid.ultra ? "ultra" : thinkSaid.think); }
         // The agent map asked, and the map says what became of it (the output not available, a Stop
         // that did not take): a refusal of its polling must not fill the chat with lines.
         if (["get_background_output", "list_background_shells", "stop_background_shell"].includes(ev.command)
@@ -10645,7 +10727,7 @@ function permissionChoices(ev) {
     return m;
   }
   function submitGoal(objective, restoreText = composerText()) {
-    if (attachments.some(a => a.pipReference)) { sysLine("Pip references are supported in chat messages. Remove the reference before starting a standing goal.", true); persistDraft(); return; }
+    if (attachments.some(a => a.pipReference)) { sysLine("Pip references are supported in messages. Remove the reference before starting a standing goal.", true); persistDraft(); return; }
     if (!sessionReady || pendingImageFiles || pendingPrompts.size >= 17) {
       sysLine("Wait for DGC and pending attachments before starting the goal."); persistDraft(); return;
     }
@@ -10712,8 +10794,8 @@ function permissionChoices(ev) {
   function holdUntilReady(delivery) {
     if (heldSend) { heldSend.delivery = delivery; return; }
     const line = sysLine(hostSessionSeen
-      ? "DGC is reconnecting to this chat. Your message sends as soon as it's back."
-      : "Starting this chat. Your message sends as soon as it's ready.");
+      ? "DGC is reconnecting to this session. Your message sends as soon as it's back."
+      : "Starting this session. Your message sends as soon as it's ready.");
     heldSend = { delivery, line, timer: null };
   }
   function armHeldSend() {
@@ -10771,7 +10853,7 @@ function permissionChoices(ev) {
     if (!text && !attachments.length) return;
     if (cardNumberIn(text) && cardWarnedFor !== text) {
       cardWarnedFor = text;
-      sysLine("That looks like a payment card number. Whatever you send here goes to the model, so card numbers stay out of the chat. Remove it, or press Enter again to send it as it is.", true);
+      sysLine("That looks like a payment card number. Whatever you send here goes to the model, so card numbers stay out of the session. Remove it, or press Enter again to send it as it is.", true);
       persistDraft(); return;
     }
     cardWarnedFor = null;
@@ -10795,7 +10877,7 @@ function permissionChoices(ev) {
     const goalManagement = value => goalStateCommand.includes(value.toLowerCase()) || /^budget(?:\s|$)/i.test(value);
     const typedGoalCommand = !!typedGoal && (!typedGoalRest || goalManagement(typedGoalRest));
     const typedGoalText = !!typedGoal && !typedGoalCommand;
-    if(references.length && (goalDraftArmed || typedGoalCommand)) {sysLine("Pip references are supported in chat messages. Remove the reference before using a goal command.",true);persistDraft();return;}
+    if(references.length && (goalDraftArmed || typedGoalCommand)) {sysLine("Pip references are supported in messages. Remove the reference before using a goal command.",true);persistDraft();return;}
     if (goalDraftArmed) {
       // Restoring a cancelled goal re-arms the composer. A freshly typed /goal
       // prefix is still command syntax, not part of its objective.
@@ -10991,7 +11073,7 @@ function permissionChoices(ev) {
     if (pipPicker.loading) items.push({label:"Loading Pips…",disabled:true});
     else if (pipPicker.error) items.push({label:pipPicker.error,disabled:true},{label:"Retry Pip list",pipRetry:true});
     else if (pipPicker.cursor && pipPicker.rows.length < 100) items.push({label:"Load more Pips",pipMore:true});
-    else if (!items.length) items.push({label:pipPicker.emptyLabel||"No matching Pips in this chat’s workspace",disabled:true});
+    else if (!items.length) items.push({label:pipPicker.emptyLabel||"No matching Pips in this session’s workspace",disabled:true});
     if(pipPicker.rows.length>=100)items.push({label:"Showing 100 Pips. Refine your search.",disabled:true});
     popMode="pip";showPop(items);
   }
@@ -11008,7 +11090,7 @@ function permissionChoices(ev) {
   function receivePromptPips(ev) {
     if(!pipPicker.active || ev.request_id!==pipPicker.id) return;
     clearTimeout(pipPicker.timeout);pipPicker.loading=false;
-    if(ev.workspace_id===""&&Array.isArray(ev.pips)&&!ev.pips.length&&ev.next_cursor===null&&!pipPicker.workspace){pipPicker.rows=[];pipPicker.cursor=null;pipPicker.emptyLabel="No Pips are registered for this chat’s workspace.";renderPipPicker();return;}
+    if(ev.workspace_id===""&&Array.isArray(ev.pips)&&!ev.pips.length&&ev.next_cursor===null&&!pipPicker.workspace){pipPicker.rows=[];pipPicker.cursor=null;pipPicker.emptyLabel="No Pips are registered for this session’s workspace.";renderPipPicker();return;}
     const rows=Array.isArray(ev.pips)?ev.pips.map(p=>({...p,workspace_id:p.workspace_id||ev.workspace_id})):null;
     if(!rows||rows.length>20||!rows.every(validPipReference)||new Set(rows.map(p=>p.pip_id)).size!==rows.length
       ||typeof ev.workspace_id!=="string"||!/^ws_[a-f0-9]{32}$/.test(ev.workspace_id)||ev.workspace_id.length!==35
@@ -11385,7 +11467,7 @@ function permissionChoices(ev) {
           candidates.push({ label, kind: "Artifact", detail: `Create ${label.toLowerCase()}`, artifactKind: value, artifactGlyph: glyph });
       }
       candidates.push(...files.filter((f) => f.label.toLowerCase().includes(query)).slice(0, 30));
-      if(pipReferencesSupported && (!query||"pips".includes(query)))candidates.unshift({label:"Reference a Pip…",kind:"Pips",detail:"This chat’s workspace · no work starts",pipPicker:true});
+      if(pipReferencesSupported && (!query||"pips".includes(query)))candidates.unshift({label:"Reference a Pip…",kind:"Pips",detail:"This session’s workspace · no work starts",pipPicker:true});
       showPop(candidates.slice(0, 40));
     } else hidePop();
   }
@@ -11559,7 +11641,7 @@ function permissionChoices(ev) {
               || { text: "", attachments: [], start: 0, end: 0, updated: Date.now() };
             draft.attachments.push(image); draft.updated = Date.now();
             draftEntries.set(owner.session, draft); persistDraft();
-            sysLine("The pasted image was added to its original chat's draft.");
+            sysLine("The pasted image was added to its original session's draft.");
           }
         };
         r.onerror = () => { release(); sysLine("The pasted image could not be read.", true); };
@@ -11731,7 +11813,7 @@ function permissionChoices(ev) {
     // Three groups with small headings, plain words, and key caps for the keys you can type instead (U2, 7 Nov).
     const group = (name, ids) => ({ name, rows: items.filter((it) => ids.includes(it.id)) });
     am.innerHTML = '<div role="group" aria-label="Add">'
-      + DgcMenu.html([group("Add to the message", ["files", "skill", "command", "mcp"]), group("This chat", ["goal", "plan"]),
+      + DgcMenu.html([group("Add to the message", ["files", "skill", "command", "mcp"]), group("This session", ["goal", "plan"]),
                       group("Go to", ["pips", "memory"])], { data: "add", rowClass: "mrow" })
       + "</div>";
     am.querySelectorAll("[data-add]").forEach((row) => row.onclick = () => {
@@ -11797,14 +11879,14 @@ function permissionChoices(ev) {
       const ceiling = Number(chatSlots.max) > 0 ? Number(chatSlots.max) : Infinity;
       const full = items.length >= ceiling;
       add.disabled = full;
-      add.title = full ? `DGC is at your limit of ${ceiling} chats (dgc.maxLiveChats)`
-        : items.length > 1 ? "Open another chat" : "Open a second chat";
+      add.title = full ? `DGC is at your limit of ${ceiling} sessions (dgc.maxLiveChats)`
+        : items.length > 1 ? "Open another session" : "Open a second session";
       add.setAttribute("aria-label", add.title);
       // Another folder is another chat: the same ceiling, and nothing to pick a folder for.
       const folder = $("chat-add-folder");
       if (folder) {
         folder.disabled = full;
-        folder.title = full ? add.title : "Open a chat in another folder";
+        folder.title = full ? add.title : "Open a session in another folder";
         folder.setAttribute("aria-label", folder.title);
       }
     }
@@ -11824,8 +11906,8 @@ function permissionChoices(ev) {
     const focusedSlot = document.activeElement?.closest?.("#chatbar .chat-tabwrap")?.dataset.slot || "";
     const focusedClose = !!document.activeElement?.classList?.contains("chat-close");
     strip.replaceChildren(...items.map((item, index) => chatTab(item, index, items.length)));
-    more.title = `All chats (${items.length})`;
-    more.setAttribute("aria-label", `All ${items.length} chats`);
+    more.title = `All sessions (${items.length})`;
+    more.setAttribute("aria-label", `All ${items.length} sessions`);
     bar.hidden = false;
     if (focusedSlot) {
       const wrap = strip.querySelector(`.chat-tabwrap[data-slot="${CSS.escape(focusedSlot)}"]`);
@@ -11853,7 +11935,7 @@ function permissionChoices(ev) {
     const dot = el("span", "chat-dot");
     dot.setAttribute("aria-hidden", "true");
     const name = el("span", "chat-name");
-    name.textContent = String(item.label || "New chat");
+    name.textContent = String(item.label || "New session");
     tab.append(dot, name);
     const inFolder = item.folder ? ` in ${String(item.folder)}` : "";
     if (item.folder) {
@@ -11863,14 +11945,14 @@ function permissionChoices(ev) {
       tab.append(where);
     }
     tab.title = `${name.textContent}${inFolder}\n${item.active ? "Showing" : words}`;
-    tab.setAttribute("aria-label", `Chat ${name.textContent}${inFolder}, ${words.toLowerCase()}${item.active ? ", showing" : ""}, ${index + 1} of ${count}`);
+    tab.setAttribute("aria-label", `Session ${name.textContent}${inFolder}, ${words.toLowerCase()}${item.active ? ", showing" : ""}, ${index + 1} of ${count}`);
     if (item.active) tab.setAttribute("aria-current", "true");
     tab.onclick = () => { if (!item.active) vscode.postMessage({ type: "switchChat", slotId: id }); };
     tab.onkeydown = (e) => chatTabKey(e, id, index, count);
     const close = el("button", "chat-close", '<span class="codicon codicon-close" aria-hidden="true"></span>');
     close.type = "button";
     close.title = `Close ${name.textContent}`;
-    close.setAttribute("aria-label", `Close chat ${name.textContent}`);
+    close.setAttribute("aria-label", `Close session ${name.textContent}`);
     close.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ type: "closeChat", slotId: id }); };
     wrap.append(tab, close);
     return wrap;
@@ -12245,13 +12327,13 @@ function permissionChoices(ev) {
   function markPipReportAsked(card) {
     for (const fix of card?.querySelectorAll(".pip-report-fix, .pip-report-fix-slim") || []) {
       fix.disabled = true; fix.textContent = "Asked DGC"; fix.classList.add("asked");
-      fix.title = "This report's prompt was sent in this chat.";
+      fix.title = "This report's prompt was sent in this session.";
     }
   }
   function askDgcToFix(r, card) {
     if (pipFixLive) { startPipFix(r, card); return; }   // a background fix in this chat, never a turn
     if (pipReportAsked(r.run_id)) { markPipReportAsked(card); return; }
-    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Ask again in a moment."); return; }
+    if (!sessionReady) { sysLine("DGC is reconnecting to this session. Ask again in a moment."); return; }
     if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return; }
     const text = pipReportPrompt(r);
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
@@ -12269,7 +12351,7 @@ function permissionChoices(ev) {
   // A plugin's card asked to send a message as yours (MCP Apps ui/message, labelled with its plugin): sent the way the
   // composer sends one, so it queues behind a running turn and comes back if the backend refuses it.
   function sendCardMessage(text) {
-    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Try the card again in a moment."); return false; }
+    if (!sessionReady) { sysLine("DGC is reconnecting to this session. Try the card again in a moment."); return false; }
     if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return false; }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
@@ -12285,7 +12367,7 @@ function permissionChoices(ev) {
   // From a Pip's own chat. A page with a chat sends it here, as the card would. The side bar's Sessions home has no
   // chat: the host opens the chat the Pip reports to (or a new one) in its tab, and that chat sends it (pipAskDgc).
   function askDgcFromPips(r, session) {
-    if (!validPipReport(r) || !PIP_REPORT_KINDS.includes(r.kind)) return "This run can't be sent to the Work chat.";
+    if (!validPipReport(r) || !PIP_REPORT_KINDS.includes(r.kind)) return "This run can't be sent to the Work session.";
     if (chatPlace === "home") {
       vscode.postMessage({ type: "pipAskDgc", report: r, session: /^[A-Za-z0-9_-]{1,128}$/.test(String(session || "")) ? session : "" });
       return true;
@@ -12300,9 +12382,9 @@ function permissionChoices(ev) {
   function openPipFixFromPips(session, runId) {
     if (!/^run_[0-9a-f]{32}$/.test(String(runId || ""))) return "This fix can't be shown.";
     const id = /^[A-Za-z0-9_-]{1,128}$/.test(String(session || "")) ? String(session) : "";
-    if (!id) return "DGC can't tell which chat this fix ran in.";
+    if (!id) return "DGC can't tell which session this fix ran in.";
     if (chatPlace !== "home" && id === draftSession) { closePips(); showPipFix(runId); return true; }
-    if (chatPlace === "chat") return "This fix ran in another chat. Open that chat from your sessions to review or undo it.";
+    if (chatPlace === "chat") return "This fix ran in another session. Open it from Work to review or undo it.";
     vscode.postMessage({ type: "pipOpenFix", session: id, run_id: runId });
     return true;
   }
@@ -12488,7 +12570,7 @@ function permissionChoices(ev) {
     else if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, fix, slimActs);
     if (!flow && !signIn) button("Open", "pip-report-open-slim", `Open this run of ${r.name} in Pips`, openReport, slimActs);
     // (At API 96 a card is history and has no Dismiss: `x` is a mark that is never drawn, so the lines below place nothing.)
-    const x = flow ? line1.appendChild(document.createComment("")) : button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the chat. The report stays in Pips.", dismiss, line1);
+    const x = flow ? line1.appendChild(document.createComment("")) : button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the session. The report stays in Pips.", dismiss, line1);
     if (!flow) { x.setAttribute("aria-label", "Dismiss"); x.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>'; }
     const chevron = el("span", "pip-report-chevron codicon codicon-chevron-right"); chevron.setAttribute("aria-hidden", "true");
     const fold = (open = card.dataset.shown !== "open") => {
@@ -12880,7 +12962,7 @@ function permissionChoices(ev) {
     const cardDismiss = card.querySelector(".pip-report-dismiss-slim, .pip-report-dismiss");
     if (!pipFixActive(fix) && fix.state !== "starting" && cardDismiss) {
       const gone = el("button", "pip-fix-dismiss"); gone.type = "button";
-      gone.title = "Dismiss: remove this from the chat. The report stays in Pips."; gone.setAttribute("aria-label", "Dismiss");
+      gone.title = "Dismiss: remove this from the session. The report stays in Pips."; gone.setAttribute("aria-label", "Dismiss");
       const x = el("span", "codicon codicon-close"); x.setAttribute("aria-hidden", "true"); gone.append(x);
       gone.onclick = (event) => { event.stopPropagation(); cardDismiss.click(); };
       // ✕ stays with the row's answers: a long line ("Fixed in your files · not committed") never leaves it alone on a row.
@@ -12985,7 +13067,7 @@ function permissionChoices(ev) {
     if (!validPipReport(r)) return;
     const had = pipFixes.get(r.run_id);
     if (pipFixActive(had)) return;
-    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Ask again in a moment."); return; }
+    if (!sessionReady) { sysLine("DGC is reconnecting to this session. Ask again in a moment."); return; }
     vscode.postMessage({ type: "startPipFix", run_id: r.run_id });
     for (const c of card ? [card] : pipFixCards(r.run_id)) {
       // The card goes at once: the row says it is starting until DGC says more (or refuses, and the card is back).
@@ -13272,7 +13354,7 @@ function permissionChoices(ev) {
       const trace = el("button", "goal-run-trace"); trace.type = "button"; trace.textContent = "Trace";
       const made = goalRunTrace(run);
       trace.disabled = !made;
-      trace.title = made ? `Replay the trace of this goal's ${made.model.replace(/ ·.*/, "")}` : "Its turns are not in this chat any more, so there is no trace to replay";
+      trace.title = made ? `Replay the trace of this goal's ${made.model.replace(/ ·.*/, "")}` : "Its turns are not in this session any more, so there is no trace to replay";
       trace.setAttribute("aria-label", made ? `Trace of the goal: ${run.name}` : `No trace for the goal: ${run.name}`);
       trace.onclick = () => { const now = goalRunTrace(run); if (!now) return; closeRailPop({ restore: false }); window.DgcTrace?.open(now); };
       li.append(words, trace);
@@ -13316,7 +13398,7 @@ function permissionChoices(ev) {
     for (const fix of pipFixesForChip()) {
       const li = el("li");
       const go = el("button", "rail-main pip-fixes-row"); go.type = "button";
-      go.title = `Show ${fix.name || "this Pip"}'s report in the chat`;
+      go.title = `Show ${fix.name || "this Pip"}'s report in the session`;
       const name = el("span", "pip-fixes-name"); name.textContent = String(fix.name || "Pip").slice(0, 120);
       const state = el("span", "pip-fixes-state"); state.textContent = pipFixHeadline(fix);
       go.append(name, state);
@@ -13407,7 +13489,7 @@ function permissionChoices(ev) {
     log.querySelectorAll(".hist").forEach((e) => e.remove());
     const history = el("div", "hist history-pages");
     const older = el("button", "act history-older", "Show earlier messages");
-    older.title = "Load the previous page of this chat\u2019s history";
+    older.title = "Load the previous page of this session\u2019s history";
     history.appendChild(older);
     // Saved history IS the live event vocabulary, so a page of it renders by driving the same
     // reducer that renders a live turn: same classes, same answer promotion, same tool cards,
@@ -13612,7 +13694,7 @@ function permissionChoices(ev) {
       const decision = card?.querySelector(':scope > .decision');
       if (decision?.textContent === "Auto requested · awaiting confirmation") {
         decision.textContent = msg.approved === true
-          ? `Approved · ${msg.mode === "default" ? "default" : "auto"} mode`
+          ? PLAN_APPROVED[msg.mode === "default" ? "default" : "auto"]
           : "Kept planning · Auto was not confirmed";
       }
       return;
@@ -13750,13 +13832,17 @@ function permissionChoices(ev) {
       renderUnconfirmedDrafts();
     }
     else if (msg.type === "state") {
-      curModel = msg.state.model || ""; curThink = msg.state.think || "off"; noProvider = msg.state.noProvider === true;
+      curModel = msg.state.model || ""; noProvider = msg.state.noProvider === true;
+      // (A level just chosen on the slider stays on the button until DGC says it: what DGC says on the way isn't shown.)
+      thinkSaid = { think: msg.state.think || "off", ultra: msg.state.ultra === true };
+      if (thinkChosen && thinkChosen.level === (thinkSaid.ultra ? "ultra" : thinkSaid.think) && !thinkChosen.timer) { clearTimeout(thinkChosen.settle); thinkChosen = null; }
+      if (!thinkChosen) curThink = thinkSaid.think;
       if (!noProvider) document.querySelector(".no-provider-line")?.remove();
       renderContext();
       curSubscription = msg.state.subscriptionEngine || "";
       curBaseUrl = String(msg.state.baseUrl || "");
       renderCacheClock();                        // a model change can change whose cache it is
-      curUltra = msg.state.ultra === true;
+      if (!thinkChosen) curUltra = thinkSaid.ultra;
       updateModelControl();
       renderContext();                           // on a subscription the CLI keeps the window: no percentage of DGC's
       agentMapChanged();                         // the map's root names the model
@@ -14632,7 +14718,7 @@ function permissionChoices(ev) {
       }
       if (record?.restored && !(told ?? [...into.children].some((node) => !node.classList.contains("agent-page-outcome")))) {
         const note = el("div", "sys hist");
-        note.textContent = `This agent's tool steps were not kept in the parent chat. The summary ${below ? "below" : "above"} is what it reported.`;
+        note.textContent = `This agent's tool steps were not kept in the parent session. The summary ${below ? "below" : "above"} is what it reported.`;
         into.appendChild(note);
       }
     }
@@ -14650,7 +14736,7 @@ function permissionChoices(ev) {
     const prompt = agentPromptOf(record);
     if (!prompt) {
       const note = el("div", "sys hist");
-      note.textContent = "This agent's prompt was not kept in the chat.";
+      note.textContent = "This agent's prompt was not kept in the session.";
       return note;
     }
     const m = el("div", "msg user agent-prompt");
@@ -14778,7 +14864,7 @@ function permissionChoices(ev) {
     const back = $("agent-back");
     if (!back) return;
     const parent = agentPageStack.length ? agentRecords.get(agentPageStack.at(-1)) : null;
-    const label = parent ? `Back to ${agentDisplayName(parent)}` : "Back to chat";
+    const label = parent ? `Back to ${agentDisplayName(parent)}` : "Back to session";
     hoverTip.retitle(back, label);
     back.setAttribute("aria-label", label);
   }
@@ -14809,10 +14895,10 @@ function permissionChoices(ev) {
     input.setAttribute("aria-disabled", String(locked));
     input.setAttribute("aria-label", agentPageLock ? "Message DGC unavailable while viewing an agent"
       : elsewhereLock ? "Message DGC unavailable: this session is open in another window" : "Message DGC");
-    input.dataset.placeholder = agentPageLock ? "Return to the chat to send a message"
+    input.dataset.placeholder = agentPageLock ? "Return to the session to send a message"
       : elsewhereLock ? "Open here to carry on in this window" : composerPlaceholder;
     // The locked box shows these words in place of the box (main.css); a session open elsewhere says Open here.
-    composerLockWords = agentPageLock ? "Return to the chat to send a message" : "Open here to carry on in this window";
+    composerLockWords = agentPageLock ? "Return to the session to send a message" : "Open here to carry on in this window";
     box?.querySelector(".cinput")?.setAttribute("data-locked", composerLockWords);
     $("btn-add").disabled = locked;
     $("btn-cmd").disabled = locked;
@@ -14997,10 +15083,10 @@ function permissionChoices(ev) {
     if (agentLog) agentLog.replaceChildren();
     log.removeAttribute("aria-hidden");
     if (title) {
-      const name = restoreTitle || "Untitled chat";
+      const name = restoreTitle || "Untitled session";
       title.textContent = name;
       title.title = `${name} — click to rename`;
-      title.setAttribute("aria-label", `Current chat: ${name}. Click to rename`);
+      title.setAttribute("aria-label", `Current session: ${name}. Click to rename`);
       document.title = `${name} — DGC`;
     }
     if (agentPageTick) { clearInterval(agentPageTick); agentPageTick = null; }
@@ -15601,7 +15687,7 @@ function permissionChoices(ev) {
     amRoot = { node, kids, ...parts };
     return amRoot;
   }
-  function amChatName() { return chatTitleName || "This chat"; }
+  function amChatName() { return chatTitleName || "This session"; }
   function amRootMeta() {
     const parts = [curModel || "dgc"];
     const used = Math.max(0, Number(contextState.used || 0));
@@ -15979,7 +16065,7 @@ function permissionChoices(ev) {
   let amGroupSerial = 0;
   function amSubtitle(plan) {
     const total = agentCounts().total;
-    if (total <= 0) return "No agents in this chat yet";
+    if (total <= 0) return "No agents in this session yet";
     if (!plan) return `${agentPlural(total, "agent")} · click an agent for details`;
     return [[plan.working, "working"], [plan.thisTurn, "this turn"], [plan.earlierCount, "earlier"]]
       .filter(([count]) => count > 0).map(([count, word]) => `${count} ${word}`).join(" · ");
@@ -16010,7 +16096,7 @@ function permissionChoices(ev) {
     groups.id = "agent-map-earlier";
     groups.hidden = true;
     groups.setAttribute("role", "group");
-    groups.setAttribute("aria-label", "Earlier in this chat");
+    groups.setAttribute("aria-label", "Earlier in this session");
     const more = el("p", "am-note am-earlier-more");
     item.append(self, groups);
     amEarlier = { item, row, desc, groups, more, entries: new Map() };
@@ -16096,7 +16182,7 @@ function permissionChoices(ev) {
     const notListed = agentTotalExtra > 0
       ? `${agentPlural(agentTotalExtra, "more agent")} not listed${agentActiveExtra > 0 ? `, ${agentActiveExtra} of them working` : ""}.` : "";
     if (fold) {
-      agentsSetText(fold.desc, `Earlier in this chat · ${agentPlural(plan.earlierCount, "agent")}`);
+      agentsSetText(fold.desc, `Earlier in this session · ${agentPlural(plan.earlierCount, "agent")}`);
       if (fold.row.getAttribute("aria-expanded") !== String(open)) fold.row.setAttribute("aria-expanded", String(open));
       fold.groups.hidden = !open;
       const ids = new Set(plan.earlier.map((group) => group.id));
@@ -16323,7 +16409,7 @@ function permissionChoices(ev) {
     const c = agentCounts();
     amWindowHead("agent-card", { title: amChatName(), state: streaming ? "running" : "idle",
       meta: [streaming ? "Working" : "Idle", ...amRootMeta()].join(" · ") });
-    agentsSetText(n.summary, c.total ? `${agentPlural(c.total, "agent")} in this chat` : "No agents in this chat yet.");
+    agentsSetText(n.summary, c.total ? `${agentPlural(c.total, "agent")} in this session` : "No agents in this session yet.");
     const lines = [[c.running, "working"], [c.waitingPermission, "waiting for your permission"], [c.waitingAnswer, "waiting for your answer"],
       [c.queued, "queued"], [c.finished, "finished"], [c.failed, "failed"], [c.stopped, "stopped"]]
       .filter(([count]) => count > 0).map(([count, label]) => `${count} ${label}`);
@@ -16667,8 +16753,8 @@ function permissionChoices(ev) {
     agentsSetText(n.stats, stats.join(" · "));
     n.stats.hidden = !stats.length;
     const activity = record.state === "waiting"
-      ? (record.waiting_for === "answer" ? "Waiting for your answer. Answer it in the chat's question card."
-        : "Waiting for your permission. Answer it in the chat's permission card.")
+      ? (record.waiting_for === "answer" ? "Waiting for your answer. Answer it in the session's question card."
+        : "Waiting for your permission. Answer it in the session's permission card.")
       : record.state === "queued" ? "Queued: it starts when a worker is free."
         : record.state === "running" ? (record.activity ? `Now: ${record.activity}` : "Working.") : "";
     agentsSetText(n.activity, activity);
@@ -16698,7 +16784,7 @@ function permissionChoices(ev) {
     const prompt = agentPromptOf(record);
     if (n.prompt._text !== prompt) {
       n.prompt._text = prompt;
-      n.prompt.textContent = prompt || "This agent's prompt was not kept in the chat.";
+      n.prompt.textContent = prompt || "This agent's prompt was not kept in the session.";
       n.prompt.classList.toggle("am-quiet", !prompt);
     }
     const calls = amToolCalls(record);
@@ -16722,7 +16808,7 @@ function permissionChoices(ev) {
       }));
     }
     n.calls.hidden = !calls.length;
-    agentsSetText(n.callsNote, calls.length ? "" : tools > 0 ? "Its steps were not kept in this chat. Its transcript has its report."
+    agentsSetText(n.callsNote, calls.length ? "" : tools > 0 ? "Its steps were not kept in this session. Its transcript has its report."
       : working ? "No tool calls yet." : "It made no tool calls.");
     n.callsNote.hidden = !n.callsNote.textContent;
     const moving = agentMoving.has(id);
@@ -16867,7 +16953,7 @@ function permissionChoices(ev) {
     } else if (task.kind === "monitor") {
       // A CLI that cannot send the output: the lines the monitor's events brought to the chat.
       text = (monitorLines.get(task.id) || []).join("\n");
-      note = text ? "The lines this monitor reported to the chat." : task.running ? "No output yet." : "No output.";
+      note = text ? "The lines this monitor reported to the session." : task.running ? "No output yet." : "No output.";
     } else note = "Output is not available.";
     const pre = n.output;
     pre.hidden = !text;                          // shown first: a hidden box has nothing to scroll

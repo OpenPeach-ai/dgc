@@ -33,10 +33,10 @@
   // The tabs, in his order: id, name, what one of them is called, its icon (a codicon) and its line for a label.
   const TABS = [
     ["artifacts", "Artifacts", "artifact", "browser", "Artifacts: the pages, sheets, docs, decks and dashboards DGC made"],
-    ["widgets", "Widgets", "widget", "symbol-misc", "Widgets: ChatDGC's widgets and the cards a reply drew"],
+    ["widgets", "Widgets", "widget", "symbol-misc", "Widgets: ChatDGC's widgets, and the cards a reply drew in Work or a Pip's chat"],
     ["images", "Images", "image", "file-media", "Images: every image DGC made or kept for you"],
     ["videos", "Videos", "video", "device-camera-video", "Videos: every video DGC made for you"],
-    ["files", "Files", "file", "files", "Files: what you attached in ChatDGC or it made, in every chat and project. Incognito chats keep none."],
+    ["files", "Files", "file", "files", "Files: what you attached in ChatDGC or it made, in every chat and space. Incognito chats keep none."],
   ];
   const TAB_IDS = TABS.map((t) => t[0]);
   // Artifacts' kinds: the filter's word, and the word of an empty list.
@@ -156,7 +156,10 @@
   /** An artifact: its kind's sheet, its title, who made it; `card`: a reply's card or a ChatDGC widget made it. */
   function fromArtifact(a) {
     return { key: `artifact:${a.id}`, source: "artifact", type: String(a.type || ""), made_as: a.made_as === "card" || a.made_as === "widget" ? a.made_as : "", title: text(a.title) || A_KIND[a.type] || "Untitled",
-      at: when(a.updated || a.created), by: makerOf(a.made_by, a.origin), verb: "made", facts: [A_KIND[a.type] || String(a.type || ""), `version ${Number(a.version) || 1}`], raw: a };
+      at: when(a.updated || a.created), by: makerOf(a.made_by, a.origin), verb: "made",
+      // (A reply's card is a card here, never "Page": listed under Widgets with a Page's name and sheet, it read as an
+      // artifact filed in the wrong tab. L2, user test 15 Nov.)
+      facts: [a.made_as === "card" ? "A reply’s card" : a.made_as === "widget" ? "Widget" : A_KIND[a.type] || String(a.type || ""), `version ${Number(a.version) || 1}`], raw: a };
   }
   /** One of ChatDGC's widgets: it is in a chat, which made it. */
   function fromWidget(w) {
@@ -394,12 +397,12 @@
           { id: "project", icon: "desktop-download", label: "Save to project…", run: () => post({ type: "videoSave", path: r.path }) }];
       }
       const project = r.source === "project";
-      return [{ id: "open", icon: project ? "folder" : "comment-discussion", label: project ? `Open the project ${r.project_name || ""}`.trim() : "Open the chat it's in", run: ask("open") },
+      return [{ id: "open", icon: project ? "folder" : "comment-discussion", label: project ? `Open the space ${r.project_name || ""}`.trim() : "Open the chat it's in", run: ask("open") },
         { id: "use", icon: "comment", label: "Use in a new chat", run: () => post({ type: "use", file: r }) },
         { id: "save", icon: "desktop-download", label: "Save a copy…", run: ask("save") },
         ...(r.type === "image" ? [{ id: "project", icon: "file-symlink-file", label: "Save to project…", tip: "Save to project… (the folder open in VS Code)", run: () => post({ type: "saveToProject", file: r }) }] : []),
-        { id: "add", icon: "new-folder", label: "Add a copy to a project…", run: () => post({ type: "toProject", file: r }) },
-        pinRow({ kind: "file", id: String(r.id || ""), title: item.title, sub: [F_KIND[r.type] || "File", project ? `in the project ${r.project_name || ""}`.trim() : `in “${r.chat_title || "a chat"}”`].join(" · "),
+        { id: "add", icon: "new-folder", label: "Add a copy to a space…", run: () => post({ type: "toProject", file: r }) },
+        pinRow({ kind: "file", id: String(r.id || ""), title: item.title, sub: [F_KIND[r.type] || "File", project ? `in the space ${r.project_name || ""}`.trim() : `in “${r.chat_title || "a chat"}”`].join(" · "),
           look: { type: String(r.type || "") }, ref: project ? { project_id: String(r.project_id || "") } : { chat_id: String(r.chat_id || "") } }),
         { id: "remove", icon: "trash", label: "Delete from your Library…", danger: true, run: ask("remove") }];
     }
@@ -447,7 +450,7 @@
       if (item.source === "video" && typeof item.raw.poster_data === "string" && IMAGE_DATA.test(item.raw.poster_data)) {
         const img = doc.createElement("img"); img.alt = ""; img.src = item.raw.poster_data; box.append(img); box.classList.add("lib-row-poster"); return box;
       }
-      if (item.source === "widget" && marks) { box.innerHTML = marks.mark("widget", String(item.raw.id || "")); box.classList.add("lib-row-mark"); return box; }
+      if ((item.source === "widget" || item.made_as) && marks) { box.innerHTML = marks.mark("widget", String(item.raw.id || "")); box.classList.add("lib-row-mark"); return box; }
       const sheets = root.DgcFileSheet;
       const html = !sheets || item.source === "video" || item.source === "image" || item.source === "widget" ? ""
         : item.source === "artifact" ? sheets.html(item.type) : sheets.forFile(item.type, item.title);
@@ -474,7 +477,7 @@
         // the terminal's name is said, no more.)
         const link = item.by.id && LINKED.has(item.by.kind) ? doc.createElement("button") : doc.createElement("span");
         link.className = "lib-row-maker"; link.textContent = name;
-        if (link.tagName === "BUTTON") { link.type = "button"; link.dataset.maker = item.key; link.title = { pip: `Open ${name}’s chat`, session: `Open the session “${name}”`, chat: `Open the chat “${name}”`, project: `Open the project ${name}` }[item.by.kind] || name; }
+        if (link.tagName === "BUTTON") { link.type = "button"; link.dataset.maker = item.key; link.title = { pip: `Open ${name}’s chat`, session: `Open the session “${name}”`, chat: `Open the chat “${name}”`, project: `Open the space ${name}` }[item.by.kind] || name; }
         meta.append(link);
       }
       if (ago) { const t = doc.createElement("span"); t.className = "lib-row-when"; t.textContent = ` · ${ago}`; meta.append(t); }
@@ -503,11 +506,11 @@
       const who = tab === "files" ? "" : whoWords(tab);
       if (tab === "artifacts") return q ? `No artifact named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || f.maker ? `No ${(A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.`
         : "Pages, sheets, docs, decks and dashboards DGC makes for you show here.";
-      if (tab === "widgets") return q ? `No widget named like “${q}”.` : who ? `No widgets ${who} yet.` : "Widgets ChatDGC makes for you, and the cards a reply draws, show here.";
+      if (tab === "widgets") return q ? `No widget named like “${q}”.` : who ? `No widgets ${who} yet.` : "Widgets ChatDGC makes for you, and the cards a reply draws in Work or a Pip’s chat, show here. A chart in a chat stays in its chat.";
       if (tab === "images") return q ? `No image made from words like “${q}”.` : who ? `No images ${who} yet.` : "Images DGC makes or keeps for you show here.";
       if (tab === "videos") return q ? `No video made from words like “${q}”.` : who ? `No videos ${who} yet.` : "Videos DGC makes for you show here.";
       return q ? `No file named like “${q}”.` : f.kind || f.origin ? `No ${(F_KINDS.find((k) => k[0] === f.kind) || F_KINDS[0])[2]}${f.origin === "made" ? " made by ChatDGC" : f.origin === "uploaded" ? " uploaded" : ""} yet.`
-        : "Files you attach to chats, and files in your projects, show here. Incognito chats keep none.";
+        : "Files you attach in ChatDGC, and files in your spaces, show here. What you attach in a Work session stays in that session. Incognito chats keep none.";
     }
     function draw() {
       drawTabs();

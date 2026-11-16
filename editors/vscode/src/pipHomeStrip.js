@@ -242,10 +242,11 @@ export function mountHomePips(options) {
    latest: '', chips: item.detail ? [item.detail] : [], waiting: 1, unread: 0, canRead: false, canDismiss: false, at: item.created_at});
   return {rows, fresh, out};
  }
- let last = null;
+ let last = null, unreadable = false;
  function paint() {
   if (disposed) return;
-  if (!ready || !pips) { last = {ready: false, pips: [], cards: [], need: 0, fresh: 0, more: 0, canClear: false, unreadFailure: false, failure: ''}; options.onModel?.(last); options.onChange?.(); tellDock(); return; }
+  // (unknown: DGC was asked for the Pips and couldn't say, so "nothing needs you" isn't something Home can tell. H3.)
+  if (!ready || !pips) { last = {ready: false, pips: [], cards: [], need: 0, fresh: 0, more: 0, canClear: false, unreadFailure: false, failure: '', unknown: ready && unreadable}; options.onModel?.(last); options.onChange?.(); tellDock(); return; }
   const {rows, fresh, out} = cards();
   const unreadCount = fresh.reduce((n, item) => n + item.count, 0);
   // Needs attention's number and this project's, as its two tabs say them. A DGC with no such list has no number here.
@@ -354,7 +355,8 @@ export function mountHomePips(options) {
    // The digest names 20 Pips, the newsiest first: when the 20th has news too, more may.
    const last = value?.pips?.at(-1);
    partial = !!(value?.omitted_pips && last && (last.runs.failed || last.new_total));
-  } catch { if (token === epoch) pips = null; }
+   unreadable = false;
+  } catch { if (token === epoch) { pips = null; unreadable = true; } }
   finally { if (token === epoch) { loading = false; paint(); } }
  }
  function receive(message) {

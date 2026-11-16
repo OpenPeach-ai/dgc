@@ -314,7 +314,10 @@
     }
     if (kind === "artifact") {
       node.dataset.artifactKind = identity;
-      const mark = doc.createElement("span"); mark.className = `composer-artifact-mark codicon codicon-${opts.glyph || "output"}`;
+      // `opts.glyphMark`: the kind's own drawing, where the page has no icon font (a Pip's chat in the side bar's
+      // shadow root), as `opts.folder` is for a project.
+      const mark = doc.createElement("span"); mark.className = opts.glyphMark ? "composer-artifact-mark" : `composer-artifact-mark codicon codicon-${opts.glyph || "output"}`;
+      if (opts.glyphMark) mark.innerHTML = opts.glyphMark;
       mark.setAttribute("aria-hidden", "true");
       const name = doc.createElement("span"); name.className = "composer-artifact-name"; name.textContent = label;
       node.append(mark, name);
