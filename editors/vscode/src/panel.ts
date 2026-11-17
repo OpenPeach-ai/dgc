@@ -2538,6 +2538,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private backgroundEvent(slot: ChatSlot, ev: DgcEvent): void {
     const type = String((ev as any)?.type || "");
+    if (type === "connection_route_request") {
+      void this.answerConnectionRoute(slot.backend || (slot.saved?.backend as ChatBackend | undefined), ev);
+      return;
+    }
     // A background chat's turn flags live in its parked fields, which a switch puts back. Setting
     // only the chip left `confirmedTurnActive` true in them after the turn ended, so coming back
     // to a finished chat showed it working until its next turn.
@@ -4853,6 +4857,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private onEvent(ev: DgcEvent): void {
     const refEvent: any = ev;
+    if ((ev as any).type === "connection_route_request") { void this.answerConnectionRoute(this.backend, ev); return; }
     if (this.pendingGoalEdit) {
       if (["ready", "session"].includes(ev.type)) {
         this.settleGoalEdit("The session changed before the goal edit was confirmed. Check the current goal before trying again.");
@@ -4926,6 +4931,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (Number((ev.capabilities as any)?.continue_agent) >= 1) {
           this.backend?.sendSetup({ type: "watch_agent_runs" });
         }
+        this.sendHelperConnections(this.backend);     // the user's saved connections, by name, for a helper (0.52)
         // Each turn's Edited card from the CLI's count (turn_files): asked here too, for the same reason, so a reopened
         // chat's history carries the cards it saved. The CLI replays them only to a client that asked.
         if (Number((ev.capabilities as any)?.turn_files) >= 1) {
@@ -9452,9 +9458,42 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.context.subscriptions.push(watch);
   }
 
+  // ---- a helper on one of the user's saved connections, by their words (0.52) ------------------------------------
+  /** DGC says it takes set_helper_connections (ready.capabilities.helper_connections). */
+  private helperConnectionsOffered(): boolean { return (this.lastReadyEvent?.capabilities as any)?.helper_connections === 1; }
+  /** The user's saved connections, by name and host only (never a key), so a helper can run on one they name. A
+   *  subscription (Claude Code, Codex) runs its own tools: named as a CLI, which DGC never gives a helper. */
+  sendHelperConnections(be: ChatBackend | undefined): void {
+    if (!be || !this.helperConnectionsOffered()) return;
+    const hostOf = (url: string): string => { try { return new URL(url).host; } catch { return ""; } };
+    const connections = listProfiles(this.context).slice(0, 30).map((p) => ({
+      id: p.id, name: p.name, host: p.kind === "subscription" ? "" : hostOf(String(p.base_url || "")),
+      kind: p.kind === "subscription" ? "cli" : "api" }));
+    try { be.send({ type: "set_helper_connections", connections } as any); } catch { /* a stopped backend */ }
+  }
+  /** DGC asks for one saved connection's route as a helper starts on it (connection_route_request). Answered with no
+   *  card, only for a provider the user saved here and never a subscription; the key goes to DGC for that helper. */
+  private async answerConnectionRoute(be: ChatBackend | undefined, ev: any): Promise<void> {
+    if (!be || typeof ev?.id !== "string" || !this.helperConnectionsOffered()) return;
+    const id = String(ev.connection || "");
+    let answer: Record<string, string> = { error: "not one of your saved connections" };
+    if (/^provider_[A-Za-z0-9_-]{1,100}$/.test(id)) {
+      try {
+        const { route, api_key } = await profileCredential(this.context, id);
+        answer = route.kind === "subscription" ? { error: "it runs its own tools" }
+          : { base_url: String(route.base_url || ""), api_mode: String(route.api_mode || ""), api_key, model: String(route.model || "") };
+      } catch { answer = { error: "not one of your saved connections" }; }
+    }
+    try { be.send({ type: "connection_route_response", id: ev.id, ...answer } as any); } catch { /* a stopped backend */ }
+  }
+
   /** The provider list changed: every open Pips page lists it again. */
   private savedProvidersChanged(): void {
     const home = this.tab?.host || this;
+    for (const owner of [home, ...home.tabProviders]) {
+      owner.sendHelperConnections(owner.backend);
+      for (const slot of owner.slots) if (slot.backend && slot.backend !== owner.backend) owner.sendHelperConnections(slot.backend);
+    }
     home.pipsEditor?.modelsChanged();
     home.pipsTab?.modelsChanged();
     home.chatdgc?.modelsChanged();

@@ -1544,6 +1544,22 @@ COMMAND_FIELDS["model_window_at"] = {
 EVENT_FIELDS["model_window"] = {"request_id": _S(), "role": _f("string", enum=LIST_MODELS_AT_ROLES),
                                 "model": _S(), "window": _I(), "error": _S(False)}
 
+# ---- a helper on one of the user's saved connections, by their words (0.52) ---------------------------------------
+# His call (17 Nov): "For the UI work, use the GLM 5 flash model on my ollama cloud". The editor names the user's saved
+# connections, never their keys: set_helper_connections {connections: [{id, name, host, kind}]}, kind "api" or "cli"
+# (a CLI runs its own tools and is never a helper's connection); at most 30, sent when a session starts and when they
+# change. DGC then offers `task` a `connection`. When a helper starts on one, DGC asks for that one connection's route:
+# connection_route_request {id, connection} (the saved connection's id), answered connection_route_response {id,
+# base_url, api_mode, api_key, model} or {id, error}. The editor answers only for its own saved connections, with no
+# card (the user's own words chose it); DGC sends the key only to that address and keeps it nowhere. Advertised as
+# ready.capabilities.helper_connections = 1; an editor sends set_helper_connections only to a DGC that says so.
+COMMAND_FIELDS["set_helper_connections"] = {"connections": _A()}
+COMMAND_FIELDS["connection_route_response"] = {
+    "id": _S(), "base_url": _S(False), "api_key": _S(False), "model": _S(False), "error": _S(False),
+    "api_mode": _f("string", required=False, enum=("", "auto", "ollama", "anthropic", "chat_completions", "responses")),
+}
+EVENT_FIELDS["connection_route_request"] = {"id": _S(), "connection": _S()}
+
 # ---- ChatDGC: chats of their own, the same in every folder ----------------------------------------
 # The process's, never a session's: the router answers every chatdgc_* command itself and none of
 # their events carries the envelope's chat_id (that name is the session router's), so a conversation

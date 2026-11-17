@@ -76,6 +76,22 @@ _MAX_CONTINUE = 8       # bounded output-limit/transport-interruption recovery p
 _MAX_FINALIZATION_RETRIES = 2  # empty reasoning/output-limit responses get two forced, thinking-off
                                # retries before the turn terminates visibly instead of appearing hung
 _INCOMPLETE_FINISH_REASONS = frozenset(("length", "incomplete"))
+CONNECTION_REFUSED = "connection: "     # a helper's own connection couldn't be had (Agent._connection_client)
+
+
+def _without_connection_hints(arguments):
+    """A `task` call as DGC Router sees it: what names one of the user's saved connections is not a Router hint."""
+    if not isinstance(arguments, dict):
+        return arguments
+    out = dict(arguments)
+    if out.get("connection"):
+        out.pop("model", None)
+        out.pop("system", None)
+    if isinstance(out.get("tasks"), list):
+        out["tasks"] = [({k: v for k, v in item.items() if k not in ("model", "system")}
+                         if isinstance(item, dict) and (item.get("connection") or arguments.get("connection")) else item)
+                        for item in out["tasks"]]
+    return out
 _MAX_PROVIDER_PAUSE_CONTINUE = 5  # bounded exact replay of provider-owned paused turns
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos (only in a turn that did work
                         #   or touched the list); then the turn finishes normally with one visible
@@ -3572,7 +3588,91 @@ class Agent(GoalLifecycle):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") in allow]
         schemas = self._router_task_schema(schemas)
+        schemas = self._connection_task_schema(schemas)
         return self._monitor_schema_filter(schemas)
+
+    # ---- a helper on one of the user's saved connections, by their words (17 Nov; set_helper_connections) ---------
+    def _helper_connections(self) -> list:
+        """The user's saved connections a helper may run on (names and hosts; never a key), from the session's editor."""
+        top = self._holding_agent()
+        raw = top.ui.__dict__.get("helper_connections") if hasattr(top.ui, "__dict__") else None
+        if raw is None:
+            raw = getattr(type(top.ui), "helper_connections", None)      # a real attribute, never a stub's __getattr__
+        return [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+
+    def _connection_named(self, said: str):
+        """(the connection, why not) for a name as the user or the model said it ("my ollama cloud")."""
+        def norm(text):
+            text = re.sub(r"[^a-z0-9]+", " ", str(text or "").lower())
+            return " ".join(w for w in text.split() if w not in ("my", "the", "on", "connection", "account"))
+        want = norm(said)
+        known = self._helper_connections()
+        found = next((c for c in known if norm(c["name"]) == want), None) or next(
+            (c for c in known if want and (want in norm(c["name"]) or norm(c["name"]) in want
+                                           or (c.get("host") and want.replace(" ", "") in c["host"].replace(".", "")))), None)
+        names = ", ".join(c["name"] for c in known if c.get("kind") != "cli") or "none"
+        if found is None:
+            return None, (f"error: no saved connection called {str(said)[:60]}. The user's saved connections: {names}. "
+                          "Use one of them, or ask the user which they meant.")
+        if found.get("kind") == "cli":
+            return None, (f"error: {found['name']} runs its own tools, so it can't run one of DGC's helpers. The user's "
+                          f"saved connections: {names}.")
+        return found, ""
+
+    def _connection_task_schema(self, schemas: list) -> list:
+        """`task` takes `connection` only when the editor named the user's saved connections; it lists them."""
+        usable = [c for c in self._helper_connections() if c.get("kind") != "cli"]
+        if not usable:
+            return schemas
+        listing = ", ".join(f"{c['name']}" + (f" ({c['host']})" if c.get("host") else "") for c in usable)
+        field = {"type": "string", "description": (
+            "Only when the user asked in their own words for a helper to run on one of their saved connections (\"use "
+            "GLM 5 flash on my ollama cloud\"): its name, one of " + listing + ". Put the model in `model`.")}
+        out = []
+        for tool in schemas:
+            function = tool.get("function", {})
+            if function.get("name") == "task":
+                tool = copy.deepcopy(tool)
+                props = tool["function"]["parameters"]["properties"]
+                props["connection"] = field
+                item = (props.get("tasks") or {}).get("items", {}).get("properties")
+                if isinstance(item, dict):
+                    item["connection"] = {"type": "string", "description": "As connection above"}
+            out.append(tool)
+        return out
+
+    def _task_connection_error(self, args: dict) -> str:
+        """Why a `task` call's connection can't be used, before anything starts ("" when it can or names none)."""
+        items = args.get("tasks") if isinstance(args.get("tasks"), list) else [args]
+        for item in items:
+            said = (item.get("connection") if isinstance(item, dict) else None) or args.get("connection")
+            if said:
+                _, why = self._connection_named(str(said))
+                if why:
+                    return why
+        return ""
+
+    def _connection_client(self, asked: dict):
+        """(a client for a helper on the user's saved connection, why not). The route comes from the editor for this
+        helper only; its key goes to that address alone and is never kept."""
+        found, why = self._connection_named(asked.get("connection", ""))
+        if found is None:
+            return None, why[len("error: "):] if why.startswith("error: ") else why
+        route_of = getattr(self._holding_agent().ui, "connection_route", None)
+        if not callable(route_of):
+            return None, f"DGC couldn't get {found['name']} from the editor here"
+        try:
+            route = route_of(found["id"]) or {}
+        except Exception:  # noqa: BLE001 -- no route: no helper on a guess
+            route = {"error": "it didn't answer"}
+        base, key = str(route.get("base_url") or "").strip(), str(route.get("api_key") or "")
+        model = str(asked.get("model") or route.get("model") or "").strip()
+        if route.get("error") or not base or not model:
+            reason = str(route.get("error") or ("no model named" if not model else "no address"))[:120]
+            return None, f"DGC couldn't get {found['name']} from the editor ({reason})"
+        api_mode = str(route.get("api_mode") or "auto")
+        client = Agent._new_client(self, base.rstrip("/"), key, model, api_mode=api_mode, source="subagent")
+        return client, ""
 
     def _router_task_schema(self, schemas: list) -> list:
         """While DGC Router is on, `task`'s `system` argument names this user's systems in one line (their ids and
@@ -10942,8 +11042,10 @@ class Agent(GoalLifecycle):
             # A call that cannot run as written is answered before anything asks the user about it.
             problem = _task_call_error(args)
             if not problem:
+                problem = self._task_connection_error(args)
+            if not problem:
                 from . import router as router_mod
-                problem = router_mod.task_hint_error(self.config, args)
+                problem = router_mod.task_hint_error(self.config, _without_connection_hints(args))
             if problem:
                 self.ui.tool_call(name, display_args, call_id)
                 self.ui.tool_result(name, problem, call_id)
@@ -12340,12 +12442,28 @@ class Agent(GoalLifecycle):
         hints = self.__dict__.setdefault("_router_hints", {})
         # How hard each helper thinks, as the model asked (`task` effort): used only when the user set nothing.
         efforts = self.__dict__.setdefault("_task_efforts", {})
+        # A helper on one of the user's saved connections, by their words: {connection, model} by the call it runs under.
+        connections = self.__dict__.setdefault("_task_connections", {})
         for call in calls or ():
             if getattr(call, "name", "") != "task" or not isinstance(getattr(call, "arguments", None), dict):
                 continue
-            top = router_mod.hints_from_call(call.arguments)
-            effort = _task_effort(call.arguments)
+            named = call.arguments.get("connection")
             items = call.arguments.get("tasks")
+            if isinstance(items, list):
+                for place, item in enumerate(items, 1):
+                    said = (item.get("connection") if isinstance(item, dict) else None) or named
+                    if said:
+                        connections[task_batch_child_id(call.id or "task", place)] = {
+                            "connection": str(said), "model": str((item or {}).get("model") or call.arguments.get("model") or "")}
+            elif named:
+                connections[str(call.id or "")] = {"connection": str(named), "model": str(call.arguments.get("model") or "")}
+            if named or (isinstance(items, list) and any(isinstance(i, dict) and i.get("connection") for i in items)):
+                call_arguments = _without_connection_hints(call.arguments)
+            else:
+                call_arguments = call.arguments
+            top = router_mod.hints_from_call(call_arguments)
+            effort = _task_effort(call.arguments)
+            items = call_arguments.get("tasks")
             if isinstance(items, list):
                 for place, item in enumerate(items, 1):
                     hint = {**top, **router_mod.hints_from_call(item)}
@@ -12359,7 +12477,7 @@ class Agent(GoalLifecycle):
                     hints[str(call.id or "")] = top
                 if effort:
                     efforts[str(call.id or "")] = effort
-        for kept in (hints, efforts):
+        for kept in (hints, efforts, connections):
             while len(kept) > 256:
                 kept.pop(next(iter(kept)))
 
@@ -12486,6 +12604,12 @@ class Agent(GoalLifecycle):
         failure = result = start_error = raised = ""
         if registry is not None and agent_id:
             registry.running(agent_id)               # a worker slot was taken (queued -> running)
+        asked_connection = (self.__dict__.get("_task_connections") or {}).pop(str(call_id or ""), None)
+        connection_client = None
+        if asked_connection is not None:
+            connection_client, why = self._connection_client(asked_connection)
+            if connection_client is None:
+                return "", "", CONNECTION_REFUSED + why
         try:
             adef = self.agent_defs.get(agent_name) if agent_name else None
             if adef and adef.tool_allow:
@@ -12617,9 +12741,10 @@ class Agent(GoalLifecycle):
                     # plan or goal verdict either (auto mode still runs normally; see _handle_call).
                     sub._monitor_turn = True
                 router_owner = str(agent_id or call_id or f"child-{id(sub):x}")
-                override = self._subagent_client(adef, lease_for=router_owner, hint=self._router_hint(call_id),
-                                                 cancel=own_cancel, registry=registry, agent_id=agent_id,
-                                                 lease_label=description)
+                # The user's own words named its connection and model: that wins, as an agent file's choice does.
+                override = connection_client if connection_client is not None else self._subagent_client(
+                    adef, lease_for=router_owner, hint=self._router_hint(call_id), cancel=own_cancel, registry=registry,
+                    agent_id=agent_id, lease_label=description)
                 route = getattr(override, "_router_route", None)
                 if route is not None:
                     # A DGC Router worker: its fixed context sizes every request (Ollama's num_ctx) and every
@@ -12845,6 +12970,9 @@ class Agent(GoalLifecycle):
             # lease first. If the lease is busy the empty checkout is retained instead.
             cleanup = self._preserve_task_workspace(
                 workspace, f"not started: {start_error}", cancel=cancel)
+            if start_error.startswith(CONNECTION_REFUSED):
+                return _TaskOutcome(f"error: Sub-task '{description}' was not started: "
+                                    f"{start_error[len(CONNECTION_REFUSED):]}. Tell the user in one sentence.{cleanup}")
             return _TaskOutcome(
                 f"error: Sub-task '{description}' was not started because its isolated configuration "
                 f"could not be created: {start_error}.{cleanup}")

@@ -1778,6 +1778,22 @@ def permission_choices(name: str) -> list[str]:
             else ["once", "always", "deny"])
 
 
+def helper_connections(raw) -> list:
+    """set_helper_connections' list as DGC keeps it: [{id, name, host, kind}], at most 30, names and hosts only."""
+    out = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        ident, name = str(item.get("id") or "").strip()[:120], " ".join(str(item.get("name") or "").split())[:80]
+        if not ident or not name:
+            continue
+        out.append({"id": ident, "name": name, "host": str(item.get("host") or "")[:200],
+                    "kind": "cli" if item.get("kind") == "cli" else "api"})
+        if len(out) >= 30:
+            break
+    return out
+
+
 def permission_request_fields(name: str, args: dict, call_id, preview_root) -> dict:
     """A ``permission_request`` event's fields (bar its id): what the editor, or a phone watching
     a terminal session, shows on the card."""
@@ -2471,10 +2487,11 @@ class HeadlessUI:
                 self.em.emit("turn_activity", **activity)
         return sent
 
-    def _await(self, rid: str, ev: threading.Event, cancel=None, recheck=None, *, human=False):
+    def _await(self, rid: str, ev: threading.Event, cancel=None, recheck=None, *, human=False, seconds=None):
         # Reviewing a plan or deciding between options is not an abandoned network request.
         # Only an explicit reply, Stop, or disconnection ends a native human decision.
-        deadline = None if human else time.monotonic() + self.approval_timeout_s
+        deadline = (None if human else time.monotonic() + (float(seconds) if seconds is not None
+                                                           else self.approval_timeout_s))
         cancel = cancel if cancel is not None else self.cancelled
         # A sub-agent's card also ends when the user stops that one sub-agent (agent_control close):
         # its own stop, which this turn-wide `cancelled` does not see.
@@ -2500,6 +2517,21 @@ class HeadlessUI:
 
     def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
         return self.approve_live(name, args, call_id)
+
+    helper_connections: list = []          # the user's saved connections, by name (set_helper_connections)
+
+    def connection_route(self, connection_id: str) -> dict:
+        """One saved connection's route for a helper, from the editor (connection_route_request): {base_url, api_mode,
+        api_key, model} or {error}. No card: the user's own words chose it. Never logged; used for one helper only."""
+        rid, ev = self.pending.register()
+        try:
+            self._announce_request(rid, "connection_route_request", {"connection": str(connection_id)[:120]})
+            payload = self._await(rid, ev, seconds=15) or {}
+        finally:
+            self._settle_request(rid)
+        if not isinstance(payload, dict) or not payload:
+            return {"error": "the editor didn't answer"}
+        return payload
 
     def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
         rid, ev = self.pending.register()
@@ -3123,6 +3155,9 @@ class Backend:
                           # model_window_at is understood (0.52): the most tokens a model at a host takes, by the
                           # same address and key rules (model_window answers; 0 when nothing says).
                           "model_window_at": 1,
+                          # set_helper_connections and connection_route_request (0.52): a helper on one of the
+                          # user's saved connections, named in their own words; its key asked for when it starts.
+                          "helper_connections": 1,
                           # save_model_provider is understood: a provider saved in Settings, kept in secrets.json for
                           # the Pips set to it, answered by model_provider_saved.
                           "saved_model_providers": 1,
@@ -9316,6 +9351,10 @@ class Backend:
             self._list_models_at(cmd)
         elif t == "model_window_at":
             self._model_window_at(cmd)
+        elif t == "set_helper_connections":
+            self.ui.helper_connections = helper_connections(cmd.get("connections"))
+        elif t == "connection_route_response":
+            self.pending.resolve(cmd.get("id"), {k: cmd.get(k) for k in ("base_url", "api_mode", "api_key", "model", "error")})
         elif t == "set_think":
             level = str(cmd.get("level", "off"))
             session_route = cmd.get("scope") == "session"
@@ -11462,7 +11501,7 @@ def _end_line(crash_log, line: str) -> None:
 # and shutdown, which only the stdin thread can act on.
 _UNQUEUED_COMMANDS = frozenset({"permission_response", "plan_response", "options_response",
                                 "mcp_input_response", "ask_skip", "ping", "editor_state",
-                                "shutdown"})
+                                "shutdown", "connection_route_response", "set_helper_connections"})
 
 _MAX_CHAT_ID_CHARS = 64
 
