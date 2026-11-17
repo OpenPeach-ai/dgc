@@ -23,7 +23,7 @@ from dgc.pips import _worker_main
 URL = %r
 def chat(self, messages, tools=None, on_text=None, **kwargs):
     names = [t["function"]["name"] for t in (tools or [])]
-    assert names == ["computer", "connect_app", "web_search", "read_app", "generate_image", "list_image_generators", "generate_video", "list_video_generators", "ask_for_key", "fetch_with_key", "skill", "working_notes"], names   # its computer, its apps, web search, its image generators, its skills, its working notes (API 57)
+    assert names == ["computer", "connect_app", "web_search", "web_fetch", "read_app", "generate_image", "list_image_generators", "make_artifact", "edit_artifact", "dgc_docs", "deep_research", "keep_image", "generate_video", "list_video_generators", "ask_for_key", "fetch_with_key", "skill", "working_notes"], names   # its computer, its apps, the web, its Library and docs, research, its generators, keys, skills, working notes
     tool_results = [m for m in messages if m.get("role") == "tool"]
     if not tool_results:
         return ChatResult(tool_calls=[ToolCall("c1", "computer", {"op": "open", "url": URL})])
@@ -39,7 +39,7 @@ with patch.object(LLMClient, "chat", chat):
 
 
 # The same model in the Pip's chat: it has the computer there too, among the chat's own tools.
-CHAT_WORKER = WORKER.replace('assert names == ["computer", "connect_app", "web_search", "read_app", "generate_image", "list_image_generators", "generate_video", "list_video_generators", "ask_for_key", "fetch_with_key", "skill", "working_notes"], names', 'assert "computer" in names, names')
+CHAT_WORKER = WORKER.replace('assert names == ["computer", "connect_app", "web_search", "web_fetch", "read_app", "generate_image", "list_image_generators", "make_artifact", "edit_artifact", "dgc_docs", "deep_research", "keep_image", "generate_video", "list_video_generators", "ask_for_key", "fetch_with_key", "skill", "working_notes"], names', 'assert "computer" in names, names')
 
 
 @unittest.skipUnless(REAL_CHROME and box.capability().get("available"), "needs Linux, bubblewrap and a Chromium build")

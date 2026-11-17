@@ -733,7 +733,9 @@ class RealBrowserTests(Store):
         self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*"}), "always allowed: it runs")
         self.assertFalse((files / "keep2.txt").exists())
         host.waiting = []
-        self.assertTrue(host.call("run", {"command": "rm -rf ~/*"}).startswith("Held:"), "once means once")
+        # (Until 18 Nov this said "once means once", from before his 15 Nov call; skipped in runs without Chromium's path,
+        # it was never seen failing.) Always allow means every time.
+        self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*"}), "always allowed: it keeps running")
 
 
 if __name__ == "__main__":

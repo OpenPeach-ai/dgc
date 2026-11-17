@@ -1655,7 +1655,8 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
   display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--border-strong); border-radius: var(--r-md);
   background: var(--surface2); color: var(--text-strong);
-  font: var(--w-med) var(--t-xs)/1.45 var(--sans); text-align: left; }
+  font: var(--w-med) var(--t-xs)/1.45 var(--sans); text-align: left;
+  overflow-wrap: anywhere; }     /* a long name with no spaces wraps inside the tip, never runs out of it */
 .tip .tip-detail { color: var(--muted); font-weight: var(--w-reg); }
 .tip::after { content: ""; position: absolute; left: var(--tip-arrow, 50%); width: 6px; height: 6px;
   margin-left: -3px; background: var(--surface2);

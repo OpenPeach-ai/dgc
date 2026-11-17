@@ -472,7 +472,7 @@ class EgressProxy:
         a.settimeout(None); b.settimeout(None)
         counts = [0, 0]
         while True:
-            ready, _, _ = select.select([a, b], [], [], IDLE_SECONDS)
+            ready = _readable([a, b], IDLE_SECONDS)
             if not ready:
                 return counts[0], counts[1]
             for s in ready:
@@ -755,6 +755,19 @@ class Box:
 
 # --------------------------------------------------------------------------- devtools over the pipe
 
+def _readable(objects, timeout: float | None) -> list:
+    """Which of these sockets or descriptors can be read within `timeout` seconds. poll(), never select(): select()
+    refuses a descriptor above 1024, and a busy Pips supervisor holds more than that (18 Nov: the full test run did)."""
+    poller = select.poll()
+    by_fd = {}
+    for item in objects:
+        fd = item if isinstance(item, int) else item.fileno()
+        by_fd[fd] = item
+        poller.register(fd, select.POLLIN | select.POLLPRI)
+    events = poller.poll(None if timeout is None else max(0, int(timeout * 1000)))
+    return [by_fd[fd] for fd, _ in events if fd in by_fd]
+
+
 class _Pipe:
     """NUL-delimited JSON over Chromium's devtools pipe, with the WebSocket client's interface."""
 
@@ -785,7 +798,7 @@ class _Pipe:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise socket.timeout("devtools pipe read timed out")
-            ready, _, _ = select.select([self.read_fd], [], [], remaining)
+            ready = _readable([self.read_fd], remaining)
             if not ready:
                 raise socket.timeout("devtools pipe read timed out")
             try:
