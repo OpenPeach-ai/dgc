@@ -275,7 +275,7 @@ body.pc-screen-mode{padding:0}
 /* The list. Its cards are laid out one under another always; folded, each is moved up behind the front one (--fold-y,
    --n and the two heights are measured by layoutDrawer), so the same cards travel when it fans out. */
 .pc-drawer-list{position:relative;flex:none;display:flex;flex-direction:column;gap:8px;min-height:0;height:var(--fold-h,auto);clip-path:inset(0 -40px -60px -40px);transition:height .42s var(--pc-spring)}
-.pc-fan .pc-drawer-list{height:var(--fan-h,auto);padding-bottom:24px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;clip-path:none;
+.pc-fan .pc-drawer-list{height:var(--fan-h,auto);padding-bottom:24px;overflow-y:auto;overscroll-behavior:contain;clip-path:none;
  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}
 .pc-drawer-banner .pc-drawer-list{height:auto;clip-path:none}
 /* A card: a tile for its kind, the site and its age, what it wants in bold, one muted line, and its answers as pills. */

@@ -107,7 +107,10 @@ body { --bg: var(--vscode-editor-background, var(--fallback-bg)); --cd-col: 760p
 @keyframes cd-slash-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .cd-welcome-slash { opacity: 1; animation: none; } }
 body.cd-blank .cd-scroll { display: flex; flex-direction: column; justify-content: flex-end; flex: 1 1 0; padding-bottom: var(--sp-6); }
-body.cd-blank .cd-foot { flex: 1 1 0; }
+/* The box takes what it needs first and the welcome what is left, the spare room shared out, so the pair sits near the
+   middle and a long pasted prompt (the box grows to 40vh, then scrolls inside) shrinks the welcome's half, never pushes
+   the box's own row off the window (17 Nov). */
+body.cd-blank .cd-foot { flex: 1 0 auto; }
 body.cd-blank .cd-fine { display: none; }
 
 .cd-msg { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }

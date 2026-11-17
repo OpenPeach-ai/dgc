@@ -11,6 +11,18 @@
 
    Pips embedded in Work's side bar sit in a shadow root, where :root and body rules here do not match; they inherit
    every token from Work's page, which loads this file through main.css. */
+/* Scrollbars, on every DGC page (17 Nov live check; his call: one look everywhere). VS Code gives every webview
+   `html { scrollbar-color: … }` in its own default layer, and Chromium then ignores every ::-webkit-scrollbar rule and
+   draws its standard bar: arrow buttons and a wide pill on Linux and Windows, a hiding overlay on a Mac. This rule sits
+   outside any layer, so it wins, and every page draws the slim bars below, as the tests and the layout audit see them.
+   Nothing asks for scrollbar-width: thin (that standard bar still has arrows here); a bar that hides (none) still does.
+   The Pips and Settings bundles load this file too, the Pips' inside their shadow root, where these bars apply as well. */
+html { scrollbar-color: auto; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--r-sm); border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+
 :root {
   /* Host-native surfaces: Cursor/VS Code inject these tokens for the active color theme. The
      literal values are deliberate fallbacks for tests and unusual hosts that omit a token. */

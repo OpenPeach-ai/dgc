@@ -1061,6 +1061,25 @@ test("turn_eta shows the remaining range beside the turn timer and clears with t
   assert.deepEqual(errors, []);
 });
 
+test("while the turn waits on you, its time-left estimate steps aside; answered, it comes back", () => {
+  // 17 Nov live check: a goal waiting 47 minutes on a question said "waiting for your input (47m · ~7–29 min left)".
+  // The time left can't run while the person hasn't answered; the clocks stay, so how long it has waited still shows.
+  const { doc, send, errors } = makeDom();
+  const meta = () => doc.querySelector(".thinking .meta").textContent;
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1" } });
+  send({ type: "event", event: { type: "turn_eta", turn_id: "t1", elapsed_seconds: 25, remaining_low_seconds: 60,
+    remaining_high_seconds: 200, confidence: 0.5, label: "~1–4 min left" } });
+  assert.match(meta(), /~1–4 min left/);
+  send({ type: "event", event: { type: "permission_request", id: "p1", name: "bash", command: "npm test", args: { command: "npm test" } } });
+  assert.equal(doc.querySelector(".thinking .verb").textContent, "waiting for your input");
+  assert.doesNotMatch(meta(), /left/, "no estimate while it waits on you");
+  assert.match(meta(), /^\(\d+s/, "the clock stays");
+  doc.querySelector('.card button[data-d="deny"]').click();
+  doc.querySelector('.card button[data-no-note]').click();
+  assert.match(meta(), /~1–4 min left/, "answered: the estimate is back");
+  assert.deepEqual(errors, []);
+});
+
 test("stream batching flushes final text and partial changes stay explicit", () => {
   const { doc, send, errors } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });

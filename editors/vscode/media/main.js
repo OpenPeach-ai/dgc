@@ -5920,7 +5920,8 @@
     const research = researchRunning(turn);
     // (In a narrow side bar the line has no room for it beside the clocks: nothing, rather than words cut short.)
     const slim = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 360px)").matches;
-    const left = research ? (slim ? "" : RESEARCH_READS[research.dataset.depth || "quick"] || "") : turn.eta;
+    // Waiting on you, no time can be left to run (17 Nov live check: "waiting for your input (47m · ~7–29 min left)").
+    const left = waiting ? "" : research ? (slim ? "" : RESEARCH_READS[research.dataset.depth || "quick"] || "") : turn.eta;
     const eta = left ? ` · ${left}` : "";
     meta.textContent = `(${clock}${eta} · ↓ ${Math.round(turn.chars / 4)} tok)`;
   }

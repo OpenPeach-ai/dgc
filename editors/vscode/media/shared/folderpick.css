@@ -50,7 +50,7 @@
 .dgc-folder-list {
   position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; max-width: 100vw; max-height: calc(100vh - 12px); padding: 4px;
   border: 1px solid transparent; border-top-width: 0; border-radius: 0 0 var(--btn-r) var(--btn-r); background: var(--folder-ground, var(--surface2)) padding-box;
-  overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
 }
 .dgc-folder-menu[data-dir="up"] .dgc-folder-list { border-top-width: 1px; border-bottom-width: 0; border-radius: var(--btn-r) var(--btn-r) 0 0; }
 .dgc-folder-menu[data-dir="down"][data-reach="left"] .dgc-folder-list { border-top-left-radius: var(--btn-r); }

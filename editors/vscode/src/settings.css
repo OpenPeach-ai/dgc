@@ -55,7 +55,7 @@ svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:
 .icon-button{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:transparent;border-radius:var(--r-sm);color:var(--muted)}
 .icon-button:hover{background:var(--hover);color:var(--text)}
 /* Folded to icons: one 30px column in the same 12px gutter. */
-.collapsed .sidebar{width:54px;scrollbar-width:thin}.collapsed .sidebar nav button{padding:0;justify-content:center}.collapsed .sidebar .nav-text,.collapsed .nav-head>span{display:none}
+.collapsed .sidebar{width:54px}.collapsed .sidebar nav button{padding:0;justify-content:center}.collapsed .sidebar .nav-text,.collapsed .nav-head>span{display:none}
 /* The page fills the width it has: no column centred in it and no gutter kept for a scroll bar (0.52; it was a 760px
    column beside both, an empty bar down the right at every width). Prose keeps a readable measure. */
 main{min-width:0;flex:1;overflow:auto;padding:12px 16px 0;background:var(--bg)}
@@ -288,7 +288,7 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 @media(max-width:860px){.examples{grid-template-columns:1fr}.example{min-height:0}.hero{flex-wrap:wrap}.hero .actions{margin-left:0}.page-heading{flex-wrap:wrap}.page-heading>.actions{margin-bottom:16px}.directory-grid{grid-template-columns:1fr}.directory-toolbar .search{flex-basis:100%}}
 /* Narrow tabs keep every page reachable in an icon rail. Rows put controls under their words. */
 @media(max-width:620px){
-  .sidebar,.collapsed .sidebar{width:54px;scrollbar-width:thin}
+  .sidebar,.collapsed .sidebar{width:54px}
   .sidebar nav button,.collapsed .sidebar nav button{padding:0;justify-content:center}
   .sidebar .nav-text,.sidebar .nav-head{display:none}
   main{padding:10px 12px 0}
