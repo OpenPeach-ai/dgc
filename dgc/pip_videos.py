@@ -146,7 +146,10 @@ class Session:
             return f"error: {exc}"
         if plan.over_limit:
             return video_tools.start(self.config, plan, surface).text
-        if self.unattended:
+        from .pip_levels import does_it_all
+        if not plan.unpriced and does_it_all(self.directory, self.pip_id):
+            pass        # Do it all: it starts at once, in its chat and in a routine (17 Nov); its price is in the result
+        elif self.unattended:
             if not may_make_alone(plan.generator, self.pip_id) or plan.unpriced:
                 return self._ask(plan)
         elif plan.asks:

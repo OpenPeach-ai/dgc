@@ -725,7 +725,10 @@ class PermissionEngine:
                 return ALLOW, "plan mode (read-only)"
             return DENY, "plan mode is active — no changes allowed; present a plan and get it approved first"
 
-        if policy_tool in ALWAYS_ASK_TOOLS:
+        # Auto mode never asks (his call, 17 Nov: "if it does it all, we do it all"); the other modes still do.
+        # (DGC's own editor on the wire: auto_holds.py. A program on the SDK still answers these itself.)
+        from . import auto_holds
+        if policy_tool in ALWAYS_ASK_TOOLS and not (self.mode == "auto" and auto_holds.wanted()):
             return ASK, ("DGC Router changes are the user's to allow, in every mode" if policy_tool == "router_update"
                          else "a Pip workflow's routing needs your review, in every mode" if policy_tool == "pips_workflow"
                          else "looking on the user's network is theirs to allow, in every mode")

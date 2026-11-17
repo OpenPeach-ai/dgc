@@ -37,7 +37,8 @@ class AgentCard(unittest.TestCase):
         return [f for f in harness.stream.frames() if f["type"] == "permission_request"][-1]
 
     def test_an_ask_rule_card_has_no_always_and_an_always_answer_counts_once(self):
-        harness = self.harness(mode="auto")
+        # (Auto mode holds it in the chat instead of a card since 17 Nov: tests/test_auto_asks_in_chat.py.)
+        harness = self.harness(mode="default")
         harness.config.permissions = {"allow": [], "ask": ["Bash(echo*)"], "deny": []}
         harness.answer("permission_request", {"decision": "always"})        # an older editor's Always
         out = harness.agent._handle_call(ToolCall("u1", "bash", {"command": "echo asked-by-rule"}))

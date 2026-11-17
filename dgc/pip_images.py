@@ -148,6 +148,12 @@ class Session:
             plan = image_tools.prepare(self.config, {k: v for k, v in args.items() if k != "confirm"}, surface)
         except image_tools.Refused as exc:
             return f"error: {exc}"
+        if plan.asks and not (plan.over_limit or plan.unpriced):
+            # Do it all: a paid picture is made at once, in its chat and in a routine (his call, 17 Nov: "for images
+            # and videos, drop all limits"); what it cost is in the result. A monthly limit the user set still asks.
+            from .pip_levels import does_it_all
+            if does_it_all(self.directory, self.pip_id):
+                plan.asks = False
         if plan.asks:
             if args.get("confirm") is not True and self._confirmed(plan, {**args, "confirm": True})[0]:
                 # The question it asked earlier is still waiting, and this message may be the user's answer: keep that

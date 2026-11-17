@@ -11784,6 +11784,8 @@ class Host:
             return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
         if cmd.get("type") == "editor_app":
             name = holder_note.clean_editor(cmd.get("name"))
+            from . import auto_holds            # auto mode asks in the chat for DGC's own editor (17 Nov)
+            auto_holds.set_editor(bool(name))
             if name != self.editor_app:
                 self.editor_app = name
                 self.announce_peers()
@@ -11796,6 +11798,8 @@ class Host:
 
     def forget_editor(self) -> None:
         """The wire changed hands, or no window has it: the editor that named itself is not the one there now."""
+        from . import auto_holds
+        auto_holds.set_editor(False)
         if self.editor_app:
             self.editor_app = ""
 

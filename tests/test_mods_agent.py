@@ -118,13 +118,16 @@ class ModsInTheAgent(unittest.TestCase):
                                                 arguments={"command": command}))
 
     def test_guard_asks_first_where_auto_mode_would_have_run_it_and_no_rule_answers_for_the_user(self):
+        from dgc import auto_holds                       # DGC's own editor on the wire (auto_holds.py)
+        auto_holds.set_editor(True)
+        self.addCleanup(auto_holds.set_editor, False)
         running = {e["name"] for e in self.host.mods() if e["state"] == "running"}
         self.assertTrue({"guard", "stopper", "shouter"} <= running, self.host.mods())
         out = self.call("rm -rf build")
-        self.assertEqual(self.ui.asked, ["bash"], "auto mode, yet the user is asked")
-        self.assertEqual(self.ui.rechecked, [None], "the rules (all allow) don't answer the mod's Ask")
+        # Auto mode (17 Nov): the mod's Ask holds the step and the model asks in the chat; no card, nothing ran.
+        self.assertEqual(self.ui.asked, [], "no card in auto mode")
+        self.assertIn("WAITING FOR THE USER", out)
         self.assertTrue(any("Guard asks you first" in i and "deletes build" in i for i in self.ui.infos), self.ui.infos)
-        self.assertIn("DENIED", out)
 
     def test_a_mods_stop_stops_the_step_and_a_step_it_didnt_mind_runs_and_is_reported(self):
         out = self.call("touch forbidden.txt")

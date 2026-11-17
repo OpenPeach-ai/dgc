@@ -85,9 +85,9 @@ class Offered(AgentCase):
 
 
 class Card(AgentCase):
-    def test_every_video_asks_in_auto_mode_with_its_price_and_no_always(self):
-        harness = self.harness()
-        self.assertEqual(harness.config.get("mode"), "auto")
+    def test_every_video_asks_in_default_mode_with_its_price_and_no_always(self):
+        # (Auto mode starts it without a card since 17 Nov: test_auto_videos_start_without_a_card below.)
+        harness = self.harness(mode="default")
         harness.answer("permission_request", {"decision": "no"})
         out = harness.agent._handle_call(ToolCall("v1", "generate_video", {"prompt": "a felt ball", "duration_s": 5}))
         self.assertIn("DENIED", out)
@@ -100,7 +100,7 @@ class Card(AgentCase):
         self.assertEqual(self.fake.requests, [], "Don't sends nothing")
 
     def test_edit_comes_back_as_the_users_prompt(self):
-        harness = self.harness()
+        harness = self.harness(mode="default")
         harness.answer("permission_request", {"decision": "no", "reason": "Changed the prompt to: a blue felt ball — "
                                               "make it with this prompt instead."})
         out = harness.agent._handle_call(ToolCall("v1", "generate_video", {"prompt": "a felt ball"}))
@@ -108,7 +108,7 @@ class Card(AgentCase):
         self.assertEqual(self.fake.requests, [])
 
     def test_an_always_from_an_older_editor_counts_as_once(self):
-        harness = self.harness()
+        harness = self.harness(mode="default")
         harness.answer("permission_request", {"decision": "always"})
         harness.agent._handle_call(ToolCall("v1", "generate_video", {"prompt": "x"}))
         harness.answer("permission_request", {"decision": "no"})
@@ -127,11 +127,22 @@ class Card(AgentCase):
         self.assertEqual(self.frames(harness, "permission_request"), [])
 
     def test_a_monitor_turn_never_makes_one(self):
-        harness = self.harness()
+        harness = self.harness(mode="default")
         harness.agent._monitor_turn = True
         out = harness.agent._handle_call(ToolCall("v1", "generate_video", {"prompt": "x"}))
         self.assertIn("PERMISSION NEEDED", out)
         self.assertEqual(self.fake.requests, [])
+
+    def test_auto_videos_start_without_a_card(self):
+        # His call (17 Nov): auto mode never shows an approval card; images and videos have no limits there.
+        from dgc import auto_holds                       # DGC's own editor on the wire (auto_holds.py)
+        auto_holds.set_editor(True)
+        self.addCleanup(auto_holds.set_editor, False)
+        harness = self.harness()
+        self.assertEqual(harness.config.get("mode"), "auto")
+        out = harness.agent._handle_call(ToolCall("v1", "generate_video", {"prompt": "a koi pond"}))
+        self.assertTrue(out.startswith("Started a 5 s video with fal Wan 2.2 5B"), out)
+        self.assertEqual(self.frames(harness, "permission_request"), [])
 
 
 class Running(AgentCase):

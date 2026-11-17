@@ -1,5 +1,5 @@
 """Image generation in Work (0.51): the tools are offered every turn, a free generator runs without a card, a paid one
-shows its Allow card with provider, model, size, count and price in every mode (auto too), Always allow makes that
+shows its Allow card with provider, model, size, count and price (auto mode: no card since 17 Nov), Always allow makes that
 generator stop asking without writing a permission rule, and the pictures arrive as 0.50's image tiles."""
 from __future__ import annotations
 
@@ -93,9 +93,9 @@ class Running(AgentCase):
         self.assertIn("That's DGC's own folder, not the project. If the user wants it in the project, call "
                       "generate_image again with save_to", out)
 
-    def test_a_paid_generator_asks_in_auto_mode_with_its_price(self):
-        harness = self.harness("fal")
-        self.assertEqual(harness.config.get("mode"), "auto")
+    def test_a_paid_generator_asks_in_default_mode_with_its_price(self):
+        # (Auto mode makes it without a card since 17 Nov: tests/test_auto_asks_in_chat.py.)
+        harness = self.harness("fal", mode="default")
         harness.answer("permission_request", {"decision": "no"})
         out = harness.agent._handle_call(ToolCall("g1", "generate_image", {"prompt": "a cat", "count": 2,
                                                                           "size": "1024x1024"}))
@@ -107,11 +107,11 @@ class Running(AgentCase):
                           "size": "1024x1024", "count": 2, "price": "about $0.006 (about $0.003 each)"})
         self.assertEqual([r for r in self.fake.requests if r["path"].startswith("/fal-ai/")], [], "nothing spent")
 
-    def test_a_public_openai_compatible_generator_asks_in_auto_mode(self):
+    def test_a_public_openai_compatible_generator_asks_in_default_mode(self):
         # A hosted OpenAI-compatible service is paid (images.is_paid): newly added, it shows its card, as fal does.
         from unittest.mock import Mock
         from dgc import image_providers as P
-        harness = self.harness()
+        harness = self.harness(mode="default")
         harness.config.set_images({"generators": [{"id": "hosted", "name": "Hosted images",
                                                    "provider": "openai_compatible",
                                                    "base_url": "https://images.example.com",
@@ -127,7 +127,7 @@ class Running(AgentCase):
         adapter.generate.assert_not_called()
 
     def test_an_unknown_price_under_a_limit_shows_its_card_though_asking_is_off(self):
-        harness = self.harness("fal")
+        harness = self.harness("fal", mode="default")     # (auto: held in the chat, test_auto_asks_in_chat)
         block = images.settings(harness.config)
         block["generators"][0].update(asks=False, monthly_limit_usd=5)
         harness.config.set_images(block, persist=False)
@@ -140,10 +140,11 @@ class Running(AgentCase):
         self.assertIn("can't keep this within your $5.00 monthly limit", card["args"]["note"])
         self.assertEqual([r for r in self.fake.requests if r["path"].startswith("/fal-ai/")], [])
 
-    def test_a_live_card_is_never_answered_by_the_rules_auto_mode_included(self):
+    def test_a_live_card_is_never_answered_by_the_rules(self):
         # A front end that keeps its card open re-checks the rules while it waits (the TUI, the editor): in auto mode
         # the plain rule allows generate_image, and that once answered a paid image's card by itself.
-        harness = self.harness("fal")
+        # (Auto mode shows no card since 17 Nov; default mode's card is the one a rule must never answer.)
+        harness = self.harness("fal", mode="default")
         seen = []
 
         def approve_live(ui, name, args, call_id=None, *, recheck=None):
@@ -156,7 +157,7 @@ class Running(AgentCase):
         self.assertEqual([r for r in self.fake.requests if r["path"].startswith("/fal-ai/")], [])
 
     def test_always_allow_makes_that_generator_stop_asking_without_a_rule(self):
-        harness = self.harness("fal")
+        harness = self.harness("fal", mode="default")
         harness.answer("permission_request", {"decision": "always"})
         out = harness.agent._handle_call(ToolCall("g1", "generate_image", {"prompt": "a cat"}))
         self.assertTrue(out.startswith("Made 1 image with fal FLUX schnell"), out)

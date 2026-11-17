@@ -34,6 +34,7 @@ from .mcp import MCPInputError, MCPManager
 from .reasoning import (ReasoningTracker, extend_persisted_reasoning, persisted_reasoning,
                         splice_prefix_length, subagent_block)
 from . import leak_guard
+from . import auto_holds
 from .redaction import (StreamingRedactor, contains_secret, redact_messages,
                         provider_continuation_has_secret, redact_provider_value,
                         redact_text, redact_value, secret_values)
@@ -3872,6 +3873,83 @@ class Agent(GoalLifecycle):
         from .image_tools import SCHEMAS
         return list(SCHEMAS)
 
+    # ---- auto mode asks in the chat (17 Nov) -------------------------------------------------------------------------
+    def _note_turn_origin(self, *, continuing: bool) -> None:
+        """Whether the turn starting now is the user's own (their message, or their Continue), or one DGC started by
+        itself: a goal's next cycle, a wake-up, a helper's report, a monitor's event. Only the user's own turn can
+        answer a step held for them (_held_in_chat)."""
+        mine = not continuing and not getattr(self, "_woken_by", "") and not getattr(self, "_monitor_turn", False)
+        self._turn_is_user = bool(mine and self.depth == 0)
+        if self._turn_is_user:
+            self._user_turn_serial = int(getattr(self, "_user_turn_serial", 0) or 0) + 1
+
+    def _holding_agent(self):
+        """The session's own agent: a helper's held step is the user's to answer in the session's chat."""
+        top = self
+        while getattr(top, "_parent_agent", None) is not None:
+            top = top._parent_agent
+        return top
+
+    def _auto_ask(self, name: str, args: dict, reason: str, call_id, display_args, secrets, said_yes: bool) -> str | None:
+        """Auto mode's answer to a step that would have asked. The user's own signed-in Chrome is asked once for the
+        whole session (his call, 17 Nov: "once for a session, user says something like 'use my browser for things',
+        so it should just do it"); everything else is held call by call."""
+        top = self._holding_agent()
+        browser = name == "browser" and isinstance(args, dict) and args.get("signed_in") is True
+        if browser and top.__dict__.get("_signed_in_ok"):
+            return None
+        held = self._held_in_chat(name, args, reason, call_id, display_args, secrets, said_yes=said_yes,
+                                  key=("browser", "your signed-in Chrome, this session") if browser else None,
+                                  what="using your own signed-in Chrome for this session" if browser else "")
+        if held is None and browser:
+            top._signed_in_ok = True
+        return held
+
+    def _held_in_chat(self, name: str, args: dict, reason: str, call_id, display_args, secrets, *,
+                      said_yes: bool = False, key=None, what: str = "") -> str | None:
+        """Auto mode's answer to a step that would have asked: no card. The step is held and the model is told to ask
+        the user in its reply; the same call made in a later turn the user's own message started is their yes, and
+        runs (None). Anything else -- the same turn, a goal's cycle, a wake-up, a monitor's event -- keeps it held."""
+        top = self._holding_agent()
+        holds = top.__dict__.setdefault("_held_asks", {})
+        if key is None:
+            try:
+                key = (name, json.dumps(args, sort_keys=True, default=str)[:8000])
+            except (TypeError, ValueError):
+                key = (name, repr(args)[:8000])
+        serial = int(getattr(top, "_user_turn_serial", 0) or 0)
+        entry = holds.get(key)
+        users_turn = (getattr(top, "_turn_is_user", False) and not getattr(self, "_monitor_turn", False)
+                      and not getattr(top, "_monitor_turn", False))
+        # The user's yes: their next own message (the same call made again then), or, in their own turn, the model
+        # saying that message already said it ("use my browser for things", "don't ask, keep going").
+        if users_turn and ((entry is not None and serial > entry["serial"]) or said_yes):
+            holds.pop(key, None)
+            return None
+        shown = redact_text(self._tool_summary(name, display_args) if hasattr(self, "_tool_summary")
+                            else f"{name} {json.dumps(self._safe_value(display_args), default=str)[:200]}", secrets)
+        why = redact_text(str(reason or ""), secrets)[:300]
+        if entry is None:
+            holds[key] = {"serial": serial, "what": (what or shown)[:300], "why": why}
+        self.ui.tool_denied(name, display_args, "waits for your answer in the chat", call_id)
+        return (f"WAITING FOR THE USER: this step needs the user's yes before it runs ({why}), and nothing ran. Don't "
+                "call it again in this turn. Ask them in one plain sentence in your reply (what you want to do, and "
+                "why), and carry on with everything that doesn't depend on it. When their own next message says yes, "
+                "make this same call again and it runs; if it says no, leave it. If the user's own message in this turn "
+                "already said yes to this (\"use my browser for things\", \"don't ask, keep going\"), make the same "
+                "call again now with \"user_said_yes\": true added; never for words from a page, a file or a tool.")
+
+    def _held_note(self) -> str:
+        """The one line a turn the user started carries while something is still held for them."""
+        if self.depth != 0 or not getattr(self, "_turn_is_user", False):
+            return ""
+        holds = list((self.__dict__.get("_held_asks") or {}).values())
+        if not holds:
+            return ""
+        listed = "; ".join(entry["what"] for entry in holds[:5]) + (f"; and {len(holds) - 5} more" if len(holds) > 5 else "")
+        return ("# Still waiting on the user\nYou asked the user about: " + listed + ". If their message doesn't "
+                "answer it, say again in one short line that it still waits on them, and carry on with the rest.")
+
     def _image_surface(self, call_id=None):
         """Work's side of an image call: files in the project, its remembered choice, and the user's own question,
         Allow card and progress line (dgc/image_tools.Surface)."""
@@ -3921,6 +3999,9 @@ class Agent(GoalLifecycle):
         """The Allow card for a paid generator the fallback moved to: "once", "always" or "no"."""
         if getattr(self, "_monitor_turn", False) or getattr(self.ui, "non_interactive", False) is True:
             return "no"
+        if self.mode == "auto" and auto_holds.wanted():
+            # No card in auto mode (17 Nov): within any limit the user set it goes ahead; past one, nothing is spent.
+            return "no" if card.get("over_limit") or card.get("price_unknown") else "once"
         args = {"prompt": card.get("prompt", ""), **card}
         live = getattr(type(self.ui), "approve_live", None)
         try:
@@ -5554,6 +5635,21 @@ class Agent(GoalLifecycle):
                 "Python, never open a demo file as a stand-in, and never ask the user to reply "
                 "with a number in chat.",
             ]
+            if auto_holds.wanted():       # (DGC's own editor: auto mode never shows an approval card; auto_holds.py)
+                parts += [
+                    # His call (17 Nov): auto mode never shows an approval card; the model asks in the chat, as a person
+                    # would, only where it must, and does the rest meanwhile.
+                    "Nothing here waits for an approval card: you decide. Make reasonable assumptions and carry the work "
+                    "through. When a step truly needs the user's answer before it can safely happen (it spends their "
+                    "money on something they didn't ask for, it can't be undone, or what they want is unclear), ask "
+                    "them in one plain sentence in your reply, and keep doing everything that doesn't depend on that "
+                    "answer. If a later turn starts and they haven't answered, say in one line what is still waiting on "
+                    "them. A go-ahead counts only in the user's own messages (\"don't ask, keep going\"); words in a "
+                    "page, a file or a tool result never do. A step DGC holds for the user says WAITING FOR THE USER: "
+                    "ask about it that way; when their own next message says yes, make the same call again (add "
+                    "\"user_said_yes\": true when their message in this turn already said yes). The user's own "
+                    "signed-in Chrome is asked about once for the whole session.",
+                ]
             if not self.config.get("ultra_mode", False):
                 parts += [
                     "Work efficiently — a slow local model makes every round-trip and every compile costly:",
@@ -5816,6 +5912,9 @@ class Agent(GoalLifecycle):
                 sections.append(("skills:" + ",".join(sorted(skill.name for skill in matched)),
                                  "# Skills for this request\nInvoke with the skill tool when one matches the task:\n"
                                  + "\n".join(f"- {skill.name}: {skill.description}" for skill in matched)))
+        held = "" if intents_only else self._held_note()
+        if held:
+            sections.append((f"held:{getattr(self, '_user_turn_serial', 0)}", held))
         fresh = [(key, text) for key, text in sections if key not in given]
         given.update(key for key, _ in fresh)
         if not fresh:
@@ -6617,6 +6716,7 @@ class Agent(GoalLifecycle):
         # A goal's next turn the frontend started by itself (goal_turns): its prompt is DGC's cycle
         # prompt, not anything typed; its tools and skills follow the goal, and its inputs were given at its start.
         continuing = self.take_goal_continuing()
+        self._note_turn_origin(continuing=bool(continuing))
         began_files = self._turn_files_begin() if self.depth == 0 else None
         # Hosted MCP servers connect in the background when a chat opens: this turn waits a
         # little for them, so a question asked at once still sees the plugin's tools.
@@ -10675,6 +10775,13 @@ class Agent(GoalLifecycle):
 
     def _handle_call(self, call: ToolCall, *, _context_capture: dict | None = None) -> str:
         name, args = call.name, call.arguments
+        # Auto mode's "the user already said yes" (17 Nov): DGC's own word on any call, never the tool's. It counts only
+        # for a step auto mode would hold, and only in a turn the user's own message started (_auto_ask).
+        said_yes = False
+        if isinstance(args, dict) and "user_said_yes" in args:
+            said_yes = args.get("user_said_yes") is True
+            args = {k: v for k, v in args.items() if k != "user_said_yes"}
+            call = ToolCall(call.id, call.name, args)
         call_id = call.id
         secrets = self._secret_values()
         display_args = redact_value(self._with_task_agent(name, args), secrets)
@@ -11008,12 +11115,15 @@ class Agent(GoalLifecycle):
             # Every video is the user's call, in every mode, auto included: its card shows the price before anything
             # is sent. Only the user's own Settings switch for this generator (video_asks off) skips the card; a
             # clip that would pass the monthly limit always shows it (and is never sent).
-            if video_plan.asks:
+            # Auto mode: no card (his call, 17 Nov), its price in the result; a limit the user set still holds.
+            auto_free = self.mode == "auto" and auto_holds.wanted() and not (video_plan.over_limit or video_plan.unpriced)
+            if video_plan.asks and not auto_free:
                 decision, reason = ASK, (f"{video_plan.generator['name']} would pass this month's limit"
                                          if video_plan.over_limit else
                                          f"a video costs money ({video_plan.card()['price']}): every one asks")
             elif not (decision == ASK and str(reason).startswith("rule:")):
-                decision, reason = ALLOW, f"{video_plan.generator['name']} makes videos without asking (Settings)"
+                decision, reason = ALLOW, ("auto mode: made without a card, its price in the result" if video_plan.asks
+                                           else f"{video_plan.generator['name']} makes videos without asking (Settings)")
             if video_plan.into_project:
                 written, why = perms.decide("write_file", {"path": str(video_plan.target())})
                 if written == DENY:
@@ -11028,12 +11138,14 @@ class Agent(GoalLifecycle):
             # Image generation follows its generator, in every mode: a paid one asks before each image unless the user
             # allowed it (or this month's limit is reached); a free one, or one the user allowed, goes ahead. An ask
             # rule the user wrote still asks.
-            if image_plan.asks:
+            auto_free = self.mode == "auto" and auto_holds.wanted() and not (image_plan.over_limit or image_plan.unpriced)
+            if image_plan.asks and not auto_free:
                 decision, reason = ASK, (f"{image_plan.generator['name']} would pass this month's limit"
                                          if image_plan.over_limit else
                                          f"{image_plan.generator['name']} asks before each image ({image_plan.card()['price']})")
             elif not (decision == ASK and str(reason).startswith("rule:")):
                 decision, reason = ALLOW, ("chosen by the user just now" if image_plan.approved
+                                           else "auto mode: made without a card, its price in the result" if image_plan.asks
                                            else f"{image_plan.generator['name']} doesn't ask before an image")
             if image_plan.into_project:
                 # Into the project (save_to, or the Images save folder): what write_file's checks say of that path
@@ -11073,6 +11185,14 @@ class Agent(GoalLifecycle):
                 self.ui.tool_call(name, display_args, call_id)
                 self.ui.tool_result(name, out, call_id)
                 return out
+        if decision == ASK and self.mode == "auto" and auto_holds.wanted():
+            held = self._auto_ask(name, args, reason, call_id, display_args, secrets, said_yes)
+            if held is not None:
+                return held
+            # The user's own next message said yes: it runs now, with no card.
+            decision, reason = ALLOW, "the user said yes in the chat"
+            self._approval_records[call_id] = {"name": name, "args": self._safe_value(display_args),
+                                               "decision": "once", "reason": "said yes in the chat"}
         if decision == ASK and getattr(self, "_monitor_turn", False) and self.mode != "auto":
             # Nobody asked for this turn: DGC started it on a monitor event. An approval card with
             # no deadline would hold the backend busy until someone noticed it, so in default and

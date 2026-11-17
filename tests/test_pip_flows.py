@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from dgc import pip_flows, pip_handoffs, pip_chat, pip_archive, pip_purge, pips, pip_workflow_tool, pip_context_tool, workspace_registry
-from dgc.permissions import ASK, DENY, PermissionEngine
+from dgc.permissions import ALLOW, ASK, DENY, PermissionEngine
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry
 import test_pips_local as fixtures
 
@@ -133,14 +133,19 @@ class PipFlowTests(unittest.TestCase):
             pip_flows.set_status(self.store, self.flow['id'], 0, 'paused', 'remote-user', self.cfg)
 
     def test_work_tool_requires_one_review_in_every_mode_and_pins_each_pip(self):
+        from dgc import auto_holds                       # DGC's own editor on the wire (auto_holds.py)
+        auto_holds.set_editor(True)
+        self.addCleanup(auto_holds.set_editor, False)
         self.prepare()
         from dgc import tools
         shape = next(item['function'] for item in tools.TOOL_SCHEMAS
                      if item['function']['name'] == 'pips_workflow')
         self.assertEqual(shape['parameters']['required'],
                          ['scope', 'name', 'pip_ids', 'pip_names', 'tasks', 'mode', 'expected_pins'])
-        for mode in ('default', 'acceptEdits', 'auto'):
+        for mode in ('default', 'acceptEdits'):
             self.assertEqual(PermissionEngine(mode, {}, self.root).decide('pips_workflow', {})[0], ASK)
+        # Auto mode never asks (his call, 17 Nov: "if it does it all, we do it all").
+        self.assertEqual(PermissionEngine('auto', {}, self.root).decide('pips_workflow', {})[0], ALLOW)
         self.assertEqual(PermissionEngine('plan', {}, self.root).decide('pips_workflow', {})[0], DENY)
         pins = [{'pip_id': p['id'], 'job_version': p['current_version'],
                  'lifecycle_revision': p['lifecycle_revision']} for p in self.pips[:2]]

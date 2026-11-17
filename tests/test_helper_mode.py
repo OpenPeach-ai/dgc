@@ -93,7 +93,7 @@ class ModeScene(FixScene):
             row = self.ended(run)
         return row, prompts[-1]
 
-    def helper_with(self, backend, *, switch_to=None, how="held"):
+    def helper_with(self, backend, *, switch_to=None, how="held", ran=True):
         """A turn that starts one task helper; the helper writes notes.txt. Returns the helper's write's tool_result."""
         prompts = []
 
@@ -117,6 +117,8 @@ class ModeScene(FixScene):
         with patch.object(LLMClient, "chat", Script([("HELPER:", child), ("Set up a daily audit", parent)])):
             backend.dispatch({"type": "prompt", "text": "Delegate the notes to a helper", "request_id": "p1"})
             wait_for(lambda: len(self.wire.of("turn_end")) > turns, 60, "the turn to end")
+        if not ran:                     # (held for the user: no result of its own)
+            return None, prompts[-1] if prompts else ""
         writes = [f for f in self.wire.of("tool_result") if f["name"] == "write_file" and ":w1" in str(f.get("call_id"))]
         self.assertEqual(len(writes), 1, writes)
         return writes[0], prompts[-1]
@@ -186,15 +188,21 @@ class StillAsksTests(ModeScene):
         self.fix_with(backend, switch_to="default", how="held")
         self.assertEqual(len(self.asked_for("apply_patch")), 1, "the chat lowered to Default: the fixer asks")
 
-    def test_an_ask_rule_still_asks_in_auto(self):
+    def test_an_ask_rule_still_holds_in_auto(self):
+        from dgc import auto_holds                       # DGC's own editor on the wire (auto_holds.py)
+        auto_holds.set_editor(True)
+        self.addCleanup(auto_holds.set_editor, False)
+        # Auto mode never shows a card (17 Nov): the user's ask rule still beats Auto, for a fix and for a helper, but
+        # the step is held and the model asks in the chat; nothing it would change is changed.
         self.cfg.permissions["ask"] = ["ApplyPatch", "Write"]
         backend = self.make()
         self.fix_with(backend, switch_to="auto", how="held")
-        self.helper_with(backend)
-        self.assertEqual(len(self.asked_for("apply_patch")), 1, "the user's ask rule beats Auto for a fix")
-        self.assertEqual(len(self.asked_for("write_file")), 1, "and for a helper")
-        self.assertEqual(self.asked_for("apply_patch")[0].get("choices"), ["once", "deny"],
-                         "an ask rule's card offers no Always allow")
+        self.helper_with(backend, ran=False)
+        self.assertEqual(self.asked_for("apply_patch") + self.asked_for("write_file"), [], "no card in auto mode")
+        held = [f for f in self.wire.of("tool_denied") if f["name"] in ("apply_patch", "write_file")]
+        self.assertEqual({f["name"] for f in held}, {"apply_patch", "write_file"}, "both held, for a fix and a helper")
+        self.assertTrue(all("waits for your answer in the chat" in str(f.get("reason", "")) for f in held), held)
+        self.assertEqual((self.root / "app" / "gst.py").read_text(), "def total(x):\n    return x\n")
 
     def test_a_deny_rule_still_denies_in_auto(self):
         self.cfg.permissions["deny"] = ["ApplyPatch"]

@@ -125,6 +125,17 @@ def _boxed(registry, pip_id) -> bool:
         return False
 
 
+def does_it_all(directory, pip_id) -> bool:
+    """Whether this Pip is at Do it all now (its registry read afresh): where nothing asks with a card (17 Nov). A
+    registry that can't say is not."""
+    try:
+        with WorkspaceRegistry(directory) as registry:
+            # A folder Pip's own level (its handoffs) counts too: Do it all is Do it all, whichever kind it is.
+            return level(registry, pip_id) == FULL or project_level(registry, pip_id) == FULL
+    except Exception:                       # noqa: BLE001 - unreadable means it asks, as before
+        return False
+
+
 def level(registry, pip_id) -> str:
     """The Pip's level: its own choice, else DEFAULT. A folder Pip's counts for its box only when it was chosen while
     the Pip had one ("box" in what was saved): one chosen before was about its handoffs only ("never changes your

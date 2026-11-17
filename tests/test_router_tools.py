@@ -265,11 +265,22 @@ class ProbeAndFind(ToolsCase):
         self.assertEqual(self.router.leases(), [], "the probe gave its worker back")
 
     def test_find_asks_first_and_a_no_means_no_scan(self):
-        harness = self.harness()
+        harness = self.harness(mode="default")      # (auto mode looks without a card since 17 Nov: below)
         harness.answer("permission_request", {"decision": "no"})
         with patch.object(router_probe, "find", side_effect=AssertionError("scanned without asking")):
             out = harness.agent._handle_call(ToolCall("f1", "router_find", {}))
         self.assertIn("DENIED", out)
+
+    def test_in_auto_mode_find_looks_without_a_card(self):
+        from dgc import auto_holds                       # DGC's own editor on the wire (auto_holds.py)
+        auto_holds.set_editor(True)
+        self.addCleanup(auto_holds.set_editor, False)
+        harness = self.harness()
+        fake_result = {"network": "10.9.8.0/24", "ports": [11434], "took_ms": 5, "found": []}
+        with patch.object(router_probe, "find", return_value=fake_result) as found:
+            harness.agent._handle_call(ToolCall("f1", "router_find", {}))
+        found.assert_called_once()
+        self.assertEqual([f for f in harness.stream.frames() if f["type"] == "permission_request"], [])
 
     def test_find_lists_what_answered(self):
         agent = self.harness().agent
