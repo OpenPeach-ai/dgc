@@ -494,6 +494,9 @@ API100_FIELDS = {'send_pip_message': frozenset({'output'})}
 # index}, answered with where it is kept on this computer (local only), checked against its digest.
 API101_READS = frozenset({'get_pip_message_file'})
 READ_COMMANDS |= API101_READS
+# API 104: a Pip's own sub-agents model. set_pip_agents also takes model_choice, thinking, context_size and fallback
+# (what its sub-agents run on, and DGC's own helpers in its runs), each optional; it answers all five with slots.
+API104_FIELDS = {'set_pip_agents': frozenset({'model_choice', 'thinking', 'context_size', 'fallback'})}
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -655,7 +658,7 @@ COMMAND_FIELDS = {
     'answer_pip_waiting': frozenset({'pip_id', 'waiting_id', 'answer'}),
     'list_pip_agents': frozenset({'pip_id'}),
     'stop_pip_agent': frozenset({'pip_id', 'agent_id'}),
-    'set_pip_agents': frozenset({'pip_id', 'slots'}),
+    'set_pip_agents': frozenset({'pip_id', 'slots', 'model_choice', 'thinking', 'context_size', 'fallback'}),
     'retry_pip_fix': frozenset({'pip_id', 'fix_id', 'again'}),
     'fill_pip_code': frozenset({'pip_id', 'action_id', 'expected_digest', 'code'}),
     'commit_pip_project_change': frozenset({'pip_id', 'change_id'}),
@@ -1300,6 +1303,9 @@ class Pips:
             raise DGCConfigError("key_id is the key's id, pipkey_ and 32 hex digits")
         if command == 'save_pip_key' and not (isinstance(values.get('value'), str) and len(values['value']) <= MAX_PLUGIN_KEY):
             raise DGCConfigError('value is the key, up to 16,384 characters')
+        if API104_FIELDS.get(command, frozenset()) & set(values) and version < 104:
+            raise DGCUnsupportedError("A Pip's own sub-agents model (model_choice, thinking, context_size, fallback) "
+                                      "requires a runtime advertising Pips API 104 or newer")
         if API100_FIELDS.get(command, frozenset()) & set(values):
             if version < 100:
                 raise DGCUnsupportedError("Asking a Pip's reply for a document, deck, sheet, page or dashboard (output) "

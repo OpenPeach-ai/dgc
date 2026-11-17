@@ -80,9 +80,38 @@ export function pipFlowRefusal(request: any, apiVersion: number): string {
 }
 /** A Pip's sub-agents in its chat (Pips API 97, dgc/pip_agents.py; src/pipChat.js): list_pip_agents {pip_id} reads
  *  them for the pill and the agent map, stop_pip_agent {pip_id, agent_id} is Stop, and retry_pip_fix {pip_id, fix_id,
- *  again} answers the Pip after its last try (Try again, or Leave it). Why a request is refused, or '' when it may go. */
+ *  again} answers the Pip after its last try (Try again, or Leave it). Why a request is refused, or '' when it may go.
+ *  From Pips API 104 set_pip_agents also takes what they run on (its picker's Sub-agents tab): model_choice ("This
+ *  Pip's model" is mode default; a model on DGC's own connection, or a saved provider's; never a subscription app or
+ *  DGC Router), thinking, context_size and fallback ({provider, model}, model "" for none). */
 const AGENT_COMMANDS = ['list_pip_agents', 'stop_pip_agent', 'set_pip_agents', 'retry_pip_fix'];
 export const AGENTS_API = 97;
+export const AGENTS_OWN_API = 104;
+const OWN_FIELDS = ['model_choice', 'thinking', 'context_size', 'fallback'];
+const OWN_PROVIDER = /^provider_[a-f0-9]{32}$/;
+const ownModelId = (v: unknown) => typeof v === 'string' && v.length >= 1 && v.length <= 256;
+/** A model choice for a Pip's sub-agents, or why it isn't one. */
+function ownChoiceProblem(c: any): string {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return 'Choose a model for its sub-agents.';
+  if (c.mode === 'subscription') return 'It runs its own tools, so it can’t run DGC’s sub-agents.';
+  if (c.mode === 'router') return 'DGC Router can’t run a Pip’s sub-agents: a Pip’s run holds one of its systems at most.';
+  const keys = Object.keys(c).sort().join();
+  if (c.mode === 'default' && keys === 'mode') return '';
+  if (c.mode === 'model' && keys === 'mode,model' && ownModelId(c.model)) return '';
+  if (c.mode === 'provider' && keys === 'mode,model,provider' && OWN_PROVIDER.test(String(c.provider)) && ownModelId(c.model)) return '';
+  return 'Choose a model for its sub-agents.';
+}
+function ownAgentsProblem(request: any): string {
+  if ('model_choice' in request) { const problem = ownChoiceProblem(request.model_choice); if (problem) return problem; }
+  if ('thinking' in request && !['', 'off', 'low', 'medium', 'high', 'xhigh'].includes(request.thinking)) return 'Their thinking is Same, Off, Low, Medium, High or Extra high.';
+  if ('context_size' in request && !(Number.isSafeInteger(request.context_size) && (request.context_size === 0 || (request.context_size >= 2048 && request.context_size <= 16777216)))) return 'Their context window is the same as the Pip’s, or 2K to 16,384K.';
+  if ('fallback' in request) {
+    const f = request.fallback;
+    if (!f || typeof f !== 'object' || Array.isArray(f) || Object.keys(f).some((k) => k !== 'provider' && k !== 'model') || typeof f.model !== 'string' || f.model.length > 256
+      || typeof f.provider !== 'string' || (f.provider !== '' && !OWN_PROVIDER.test(f.provider))) return 'Their fallback is a model DGC runs itself, or none.';
+  }
+  return '';
+}
 export function pipAgentsRefusal(request: any, apiVersion: number): string {
   if (!AGENT_COMMANDS.includes(request?.type)) return '';
   if (apiVersion < AGENTS_API) return 'Update DGC to see a Pip’s sub-agents in its chat.';
@@ -90,7 +119,14 @@ export function pipAgentsRefusal(request: any, apiVersion: number): string {
   if (!id(request.pip_id, /^pip_[a-f0-9]{32}$/)) return 'Choose a Pip first.';
   if (request.type === 'stop_pip_agent' && !id(request.agent_id, /^pipagent_[a-f0-9]{32}$/)) return 'Choose the sub-agent to stop.';
   // Ultra on the Pip's thinking slider: how many of its sub-agents run at once (1, or 4 for Ultra; DGC holds the most).
-  if (request.type === 'set_pip_agents' && !(Number.isSafeInteger(request.slots) && request.slots >= 1 && request.slots <= 64)) return 'A Pip runs 1 to 4 sub-agents at once.';
+  // From 104, what they run on too; an older DGC is sent only `slots`.
+  if (request.type === 'set_pip_agents') {
+    const own = OWN_FIELDS.filter((key) => Object.prototype.hasOwnProperty.call(request, key));
+    if (own.length && apiVersion < AGENTS_OWN_API) return 'Update DGC to choose a model for a Pip’s sub-agents.';
+    if ((Object.prototype.hasOwnProperty.call(request, 'slots') || !own.length) && !(Number.isSafeInteger(request.slots) && request.slots >= 1 && request.slots <= 64)) return 'A Pip runs 1 to 4 sub-agents at once.';
+    const problem = ownAgentsProblem(request);
+    if (problem) return problem;
+  }
   if (request.type === 'retry_pip_fix' && !(id(request.fix_id, /^pipfix_[a-f0-9]{32}$/) && typeof request.again === 'boolean')) return 'Answer the Pip: Try again, or Leave it.';
   return '';
 }
@@ -551,6 +587,10 @@ export class PipsEditor implements vscode.Disposable {
   /** Providers saved in Settings: the host lists them for a Pip's model menus, and saves one (with its key, which never
    *  comes here) before a Pip is set to it. */
   /** `host`: the name and mark of the host DGC itself is on, for the model picker's "your connection" (never its address). */
+  /** The most tokens a model takes (Pips API 104: a Pip's Sub-agents page), asked of the window's DGC (model_window_at)
+   *  by the panel, which knows a saved provider's address and key; 0 when it can't say. */
+  private modelWindow?: (choice: { mode: 'model' | 'provider'; model: string; provider?: string }) => Promise<number>;
+  useModelWindow(ask: (choice: { mode: 'model' | 'provider'; model: string; provider?: string }) => Promise<number>): void { this.modelWindow = ask; }
   useSavedProviders(list: () => Promise<unknown[]>, save: (id: string, model: string) => Promise<void>, none: () => boolean = () => false, host: () => unknown = () => undefined): void { this.savedProviders = { list, save, none, host }; }
   /** A reply's links and Settings → Models, on the page in its own tab. The side bar's page shares the panel's own. */
   private pageActions?: (message: any) => void;
@@ -1755,6 +1795,17 @@ export class PipsEditor implements vscode.Disposable {
     if (this.pending.size >= 64) { fail('DGC is busy. Reconnect and try again.'); return; }
     const request = message.request;
     if (!request || typeof request !== 'object' || Array.isArray(request) || typeof request.type !== 'string') return;
+    if (request.type === 'pip_model_window') {
+      // A Pip's Sub-agents page (Pips API 104): the most tokens the chosen model takes. The host asks DGC itself
+      // (model_window_at) with the saved provider's address and key; nothing of either reaches the page.
+      if (this.apiVersion < AGENTS_OWN_API || !this.modelWindow) { fail('Update DGC to see the sizes a model takes.'); return; }
+      const c = request.model_choice;
+      if (!c || typeof c !== 'object' || !ownModelId(c.model) || !(c.mode === 'model' || (c.mode === 'provider' && OWN_PROVIDER.test(String(c.provider))))) { fail('Choose a model on DGC’s connection or a saved provider.'); return; }
+      const choice = c.mode === 'model' ? { mode: 'model' as const, model: String(c.model) } : { mode: 'provider' as const, provider: String(c.provider), model: String(c.model) };
+      const answer = (window: unknown) => this.post({ type: 'pipsReply', id: message.id, ok: true, result: { window: Number.isSafeInteger(window) && Number(window) > 0 ? Number(window) : 0 } }, surface);
+      void this.modelWindow(choice).then(answer, () => answer(0));
+      return;
+    }
     // No provider yet: a Pip's hello has nothing to run on. Nothing is queued; the Pip says hello once one is saved.
     if (request.type === 'introduce_pip' && this.savedProviders?.none()) {
       this.post({ type: 'pipsReply', id: message.id, ok: true, result: { no_provider: true } }, surface);
@@ -1762,9 +1813,13 @@ export class PipsEditor implements vscode.Disposable {
     }
     // A Pip set to a saved provider: the host saves that provider first, so the choice's check and its runs find it.
     // A Pip's fallback on a saved provider (D14) is saved the same way.
+    // (And the sub-agents' own model or fallback on one, Pips API 104: checked first, so a request DGC won't take saves nothing.)
+    if (request.type === 'set_pip_agents') { const refused = pipAgentsRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
     const chosen = request.model_choice ?? request.changes?.model_choice
       ?? (request.type === 'set_pip_backup' && typeof request.provider === 'string' && request.provider && request.model
-        ? { mode: 'provider', provider: request.provider, model: request.model } : undefined);
+        ? { mode: 'provider', provider: request.provider, model: request.model } : undefined)
+      ?? (request.type === 'set_pip_agents' && typeof request.fallback?.provider === 'string' && request.fallback.provider && request.fallback.model
+        ? { mode: 'provider', provider: request.fallback.provider, model: request.fallback.model } : undefined);
     if (chosen?.mode === 'provider' && message.providerSaved !== true) {
       if (!this.savedProviders) { fail('Update DGC to run a Pip on a saved provider.'); return; }
       void this.savedProviders.save(String(chosen.provider), String(chosen.model || '')).then(

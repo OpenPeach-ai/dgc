@@ -64,10 +64,27 @@ export function agentView(a, pip = '') {
     model: text(a.model, 200) ? a.model : '', notes: text(a.notes, 2000) ? a.notes.trim() : '',
     held: Array.isArray(a.held) ? a.held.filter(h => words(h, 4096)).slice(0, 50) : []};
 }
-/** list_pip_agents, checked: {agents (newest first), slots}. */
+/** list_pip_agents, checked: {agents (newest first), slots}, and from Pips API 104 `own`: what its sub-agents run on. */
 export function agentsPage(value, pip) {
   if (!record(value) || !Array.isArray(value.agents) || value.agents.length > 200) throw new Error('This Pip’s sub-agents didn’t load. Open the chat again.');
-  return {agents: value.agents.map(a => agentView(a, pip)).filter(Boolean), slots: Number.isSafeInteger(value.slots) && value.slots > 0 ? value.slots : 1};
+  const own = agentsOwnOf(value);
+  return {agents: value.agents.map(a => agentView(a, pip)).filter(Boolean), slots: Number.isSafeInteger(value.slots) && value.slots > 0 ? value.slots : 1, ...(own ? {own} : {})};
+}
+// A Pip's sub-agents' own model (Pips API 104, dgc/pip_agents.py): {model_choice, thinking, context_size, fallback}, as
+// list_pip_agents and set_pip_agents say it; null from a DGC that says none. "This Pip's model" is mode "default".
+const OWN_THINKING = ['', 'off', 'low', 'medium', 'high', 'xhigh'], PROVIDER_ID = /^provider_[a-f0-9]{32}$/;
+const ownModel = v => typeof v === 'string' && v.length >= 1 && v.length <= 256;
+function ownChoice(c) {
+  if (!record(c) || c.mode === 'default') return {mode: 'default'};
+  if (c.mode === 'model' && ownModel(c.model)) return {mode: 'model', model: c.model};
+  if (c.mode === 'provider' && PROVIDER_ID.test(String(c.provider || '')) && ownModel(c.model)) return {mode: 'provider', provider: c.provider, model: c.model};
+  return {mode: 'default'};
+}
+export function agentsOwnOf(value) {
+  if (!record(value) || !('model_choice' in value)) return null;
+  const f = record(value.fallback) && ownModel(value.fallback.model) ? {provider: PROVIDER_ID.test(String(value.fallback.provider || '')) ? value.fallback.provider : '', model: value.fallback.model} : {provider: '', model: ''};
+  return {model_choice: ownChoice(value.model_choice), thinking: OWN_THINKING.includes(value.thinking) ? value.thinking : '',
+    context_size: Number.isSafeInteger(value.context_size) && value.context_size >= 0 && value.context_size <= 16777216 ? value.context_size : 0, fallback: f};
 }
 function fix(f) {
   if (!record(f) || !FIX.test(String(f.id || '')) || !FIX_STATES.includes(f.state) || !count(f.count) || !words(f.digest, 128)

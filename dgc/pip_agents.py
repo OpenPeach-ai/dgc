@@ -9,6 +9,13 @@ RETRY sends it back with the Pip's notes, three tries at most; after the last th
 
 A sub-agent's turn is a conversation run with no chat rows (``manifest["agent"]``): it runs beside the Pip's chat, at
 most ``slots`` at once for a Pip, and nothing that reads the Pip's chat (unread, previews, memory) ever sees it.
+
+Its own model (Pips API 104): ``set_pip_agents`` also takes the model a Pip's sub-agents run on (``model_choice``: "This
+Pip's model" by default, a model on DGC's own connection, or a saved provider's), their ``thinking``, their
+``context_size`` and their ``fallback``, kept in metadata ``pip_agent_model:<pip>``. A sub-agent job's run runs on them
+and carries on with that fallback; every run of the Pip gives DGC's own helpers inside it the same settings
+(``for_worker``, read from today's settings when the run starts, never kept in a manifest). A subscription CLI and DGC
+Router are refused.
 """
 from __future__ import annotations
 
@@ -77,7 +84,7 @@ def slots(registry, pip_id) -> int:
     return max(1, value)
 
 
-def set_slots(registry, pip_id, value) -> int:
+def _valid_slots(value) -> int:
     try:
         from .dev_mode import chosen
         most = chosen("pip_agent_slots") or SLOTS_ULTRA     # Dev Mode lifts the most (his call)
@@ -85,9 +92,172 @@ def set_slots(registry, pip_id, value) -> int:
         most = SLOTS_ULTRA
     if type(value) is not int or not 1 <= value <= most:
         raise RegistryError("invalid_request", f"A Pip runs 1 to {most} sub-agents at once.")
+    return value
+
+
+def set_slots(registry, pip_id, value) -> int:
+    value = _valid_slots(value)
     with registry.transaction():
         registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (SLOTS_KEY + pip_id, json.dumps(value)))
     return value
+
+
+# ---- its own model (Pips API 104) -----------------------------------------------------------------------------------
+MODEL_KEY = "pip_agent_model:"              # metadata: JSON {model_choice, thinking, context_size, fallback}
+MODEL_FIELDS = ("model_choice", "thinking", "context_size", "fallback")
+CONTEXT_MOST = 16_777_216                   # what DGC's own sub-agents' window takes (config.subagent_window_arg)
+NO_CLI = "It runs its own tools, so it can’t run DGC’s sub-agents."
+NO_ROUTER = ("DGC Router can’t run a Pip’s sub-agents: a Pip’s run holds one of its systems at most. Choose a model "
+             "or a saved provider.")
+
+
+def _model_defaults() -> dict:
+    return {"model_choice": {"mode": "default"}, "thinking": "", "context_size": 0,
+            "fallback": {"provider": "", "model": ""}}
+
+
+def _valid_choice(value) -> dict:
+    """The Pip's model_choice shape: "This Pip's model" (default), a model on DGC's own connection, or a saved
+    provider's. Never a subscription CLI (it runs its own tools) or DGC Router."""
+    from .pip_models import validate_model_choice
+    choice = validate_model_choice(value)
+    if choice["mode"] == "subscription":
+        raise RegistryError("invalid_model_choice", NO_CLI)
+    if choice["mode"] == "router":
+        raise RegistryError("invalid_model_choice", NO_ROUTER)
+    return choice
+
+
+def _valid_thinking(value) -> str:
+    from .pip_chat_options import THINKING_LEVELS
+    if type(value) is not str or value not in ("", *THINKING_LEVELS):
+        raise RegistryError("invalid_request", 'thinking is "" (the same as the Pip), off, low, medium, high or xhigh.')
+    return value
+
+
+def _valid_context(value) -> int:
+    if type(value) is not int or not (value == 0 or 2_048 <= value <= CONTEXT_MOST):
+        raise RegistryError("invalid_request", "context_size is 0 (the same as the Pip) or 2,048 to 16,777,216 tokens.")
+    return value
+
+
+def _valid_fallback(value) -> dict:
+    """{provider, model} as a Pip's fallback is kept (pip_backup): a model DGC runs itself, never a CLI or the Router."""
+    if not isinstance(value, dict):
+        raise RegistryError("invalid_request", "fallback is {provider, model}: model \"\" for none.")
+    if "engine" in value or "router" in value:
+        raise RegistryError("invalid_request", "A sub-agents’ fallback is a model DGC runs itself: never a subscription "
+                                               "CLI or DGC Router.")
+    if set(value) - {"provider", "model"}:
+        raise RegistryError("invalid_request", "fallback takes only provider and model.")
+    from .pip_backup import _choice
+    return _choice(value.get("model", ""), value.get("provider", ""))
+
+
+_VALID = {"model_choice": _valid_choice, "thinking": _valid_thinking, "context_size": _valid_context,
+          "fallback": _valid_fallback}
+
+
+def agents_model(registry, pip_id) -> dict:
+    """What a Pip's sub-agents run on: {model_choice, thinking, context_size, fallback}. A value that can't be read is
+    the default ("This Pip's model", its thinking and window, no fallback of their own)."""
+    out = _model_defaults()
+    try:
+        row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (MODEL_KEY + str(pip_id),)).fetchone()
+        stored = json.loads(row[0]) if row else {}
+    except (TypeError, ValueError):
+        stored = {}
+    if not isinstance(stored, dict):
+        return out
+    for field in MODEL_FIELDS:
+        if field in stored:
+            try:
+                out[field] = _VALID[field](stored[field])
+            except RegistryError:
+                pass                                         # unreadable: its default
+    return out
+
+
+def configure(registry, pip_id, request) -> dict:
+    """set_pip_agents: slots and its own model, each optional, at least one; a field not given keeps its value. Every
+    field is checked before anything is written. Answers {slots, model_choice, thinking, context_size, fallback}."""
+    given = [field for field in ("slots", *MODEL_FIELDS) if field in request]
+    if not given:
+        raise RegistryError("invalid_request", "Give slots, model_choice, thinking, context_size or fallback.")
+    slots_value = _valid_slots(request["slots"]) if "slots" in request else None
+    chosen = agents_model(registry, pip_id)
+    for field in MODEL_FIELDS:
+        if field in request:
+            chosen[field] = _VALID[field](request[field])
+    with registry.transaction():
+        if slots_value is not None:
+            registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (SLOTS_KEY + pip_id, json.dumps(slots_value)))
+        if set(given) & set(MODEL_FIELDS):
+            registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (MODEL_KEY + pip_id, json.dumps(chosen)))
+    return {"slots": slots(registry, pip_id), **agents_model(registry, pip_id)}
+
+
+def own_choice(agents) -> dict | None:
+    """The model choice a sub-agent job's run takes in place of its Pip's, or None for "This Pip's model"."""
+    choice = agents["model_choice"]
+    return None if choice.get("mode") == "default" else choice
+
+
+def job_settings(settings, agents, config) -> dict:
+    """A sub-agent job's model settings: its thinking and window in place of the Pip's chat options, where set."""
+    out = dict(settings)
+    if agents["thinking"]:
+        from .pip_chat_options import apply
+        out = apply(out, {"context_size": out["context_size"], "thinking": agents["thinking"]}, config)
+    if agents["context_size"]:
+        out["context_size"] = agents["context_size"]
+    return out
+
+
+def _route(config, provider, model) -> dict | None:
+    """{model, base_url, api_mode, api_key}: a model on DGC's own connection (provider "") or a saved provider's, from
+    today's settings. None when that connection has no web address. A removed provider raises, in plain words."""
+    if provider:
+        from .pip_models import provider_view
+        config = provider_view(config, {"provider": provider, "model": model})
+    base = str(config.get("base_url", "") or "").rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        return None
+    return {"model": model, "base_url": base, "api_mode": str(config.get("api_mode", "auto") or "auto"),
+            "api_key": str(config.get("api_key", "") or "")}
+
+
+def for_worker(registry, config, pip_id) -> dict | None:
+    """What DGC's own helpers inside any run of this Pip follow: the subagent_* settings its worker sets, read from
+    today's settings when the run starts (a saved provider's address, API and key), never kept in a manifest. None when
+    nothing is set, and when the chosen provider was removed (the run's helpers stay as they are). A fallback whose
+    provider was removed is left out: no fallback, never another."""
+    agents = agents_model(registry, pip_id)
+    out = {}
+    choice = own_choice(agents)
+    if choice is not None:
+        try:
+            route = _route(config, choice.get("provider", ""), choice["model"])
+        except RegistryError:
+            return None
+        if route is None:
+            return None
+        out.update(subagent_model=route["model"], subagent_base_url=route["base_url"],
+                   subagent_api_mode=route["api_mode"], subagent_api_key=route["api_key"])
+    if agents["thinking"]:
+        out["subagent_thinking"] = agents["thinking"]
+    if agents["context_size"]:
+        out["subagent_context_size"] = agents["context_size"]
+    fallback = agents["fallback"]
+    if fallback["model"]:
+        try:
+            route = _route(config, fallback["provider"], fallback["model"])
+        except RegistryError:
+            route = None
+        if route is not None:
+            out.update(subagent_fallback_model=route["model"], subagent_fallback_base_url=route["base_url"],
+                       subagent_fallback_api_mode=route["api_mode"], subagent_fallback_api_key=route["api_key"])
+    return out or None
 
 
 # ---- its own copy -------------------------------------------------------------------------------------------------
@@ -175,7 +345,16 @@ def start(store, config, pip_id, *, kind, title, brief, fix_id=None) -> dict:
         db.execute("INSERT INTO pip_agent_jobs(id,pip_id,workspace_id,kind,fix_id,title,brief,folder,copy,base,tries,state,"
                    "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,'queued',?,?)",
                    (job_id, pip_id, workspace_id, kind, fix_id, title[:200], brief, folder, rel, json.dumps(base), now, now))
-    _run(store, config, job_id, brief)
+    try:
+        _run(store, config, job_id, brief)
+    except RegistryError as exc:
+        # Its run was refused (its sub-agents' provider was removed, say): it ends here in those words, never left
+        # queued with no run. The caller says why.
+        ended = _now(registry)
+        with registry.transaction():
+            db.execute("UPDATE pip_agent_jobs SET state='failed',said=?,ended_at=?,updated_at=? WHERE id=?",
+                       (str(exc)[:1000], ended, ended, job_id))
+        raise
     return view(db, _row(db, job_id))
 
 
@@ -344,7 +523,18 @@ def send_due(registry, config) -> int:
     for row in db.execute("SELECT * FROM pip_agent_jobs WHERE state IN ('check_due','retry_due') ORDER BY updated_at LIMIT 20").fetchall():
         if row["state"] == "retry_due":
             carry = db.execute("SELECT value FROM metadata WHERE key=?", (CARRY_KEY + row["id"],)).fetchone()
-            _run(store, config, row["id"], _retry_text(row, carry=carry is not None), counted=carry is None)
+            try:
+                _run(store, config, row["id"], _retry_text(row, carry=carry is not None), counted=carry is None)
+            except RegistryError as exc:
+                if exc.code in ("runner_stopped", "limit"):
+                    continue                                # Pips are paused or the queue is full: the next tick
+                # Anything else (its sub-agents' provider was removed, say) won't run on the next tick either: the
+                # job ends, in those words.
+                with registry.transaction():
+                    db.execute("UPDATE pip_agent_jobs SET state='failed',said=?,updated_at=? WHERE id=?",
+                               (str(exc)[:1000], _now(registry), row["id"]))
+                _job_ended(store, _row(db, row["id"]))
+                continue
             if carry is not None:
                 with registry.transaction():
                     db.execute("DELETE FROM metadata WHERE key=?", (CARRY_KEY + row["id"],))
@@ -493,11 +683,13 @@ def view(db, row) -> dict:
 
 
 def listing(store, pip_id) -> dict:
+    """list_pip_agents: {agents, slots, model_choice, thinking, context_size, fallback}."""
     db = store.db
+    own = agents_model(store.registry, pip_id)
     if not _has(db):
-        return {"agents": [], "slots": slots(store.registry, pip_id)}
+        return {"agents": [], "slots": slots(store.registry, pip_id), **own}
     rows = db.execute("SELECT * FROM pip_agent_jobs WHERE pip_id=? ORDER BY created_at DESC, rowid DESC LIMIT 50", (pip_id,)).fetchall()
-    return {"agents": [view(db, row) for row in rows], "slots": slots(store.registry, pip_id)}
+    return {"agents": [view(db, row) for row in rows], "slots": slots(store.registry, pip_id), **own}
 
 
 def stop(store, pip_id, job_id, actor) -> dict:

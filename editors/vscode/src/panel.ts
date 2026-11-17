@@ -124,7 +124,7 @@ const CHATDGC_SEEN_KEY = "dgc.chatdgcSeen.v1";
 /** What a Work chat's page may not do while its session is open in another window (session_elsewhere): anything that
  *  changes the session, its turn or its settings. */
 const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel", "setMode", "setModel", "setReasoningProfile",
-  "setContextSize", "setAgentsThinking", "setAgentsContext", "agentsContextTyped", "pickModel", "compact", "rateResponse", "branchChat", "resumeTurn", "permission_response", "plan_response",
+  "setContextSize", "setAgentsThinking", "setAgentsContext", "setAgentsFallback", "pickModel", "compact", "rateResponse", "branchChat", "resumeTurn", "permission_response", "plan_response",
   "options_response", "mcp_input_response", "askSkip", "steerQueued", "queueRemove", "queueReorder", "rerunTask", "learnSave", "clear_todos", "undoTurn",
   "startGoal", "updateGoal", "clearGoal", "resumeGoal", "drop_uris", "stopAgent", "stopMonitor", "restartMonitor",
   "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix", "backgroundNow", "continueAgent"]);
@@ -6663,18 +6663,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           if (typed?.trim()) await this.setSessionAgentsModel(msg.id, typed.trim());
         }
         break;
+      case "setAgentsFallback":
+        // The picker's Sub-agents tab, a row's ⋯: this session's sub-agents' own fallback (model "" stops it).
+        await this.setSessionAgentsFallback(String(msg.provider || ""), typeof msg.model === "string" ? msg.model.trim().slice(0, 256) : "");
+        break;
+      case "agentsWindow":
+        // Its Sub-agents page: the most tokens the chosen model takes, so it offers only those sizes.
+        await this.agentsWindow(msg);
+        break;
       case "setAgentsThinking":
         if (this.subagentThinkingSettable() && typeof msg.level === "string" && SUBAGENT_THINKING.includes(msg.level)) await this.setSessionAgentsSetting({ subagent_thinking: msg.level });
         break;
       case "setAgentsContext":
         if (this.subagentWindowSettable && Number.isSafeInteger(msg.size) && msg.size >= 0) await this.setSessionAgentsSetting({ subagent_context_size: subagentWindow(msg.size) });
-        break;
-      case "agentsContextTyped":
-        if (this.subagentWindowSettable) {
-          const typed = await vscode.window.showInputBox({ prompt: "Context window for this session’s sub-agents", placeHolder: "A size like 24K or 24576; nothing for the same as the session",
-            validateInput: (value) => (!value.trim() || subagentWindow(value) > 0 ? undefined : "Type a size like 24K or 24576.") });
-          if (typed !== undefined) await this.setSessionAgentsSetting({ subagent_context_size: subagentWindow(typed) });
-        }
         break;
       case "setFallback":
         await this.setSessionFallback(String(msg.provider || ""), typeof msg.model === "string" ? msg.model.trim().slice(0, 256) : "");
@@ -8927,7 +8928,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   // ---- a Work session's own agents model (0.52, ready.capabilities.agents_model) ----
   /** What DGC last said of this session's agents model (agents_model): its own, or Settings' that it follows. */
-  private agentsModel = { own: false, model: "", baseUrl: "", settingsModel: "", settingsBaseUrl: "" };
+  private agentsModel = { own: false, model: "", baseUrl: "", settingsModel: "", settingsBaseUrl: "", fallbackOwn: false, fallbackModel: "", fallbackBaseUrl: "" };
   /** The addresses a key was supplied for and DGC hasn't confirmed yet: a key it won't take is never sent in a loop. */
   private agentsKeyAsked = new Set<string>();
   private agentsModelOffered(): boolean { return (this.lastReadyEvent?.capabilities as any)?.agents_model === 1; }
@@ -8937,10 +8938,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return { offered: this.agentsModelOffered(), own: this.agentsModel.own, model: this.agentsModel.model,
              base_url: this.agentsModel.baseUrl, settings_model: this.agentsModel.settingsModel,
              settings_base_url: this.agentsModel.settingsBaseUrl, router: host.routerStatus?.enabled === true,
-             // The Sub-agents tab's two dropdowns: how they think and their window, where this DGC can set them.
+             // The Sub-agents page: how they think and their window, where this DGC can set them.
              thinking: this.subagentSettings?.thinking ?? "", thinking_settable: this.subagentThinkingSettable(),
-             context_size: this.subagentWindow, context_settable: this.subagentWindowSettable };
+             context_size: this.subagentWindow, context_settable: this.subagentWindowSettable,
+             // (17 Nov) whether DGC says a model's largest window (model_window_at), and the sub-agents' own fallback
+             // (subagent_fallback): which model and address it is, own or Settings'; never its key.
+             window_offered: this.modelWindowOffered(), fallback_offered: this.agentsFallbackOffered(),
+             fallback_own: this.agentsModel.fallbackOwn, fallback_model: this.agentsModel.fallbackModel, fallback_base_url: this.agentsModel.fallbackBaseUrl };
   }
+  private agentsFallbackOffered(): boolean { return this.agentsModelOffered() && (this.lastReadyEvent?.capabilities as any)?.subagent_fallback === 1; }
+  private modelWindowOffered(): boolean { return (this.lastReadyEvent?.capabilities as any)?.model_window_at === 1; }
   private subagentThinkingSettable(): boolean { return Number((this.lastReadyEvent?.capabilities as any)?.subagent_thinking) >= 1 && !!this.subagentSettings; }
   /** The Sub-agents tab's Thinking and Context window: this chat's sub-agents, set as its own context window is
    *  (set_config; both are keys every chat holds for itself, and what is chosen is what later chats start with). */
@@ -8958,8 +8965,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  saved for that address is supplied at once, as a session's fallback key is. */
   private noteAgentsModel(ev: any): void {
     this.agentsModel = { own: ev?.own === true, model: String(ev?.model || "").slice(0, 256), baseUrl: String(ev?.base_url || "").slice(0, 2048),
-                         settingsModel: String(ev?.settings_model || "").slice(0, 256), settingsBaseUrl: String(ev?.settings_base_url || "").slice(0, 2048) };
+                         settingsModel: String(ev?.settings_model || "").slice(0, 256), settingsBaseUrl: String(ev?.settings_base_url || "").slice(0, 2048),
+                         fallbackOwn: ev?.fallback_own === true, fallbackModel: String(ev?.fallback_model || "").slice(0, 256),
+                         fallbackBaseUrl: String(ev?.fallback_base_url || "").slice(0, 2048) };
     this.postAgentsModel();
+    // Its own sub-agents' fallback, reopened with no key (a session file never holds one): the one saved for that address.
+    const fallbackBase = this.agentsModel.fallbackBaseUrl;
+    if (!this.agentsModel.fallbackOwn || !this.agentsModel.fallbackModel || ev?.fallback_api_key_set === true) this.agentsFallbackKeyAsked.clear();
+    else if (fallbackBase) void this.resupplyAgentsFallbackKey(fallbackBase);
     const base = this.agentsModel.baseUrl;
     if (!this.agentsModel.own || ev?.api_key_set === true) { this.agentsKeyAsked.clear(); return; }
     if (base) void this.resupplyAgentsKey(base);
@@ -8976,6 +8989,92 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.backend?.send(this.stateCommand("agents-key", { type: "set_config", scope: "session", values: { subagent_api_key: api_key } }));
       }
     } catch { /* no key there: its host answers as any keyless host does */ }
+  }
+  private agentsFallbackKeyAsked = new Set<string>();
+  private async resupplyAgentsFallbackKey(baseUrl: string): Promise<void> {
+    if (!this.agentsFallbackOffered() || this.agentsFallbackKeyAsked.has(baseUrl) || !this.backend) return;
+    this.agentsFallbackKeyAsked.add(baseUrl);
+    // Only the key saved for this very address: never another address's.
+    const row = listProfiles(this.context).find((p: any) => p.kind !== "subscription" && endpointId(p.base_url) === endpointId(baseUrl));
+    if (!row) return;
+    try {
+      const { api_key } = await profileCredential(this.context, row.id);
+      if (api_key && this.agentsModel.fallbackOwn && this.agentsModel.fallbackBaseUrl === baseUrl) {
+        this.backend?.send(this.stateCommand("agents-fallback-key", { type: "set_config", scope: "session", values: { subagent_fallback_api_key: api_key } }));
+      }
+    } catch { /* no key there: its host answers as any keyless host does */ }
+  }
+  /** Use as fallback (or Stop) on the picker's Sub-agents tab: this session's sub-agents' own fallback. A saved
+   *  provider's own address, API and key go with it; a model on the session's own host needs none (a blank address is
+   *  that host); model "" is none. Claude Code and Codex run their own tools: never a sub-agents' fallback. */
+  private async setSessionAgentsFallback(provider: string, model: string): Promise<void> {
+    if (!this.agentsFallbackOffered()) return;
+    try {
+      const cli = "It runs its own tools, so it can’t run DGC’s sub-agents.";
+      if (provider === "claude" || provider === "codex" || provider.startsWith("subscription_")) throw new Error(cli);
+      let values: Record<string, string> = { subagent_fallback_model: model, subagent_fallback_base_url: "", subagent_fallback_api_mode: "", subagent_fallback_api_key: "" };
+      if (model && provider.startsWith("provider_")) {
+        const { route, api_key } = await profileCredential(this.context, provider);
+        if (route.kind === "subscription") throw new Error(cli);
+        values = { subagent_fallback_model: model, subagent_fallback_base_url: route.base_url, subagent_fallback_api_mode: route.api_mode, subagent_fallback_api_key: api_key };
+      } else if (model && provider) throw new Error("Provider not found. Add it in Settings first.");
+      this.noteAgentsModel(await this.requestState(this.ensureBackend(), "agents-fallback", { type: "set_config", scope: "session", values }, "agents_model" as any, 10000));
+    } catch (error) {
+      void vscode.window.showWarningMessage(error instanceof Error && error.message ? error.message : "DGC could not set this session’s sub-agents’ fallback.");
+      void this.readAgentsModel().then(() => this.postAgentsModel());      // the picker shows what DGC still has
+    }
+  }
+  /** The most tokens a model takes, for the Sub-agents page (model_window_at): asked of DGC once per address and model
+   *  for the panel's life; 0 when DGC can't say. The row's connection: a saved provider (its key, only for its own
+   *  address), this session's own host (a blank address: DGC's own), or Settings' choice (the address Settings has). */
+  private agentsWindows = new Map<string, number>();
+  private async agentsWindow(msg: any): Promise<void> {
+    const model = typeof msg?.model === "string" ? msg.model.trim().slice(0, 256) : "";
+    const settings = msg?.settings === true, provider = settings ? "" : String(msg?.provider || "").slice(0, 64);
+    const answer = (window: number) => this.post({ type: "agentsWindow", ...(settings ? { settings: true } : {}), provider, model, window });
+    if (!model) return;
+    if (!this.modelWindowOffered() || provider === "claude" || provider === "codex" || provider.startsWith("subscription_")) { answer(0); return; }
+    let baseUrl = "", apiMode = "", apiKey = "";
+    try {
+      if (settings) {
+        baseUrl = this.agentsModel.settingsBaseUrl;
+        const row = baseUrl ? listProfiles(this.context).find((p: any) => p.kind !== "subscription" && endpointId(p.base_url) === endpointId(baseUrl)) : undefined;
+        if (row) apiKey = await this.agentsProviderKey(row.id, baseUrl);
+      } else if (provider.startsWith("provider_")) {
+        const { route, api_key } = await profileCredential(this.context, provider);
+        if (route.kind === "subscription") { answer(0); return; }
+        baseUrl = route.base_url; apiMode = route.api_mode; apiKey = String(api_key || "");
+      } else if (provider && provider !== "native") { answer(0); return; }
+    } catch { answer(0); return; }
+    answer(await this.modelWindowAt(baseUrl, apiMode, apiKey, model));
+  }
+  /** model_window_at, remembered per address and model ("" is this window's own host) for the panel's life. */
+  private async modelWindowAt(baseUrl: string, apiMode: string, apiKey: string, model: string): Promise<number> {
+    if (!this.modelWindowOffered() || !model) return 0;
+    const key = `${endpointId(baseUrl || this.state.baseUrl)}|${model}`;
+    const known = this.agentsWindows.get(key);
+    if (known !== undefined) return known;
+    try {
+      const ev: any = await this.ensureBackend().request({ type: "model_window_at", request_id: this.nextRequestId("model-window"), role: "subagent", base_url: baseUrl, model,
+        ...(apiMode ? { api_mode: apiMode } : {}), ...(apiKey ? { api_key: apiKey } : {}) } as any, "model_window" as any, 20000);
+      const window = Number.isSafeInteger(ev?.window) && ev.window > 0 ? ev.window : 0;
+      if (!ev?.error) this.agentsWindows.set(key, window);
+      return window;
+    } catch { return 0; }
+  }
+  /** A Pip's Sub-agents page (Pips API 104): a model on DGC's own connection (the host DGC is on) or a saved
+   *  provider's (its address, API and key, only for its own address). */
+  private async pipModelWindow(choice: { mode: string; model: string; provider?: string }): Promise<number> {
+    const model = String(choice?.model || "").slice(0, 256);
+    if (!model) return 0;
+    if (choice.mode === "provider") {
+      try {
+        const { route, api_key } = await profileCredential(this.context, String(choice.provider || ""));
+        if (route.kind === "subscription") return 0;
+        return await this.modelWindowAt(route.base_url, route.api_mode, String(api_key || ""), model);
+      } catch { return 0; }
+    }
+    return choice.mode === "model" ? this.modelWindowAt("", "", "", model) : 0;
   }
   /** Asks DGC which agents model this session uses (when it opens or is resumed); the answer comes as agents_model. */
   private askAgentsModel(be = this.backend): void {
@@ -9148,6 +9247,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
       this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider(), () => this.pipHostMark());
+      this.pipsEditor.useModelWindow((choice) => this.pipModelWindow(choice));      // a Pip's Sub-agents page (Pips API 104)
       // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
       this.pipsEditor.useArtifacts(() => this.artifacts);
       // Continue in Work on what a Pip changed in its copy of a project (Pips API 91).
@@ -9404,6 +9504,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsTab.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsTab.usePluginLogos(plugin => this.replyPluginLogo(plugin));
       this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider(), () => this.pipHostMark());
+      this.pipsTab.useModelWindow((choice) => this.pipModelWindow(choice));
       // A Pip's reply in this tab: its links and "Settings → Models" go where the side bar's do.
       this.pipsTab.usePageActions((message) => { void this.onMessage(message); });
       this.pipsTab.useArtifacts(() => this.artifacts);

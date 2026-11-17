@@ -748,13 +748,14 @@ def control(store, command, request, actor, config) -> dict:
     if command == "retry_pip_fix":
         return retry(store, pip_id, request.get("fix_id"), request.get("again"), actor, config)
     if command in ("list_pip_agents", "stop_pip_agent", "set_pip_agents"):
-        # Its sub-agents (pip_agents, Pips API 97): the agent map in its chat, Stop, and how many run at once.
+        # Its sub-agents (pip_agents, Pips API 97): the agent map in its chat, Stop, and how many run at once; since
+        # API 104 also the model they run on, their thinking, their window and their fallback.
         from . import pip_agents
         if command == "list_pip_agents":
             return pip_agents.listing(store, pip_id)
         if command == "stop_pip_agent":
             return {"agent": pip_agents.stop(store, pip_id, request.get("agent_id"), actor)}
-        return {"slots": pip_agents.set_slots(store.registry, pip_id, request.get("slots"))}
+        return pip_agents.configure(store.registry, pip_id, request)
     if command == "commit_pip_project_change":
         from . import pip_project_copies
         return pip_project_copies.commit(store, pip_id, request.get("change_id"), actor)

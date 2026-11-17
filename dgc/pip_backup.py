@@ -156,10 +156,11 @@ def chosen(registry, pip_id) -> dict:
     return _read(registry, KEY + str(pip_id)) or dict(NONE)
 
 
-def for_run(registry, config, row, manifest) -> dict | None:
+def for_run(registry, config, row, manifest, choice=None) -> dict | None:
     """What the worker may switch to: {model, provider, base_url, api_mode, api_key}, or None (no fallback, the same
-    model the run already has, a Router run, a removed provider, or a connection DGC can't use)."""
-    choice = chosen(registry, row["pip_id"])
+    model the run already has, a Router run, a removed provider, or a connection DGC can't use). `choice`: a fallback
+    in place of the Pip's own (a sub-agent job's, pip_agents), resolved the same way."""
+    choice = chosen(registry, row["pip_id"]) if choice is None else choice
     model = choice["model"]
     settings = manifest.get("model_settings") if isinstance(manifest.get("model_settings"), dict) else {}
     if not is_set(choice) or "router" in settings:

@@ -60,7 +60,7 @@ export async function pickerPage(browser, { width = 440, height = 720, theme = "
     window.picked = [];
     window.openPicker = (view) => {
       const on = {};
-      for (const name of ["pick", "thinking", "select", "search", "action", "tab", "setting", "close"]) on[name] = (...args) => window.picked.push([name, ...args.map((a) => (a && typeof a === "object" ? (a.value ?? a.id ?? JSON.parse(JSON.stringify(a, (k, v) => (k === "trigger" ? undefined : v)))) : a))]);
+      for (const name of ["pick", "thinking", "select", "search", "action", "tab", "setting", "close", "pageThinking", "pageWindow", "back", "done"]) on[name] = (...args) => window.picked.push([name, ...args.map((a) => (a && typeof a === "object" ? (a.value ?? a.id ?? JSON.parse(JSON.stringify(a, (k, v) => (k === "trigger" ? undefined : v)))) : a))]);
       window.view = { trigger: document.getElementById("btn"), ...view };
       window.picker = window.DgcModelPicker.open(document.body, window.view, on);
       return true;

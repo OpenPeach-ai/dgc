@@ -267,7 +267,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
 # wake-up waits one wake delay after it -- and never starts while the command is being handled.
 _WAKE_NEUTRAL_COMMANDS = frozenset({
     "get_chat_changes", "get_chat_change", "get_workspace_changes", "get_workspace_change",
-    "list_models", "list_models_at", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
+    "list_models", "list_models_at", "model_window_at", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
     "get_recall", "list_sessions", "list_checkpoints", "rewind_preview", "list_retained_tasks", "list_artifacts",
     "artifact_list", "artifact_get", "mods_list", "list_session_attachments", "get_session_attachment",
@@ -573,7 +573,14 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # and computer_plan are any Pip's (create_pip's `computer`, propose_pip_update, a setup card, its own chat's
 # draft_pip_change); Remove computer (computer_plan null) takes a folder Pip's box away and Give a computer gives it back;
 # an @ project's copy needs a box, not a computer plan.
-PIPS_API_VERSION = 103
+# API 104 (0.52, a Pip's own sub-agents model): set_pip_agents {pip_id, slots?, model_choice?, thinking?, context_size?,
+# fallback?} (at least one; a field not given keeps its value) also sets what the Pip's sub-agents run on: model_choice
+# ({mode: "default"} "This Pip's model", a model on DGC's own connection, or a saved provider's; a subscription CLI and
+# DGC Router are refused), thinking ("" the Pip's, off..xhigh), context_size (0 the Pip's, or 2,048 to 16,777,216) and
+# fallback ({provider, model}, model "" none); it answers {slots, model_choice, thinking, context_size, fallback}, and
+# list_pip_agents carries the same four beside agents and slots. A sub-agent job's run runs on them and carries on with
+# that fallback in place of the Pip's; every run of the Pip gives DGC's own helpers inside it the same settings.
+PIPS_API_VERSION = 104
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}
@@ -3106,6 +3113,9 @@ class Backend:
                           # list_models_at is understood: the models at a host as Settings has it typed, with a
                           # saved key only for the host it is bound to (models_at answers).
                           "list_models_at": 1,
+                          # model_window_at is understood (0.52): the most tokens a model at a host takes, by the
+                          # same address and key rules (model_window answers; 0 when nothing says).
+                          "model_window_at": 1,
                           # save_model_provider is understood: a provider saved in Settings, kept in secrets.json for
                           # the Pips set to it, answered by model_provider_saved.
                           "saved_model_providers": 1,
@@ -6363,6 +6373,79 @@ class Backend:
                          "subagent_fallback": ("subagent_fallback_api_key", "subagent_fallback_base_url",
                                                "subagent_fallback_api_mode")}
 
+    def _host_at(self, cmd: dict, role: str, *, blank_is_main: bool = False):
+        """The address, key and API a Settings box or the model picker names (list_models_at, model_window_at), or
+        a few words on what is wrong with it: ((url, key, mode), "") or (None, error). A key typed beside the address
+        goes to it; otherwise only a saved key bound to it (a sub-agent's or fallback's with no host of its own goes to
+        the main host only). `blank_is_main`: an empty address is the main host for the main role too (the picker's
+        own session model), where Settings' main box must name one."""
+        typed_url = str(cmd.get("base_url") or "").strip()
+        typed_key = str(cmd.get("api_key") or "").strip()
+        if len(typed_url) > 4096 or len(typed_key) > 16_384:
+            return None, "the host URL or key is too long"
+        secret, endpoint, mode_key = self._MODELS_AT_ROUTES[role]
+        config = self.config
+        main_url = str(config.get("base_url", "") or "").strip()
+        url = typed_url or ("" if role == "main" and not blank_is_main else main_url)
+        try:
+            parts = urllib.parse.urlsplit(url)
+            valid = parts.scheme in ("http", "https") and bool(parts.hostname)
+            _ = parts.port
+        except ValueError:
+            valid = False
+        if not valid:
+            return None, "enter a host URL that starts with http:// or https://"
+        if parts.username or parts.password:
+            return None, "take the user name and password out of the host URL"
+        from .config import bound_provider_key
+        # A key typed beside the host goes to that host, as the user asked. Otherwise only a saved key bound to it.
+        asked = typed_url or (main_url if role == "main" and blank_is_main else "")
+        key = typed_key or bound_provider_key(config, secret, asked)
+        if not key and role != "main":
+            key = bound_provider_key(config, "api_key", url)
+        mode = str(cmd.get("api_mode") or "").strip().lower()
+        if not mode:
+            same_host = url.rstrip("/").lower() == main_url.rstrip("/").lower()
+            mode = str(config.get("api_mode", "auto") or "auto") if role == "main" or same_host else "auto"
+        return (url, key, mode), ""
+
+    def _model_window_at(self, cmd: dict) -> None:
+        """The model picker's Sub-agents page: the most tokens a model at a connection takes (model_window), so it
+        offers only the sizes that model takes; 0 when nothing says. Asked off the command thread (a host can take
+        seconds); the reply never holds the URL, a key or what the host said."""
+        request_id = str(cmd.get("request_id") or "")
+        role = str(cmd.get("role") or "")
+        model = str(cmd.get("model") or "").strip()
+        if not 1 <= len(request_id) <= 128:
+            self.em.emit("command_rejected", command="model_window_at", reason="invalid_request_id",
+                         message="request_id must contain 1-128 characters")
+            return
+
+        def answer(window=0, error=""):
+            self.em.emit("model_window", request_id=request_id, role=role, model=model[:512], window=int(window or 0),
+                         **({"error": error} if error else {}))
+
+        if not model or len(model) > 512:
+            answer(error="name a model")
+            return
+        found, error = self._host_at(cmd, role, blank_is_main=True)
+        if error:
+            answer(error=error)
+            return
+        url, key, mode = found
+
+        def ask() -> None:
+            from .llm import LLMClient
+            try:
+                client = LLMClient(url, key, model, read_timeout=10, api_mode=mode)
+                client.prepare_model(server_window=True)
+                window = int(client.window_limit() or 0)
+            except Exception as exc:            # noqa: BLE001 -- a few words, never the host's own
+                answer(error=_models_at_reason(exc, bool(key)))
+                return
+            answer(window=max(0, window))
+        threading.Thread(target=ask, daemon=True, name="dgc-model-window").start()
+
     def _list_models_at(self, cmd: dict) -> None:
         """One Model box's list: the models at its card's host, before anything is saved. One request per role runs
         at a time; a newer one for the same role replaces one still waiting (answered as replaced), so typing a host
@@ -6378,36 +6461,11 @@ class Backend:
             self.em.emit("models_at", request_id=request_id, role=role, ids=list(ids),
                          **({"api_mode": api_mode} if api_mode else {}), **({"error": error} if error else {}))
 
-        typed_url = str(cmd.get("base_url") or "").strip()
-        typed_key = str(cmd.get("api_key") or "").strip()
-        if len(typed_url) > 4096 or len(typed_key) > 16_384:
-            answer(error="the host URL or key is too long")
+        found, error = self._host_at(cmd, role)
+        if error:
+            answer(error=error)
             return
-        secret, endpoint, mode_key = self._MODELS_AT_ROUTES[role]
-        config = self.config
-        main_url = str(config.get("base_url", "") or "").strip()
-        url = typed_url or ("" if role == "main" else main_url)
-        try:
-            parts = urllib.parse.urlsplit(url)
-            valid = parts.scheme in ("http", "https") and bool(parts.hostname)
-            _ = parts.port
-        except ValueError:
-            valid = False
-        if not valid:
-            answer(error="enter a host URL that starts with http:// or https://")
-            return
-        if parts.username or parts.password:
-            answer(error="take the user name and password out of the host URL")
-            return
-        from .config import bound_provider_key
-        # A key typed beside the host goes to that host, as the user asked. Otherwise only a saved key bound to it.
-        key = typed_key or bound_provider_key(config, secret, typed_url)
-        if not key and role != "main":
-            key = bound_provider_key(config, "api_key", url)
-        mode = str(cmd.get("api_mode") or "").strip().lower()
-        if not mode:
-            same_host = url.rstrip("/").lower() == main_url.rstrip("/").lower()
-            mode = str(config.get("api_mode", "auto") or "auto") if role == "main" or same_host else "auto"
+        url, key, mode = found
         job = (request_id, role, url, key, mode, answer)
         lock = self.__dict__.setdefault("_models_at_lock", threading.Lock())
         with lock:
@@ -9249,6 +9307,8 @@ class Backend:
             threading.Thread(target=discover_models, daemon=True).start()
         elif t == "list_models_at":
             self._list_models_at(cmd)
+        elif t == "model_window_at":
+            self._model_window_at(cmd)
         elif t == "set_think":
             level = str(cmd.get("level", "off"))
             session_route = cmd.get("scope") == "session"

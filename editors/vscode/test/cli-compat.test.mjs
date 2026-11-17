@@ -86,7 +86,9 @@ const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" },
                        // The Library's Files, Work's part (0.52): listed and opened only when ready.capabilities.session_attachments says so.
                        { method: "sessionAttachments", guard: "sessionAttachmentsCapable" },
                        { method: "sessionAttachment", guard: "sessionAttachmentsCapable" },
-                       { method: "undoSettingChange", guard: "settingsUndoCapable" }].map(g => g.method);
+                       { method: "undoSettingChange", guard: "settingsUndoCapable" },
+                       // A model's largest window for the Sub-agents page (0.52): asked only when ready.capabilities.model_window_at says so.
+                       { method: "modelWindowAt", guard: "modelWindowOffered" }].map(g => g.method);
 const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps: "mcpAppsSupported",
                               watchRouter: "routerCapable", watchImages: "imagesCapable",
                               imagesLibrary: "imagesLibraryCapable", routerThinking: "routerThinkingCapable",
@@ -95,7 +97,8 @@ const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps:
                               sessionArchive: "sessionArchiveCapable", undoSettingChange: "settingsUndoCapable",
                               askAgentsModel: "agentsModelOffered", readAgentsModel: "agentsModelOffered",
                               resetSessionAgentsModel: "agentsModelOffered",
-                              sessionAttachments: "sessionAttachmentsCapable", sessionAttachment: "sessionAttachmentsCapable" };
+                              sessionAttachments: "sessionAttachmentsCapable", sessionAttachment: "sessionAttachmentsCapable",
+                              modelWindowAt: "modelWindowOffered" };
 
 /** Is this node inside a method with the given name? */
 function insideMethod(node, name) {

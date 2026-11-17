@@ -235,7 +235,9 @@ _COMMAND_ARGS = {
     "apply_pip_project_change": {"pip_id", "change_id", "expected_digest"},
     "discard_pip_project_change": {"pip_id", "change_id"}, "undo_pip_project_change": {"pip_id", "change_id"},
     "list_pip_fixes": {"pip_id"}, "decide_pip_fix": {"pip_id", "fix_id", "expected_digest", "allow"},
-    "list_pip_agents": {"pip_id"}, "stop_pip_agent": {"pip_id", "agent_id"}, "set_pip_agents": {"pip_id", "slots"},
+    # API 104: set_pip_agents also takes its sub-agents' own model, thinking, window and fallback (pip_agents).
+    "list_pip_agents": {"pip_id"}, "stop_pip_agent": {"pip_id", "agent_id"},
+    "set_pip_agents": {"pip_id", "slots", "model_choice", "thinking", "context_size", "fallback"},
     "retry_pip_fix": {"pip_id", "fix_id", "again"},
     "start_pip_work_helper": {"pip_id", "fix_id"}, "answer_pip_waiting": {"pip_id", "waiting_id", "answer"},
     "commit_pip_project_change": {"pip_id", "change_id"},
@@ -1546,8 +1548,15 @@ class PipStore:
         frozen_config = config.clone_for_root(Path(binding["canonical_root"]))
         model = None
         if not standalone:
-            model = (_model_settings(frozen_config, pip["model_choice"], _prepared=_model_preparation, personal=personal)
-                     if _model_preparation is not None else _model_settings(frozen_config, pip["model_choice"], personal=personal))
+            # A sub-agent's turn (pip_agents) runs on its Pip's sub-agents' own model when they have one (Pips API 104),
+            # else on the Pip's. A provider removed since it was chosen refuses the turn in plain words (provider_view).
+            choice, agents = pip["model_choice"], None
+            if conversation_request is not None and conversation_request.get("agent"):
+                from . import pip_agents
+                agents = pip_agents.agents_model(self.registry, pip_id)
+                choice = pip_agents.own_choice(agents) or choice
+            model = (_model_settings(frozen_config, choice, _prepared=_model_preparation, personal=personal)
+                     if _model_preparation is not None else _model_settings(frozen_config, choice, personal=personal))
             # The Pip's own context window and thinking, from its prompt box: a reply sent with them keeps them as
             # the Pip's, and everything it does on its own uses them too.
             from .pip_chat_options import apply as apply_chat_options, save as save_chat_options, saved as saved_chat_options
@@ -1556,6 +1565,8 @@ class PipStore:
                       else saved_chat_options(self.db, pip_id))
             if chosen is not None:
                 model = apply_chat_options(model, chosen, frozen_config)
+            if agents is not None:
+                model = pip_agents.job_settings(model, agents, frozen_config)     # its sub-agents' thinking and window
             if conversation_request is not None and 'chat_options' in conversation_request:
                 save_chat_options(self.registry, pip_id, chosen)
             from .pip_models import validate_pinned_connection
@@ -4702,10 +4713,40 @@ def _worker_payload(value):
     return raw
 
 
+_AGENTS_SETTINGS = (("subagent_model", str), ("subagent_base_url", str), ("subagent_api_mode", str),
+                    ("subagent_api_key", str), ("subagent_thinking", str), ("subagent_context_size", int),
+                    ("subagent_fallback_model", str), ("subagent_fallback_base_url", str),
+                    ("subagent_fallback_api_mode", str), ("subagent_fallback_api_key", str))
+
+
+def _run_fallbacks(registry, config, row, manifest):
+    """What a run's worker gets beside its manifest, read from today's settings when it starts (never pinned in the
+    manifest): (backup, agents, pips_own). `backup` is the model it carries on with (pip_backup): a sub-agent job's own
+    fallback in place of its Pip's when its Pip's sub-agents have one (pip_agents). `agents` is what DGC's own helpers
+    inside it follow (pip_agents.for_worker), or None. `pips_own` is False for a sub-agent job on its sub-agents' own
+    model or fallback: what happens there says nothing about the Pip's own model (no outage line in its chat)."""
+    from . import pip_agents, pip_backup
+    from .pip_models import saved_route_view
+    view = saved_route_view(config)
+    job = isinstance(manifest.get("agent"), dict)
+    own = pip_agents.agents_model(registry, row["pip_id"]) if job else None
+    if own is not None and pip_backup.is_set(own["fallback"]):
+        backup = pip_backup.for_run(registry, view, row, manifest, choice=own["fallback"])
+    else:
+        backup = pip_backup.for_run(registry, view, row, manifest)
+    try:
+        agents = pip_agents.for_worker(registry, view, row["pip_id"])
+    except Exception:                            # noqa: BLE001 - its helpers as before; the backup stands
+        agents = None
+    pips_own = own is None or (pip_agents.own_choice(own) is None and not pip_backup.is_set(own["fallback"]))
+    return backup, agents, pips_own
+
+
 def _worker_config_overrides(payload: dict, backup: dict) -> dict:
-    """What a Pip run's worker sets over its config, whatever the snapshot's: its key, its backup as its fallback, and
-    nothing of the user's own Work setup."""
-    return {
+    """What a Pip run's worker sets over its config, whatever the snapshot's: its key, its backup as its fallback, its
+    Pip's sub-agents' settings for DGC's own helpers (payload["agents"], pip_agents.for_worker), and nothing of the
+    user's own Work setup."""
+    overrides = {
         "api_key": payload.get("api_key", ""), "mode": "default", "subscription_engine": "",
         # A Pip's backup model (pip_backup), when it has one: the model it carries on with if its own doesn't answer.
         "fallback_model": "" if ("brain" in backup or "router" in backup) else str(backup.get("model") or ""),
@@ -4717,10 +4758,18 @@ def _worker_config_overrides(payload: dict, backup: dict) -> dict:
         # A Pip run holds at most one DGC Router worker, leased by the controller when it left the queue: inside the
         # run nothing routes again (its helpers inherit the run's own model), and it never holds a second one.
         "router": {"enabled": False, "when_busy": "wait", "systems": []},
-        # A Pip's helpers carry on with the Pip's own backup (the fallback above), never a sub-agents fallback (0.52).
+        # A Pip's helpers carry on with the Pip's own backup (the fallback above), never Settings' sub-agents fallback
+        # (0.52); with a fallback of the Pip's own sub-agents, that one (below).
         "subagent_fallback_model": "", "subagent_fallback_base_url": "", "subagent_fallback_api_key": "",
         "subagent_fallback_api_mode": "",
     }
+    # The Pip's own sub-agents' model, thinking, window and fallback (Pips API 104), only those set; in this order, so
+    # each address is set before its key (a new address drops the old address's key).
+    agents = payload.get("agents") if isinstance(payload.get("agents"), dict) else {}
+    for key, kind in _AGENTS_SETTINGS:
+        if key in agents and type(agents[key]) is kind:
+            overrides[key] = agents[key]
+    return overrides
 
 
 def _worker_main():
@@ -5358,13 +5407,15 @@ def _execute_run(registry, row, config):
     manifest = pip_run_inputs.attach(registry.db, row["id"], manifest)
     payload = {"snapshot": str(snapshot), "manifest": manifest, "api_key": api_key}
     # Pips package 6 (pip_backup): the model this run carries on with if its own doesn't answer, on DGC's own
-    # connection, read from today's settings (never pinned in the manifest).
+    # connection, read from today's settings (never pinned in the manifest); a sub-agent job's own fallback in its
+    # place when the Pip's sub-agents have one. And (Pips API 104) what DGC's own helpers inside it follow.
     from . import pip_backup
-    from .pip_models import saved_route_view
     try:
-        backup = pip_backup.for_run(registry, saved_route_view(config), row, manifest)
-    except Exception:                            # noqa: BLE001 - no backup: the run is as before
-        backup = None
+        backup, agents_settings, pips_own = _run_fallbacks(registry, config, row, manifest)
+    except Exception:                            # noqa: BLE001 - no backup, helpers as before: the run is as before
+        backup, agents_settings, pips_own = None, None, True
+    if agents_settings:
+        payload["agents"] = agents_settings
     if backup is not None and isinstance(backup.get("brain"), dict):
         # Claude Code or Codex as its fallback (9 Nov): pinned as a run on it is, so the worker can start it if needed.
         try:
@@ -5466,7 +5517,7 @@ def _execute_run(registry, row, config):
                 _backup_route_lease(config, row, manifest, backup, run_dir)
             elif kind == "backup":
                 backup_model = str(event.get("model") or "")[:256]     # believed only if it is the fallback it was given
-                if backup is not None:
+                if backup is not None and pips_own:                    # (a sub-agent's own model or fallback: not the Pip's)
                     try:
                         pip_backup.used(registry, row, backup, backup_model)   # from now its chat says the fallback answers
                     except Exception:            # noqa: BLE001 - the run goes on either way
@@ -5492,7 +5543,7 @@ def _execute_run(registry, row, config):
                 raise failed
             raise RegistryError("worker_failed", "The audit worker stopped without a verified structured result.")
         try:
-            if not (backup is not None and backup_model):
+            if pips_own and not (backup is not None and backup_model):
                 pip_backup.answered_itself(registry, row)                  # its own model answered: an outage is over
         except Exception:                        # noqa: BLE001 - the reply stands either way
             pass

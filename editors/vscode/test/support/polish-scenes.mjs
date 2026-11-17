@@ -9,7 +9,7 @@ import { openCards } from "./home-cards-scene.mjs";
 import { sample } from "./notes-sample.mjs";
 import { openRunningTurn, openChatDgc } from "./dgc-look-scene.mjs";
 import { openMapScene } from "./agent-map-scene.mjs";
-import { manyRoutes, PIP_CATALOG, PIP_MODELS } from "./model-menu-scene.mjs";
+import { manyRoutes, PIP_CATALOG, PIP_MODELS, PIP_KEYED } from "./model-menu-scene.mjs";
 import { openLibrary, ITEMS } from "./chat-scene.mjs";
 import { openOnePips, GST, LIME_DIR } from "./one-pips-scene.mjs";
 import { openChat as openPipChat } from "./pip-chat-scene.mjs";
@@ -171,7 +171,8 @@ export const SCENES = {
       fixed: ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], cli_default_model: "", cli_default_listed: true };
     const ROUTES = [{ key: `provider_${"a".repeat(32)}`, label: "Ollama", kind: "native", base_url: "http://127.0.0.1:11434/v1", model: "qwen3.8:27b" }, { key: SPARE, label: "Spare GPU box", kind: "native", base_url: "https://spare.example/v1", model: "gpt-oss:120b" },
       { key: OPEN, label: "Ollama Cloud", kind: "native", base_url: "https://ollama.com", model: "", allModels: true }, CLAUDE, { key: "subscription_codex", label: "Codex", kind: "subscription", engine: "codex", hints: ["gpt-5.6-sol"], versions: {}, fixed: [] }];
-    const AGENTS = { offered: true, own: false, model: "qwen3-coder", base_url: "", settings_model: "qwen3-coder", settings_base_url: "", router: false, thinking: "", thinking_settable: true, context_size: 0, context_settable: true };
+    const AGENTS = { offered: true, own: false, model: "qwen3-coder", base_url: "", settings_model: "qwen3-coder", settings_base_url: "", router: false, thinking: "", thinking_settable: true, context_size: 0, context_settable: true,
+      window_offered: true, fallback_offered: true, fallback_own: false, fallback_model: "", fallback_base_url: "" };
     const models = { type: "models", ids: ["qwen3.8:27b", "qwen3-coder", "deepseek-v4.1-flash:cloud", "glm-5.3:cloud", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"], current: "qwen3.8:27b", base: "http://127.0.0.1:11434/v1", routes: ROUTES, currentRouteKey: ROUTES[0].key, supportsEffort: true,
       fallback: { offered: true, model: "glm-5.3:cloud", base_url: "", engine: "", route_base: "http://127.0.0.1:11434/v1" }, agents: AGENTS };
     const scene = await openMapScene(b, { width, height: 760, theme: modern(theme), open: false, capabilities: { agents_model: 1, model_fallback: 1 } });
@@ -188,6 +189,11 @@ export const SCENES = {
       await page.click('.dgc-mp-tab[data-tab="agents"]'); await page.waitForSelector('.dgc-mp-conn[data-rail="agents:settings"]'); await page.waitForTimeout(200); await visit("sub-agents", page, { focus: false });
       await page.click(`.dgc-mp-conn[data-rail="${SPARE}"]`); await post({ type: "providerModels", id: SPARE, ids: ["gpt-oss:120b", "own-coder", "qwen3-coder:30b", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"] });
       await page.waitForSelector(".dgc-mp .dgc-mp-row"); await page.waitForTimeout(200); await visit("sub-agents-models", page, { focus: false });
+      // The Sub-agents page (17 Nov): a model chosen, its sizes as it takes them; then Custom… with a wrong size said.
+      await page.click('.dgc-mp-row[data-value="own-coder"]'); await post({ type: "agentsWindow", provider: SPARE, model: "own-coder", window: 262144 });
+      await page.waitForSelector(".dgc-mp-page:not([hidden])"); await page.waitForTimeout(200); await visit("sub-agents-page", page, { focus: false });
+      if (await page.locator(".dgc-mp-custom").count()) { await page.click(".dgc-mp-custom"); await page.keyboard.type("1K"); await page.keyboard.press("Enter"); await page.waitForTimeout(150); await visit("sub-agents-page-custom", page, { focus: false }); }
+      for (let i = 0; i < 3 && await page.locator(".dgc-mp-layer").count(); i++) { await page.keyboard.press("Escape"); await page.waitForTimeout(120); }
       await page.keyboard.press("Escape"); await page.waitForTimeout(150); await page.keyboard.press("Escape");
       await page.click("#agents-pill"); await page.waitForTimeout(350); await visit("agent-map", page);
       const row = page.locator(".agent-row, [data-agent-id]").first(); if (await row.count()) { await row.click().catch(() => {}); await page.waitForTimeout(300); await visit("agent-map-opened", page, { focus: false }); }
@@ -249,6 +255,13 @@ export const SCENES = {
       try { await x.openPip(GST); await x.page.waitForTimeout(300); await x.click("#chat-model"); await x.waitIn(".dgc-mp .dgc-mp-row"); await x.page.waitForTimeout(250); await visit("model-menu", x.page, { focus: false, hover: false });
         await x.click('.dgc-mp-conn[data-rail="subscription:claude"]'); await x.page.waitForTimeout(200); await visit("model-menu-claude", x.page, { focus: false, hover: false });
         await x.click('.dgc-mp-tab[data-tab="agents"]'); await x.waitIn('.dgc-mp-conn[data-rail="pip"]'); await x.page.waitForTimeout(200); await visit("model-menu-sub-agents", x.page, { focus: false, hover: false });
+      } finally { await x.close(); } }
+    // Its own sub-agents model (Pips API 104, 17 Nov): the Sub-agents tab as Work's, and the page of a model chosen there.
+    { const x = await openOnePips(b, { ...opts, api: 104, scene: { sub: true, waiting: false, fix: "none", models: PIP_MODELS, catalog: PIP_CATALOG, windows: { "claude-opus-5-5": 262144 } } });
+      try { await x.openPip(GST); await x.page.waitForTimeout(300); await x.click("#chat-model"); await x.waitIn(".dgc-mp .dgc-mp-row"); await x.page.waitForTimeout(200);
+        await x.click('.dgc-mp-tab[data-tab="agents"]'); await x.waitIn(`.dgc-mp-conn[data-rail="provider:${PIP_KEYED}"]`); await x.page.waitForTimeout(200); await visit("model-menu-sub-agents-own", x.page, { focus: false, hover: false });
+        await x.click(`.dgc-mp-conn[data-rail="provider:${PIP_KEYED}"]`); await x.click(`.dgc-mp-row[data-value="provider:${PIP_KEYED}:claude-opus-5-5"]`);
+        await x.waitIn(".dgc-mp-page:not([hidden])"); await x.page.waitForTimeout(250); await visit("model-menu-sub-agents-page", x.page, { focus: false, hover: false });
       } finally { await x.close(); } }
     // Its page (every section with something in it), from the older scene that fills each; and the pages under it.
     for (const sub of ["", "schedule", "runs", "revisions"]) {

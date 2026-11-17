@@ -229,7 +229,7 @@ export type PipMutationParams = {
   answer_pip_waiting: { pip_id: string; waiting_id: string; answer: "done" | "later" | "not_a_problem" | "undo" };
   list_pip_agents: { pip_id: string };
   stop_pip_agent: { pip_id: string; agent_id: string };
-  set_pip_agents: { pip_id: string; slots: number };
+  set_pip_agents: { pip_id: string; slots?: number; model_choice?: { mode: "default" } | { mode: "model"; model: string } | { mode: "provider"; provider: string; model: string }; thinking?: "" | "off" | "low" | "medium" | "high" | "xhigh"; context_size?: number; fallback?: { provider?: string; model?: string } };
   retry_pip_fix: { pip_id: string; fix_id: string; again: boolean };
   fill_pip_code: { pip_id: string; action_id: string; expected_digest: string; code: string };
   commit_pip_project_change: { pip_id: string; change_id: string };
@@ -449,7 +449,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   answer_pip_waiting: ["pip_id", "waiting_id", "answer"],
   list_pip_agents: ["pip_id"],
   stop_pip_agent: ["pip_id", "agent_id"],
-  set_pip_agents: ["pip_id", "slots"],
+  set_pip_agents: ["pip_id", "slots", "model_choice", "thinking", "context_size", "fallback"],
   retry_pip_fix: ["pip_id", "fix_id", "again"],
   fill_pip_code: ["pip_id", "action_id", "expected_digest", "code"],
   commit_pip_project_change: ["pip_id", "change_id"],
@@ -1041,6 +1041,9 @@ for (const command of API98_MUTATIONS) MUTATIONS.add(command);
 // computer only), checked against its digest. A reply carries `files` [{index, name, bytes, mime}].
 const API101_READS = new Set(["get_pip_message_file"]);
 for (const command of API101_READS) READS.add(command);
+// API 104: a Pip's own sub-agents model. set_pip_agents also takes model_choice, thinking, context_size and fallback
+// (what its sub-agents run on, and DGC's own helpers in its runs), each optional; it answers all five with slots.
+const API104_FIELDS: Record<string, readonly string[]> = { set_pip_agents: ["model_choice", "thinking", "context_size", "fallback"] };
 /** What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list) and
  *  use_pip_computer_view's op close (its tab closed). start_pip_app_link's another is older (0.51). */
 function api88Field(command: string, values: Record<string, unknown>): boolean {
@@ -1395,6 +1398,10 @@ export class Pips {
       if (!(typeof values.reply_to === "string" && /^message_[0-9a-f]{32}$/.test(values.reply_to))) {
         throw new DGCConfigError("reply_to names one of the Pip's own messages (message_ and 32 hex digits)");
       }
+    }
+    if ((API104_FIELDS[command] ?? []).some((field) => Object.hasOwn(values, field))
+        && (this.caps.pips_api_version as number) < 104) {
+      throw new DGCUnsupportedError("A Pip's own sub-agents model (model_choice, thinking, context_size, fallback) requires a runtime advertising Pips API 104 or newer");
     }
     // API 100: @ outputs in a Pip's chat, as Work's Output menu: the reply is asked for one document, deck, sheet, page
     // or dashboard ("auto": nothing asked); a reply that didn't make one carries `output_missing`, the line to show.

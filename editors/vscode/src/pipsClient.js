@@ -97,7 +97,7 @@ import {ONE_API,ALL as ONE_ALL,PERSONAL as ONE_PERSONAL,savedFilter,listRequest,
 import {payLimits,payDraft,payRequest,payNotice,payingNotice,payLimitsMarkup,payTotalMarkup,readUsd,dollars} from './pipPay.js';
 import {sentPage,sentMarkup} from './pipSent.js';
 import {CHAT_API,agentsPage,foundListMarkup,saidMarkup,askCardMarkup,answeredMarkup,handedMarkup,agentRowMarkup,retryAskMarkup,pillMarkup,agentMapMarkup,agentCardMarkup,mapMeta,cardMeta} from './pipChat.js';
-import {AGENT_LIVE} from './pipFlow.js';
+import {AGENT_LIVE,agentsOwnOf} from './pipFlow.js';
 import {FLOW_API,took,fixesPage,fixAnswer,FIX_LIVE,findingsCardMarkup,fixAskMarkup,fixDecidedLine,fixingMarkup,fixEndedLine,waitingLineMarkup,waitingCardMarkup,reportRow,reportsTableMarkup} from './pipFlow.js';
 import {infoTip,wireInfoTips} from './pipInfoTip.js';
 import {watchButtons} from './buttonFit.js';
@@ -794,10 +794,11 @@ function pipPickerView(){
  // The two tabs, as in Work's picker: once DGC has said how many sub-agents this Pip runs. An older DGC has no
  // sub-agents for a Pip, so no tabs.
  const tabbed=ultraOffered(),agentsTab=tabbed&&S.modelTab==='agents',shownModel=chipModel(S.pip.model_choice,current).text;
- const tabs=tabbed?{tabs:[{id:'main',label:'Main model',title:'This Pip’s model'},{id:'agents',label:'Sub-agents',title:`Sub-agents: ${pipAgentsWords()}`}],tab:agentsTab?'agents':'main'}:{};
+ const tabs=tabbed?{tabs:[{id:'main',label:'Main model',title:'This Pip’s model'},{id:'agents',label:'Sub-agents',title:`Sub-agents: ${ownOffered()?`${ownWords()} · `:''}${pipAgentsWords()}`}],tab:agentsTab?'agents':'main'}:{};
  // The Sub-agents tab. What is true today: a Pip's sub-agents run on the Pip's own model, at its thinking, one at a
  // time or up to `slots` at once (Ultra is 4). DGC cannot yet give a Pip's sub-agents a model, a thinking level, a
  // context window or a fallback of their own (set_pip_agents takes only `slots`), so the tab offers none.
+ if(agentsTab&&ownOffered())return ownPickerView(base,tabs,shownModel,locked);
  if(agentsTab)return{...base,...tabs,title:'This Pip’s sub-agents',thinking,footer:[],connections:[{id:'pip',name:'This Pip’s model',tip:'This Pip’s model',mark:'dgc',badge:'',current:true,loaded:true,
    note:`${pipAgentsWords()}${agentsUi.slots>=ULTRA_SLOTS?'':' Ultra, under Thinking, lets up to 4 work at once.'} They think as hard as this Pip does.`,
    sections:[{title:'',rows:[{value:'pip',name:'This Pip’s model',desc:`Now: ${shownModel||'not chosen yet'}`,current:true,disabled:true}]}]}]};
@@ -857,24 +858,69 @@ function pipPickerView(){
   note:!keepsAll()?'You’ll confirm a new model before it’s used. Work already started keeps the old one.':'',
   empty:{title:S.modelsLoading?'Loading models…':'No models',text:S.modelsLoading?'':'Nothing to choose from yet.'}};
 }
+// The Sub-agents tab from Pips API 104 (see "a Pip's own sub-agents model"): the connections the Main tab lists, each
+// model a choice for their own, its ⋯ their fallback; never a subscription app or DGC Router.
+function ownPickerView(base,tabs,shownModel,locked){
+ const MP=globalThis.DgcModelPicker,own=agentsUi.own,chosen=ownValue(own.model_choice),fallback=ownFallbackValue(own.fallback);
+ const row=(value,name,desc='',more={})=>{const on=value===chosen,isFallback=!on&&value===fallback;
+  return{value,name,...(desc?{desc}:{}),caps:more.caps||MP.facts(more.id||name),current:on,agentsFallback:isFallback,
+   pills:fallback?(on?[['Main','main']]:isFallback?[['Fallback','fallback']]:[]):[],
+   actions:[{id:'agentsFallback',label:isFallback?'Stop using as fallback':'Use as fallback',disabled:on||locked}]};};
+ const listed=(conn,rows)=>conn.mark==='ollama'&&conn.badge!=='cloud'?MP.ollamaSections(rows):[{title:'',rows}];
+ const from=p=>typeof p?.mark==='string'?{mark:p.mark,badge:String(p.badge||'')}:MP.markOf({name:p?.name||''});
+ const named=savedProviders(),ownDefault=named.find(p=>p.default),hostKept=S.models.length||currentChatProvider('default')==='connection';
+ const connections=[{id:'pip',name:'This Pip’s model',tip:'This Pip’s model',mark:'dgc',badge:'',loaded:true,
+  sections:[{title:'',rows:[{value:'pip',name:'This Pip’s model',desc:`Now: ${shownModel||'not chosen yet'}`,current:chosen==='pip'}]}]}];
+ if(hostKept){
+  const conn={id:'connection',name:ownDefault?ownDefault.name:(S.hostMark?.name||'Current host'),...(ownDefault?from(ownDefault):S.hostMark?{mark:S.hostMark.mark,badge:S.hostMark.badge}:{mark:'',badge:''}),loaded:!S.modelsLoading||S.models.length>0};
+  conn.sections=listed(conn,S.models.map(m=>row('model:'+m.id,m.name,m.name!==m.id?m.id:'',{id:m.id})));
+  if(S.modelsError){conn.error=errorText(S.modelsError);conn.footer=[{id:'refresh',label:'Refresh models',icon:'refresh',disabled:S.modelsLoading||locked}];}
+  connections.push(conn);
+ }
+ for(const p of named){
+  if(p.default&&hostKept)continue;
+  const conn={id:'provider:'+p.id,name:p.name,...from(p),loaded:true};
+  conn.sections=listed(conn,(p.models||[]).map(id=>row(`provider:${p.id}:${id}`,id,'',{id})));
+  connections.push(conn);
+ }
+ if(routerChoices(routerOffer()).length)connections.push({id:'router',name:'DGC Router',mark:'dgc',badge:'',loaded:true,disabled:true,reason:OWN_NO_ROUTER,sections:[]});
+ for(const x of subscriptionChoices(everyPip()))connections.push({id:'subscription:'+x.engine,name:x.name,...MP.markOf({engine:x.engine}),loaded:true,disabled:true,reason:OWN_NO_CLI,sections:[]});
+ for(const conn of connections)conn.current=(conn.sections||[]).some(s=>s.rows.some(r=>r.current));
+ return{...base,...tabs,title:'This Pip’s sub-agents',footer:[],thinking:null,connections,selected:(connections.find(c=>c.current)||connections[0]).id,
+  note:`${pipAgentsWords()}${agentsUi.slots>=ULTRA_SLOTS?'':' Ultra, under Main model’s Thinking, lets up to 4 work at once.'}`,
+  page:ownPage.page?ownPageView():null};
+}
 function openPipPicker(){
  if(!S.pip||typeof globalThis.DgcModelPicker==='undefined')return;
  let host=document.getElementById('model-picker-root');
  if(!host){host=document.createElement('div');host.id='model-picker-root';shell.append(host);}
- S.composerPanel='';S.modelTab='main';pipPickerPip=S.selected;
+ S.composerPanel='';S.modelTab='main';pipPickerPip=S.selected;ownPage.page=null;
  render();
  pipPicker=globalThis.DgcModelPicker.open(host,pipPickerView(),{
-  pick:row=>{if(row.value==='pip')return;closePipPicker();reviewChatModel(row.value);focusChip();},
+  pick:(row,conn)=>{
+   if(S.modelTab==='agents'&&ownOffered()){
+    // Saved at once (the chosen one is chosen already), then its page.
+    if(!row.current){const choice=ownChoiceOf(row.value);if(!choice)return;void setOwnAgents({model_choice:choice});}
+    const shown=chipModel(S.pip.model_choice,S.pip.model_choice?.mode==='model'?S.pip.model_choice.model:'').text;
+    openOwnPage(row.value,row.value==='pip'?'This Pip’s model':row.name,row.value==='pip'?`Now: ${shown||'not chosen yet'}`:conn?.name||'');
+    return;
+   }
+   if(row.value==='pip')return;closePipPicker();reviewChatModel(row.value);focusChip();},
+  pageThinking:(value,{keys})=>ownChoose('thinking',value==='same'?'':value,keys),
+  pageWindow:(tokens,{keys})=>ownChoose('context_size',Math.max(0,Math.floor(Number(tokens)||0)),keys),
+  back:()=>{ownChoiceNow();ownPage.page=null;refreshPipPicker();},
+  done:()=>{ownChoiceNow();closePipPicker();focusChip();},
   thinking:value=>{if(value==='ultra'){void setPipUltra(true);return;}if(pipUltra())void setPipUltra(false);updateChatPreference('thinking',value);},
-  tab:id=>{S.modelTab=id==='agents'?'agents':'main';refreshPipPicker();},
+  tab:id=>{S.modelTab=id==='agents'?'agents':'main';ownPage.page=null;refreshPipPicker();},
   action:(id,{connection,row,text})=>{
    if(id==='settings'){closePipPicker();vscode.postMessage({type:'openSettings',section:'models'});return;}
    if(id==='refresh'){void loadModels();return;}
    if(id==='main'&&row){closePipPicker();reviewChatModel(row.value);focusChip();return;}
    if(id==='fallback'&&row){void setPipBackup(row.value===fallbackValue(pipFallback())?null:fallbackChoice(row.value));return;}
+   if(id==='agentsFallback'&&row){const c=ownChoiceOf(row.value);if(!c||c.mode==='default')return;void setOwnAgents({fallback:row.agentsFallback?{provider:'',model:''}:{provider:c.mode==='provider'?c.provider:'',model:c.model}});return;}
    if(id==='typed'&&connection&&text){closePipPicker();reviewChatModel(`${connection.id}:${text}`);focusChip();}
   },
-  close:()=>{pipPicker=null;$('chat-model')?.setAttribute('aria-expanded','false');},
+  close:()=>{pipPicker=null;ownChoiceNow();ownPage.page=null;$('chat-model')?.setAttribute('aria-expanded','false');},
  });
  $('chat-model')?.setAttribute('aria-expanded','true');
  void loadPipBackup();
@@ -4862,19 +4908,18 @@ function agentCheckReply(m){
 // Focus the map moves by itself after a click is quiet (no ring); the keyboard's always shows.
 let agentsByPointer=false;
 const amFocus=el=>{if(!el)return;el.classList.toggle('quiet-focus',agentsByPointer);el.focus({preventScroll:true});};
-const agentsUi={pip:'',list:[],slots:1,seq:0,doing:new Map(),steps:new Map(),stepsOpen:new Set(),map:false,card:'',earlier:false,stopping:'',timer:0,drawn:''};
+const agentsUi={pip:'',list:[],slots:1,own:null,seq:0,doing:new Map(),steps:new Map(),stepsOpen:new Set(),map:false,card:'',earlier:false,stopping:'',timer:0,drawn:''};
 const changeUi={folded:new Set(),menu:''};const askedWords=new Map();
-function resetAgents(){window.clearTimeout(agentsUi.timer);Object.assign(agentsUi,{pip:'',list:[],slots:1,seq:agentsUi.seq+1,map:false,card:'',earlier:false,stopping:'',timer:0});agentsUi.doing.clear();agentsUi.steps.clear();agentsUi.stepsOpen.clear();changeUi.folded.clear();changeUi.menu='';renderAgentMap();}
+function resetAgents(){window.clearTimeout(agentsUi.timer);Object.assign(agentsUi,{pip:'',list:[],slots:1,own:null,seq:agentsUi.seq+1,map:false,card:'',earlier:false,stopping:'',timer:0});agentsUi.doing.clear();agentsUi.steps.clear();agentsUi.stepsOpen.clear();changeUi.folded.clear();changeUi.menu='';renderAgentMap();}
 const agentsNow=()=>convOn()&&agentsUi.pip===S.selected?agentsUi.list:[];
 const fixAgents=()=>convOn()?(flowNow()?.fixes||[]).map(f=>f.agent).filter(Boolean):[];
 const agentOf=id=>agentsNow().find(a=>a.id===id)||fixAgents().find(a=>a.id===id)||null;
 // Ultra on the Pip's thinking slider (live round 1, 14 Nov): up to 4 sub-agents at once for this Pip (set_pip_agents,
 // Pips API 97: 1 is a Pip's usual, 4 is Ultra). Offered once DGC has said how many this Pip runs.
 const ULTRA_SLOTS=4;let ultraBusy=false;
-// The Sub-agents tab of a Pip's model menu. What is true today: a Pip's sub-agents run on the Pip's own model, at its
-// thinking, one at a time or up to `slots` at once (Ultra is 4). DGC cannot yet give a Pip's sub-agents a model, a
-// thinking level, a context window or a fallback of their own (set_pip_agents takes only `slots`), so the tab offers
-// none: when it can, their list goes under the row here, with "This Pip's model" first, and each row's menu.
+// The Sub-agents tab of a Pip's model menu. Before Pips API 104 a Pip's sub-agents run on the Pip's own model, at its
+// thinking, one at a time or up to `slots` at once (Ultra is 4), and the tab says only that. From 104 it is Work's:
+// set_pip_agents also takes their own model, thinking, window and fallback (below, "a Pip's own sub-agents model").
 const pipAgentsWords=()=>agentsUi.slots>=ULTRA_SLOTS?`Up to ${agentsUi.slots} at once (Ultra).`:agentsUi.slots>1?`Up to ${agentsUi.slots} at once.`:'One at a time.';
 const ultraOffered=()=>convOn()&&agentsUi.pip===S.selected;
 const pipUltra=()=>ultraOffered()&&agentsUi.slots>=ULTRA_SLOTS;
@@ -4886,11 +4931,66 @@ async function setPipUltra(on){
  catch(error){if(token===scope()&&agentsUi.pip===pip){agentsUi.slots=was;setError(error);}}
  finally{ultraBusy=false;if(token===scope())render();}
 }
+// ---- a Pip's own sub-agents model (Pips API 104, 17 Nov) ----
+// The Sub-agents tab as Work's: "This Pip's model" (the dgc mark) first, then the connections its Main tab lists (a
+// subscription app and DGC Router greyed, with DGC's reason). A model is saved at once (set_pip_agents model_choice),
+// then its page opens in the same dialog: their thinking, their window (only the sizes the model takes: its largest
+// window is asked of DGC through the host, pip_model_window, once per model), Custom…, Done. A row's ⋯ makes a model
+// their fallback. What DGC keeps is agentsUi.own; a choice shows at once and DGC's answer is what it says from then on.
+const OWN_API=104;
+const ownOffered=()=>ultraOffered()&&S.apiVersion>=OWN_API&&!remoteHost&&!!agentsUi.own;
+const OWN_LEVELS=[['','Same'],['off','Off'],['low','Low'],['medium','Medium'],['high','High'],['xhigh','Extra high']];
+const OWN_NO_CLI='It runs its own tools, so it can’t run DGC’s sub-agents.';
+const OWN_NO_ROUTER='DGC Router can’t run a Pip’s sub-agents: a Pip’s run holds one of its systems at most.';
+const ownValue=c=>!c||c.mode==='default'?'pip':c.mode==='provider'?`provider:${c.provider}:${c.model}`:`model:${c.model}`;
+const ownChoiceOf=value=>{if(value==='pip')return{mode:'default'};if(value.startsWith('model:'))return{mode:'model',model:value.slice(6)};const m=/^provider:(provider_[a-f0-9]{32}):(.+)$/.exec(value);return m?{mode:'provider',provider:m[1],model:m[2]}:null;};
+const ownFallbackValue=f=>!f||!f.model?'':f.provider?`provider:${f.provider}:${f.model}`:`model:${f.model}`;
+const ownPage={page:null,windows:new Map(),keys:null};
+let ownSaving=0;
+async function setOwnAgents(fields){
+ if(!ownOffered()||!usable())return;
+ const pip=S.selected,token=scope(),was=agentsUi.own;
+ agentsUi.own={...agentsUi.own,...fields};ownSaving++;refreshPipPicker();
+ try{const said=agentsOwnOf(await send('set_pip_agents',{pip_id:pip,...fields}));if(token===scope()&&agentsUi.pip===pip&&said&&ownSaving===1)agentsUi.own=said;}
+ catch(error){if(token===scope()&&agentsUi.pip===pip){agentsUi.own=was;setError(error);}}
+ finally{ownSaving--;if(token===scope())refreshPipPicker();}
+}
+// A choice on the page: told to DGC at once (a click), or when the arrow keys rest.
+function ownChoiceNow(){const k=ownPage.keys;if(!k)return;window.clearTimeout(k.timer);ownPage.keys=null;void setOwnAgents({[k.field]:k.value});}
+function ownChoose(field,value,keys){
+ if(ownPage.keys&&ownPage.keys.field!==field)ownChoiceNow();
+ if(ownPage.keys)window.clearTimeout(ownPage.keys.timer);
+ if(!keys){ownPage.keys=null;void setOwnAgents({[field]:value});return;}
+ agentsUi.own={...agentsUi.own,[field]:value};ownPage.keys={field,value,timer:window.setTimeout(ownChoiceNow,650)};refreshPipPicker();
+}
+async function askOwnWindow(ask,key){
+ ownPage.windows.set(key,null);
+ try{const said=await send('pip_model_window',{model_choice:ask});ownPage.windows.set(key,{window:Number.isSafeInteger(said?.window)&&said.window>0?said.window:0});}
+ catch{ownPage.windows.set(key,{window:0});}
+ refreshPipPicker();
+}
+function openOwnPage(value,name,conn){
+ const choice=value==='pip'?S.pip?.model_choice:ownChoiceOf(value);
+ const ask=choice&&(choice.mode==='model'||choice.mode==='provider')?(choice.mode==='model'?{mode:'model',model:choice.model}:{mode:'provider',provider:choice.provider,model:choice.model}):null;
+ const key=ask?JSON.stringify(ask):'';
+ ownPage.page={key:value,name,conn,ask,askKey:key};
+ if(ask&&!ownPage.windows.has(key))void askOwnWindow(ask,key);
+ refreshPipPicker();
+}
+function ownPageView(){
+ const p=ownPage.page,own=agentsUi.own,known=p.ask?ownPage.windows.get(p.askKey):undefined;
+ return{key:p.key,name:p.name,conn:p.conn,label:`${p.name} for sub-agents`,
+  thinking:{label:'Their thinking',value:own.thinking||'same',levels:OWN_LEVELS.map(([v,l])=>({value:v||'same',label:l,...(v?{}:{title:'Same as this Pip',now:'Same as this Pip'})}))},
+  window:{label:'Their context window',value:own.context_size,max:known?known.window:0,checking:!!p.ask&&!known,same:'Same as this Pip'}};
+}
+/** What a Pip's sub-agents run on, in a few words: their own model, or "This Pip's model". */
+const ownWords=()=>{const c=agentsUi.own?.model_choice;return!c||c.mode==='default'?'This Pip’s model':c.model;};
 async function loadAgents(){
  if(!convOn()||!usable())return;
  const token=scope(),sequence=++agentsUi.seq,pip=S.selected;
  try{const page=agentsPage(await send('list_pip_agents',{pip_id:pip}),pip);if(token!==scope()||sequence!==agentsUi.seq)return;
   const before=agentsUi.pip===pip?JSON.stringify(agentsUi.list):'';const slotsBefore=agentsUi.slots;agentsUi.pip=pip;agentsUi.list=page.agents;if(!ultraBusy)agentsUi.slots=page.slots;
+  if(!ownSaving){const was=JSON.stringify(agentsUi.own);agentsUi.own=page.own||null;if(JSON.stringify(agentsUi.own)!==was)refreshPipPicker();}   // (Pips API 104: what its sub-agents run on; none from an older DGC)
   for(const a of page.agents)if(a.run_id&&(AGENT_LIVE.includes(a.state)||agentsUi.stepsOpen.has(a.id)||agentsUi.card===a.id))void loadAgentSteps(a);
   if(JSON.stringify(page.agents)!==before||agentsUi.slots!==slotsBefore)render();else renderAgentMap();}
  catch{/* the pill and the map keep what they had */}

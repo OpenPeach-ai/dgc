@@ -51,6 +51,8 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *    pending  changes saved for GST watchdog that wait for you (its `proposals`)
  *    answers  {[request type]: result}: what DGC answers to a request this stand-in has no answer of its own for (or in
  *             place of its own); {byPip: {[pip id]: result}} answers by the Pip asked about
+ *    agentsOwn Pips API 104: the sub-agents' own {model_choice, thinking, context_size, fallback} list_pip_agents says
+ *             (set_pip_agents keeps what it is given); windows: {[model]: tokens} for pip_model_window (0 unknown)
  *  Returns {answer(request) → result | undefined | {error}, state}. */
 export function makeBackend(o = {}) {
   const hex = (c) => c.repeat(32), ws = (c) => "ws_" + hex(c), pid = (c) => "pip_" + hex(c);
@@ -59,7 +61,7 @@ export function makeBackend(o = {}) {
   const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run_" + hex("3"), FIX = "pipfix_" + hex("1"), CHANGE = "pchange_" + hex("1"), WAIT = "pipwait_" + hex("1");
   const sub = !!o.sub, AGENT = "pipagent_" + hex("1"), NAME = sub ? "Tile checker" : "GST watchdog";
   const now = Date.now(), ago = (minutes) => new Date(now - minutes * 60000).toISOString();
-  const state = { slots: o.slots || 1, fix: o.fix || "none", waiting: o.waiting === false ? "none" : "waiting", level: o.level || "ask", change: o.fix === "applied" ? "applied" : "pending", committed: false,
+  const state = { slots: o.slots || 1, agentsOwn: { model_choice: { mode: "default" }, thinking: "", context_size: 0, fallback: { provider: "", model: "" }, ...(o.agentsOwn || {}) }, fix: o.fix || "none", waiting: o.waiting === false ? "none" : "waiting", level: o.level || "ask", change: o.fix === "applied" ? "applied" : "pending", committed: false,
     order: o.order || [GST, ERP, MORNINGS, BEDS], requests: [], unread: o.unread || {}, made: [], helper: 0, left: false, again: 0,
     paying: o.paying || "ask", limits: o.limits === false ? null : { usd_per_day: null, max_count: null, sites: null, ...(o.limits || {}) }, spent: o.spent || 0,
     total: { usd_per_day: null, spent_today: 0, ...(o.total || {}) }, knows: {}, notes: (o.notes || []).slice(),
@@ -252,8 +254,15 @@ export function makeBackend(o = {}) {
     start_pip_work_helper: () => { state.helper++; return { asks: state.level !== "full" }; },
     answer_pip_waiting: (r) => { state.waiting = { done: "done", later: "later", not_a_problem: "dismissed", undo: "waiting" }[r.answer]; return { waiting: waitingNow() }; },
     // ---- its sub-agents (Pips API 97), and the one command still to come from DGC (retry_pip_fix) ----
-    list_pip_agents: (r) => ({ agents: r.pip_id === GST && sub ? [agentNow(), ...earlierAgents()].filter(Boolean) : [], slots: state.slots }),
-    set_pip_agents: (r) => { state.slots = r.slots; return { slots: r.slots }; },
+    // Pips API 104: a Pip's sub-agents' own model, thinking, window and fallback ride along (an older DGC sends only slots;
+    // the editor reads them only from 104).
+    list_pip_agents: (r) => ({ agents: r.pip_id === GST && sub ? [agentNow(), ...earlierAgents()].filter(Boolean) : [], slots: state.slots, ...state.agentsOwn }),
+    set_pip_agents: (r) => { if ("slots" in r) state.slots = r.slots;
+      if (r.model_choice?.mode === "subscription") return { error: { code: "invalid_model_choice", message: "It runs its own tools, so it can’t run DGC’s sub-agents." } };
+      for (const k of ["model_choice", "thinking", "context_size", "fallback"]) if (k in r) state.agentsOwn[k] = r[k];
+      return { slots: state.slots, ...state.agentsOwn }; },
+    // The most tokens a model takes (the host asks DGC's model_window_at for a Pip's picker): `windows` by model name.
+    pip_model_window: (r) => ({ window: (o.windows || {})[r.model_choice?.model] ?? 0 }),
     stop_pip_agent: () => { state.fix = "stopped"; return { agent: agentNow() }; },
     retry_pip_fix: (r) => { if (r.again) { state.fix = "running"; state.again++; } else state.left = true; return { fix: fixNow()[0] }; },
     send_pip_message: (r) => { if (!state.chat[r.pip_id]) return undefined;     // (a scene with no given chat never answers, as before)

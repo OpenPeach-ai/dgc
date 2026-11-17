@@ -2867,7 +2867,7 @@
   }
   function openModelPicker() {
     hideModeMenu(); hideContextMenu(); hideAgentsMenu(); hideOutputMenu(); hideAddMenu();
-    pickerTab = "main"; pickerLists.clear(); lastModelMenu = null;
+    pickerTab = "main"; pickerLists.clear(); lastModelMenu = null; agentsPage = null;
     modelPicker = MP.open(document.body, modelPickerView(), {
       pick: pickModelRow, thinking: pickThinking, action: pickerAction,
       thinkingRest: () => { if (thinkChosen && thinkChosen.timer) chooseThink(thinkChosen.level, 0); },   // the keys came to rest: told now
@@ -2875,6 +2875,7 @@
       search: () => { for (const row of agentsRoutes()) if (row.kind !== "subscription" && row.key !== lastModelMenu?.currentRouteKey) askProviderModels(row.key); },
       tab: (id) => {
         pickerTab = id === "agents" && agentsModel.offered ? "agents" : "main";
+        agentsPage = null;
         if (pickerTab === "agents") {
           vscode.postMessage({ type: "getAgentsModel" });       // as the tab opens: what DGC has now
           const on = agentsRoutes().find(agentsOn);             // (the connection its list opens on is listed by its host)
@@ -2882,15 +2883,11 @@
         }
         refreshModelPicker();
       },
-      setting: (id, value) => {
-        if (id !== "context") return;
-        if (value === "typed") { vscode.postMessage({ type: "agentsContextTyped" }); hideModelMenu(); return; }
-        const size = Number(value) || 0;
-        vscode.postMessage({ type: "setAgentsContext", size });
-        agentsModel = { ...agentsModel, context_size: size };       // shown at once; DGC's answer is what it says from then on
-        refreshModelPicker();
-      },
-      close: () => { modelPicker = null; $("btn-model").setAttribute("aria-expanded", "false"); if (thinkChosen && thinkChosen.timer) chooseThink(thinkChosen.level, 0); },
+      pageThinking: (value, { keys }) => agentsChoice("thinking", value === "same" ? "" : value, keys),
+      pageWindow: (tokens, { keys }) => agentsChoice("window", Math.max(0, Math.floor(Number(tokens) || 0)), keys),
+      back: () => { agentsChoiceNow(); agentsPage = null; refreshModelPicker(); },
+      done: () => { agentsChoiceNow(); modelPicker.close("done"); },
+      close: () => { modelPicker = null; agentsChoiceNow(); agentsPage = null; $("btn-model").setAttribute("aria-expanded", "false"); if (thinkChosen && thinkChosen.timer) chooseThink(thinkChosen.level, 0); },
     });
     $("btn-model").setAttribute("aria-expanded", "true");
     vscode.postMessage({ type: "listModels" });
@@ -2964,11 +2961,10 @@
   // greyed with its reason: it runs its own tools, and DGC's agents need an address, a key and a model. Its Thinking
   // row and its Context window are the sub-agents' own (DGC's subagent_thinking and subagent_context_size, "Same as
   // the session" when unset; shown only when this DGC can set them).
-  const AGENTS_NONE = { offered: false, own: false, model: "", base_url: "", settings_model: "", settings_base_url: "", router: false, thinking: "", thinking_settable: false, context_size: 0, context_settable: false };
+  const AGENTS_NONE = { offered: false, own: false, model: "", base_url: "", settings_model: "", settings_base_url: "", router: false, thinking: "", thinking_settable: false, context_size: 0, context_settable: false,
+    window_offered: false, fallback_offered: false, fallback_own: false, fallback_model: "", fallback_base_url: "" };
   let agentsModel = { ...AGENTS_NONE };
   const AGENTS_THINK = [["", "Same as the session"], ["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]];
-  const AGENTS_SIZES = [4096, 8192, 16384, 32768, 65536, 131072, 262144];       // the sizes Settings offers (src/contextCombo.js)
-  const agentsSizeWords = (n) => (n > 0 && n % 1024 === 0 ? `${n / 1024}K` : n > 0 ? n.toLocaleString("en-US") : "Same as the session");
   const AGENTS_CLI_REASON = "Runs its own tools, so it can’t run DGC’s agents";
   function setAgentsModel(view) {
     const text = (value) => (typeof value === "string" ? value.slice(0, 2048) : "");
@@ -2976,7 +2972,10 @@
       ? { offered: true, own: view.own === true, model: text(view.model).slice(0, 256), base_url: text(view.base_url),
           settings_model: text(view.settings_model).slice(0, 256), settings_base_url: text(view.settings_base_url), router: view.router === true,
           thinking: AGENTS_THINK.some(([level]) => level === view.thinking) ? view.thinking : "", thinking_settable: view.thinking_settable === true,
-          context_size: Number.isSafeInteger(view.context_size) && view.context_size > 0 ? view.context_size : 0, context_settable: view.context_settable === true }
+          context_size: Number.isSafeInteger(view.context_size) && view.context_size > 0 ? view.context_size : 0, context_settable: view.context_settable === true,
+          // (0.52, 17 Nov: the page asks the model's largest window; the sub-agents' own fallback, from the rows' ⋯)
+          window_offered: view.window_offered === true, fallback_offered: view.fallback_offered === true, fallback_own: view.fallback_own === true,
+          fallback_model: text(view.fallback_model).slice(0, 256), fallback_base_url: text(view.fallback_base_url) }
       : { ...AGENTS_NONE };
   }
   const agentsRoutes = () => (Array.isArray(lastModelMenu?.routes) ? lastModelMenu.routes : []).filter((row) => row && row.key);
@@ -3014,6 +3013,64 @@
     agentMapChanged();
     refreshModelPicker();
   }
+  // ---- the Sub-agents page (17 Nov) ----
+  // A model chosen on the Sub-agents tab is saved at once, then its page opens in the same dialog: Their thinking and
+  // Their context window (only the sizes the model takes: its largest window is asked of DGC once per model and
+  // connection, model_window_at through the extension), Custom… typed right there, Done. Settings' choice opens it too.
+  let agentsPage = null;                  // {key, name, conn, ask: {provider, model} | {settings, model} | null}
+  const agentsWindows = new Map();        // "<provider>|<model>" or "settings|<model>" -> {window} once DGC said; null while asked
+  const windowKey = (ask) => (ask ? `${ask.settings ? "settings" : ask.provider || ""}|${ask.model}` : "");
+  function askAgentsWindow(ask) {
+    if (!ask || !ask.model || !agentsModel.window_offered || agentsWindows.has(windowKey(ask))) return;
+    agentsWindows.set(windowKey(ask), null);
+    vscode.postMessage({ type: "agentsWindow", ...ask });
+  }
+  function onAgentsWindow(msg) {
+    const model = typeof msg.model === "string" ? msg.model : "";
+    if (!model) return;
+    const window = Number.isSafeInteger(msg.window) && msg.window > 0 ? msg.window : 0;
+    agentsWindows.set(windowKey({ settings: msg.settings === true, provider: typeof msg.provider === "string" ? msg.provider : "", model }), { window });
+    refreshModelPicker();
+  }
+  function openAgentsPage(page) {
+    agentsPage = page;
+    askAgentsWindow(page.ask);
+    refreshModelPicker();
+  }
+  // What the page shows of the sub-agents' thinking and window (what DGC said, or what was just chosen).
+  function agentsPageView() {
+    const p = agentsPage, known = p.ask ? agentsWindows.get(windowKey(p.ask)) : undefined;
+    const checking = !!p.ask && agentsModel.window_offered && (known === null || known === undefined);
+    return { key: p.key, name: p.name, conn: p.conn, label: `${p.name} for sub-agents`,
+      thinking: agentsModel.thinking_settable ? { label: "Their thinking", value: agentsModel.thinking || "same",
+        levels: AGENTS_THINK.map(([value, label]) => ({ value: value || "same", label: value ? label : "Same", ...(value ? {} : { title: "Same as the session", now: "Same as the session" }) })) } : null,
+      window: agentsModel.context_settable ? { label: "Their context window", value: agentsModel.context_size, max: known ? known.window : 0, checking, same: "Same as the session" } : null,
+      none: "This DGC can’t set their thinking or their window. Update DGC CLI." };
+  }
+  // A choice on the page: shown at once, told to DGC at once (a click) or when the arrow keys rest.
+  let agentsKeys = null;
+  function agentsChoiceNow() {
+    if (!agentsKeys) return;
+    clearTimeout(agentsKeys.timer);
+    const { kind, value } = agentsKeys;
+    agentsKeys = null;
+    if (kind === "thinking") vscode.postMessage({ type: "setAgentsThinking", level: value });
+    else vscode.postMessage({ type: "setAgentsContext", size: value });
+  }
+  function agentsChoice(kind, value, keys) {
+    if (agentsKeys && agentsKeys.kind !== kind) agentsChoiceNow();
+    agentsModel = kind === "thinking" ? { ...agentsModel, thinking: value } : { ...agentsModel, context_size: value };   // shown at once; DGC's answer is what it says from then on
+    if (keys) { if (agentsKeys) clearTimeout(agentsKeys.timer); agentsKeys = { kind, value, timer: setTimeout(agentsChoiceNow, THINK_KEYS_REST) }; }
+    else { if (agentsKeys) clearTimeout(agentsKeys.timer); agentsKeys = { kind, value, timer: 0 }; agentsChoiceNow(); }
+    refreshModelPicker();
+  }
+  /** Whether a row is the sub-agents' fallback (as DGC said it, own or Settings'). */
+  function agentsFallbackOn(row, value) {
+    if (!agentsModel.fallback_model || agentsModel.fallback_model !== value || row.kind === "subscription") return false;
+    if (!agentsModel.fallback_base_url) return row.key === lastModelMenu?.currentRouteKey;
+    return !!row.base_url && row.base_url === agentsModel.fallback_base_url || (row.key === "native" && agentsModel.fallback_base_url === lastModelMenu?.base);
+  }
+
   // D14: this session's fallback. A model DGC runs itself (this host's, or a saved provider's), Claude Code and Codex
   // have a ⋯ with Use as main and Use as fallback; once one is set, Main and Fallback sit at the rows' right end. A
   // CLI is a fallback on its own default model, so of its rows only "CLI default" has the ⋯.
@@ -3102,7 +3159,14 @@
       const list = own ? { ids: m.subscription || m.err ? [] : m.ids, error: m.err } : pickerLists.get(row.key);
       if (!list) { conn.loaded = false; return conn; }
       if (list.error && !list.ids.length) conn.error = "Couldn’t list its models.";
-      conn.sections = listed(conn, plainRows(list.ids, on ? agentsModel.model : null));
+      // The sub-agents' own fallback (subagent_fallback): a row's ⋯, and Main and Fallback on the rows once one is set.
+      const fb = agentsModel.fallback_offered, set = !!agentsModel.fallback_model;
+      conn.sections = listed(conn, plainRows(list.ids, on ? agentsModel.model : null).map((r) => {
+        if (!fb) return r;
+        const isFallback = !r.current && agentsFallbackOn(row, r.value);
+        return { ...r, pills: set ? (r.current ? [["Main", "main"]] : isFallback ? [["Fallback", "fallback"]] : []) : [],
+          actions: [{ id: "agentsFallback", label: isFallback ? "Stop using as fallback" : "Use as fallback", disabled: r.current }], agentsFallback: isFallback };
+      }));
       if (!own) conn.footer = [{ id: "agentsTyped", label: "Enter another model…", icon: "edit" }];
       return conn;
     })];
@@ -3115,13 +3179,10 @@
     const tabbed = agentsModel.offered;
     const tabs = tabbed ? { tabs: [{ id: "main", label: "Main model", title: "This session’s model and its fallback" }, { id: "agents", label: "Sub-agents", title: `Sub-agents: ${agentsWords()}` }], tab: pickerTab } : {};
     if (tabbed && pickerTab === "agents") {
-      const now = agentsModel.context_size, sizes = [...new Set([...AGENTS_SIZES, ...(now > 0 ? [now] : [])])].sort((a, b) => a - b);
+      // Their thinking and their window are the page's, once a model is chosen (or Settings' choice): not under the list.
       return { ...view, ...tabs, title: "Model for this session’s sub-agents", connections: agentsConnections(),
-        selected: agentsModel.own ? (m.routes.find(agentsOn) || {}).key : "agents:settings",
-        thinking: agentsModel.thinking_settable ? { label: "Their thinking", value: agentsModel.thinking || "same",
-          levels: AGENTS_THINK.map(([value, label]) => ({ value: value || "same", label: value ? label : "Same", title: value ? "" : "Same as the session" })) } : null,
-        settings: agentsModel.context_settable ? [{ id: "context", label: "Their context window", value: String(now > 0 ? now : 0),
-          options: [{ value: "0", label: "Same as the session" }, ...sizes.map((n) => ({ value: String(n), label: agentsSizeWords(n) })), { value: "typed", label: "Another size…" }] }] : [] };
+        selected: agentsModel.own ? (m.routes.find(agentsOn) || {}).key : "agents:settings", thinking: null, settings: [],
+        page: agentsPage ? agentsPageView() : null };
     }
     return { ...view, ...tabs, connections: mainConnections(), thinking: thinkingView() };
   }
@@ -3130,14 +3191,21 @@
     if (pickerTab === "agents" && agentsModel.offered) {
       if (!route) {
         if (agentsModel.own) { vscode.postMessage({ type: "resetAgentsModel" }); agentsModel = { ...agentsModel, own: false, model: agentsModel.settings_model, base_url: agentsModel.settings_base_url }; updateModelControl(); agentMapChanged(); }
-      } else {
-        const own = route.key === "native";
+        // Settings' choice: its page is for what Settings has now (DGC Router picks a worker for each: nothing to ask).
+        const settings = agentsSettingsWords();
+        const ask = agentsModel.router ? null : agentsModel.settings_model ? { settings: true, model: agentsModel.settings_model }
+          : m.subscription || !m.current ? null : { provider: m.currentRouteKey === "native" ? "" : m.currentRouteKey, model: m.current };
+        openAgentsPage({ key: "agents:settings", name: "Settings’ choice", conn: settings ? `Now: ${settings}` : "Now: this session’s model", ask });
+        return;
+      }
+      const own = route.key === "native";
+      if (!row.current) {
         vscode.postMessage({ type: "setAgentsModel", provider: own ? "" : route.key, model: row.value });
         // Shown at once; DGC's answer (agentsModel) is what it says from then on.
         agentsModel = { ...agentsModel, own: true, model: row.value, base_url: own ? "" : String(route.base_url || "") };
         updateModelControl(); agentMapChanged();
       }
-      refreshModelPicker();
+      openAgentsPage({ key: `${route.key}:${row.value}`, name: row.value, conn: connName(route), ask: { provider: own ? "" : route.key, model: row.value } });
       return;
     }
     if (route.key === m.currentRouteKey) vscode.postMessage({ type: "setModel", model: row.value });
@@ -3151,6 +3219,14 @@
     if (id === "typed") { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); return; }
     if (id === "typedFor" && route) { vscode.postMessage(route.kind === "subscription" ? { type: "subscriptionModelTyped", id: route.key } : { type: "providerModelTyped", id: route.key }); hideModelMenu(); return; }
     if (id === "agentsTyped" && route) { vscode.postMessage({ type: "agentsModelTyped", id: route.key }); hideModelMenu(); return; }
+    if (id === "agentsFallback" && route && row && route.kind !== "subscription" && agentsModel.fallback_offered) {
+      // Use as fallback, or Stop: this session's own sub-agents' fallback (none, when stopped).
+      const own = route.key === "native", stop = row.agentsFallback === true;
+      vscode.postMessage({ type: "setAgentsFallback", provider: own ? "" : route.key, model: stop ? "" : row.value });
+      agentsModel = { ...agentsModel, fallback_own: true, fallback_model: stop ? "" : row.value, fallback_base_url: stop || own ? "" : String(route.base_url || "") };
+      refreshModelPicker();
+      return;
+    }
     if (id === "main" && row) { pickModelRow(row, connection); return; }
     if (id === "fallback" && row?.fb) {
       const target = row.fb, view = fbView();
@@ -13780,6 +13856,7 @@ function permissionChoices(ev) {
       joinGoal(msg.state.goal);                 // a goal already running when this window opened: its end is said too
     }
     else if (msg.type === "agentsModel") onAgentsModel(msg);
+    else if (msg.type === "agentsWindow") onAgentsWindow(msg);
     else if (msg.type === "providerModels") { if (modelPickerOpen() && typeof msg.id === "string") { pickerLists.set(msg.id, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: !!msg.error }); refreshModelPicker(); } }
     else if (msg.type === "models" && modelPickerOpen()) { if ("agents" in msg) { setAgentsModel(msg.agents); updateModelControl(); } onModels(msg); }
     else if (msg.type === "fallbackActive") { fallbackActive = typeof msg.model === "string" ? msg.model.slice(0, 256) : ""; updateModelControl(); }

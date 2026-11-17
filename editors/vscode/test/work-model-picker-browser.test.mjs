@@ -94,7 +94,7 @@ test("Main and Fallback at the rows' ends; every row's ⋯ shows only while its 
   } finally { await page.close(); }
 });
 
-test("the Sub-agents tab: Settings' choice first, their thinking with no Ultra, their window with Settings' sizes; a subscription app is greyed with its reason", async (t) => {
+test("the Sub-agents tab: Settings' choice first; their thinking (no Ultra) and their window are its page's; a subscription app is greyed with its reason", async (t) => {
   if (skipOrFail(t)) return;
   const { page } = await open(440);
   try {
@@ -106,19 +106,25 @@ test("the Sub-agents tab: Settings' choice first, their thinking with no Ultra, 
     assert.deepEqual(rail, [["Settings’ choice", "true", null], ["Ollama", "false", null], ["Spare GPU box · your key", "false", null], ["Claude Code · your subscription", "false", "true"]]);
     assert.deepEqual(await names(page), ["Settings’ choice"]);
     assert.equal(await page.textContent(".dgc-mp-row .dgc-mp-desc"), "Now: same as this session’s model");
-    assert.equal(await page.textContent(".dgc-mp-think-name"), "Their thinking");
-    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-level")].map((b) => [b.dataset.level, b.textContent, b.getAttribute("aria-checked")])),
+    assert.equal(await page.locator(".dgc-mp-think:visible, .dgc-mp-settings:visible").count(), 0, "under the list: neither (they are the page's, 17 Nov)");
+    // Settings' choice opens its page: their thinking, their window, Done.
+    await page.click(".dgc-mp-row");
+    assert.equal(await page.textContent(".dgc-mp-page-name"), "Settings’ choice");
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-page .dgc-mp-think-name")].map((n) => n.textContent)), ["Their thinking", "Their context window"]);
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("[data-pthink]")].map((b) => [b.dataset.pthink, b.textContent, b.getAttribute("aria-checked")])),
       [["same", "Same", "true"], ["off", "Off", "false"], ["low", "Low", "false"], ["medium", "Medium", "false"], ["high", "High", "false"], ["xhigh", "Extra high", "false"]], "no Ultra for sub-agents");
-    assert.equal(await page.getAttribute('.dgc-mp-level[data-level="same"]', "title") ?? await page.getAttribute('.dgc-mp-level[data-level="same"]', "data-tip"), "Same as the session");
-    assert.deepEqual(await page.evaluate(() => [document.querySelector(".dgc-mp-setting-name").textContent, [...document.querySelector(".dgc-mp-select").options].map((o) => o.textContent), document.querySelector(".dgc-mp-select").value]),
-      ["Their context window", ["Same as the session", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "Another size…"], "0"]);
-    await page.click('.dgc-mp-level[data-level="high"]');
+    assert.equal(await page.getAttribute('[data-pthink="same"]', "title") ?? await page.getAttribute('[data-pthink="same"]', "data-tip"), "Same as the session");
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-size")].map((b) => b.textContent)), ["Same", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M"],
+      "a DGC that can't say the model's window: every size");
+    await page.click('[data-pthink="high"]');
     assert.deepEqual(await posted(page, "setAgentsThinking"), [{ type: "setAgentsThinking", level: "high" }]);
-    assert.equal(await page.getAttribute('.dgc-mp-level[data-level="high"]', "aria-checked"), "true", "shown at once");
+    assert.equal(await page.getAttribute('[data-pthink="high"]', "aria-checked"), "true", "shown at once");
     assert.deepEqual(await posted(page, "setReasoningProfile"), [], "the session's own thinking never moves");
-    await page.selectOption(".dgc-mp-select", "65536");
+    await page.click('.dgc-mp-size[data-size="65536"]');
     assert.deepEqual(await posted(page, "setAgentsContext"), [{ type: "setAgentsContext", size: 65536 }]);
-    assert.equal(await page.inputValue(".dgc-mp-select"), "65536");
+    assert.equal(await page.getAttribute('.dgc-mp-size[data-size="65536"]', "aria-checked"), "true");
+    await page.click(".dgc-mp-back");
+    assert.equal(await focusKey(page), "r:agents:settings:same", "back on Settings' choice");
     // A saved provider's models for the sub-agents: asked of its host when it is looked at.
     await page.click(`.dgc-mp-conn[data-rail="${SPARE}"]`);
     assert.deepEqual(await posted(page, "providerModels"), [{ type: "providerModels", id: SPARE }]);
@@ -126,29 +132,32 @@ test("the Sub-agents tab: Settings' choice first, their thinking with no Ultra, 
     // Claude Code: shown, greyed, with why.
     await page.click('.dgc-mp-conn[data-rail="subscription_claude"]', { force: true });
     assert.equal(await page.textContent(".dgc-mp-list"), "Runs its own tools, so it can’t run DGC’s agents.");
-    assert.equal(await page.locator(".dgc-mp-more").count(), 0, "no fallback ⋯ in this tab");
-    await page.selectOption(".dgc-mp-select", "typed");
-    assert.deepEqual(await posted(page, "agentsContextTyped"), [{ type: "agentsContextTyped" }]);
-    assert.equal(await page.locator(".dgc-mp-layer").count(), 0, "the editor's own box takes the size");
+    assert.equal(await page.locator(".dgc-mp-more").count(), 0, "nothing of it to choose");
+    assert.deepEqual(await posted(page, "agentsContextTyped"), [], "no editor input box for a size any more");
   } finally { await page.close(); }
 });
 
-test("what DGC says the sub-agents use shows in their rows; a DGC that cannot set one shows no row for it", async (t) => {
+test("what DGC says the sub-agents use shows on their page; a DGC that cannot set one shows neither", async (t) => {
   if (skipOrFail(t)) return;
   const said = await open(440, 760, "dark-modern", modelsMessage({ thinking: "medium", context_size: 32768, own: true, model: "gpt-oss:120b", base_url: "https://spare.example/v1" }));
   try {
     await said.page.click('.dgc-mp-tab[data-tab="agents"]');
     assert.equal(await said.page.getAttribute(`.dgc-mp-conn[data-rail="${SPARE}"]`, "aria-selected"), "true", "the tab opens on where their own model runs");
-    assert.equal(await said.page.evaluate(() => document.querySelector('.dgc-mp-level[aria-checked="true"]').dataset.level), "medium");
-    assert.equal(await said.page.inputValue(".dgc-mp-select"), "32768");
     await said.post({ type: "providerModels", id: SPARE, ids: ["gpt-oss:120b", "other:1"] });
     assert.deepEqual(await said.page.evaluate(() => [...document.querySelectorAll('.dgc-mp-row[aria-selected="true"] .dgc-mp-name')].map((n) => n.textContent)), ["gpt-oss:120b"]);
+    await said.page.click('.dgc-mp-row[aria-selected="true"]');
+    assert.equal(await said.page.evaluate(() => document.querySelector('[data-pthink][aria-checked="true"]').dataset.pthink), "medium");
+    assert.equal(await said.page.evaluate(() => document.querySelector('.dgc-mp-size[aria-checked="true"]').textContent), "32K");
+    assert.deepEqual(await posted(said.page, "setAgentsModel"), [], "the chosen one again: its page, nothing saved");
   } finally { await said.page.close(); }
   const plain = await open(440, 760, "dark-modern", modelsMessage({ thinking_settable: false, context_settable: false }));
   try {
     await plain.page.click('.dgc-mp-tab[data-tab="agents"]');
     assert.equal(await plain.page.locator(".dgc-mp-think:visible, .dgc-mp-settings:visible").count(), 0, "neither row");
     assert.deepEqual(await names(plain.page), ["Settings’ choice"]);
+    await plain.page.click(".dgc-mp-row");
+    assert.equal(await plain.page.locator("[data-pthink], .dgc-mp-size").count(), 0);
+    assert.equal(await plain.page.textContent(".dgc-mp-page .dgc-mp-say"), "This DGC can’t set their thinking or their window. Update DGC CLI.");
   } finally { await plain.page.close(); }
 });
 

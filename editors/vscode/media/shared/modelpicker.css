@@ -273,10 +273,10 @@ body.vscode-dark .dgc-menu.dgc-mp, .vscode-dark .dgc-menu.dgc-mp { --mp-frame: c
 .dgc-mp-conn-kind::before { content: "· "; }
 .dgc-mp .dgc-mp-sec { padding: 10px 10px 4px; }
 /* A model: its name (the check right after it when it is the one), the line under it, its capabilities at the end. */
-.dgc-menu.dgc-mp .dgc-mp-row { gap: 10px; padding: 7px 8px 7px 10px; }   /* one line: the shared row's height; with its line under, its own */
+.dgc-menu.dgc-mp .dgc-mp-row { gap: 10px; padding: 7px 8px 7px 10px; }   /* one line: the shared row's height and corner (media/shared/menu.css); with its line under, its own */
 /* The actions under the list are rows of the same list: the same padding, so they grow with the editor's font as the rows do. */
 .dgc-menu.dgc-mp .dgc-mp-under .dgc-mp-action { height: auto; min-height: 0; padding-block: 7px; }
-.dgc-mp .dgc-mp-under .dgc-mp-action .dgc-menu-label { line-height: calc(var(--t-base, 13px) * 1.3); }   /* a model name's line */   /* its corner is the shared menu row's (media/shared/menu.css) */
+.dgc-mp .dgc-mp-under .dgc-mp-action .dgc-menu-label { line-height: calc(var(--t-base, 13px) * 1.3); }   /* a model name's line */
 .dgc-menu.dgc-mp .dgc-mp-row.dgc-menu-row-sub { padding-block: 7px; }
 .dgc-mp-nameline { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .dgc-mp .dgc-mp-row .dgc-mp-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-med) var(--t-base)/1.3 var(--sans); color: var(--text-strong); }
@@ -345,3 +345,73 @@ body.vscode-high-contrast .dgc-mp-seg, body.vscode-high-contrast-light .dgc-mp-s
 .dgc-mp-mark > img { display: block; width: 20px; height: 20px; object-fit: contain; border-radius: 4px; }
 /* A short window: the levels on two lines at the most, so Thinking stays whole under the models. */
 @media (max-height: 420px) { .dgc-mp-seg:has(> :nth-child(5)) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* ---- Main model | Sub-agents (17 Nov): the same control as the Thinking row, its chosen tab the raised tile its chosen
+   level is, never the grey wash. ---- */
+.dgc-mp-tabs { gap: 2px; padding: 3px; border: 0; background: color-mix(in srgb, var(--text) 7%, transparent); }
+.dgc-mp .dgc-mp-tab { height: 26px; transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
+.dgc-mp-tab[aria-selected="true"] { background: var(--mp-card); color: var(--text-strong); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
+body.vscode-high-contrast .dgc-mp-tabs, body.vscode-high-contrast-light .dgc-mp-tabs { border: 1px solid var(--vscode-contrastBorder, CanvasText); }
+@media (forced-colors: active) { .dgc-mp-tabs { border: 1px solid CanvasText; } .dgc-mp-tab[aria-selected="true"] { box-shadow: none; } }
+@media (prefers-reduced-motion: reduce) { .dgc-mp .dgc-mp-tab { transition: none; } }
+
+/* ---- Main and Fallback on a row: a small tag with the buttons' corner (--btn-r), never a pill. (Its classes are still
+   the shared menu's Main and Fallback words, so every page reads them the same way; here they are tags.) ---- */
+.dgc-menu.dgc-mp .dgc-mp-tag {
+  flex: none; box-sizing: border-box; height: 18px; margin-block: -2px; margin-left: 0; padding: 0 6px; border-radius: var(--btn-r, 6px);   /* (inside the row's own padding: a row with a tag is as tall as one without) */
+  font: var(--w-med) var(--t-xs)/16px var(--sans); white-space: nowrap;
+}
+.dgc-menu.dgc-mp .dgc-mp-tag + .dgc-mp-tag { margin-left: 4px; }
+
+/* ---- The second page (17 Nov, his call): on the Sub-agents tab a model is chosen, then how they think and their
+   context window are chosen here, in the same dialog. One surface, the card's: its head (Back, the model's name, its
+   connection quiet under it), the two choices, and Done at its foot. ---- */
+.dgc-mp.dgc-mp-paged { background: var(--mp-card); }
+.dgc-mp-page { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--mp-card); container: dgc-mp-page / inline-size; }
+.dgc-mp-page-head { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px 12px 10px; border-bottom: 1px solid var(--hair); }
+.dgc-mp .dgc-mp-back {
+  appearance: none; flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--btn-h, 28px); height: var(--btn-h, 28px);
+  margin: 0; padding: 0; border: 1px solid var(--btn-line, var(--hair-strong)); border-radius: var(--btn-r, 6px); background: transparent; color: var(--text-strong);
+  cursor: pointer; transition: background-color var(--dur-hover) ease, border-color var(--dur-hover) ease;
+}
+.dgc-mp .dgc-mp-back:hover { background: var(--btn-wash, color-mix(in srgb, var(--text) 6%, transparent)); border-color: var(--btn-line-hover, var(--hair-strong)); }
+.dgc-mp .dgc-mp-back .dgc-mp-glyph, .dgc-mp .dgc-mp-back .dgc-icon { width: 16px; height: 16px; }
+.dgc-mp-page-words { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dgc-mp-page-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-semi) var(--t-base)/1.25 var(--sans); color: var(--text-strong); }
+.dgc-mp-page-conn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-reg) var(--t-xs)/1.25 var(--mono, ui-monospace, monospace); letter-spacing: .02em; color: var(--muted-raised, var(--muted)); }
+.dgc-mp-page-body { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 2px 12px 10px; scrollbar-width: thin; }
+/* (Each part is a container as Thinking in the card is, so its control folds by its own width the same way.) */
+.dgc-mp-page-part { padding: 12px 0 2px; container: dgc-mp-think / inline-size; }
+.dgc-mp-page-part + .dgc-mp-page-part { margin-top: 10px; border-top: 1px solid var(--hair); }
+.dgc-mp-page .dgc-mp-seg { margin-top: 8px; }
+/* The sizes: four to a line (three in the narrowest side bar), as one control; Same is the first. */
+.dgc-mp-page .dgc-mp-seg.dgc-mp-sizes { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@container dgc-mp-think (max-width: 200px) { .dgc-mp-page .dgc-mp-seg.dgc-mp-sizes { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.dgc-mp-custom-row { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 8px; }
+.dgc-mp .dgc-mp-custom-row .dgc-btn.small { width: auto; min-width: var(--btn-w-sm, 76px); }
+.dgc-mp input.dgc-mp-custom-input {
+  flex: 1 1 auto; min-width: 0; width: 100%; height: var(--btn-h, 28px); margin: 0; padding: 0 8px; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px);
+  background: var(--field, transparent); color: var(--text-strong); font: var(--w-reg) var(--t-base)/1 var(--sans); box-shadow: none; outline: 0;
+}
+.dgc-mp input.dgc-mp-custom-input:focus { border-color: var(--vscode-focusBorder, var(--ring)); }
+.dgc-mp input.dgc-mp-custom-input[aria-invalid="true"] { border-color: var(--err, var(--hair-strong)); }
+.dgc-mp input.dgc-mp-custom-input::placeholder { color: var(--faint); }
+.dgc-mp .dgc-mp-custom-row .dgc-mp-custom-save { flex: none; width: var(--btn-w-sm, 76px); height: var(--btn-h, 28px); line-height: calc(var(--btn-h, 28px) - 2px); font-size: var(--t-sm); }
+.dgc-mp-wrong { margin: 6px 0 0; padding: 0 2px; color: var(--err-text, var(--text)); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
+.dgc-mp-page .dgc-mp-window-note { padding: 8px 2px 0; }
+.dgc-mp-window-note[data-state="checking"] { color: var(--faint, var(--muted)); }
+.dgc-mp-page-foot { flex: none; display: flex; justify-content: flex-end; padding: 10px 12px 12px; border-top: 1px solid var(--hair); }
+.dgc-mp-page-foot .dgc-mp-done { flex: none; }
+/* A narrow page: what is chosen is said short ("Same"), so the part's name stays whole beside it. */
+@container dgc-mp-think (max-width: 330px) {
+  .dgc-mp-page .dgc-mp-think-now[data-short] { font-size: 0; }
+  .dgc-mp-page .dgc-mp-think-now[data-short]::after { content: attr(data-short); font-size: var(--t-xs, 11px); }
+}
+/* The narrowest side bars: the page keeps its room for the choices. */
+@container dgc-mp (max-width: 240px) {
+  .dgc-mp-page-head { gap: 8px; padding: 10px 8px 8px; } .dgc-mp-page-body { padding-inline: 8px; } .dgc-mp-page-foot { padding: 8px; }
+  .dgc-mp-page-foot .dgc-mp-done { width: 100%; }
+}
+@media (max-height: 420px) { .dgc-mp-page-head { padding-block: 8px 6px; } .dgc-mp-page-part { padding-top: 8px; } .dgc-mp-page-foot { padding-block: 6px 8px; } }
+@media (forced-colors: active) { .dgc-mp-page-head, .dgc-mp-page-foot, .dgc-mp-page-part + .dgc-mp-page-part { border-color: CanvasText; } .dgc-mp .dgc-mp-back { border-color: ButtonText; } }
+@media (prefers-reduced-motion: reduce) { .dgc-mp .dgc-mp-back { transition: none; } }

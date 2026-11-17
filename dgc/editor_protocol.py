@@ -1527,6 +1527,23 @@ COMMAND_FIELDS["list_models_at"] = {
 EVENT_FIELDS["models_at"] = {"request_id": _S(), "role": _f("string", enum=LIST_MODELS_AT_ROLES),
                              "ids": _A(), "api_mode": _S(False), "error": _S(False)}
 
+# ---- the largest window a model at a host takes (0.52) --------------------------------------------
+# The model picker's Sub-agents page offers only the context sizes a model takes (his call, 17 Nov: "for a model
+# whose max is 256k, we do not show 1M"). The editor names the model and its connection's address as for
+# list_models_at (the same roles, and a saved key only to the host it is bound to; `api_key` a key the editor holds for
+# that address, never kept). The answer is one `model_window`: `window`, the most tokens the model takes as DGC's
+# model client knows it (Ollama's /api/show, Anthropic's Models API, a vLLM or llama.cpp server's own word, or what an
+# overflow taught it), 0 when nothing says; or `error`, a few words with no URL, key or body. Advertised as
+# ready.capabilities.model_window_at = 1.
+COMMAND_FIELDS["model_window_at"] = {
+    "request_id": _S(), "role": _f("string", enum=LIST_MODELS_AT_ROLES), "base_url": _S(), "model": _S(),
+    "api_mode": _f("string", required=False,
+                   enum=("", "auto", "ollama", "anthropic", "chat_completions", "responses")),
+    "api_key": _S(False),
+}
+EVENT_FIELDS["model_window"] = {"request_id": _S(), "role": _f("string", enum=LIST_MODELS_AT_ROLES),
+                                "model": _S(), "window": _I(), "error": _S(False)}
+
 # ---- ChatDGC: chats of their own, the same in every folder ----------------------------------------
 # The process's, never a session's: the router answers every chatdgc_* command itself and none of
 # their events carries the envelope's chat_id (that name is the session router's), so a conversation

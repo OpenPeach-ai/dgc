@@ -17,7 +17,14 @@
 //   row: { value, name, desc, caps: ["thinks", "images"], cloud, current, pills: [[label, tone]],
 //          actions: [{id, label, disabled}], disabled, title }
 //   on: { pick(row, connection), thinking(value, {keys}), thinkingRest(), select(connection), search(),
-//         action(id, {connection, row, text}), tab(id), setting(id, value), close() }
+//         action(id, {connection, row, text}), tab(id), setting(id, value), close(),
+//         pageThinking(value, {keys}), pageWindow(tokens, {keys, typed}), back(), done() }
+//   The second page (the Sub-agents tab, 17 Nov): while `view.page` is set, the dialog shows it in place of the list:
+//     page: { key, name, conn, label, back, done, none,
+//             thinking: { label, levels: [{value, label, title, now}], value, disabled },
+//             window: { label, value, max, checking, same, unknown, disabled } }   // value/max in tokens; 0 = same/unknown
+//   It offers only the sizes the model takes (windowSizes); Custom… takes a size typed as Settings' box does. Back and
+//   Escape call on.back (the page clears `page`); Done calls on.done.
 //
 // A classic script, like media/shared/menu.js: Work's and ChatDGC's pages load it before their own script and the Pips
 // bundle imports it, so all three share window.DgcModelPicker. The extension's host imports it too, for `markOf`: which
@@ -128,10 +135,11 @@
     plug: '<path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v2.3a3.5 3.5 0 0 1-7 0zM8 11.3v2.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',
     more: '<circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/>',
     refresh: '<path d="M12.6 6.2A5 5 0 1 0 13 8.6M12.8 3v3.4H9.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    back: '<path d="M13 8H3.5M7.5 3.8L3.3 8l4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
   };
   const glyph = (name, cls = "") => `<svg class="dgc-mp-glyph${cls ? ` ${cls}` : ""}" viewBox="0 0 16 16" aria-hidden="true" focusable="false">${GLYPH[name] || ""}</svg>`;
   /** One action, one icon: Add, Settings and Close are the shared ones (media/shared/icons.js) where that is loaded. */
-  const actionIcon = (name) => (root && root.DgcIcons && ["add", "settings", "close"].includes(name) ? root.DgcIcons.html(name, { cls: "dgc-mp-glyph" }) : glyph(name));
+  const actionIcon = (name) => (root && root.DgcIcons && ["add", "settings", "close", "back"].includes(name) ? root.DgcIcons.html(name, { cls: "dgc-mp-glyph" }) : glyph(name));
   const CAP_WORDS = { thinks: "Thinks", images: "Takes images" };
 
   // ---- what DGC knows about a model by its name ----------------------------------------------------------------------
@@ -185,6 +193,49 @@
     return [...(local.length ? [{ title: "On this computer", rows: local }] : []), { title: "Cloud", rows: cloud.map((row) => ({ ...row, cloud: true })) }];
   }
 
+  // ---- a context window's sizes (the Sub-agents page) ---------------------------------------------------------------
+  // The sizes offered for a model's window: 4K to 1M (1,048,576), only those it takes, with its own largest last when
+  // that is not one of them. A size is typed as Settings' box takes one (src/contextCombo.js, the same rules):
+  // "24K", "24k", "24576" or "24,576"; DGC needs 2K at least and takes 16,384K at most (dgc/config.py).
+  const WINDOW_STEPS = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
+  const WINDOW_MIN = 2048, WINDOW_MAX = 16777216;
+  /** "16K", "1M", "200K" (a window of 200,000), else the number with its commas; "" for none. */
+  function sizeWords(tokens) {
+    const n = Number(tokens) || 0;
+    if (n <= 0) return "";
+    if (n % 1048576 === 0) return `${n / 1048576}M`;
+    if (n % 1024 === 0) return `${n / 1024}K`;
+    if (n % 1000 === 0) return `${n / 1000}K`;
+    return n.toLocaleString("en-US");
+  }
+  /** The sizes to offer: the steps at or under `max` (every one when it is unknown, 0), `max` last when it is not a
+   *  step, and `value` (what is set now) wherever it falls. */
+  function windowSizes(max = 0, value = 0) {
+    const top = Number(max) > 0 ? Math.min(WINDOW_MAX, Math.floor(Number(max))) : 0;
+    const list = WINDOW_STEPS.filter((n) => !top || n <= top);
+    if (top >= WINDOW_MIN && !list.includes(top)) list.push(top);
+    const now = Number(value) || 0;
+    if (now > 0 && !list.includes(now)) list.push(now);
+    return list.sort((a, b) => a - b);
+  }
+  /** What a typed size is, in tokens: a number, "" (nothing typed) or null (not a size). */
+  function parseSize(text) {
+    const raw = String(text == null ? "" : text).trim().toLowerCase().replace(/[,_\s]/g, "");
+    if (!raw) return "";
+    const scale = raw.endsWith("k") ? 1024 : 1, digits = scale > 1 ? raw.slice(0, -1) : raw;
+    if (!/^\d+(\.\d+)?$/.test(digits) || (scale === 1 && !/^\d+$/.test(digits))) return null;
+    const tokens = Math.round(Number(digits) * scale);
+    return Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null;
+  }
+  /** The one line for a typed size that can't be saved, or "". */
+  function sizeProblem(tokens, max = 0) {
+    if (tokens === "" || tokens === null) return "Type a size like 24K or 24576.";
+    if (tokens < WINDOW_MIN) return "Below 2K: DGC needs at least 2K (2,048 tokens) for its own instructions.";
+    if (tokens > WINDOW_MAX) return "DGC takes up to 16,384K (16,777,216 tokens).";
+    if (max > 0 && tokens > max) return `This model takes up to ${sizeWords(max)}: type that or less.`;
+    return "";
+  }
+
   // ---- the picker -----------------------------------------------------------------------------------------------------
   const SHORT = { "Extra High": "X-High", "Extra high": "X-High" };      // a level said short, where every word would not fit one line
   let serial = 0;
@@ -201,11 +252,12 @@
       + `<div class="dgc-mp-pane" role="tabpanel"><label class="dgc-mp-search">${glyph("search")}<input type="text" inputmode="search" enterkeyhint="search" class="dgc-mp-q" data-k="q" placeholder="Search models" aria-label="Search models" autocomplete="off" spellcheck="false" aria-controls="${id}-list"></label>`
       + `<div class="dgc-mp-card"><div class="dgc-mp-head"></div><div class="dgc-mp-list" id="${id}-list" role="listbox" aria-label="Models"></div><div class="dgc-mp-under"></div>`
       + `<div class="dgc-mp-think"></div><div class="dgc-mp-settings" hidden></div></div></div></div>`
+      + `<div class="dgc-mp-page" role="group" hidden></div>`
       + `<div class="dgc-mp-live" role="status" aria-live="polite"></div></div>`;
     const box = layer.firstElementChild;
     const $ = (cls) => box.querySelector(`.dgc-mp-${cls}`);
     const search = $("q");
-    let state = { sel: "", query: "", more: "", typing: "", open: true, asked: false, first: true };
+    let state = { sel: "", query: "", more: "", typing: "", open: true, asked: false, first: true, custom: false, customText: "", wrong: "", pageKey: "" };
     let data = view;
 
     const conns = () => (Array.isArray(data.connections) ? data.connections : []);
@@ -215,13 +267,15 @@
     const focused = () => { const a = (layer.getRootNode && layer.getRootNode().activeElement) || doc.activeElement; return a && box.contains(a) ? a : null; };
     const byKey = (key) => [...box.querySelectorAll("[data-k]")].find((n) => n.dataset.k === key) || null;
     const say = (words) => { $("live").textContent = words; };
+    /** Which page is showing: "" for the list; another model's page is another page. */
+    const pageKeyOf = (p) => (p && typeof p === "object" ? `p:${p.key || p.name || ""}` : "");
 
     function rowHtml(conn, row, found) {
       const key = keyOf(conn, row), on = row.current === true, off = row.disabled === true || data.locked === true;
       const caps = (Array.isArray(row.caps) ? row.caps : []).filter((cap) => CAP_WORDS[cap]);
       const marks = (row.cloud ? `<span class="dgc-mp-cap" data-cap="cloud" title="Runs in Ollama’s cloud" role="img" aria-label="Runs in Ollama’s cloud">${glyph("cloud")}</span>` : "")
         + caps.map((cap) => `<span class="dgc-mp-cap" data-cap="${cap}" title="${CAP_WORDS[cap]}" role="img" aria-label="${CAP_WORDS[cap]}">${glyph(cap)}</span>`).join("");
-      const pills = (Array.isArray(row.pills) ? row.pills : []).map(([label, tone]) => `<span class="dgc-menu-pill${tone ? ` dgc-menu-pill-${esc(tone)}` : ""}">${esc(label)}</span>`).join("");
+      const pills = (Array.isArray(row.pills) ? row.pills : []).map(([label, tone]) => `<span class="dgc-menu-pill dgc-mp-tag${tone ? ` dgc-menu-pill-${esc(tone)}` : ""}">${esc(label)}</span>`).join("");
       const sub = [found ? conn.name : "", row.desc || ""].filter(Boolean).join(" · ");
       const button = `<button type="button" role="option" class="dgc-menu-row dgc-mp-row${sub ? " dgc-menu-row-sub" : ""}" data-k="${esc(key)}" data-conn="${esc(conn.id)}" data-value="${esc(row.value)}" aria-selected="${on}" tabindex="-1"${off ? ' aria-disabled="true"' : ""}${row.title ? ` title="${esc(row.title)}"` : ""}>`
         + (found ? markHtml(conn.mark, conn.name, "dgc-mp-row-mark") : "")
@@ -320,6 +374,53 @@
           : `<div class="dgc-mp-seg" role="radiogroup" aria-labelledby="${id}-think" style="--mp-levels:${levels.length}">${levels.map((l, i) => `<button type="button" role="radio" class="dgc-mp-level" data-k="t:${esc(l.value)}" data-level="${esc(l.value)}" aria-checked="${i === at}" tabindex="${i === at ? 0 : -1}"${t.disabled || data.locked ? " disabled" : ""}${l.title ? ` title="${esc(l.title)}"` : ""}><span class="dgc-mp-level-word" data-short="${esc(l.short || SHORT[l.label] || l.label)}">${esc(l.label)}</span></button>`).join("")}</div>`)
         + noteHtml(t.note);
     }
+    // ---- the second page (the Sub-agents tab: a model chosen, then how they think and their window) ----
+    // Its head: Back, the model's name and its connection's under it; then Their thinking (the Thinking row's control),
+    // Their context window (Same, then only the sizes the model takes, then Custom…, typed right there), and Done.
+    function radioRow(group, items, at, labelledBy, off) {
+      return `<div class="dgc-mp-seg${group === "ps" ? " dgc-mp-sizes" : ""}" role="radiogroup" aria-labelledby="${labelledBy}" style="--mp-levels:${group === "ps" ? 4 : items.length}">`
+        + items.map((l, i) => `<button type="button" role="radio" class="dgc-mp-level${group === "ps" ? " dgc-mp-size" : ""}" data-k="${group}:${esc(l.value)}" data-${group === "ps" ? "size" : "pthink"}="${esc(l.value)}" aria-checked="${i === at}" tabindex="${i === at ? 0 : -1}"${off ? " disabled" : ""}${l.title ? ` title="${esc(l.title)}"` : ""}><span class="dgc-mp-level-word" data-short="${esc(l.short || SHORT[l.label] || l.label)}">${esc(l.label)}</span></button>`).join("")
+        + `</div>`;
+    }
+    function pageHtml(p) {
+      const name = String(p.name || ""), off = data.locked === true;
+      let html = `<div class="dgc-mp-page-head"><button type="button" class="dgc-mp-back" data-k="back" data-back="1" aria-label="${esc(p.back || "Back to the models")}" title="Back">${actionIcon("back")}</button>`
+        + `<div class="dgc-mp-page-words"><span class="dgc-mp-page-name" title="${esc(name)}">${esc(name)}</span>${p.conn ? `<span class="dgc-mp-page-conn" title="${esc(p.conn)}">${esc(p.conn)}</span>` : ""}</div></div><div class="dgc-mp-page-body">`;
+      const t = p.thinking;
+      if (t && Array.isArray(t.levels) && t.levels.length) {
+        const levels = t.levels, at = Math.max(0, levels.findIndex((l) => l.value === t.value));
+        html += `<section class="dgc-mp-page-part dgc-mp-page-think"><div class="dgc-mp-think-head"><span class="dgc-mp-meter" aria-hidden="true">${levels.map((_, i) => `<i${i <= at && at > 0 ? ' class="on"' : ""} style="--mp-step:${i}"></i>`).join("")}</span>`
+          + `<span class="dgc-mp-think-name" id="${id}-pthink">${esc(t.label || "Their thinking")}</span><span class="dgc-mp-think-now" data-short="${esc(levels[at].label)}">${esc(levels[at].now || levels[at].label)}</span></div>`
+          + radioRow("pt", levels, at, `${id}-pthink`, off || t.disabled) + `</section>`;
+      }
+      const w = p.window;
+      if (w) {
+        const max = Number(w.max) > 0 ? Number(w.max) : 0, value = Number(w.value) > 0 ? Number(w.value) : 0, same = w.same || "Same as the session";
+        const choices = [{ value: 0, label: "Same", title: same }, ...windowSizes(max, value).map((n) => ({ value: n, label: sizeWords(n), title: `${n.toLocaleString("en-US")} tokens` }))];
+        const at = Math.max(0, choices.findIndex((c) => c.value === value));
+        const line = w.checking ? "Checking this model’s largest window…" : max > 0 ? `This model takes up to ${sizeWords(max)}.` : (w.unknown || "DGC couldn’t learn this model’s largest window, so every size shows.");
+        html += `<section class="dgc-mp-page-part dgc-mp-page-window"><div class="dgc-mp-think-head"><span class="dgc-mp-think-name" id="${id}-pwin">${esc(w.label || "Their context window")}</span><span class="dgc-mp-think-now" data-short="${esc(value ? sizeWords(value) : "Same")}">${esc(value ? sizeWords(value) : same)}</span></div>`
+          + radioRow("ps", choices, at, `${id}-pwin`, off || w.disabled)
+          + (state.custom
+            ? `<div class="dgc-mp-custom-row"><input type="text" class="dgc-mp-custom-input" data-k="custom-in" inputmode="text" enterkeyhint="done" value="${esc(state.customText)}" placeholder="e.g. 24K" aria-label="Their context window, in tokens: a size like 24K or 24576" aria-invalid="${!!state.wrong}"${state.wrong ? ` aria-describedby="${id}-wrong"` : ""} maxlength="32" spellcheck="false" autocomplete="off"><button type="button" class="dgc-btn small dgc-mp-custom-save" data-k="custom-save" data-save="1">Save</button></div>`
+              + (state.wrong ? `<p class="dgc-mp-wrong" id="${id}-wrong" role="alert">${esc(state.wrong)}</p>` : "")
+            : `<div class="dgc-mp-custom-row"><button type="button" class="dgc-btn small dgc-mp-custom" data-k="custom" data-custom="1" aria-expanded="false"${off || w.disabled ? " disabled" : ""}>Custom…</button></div>`)
+          + (state.custom && state.wrong ? "" : `<p class="dgc-mp-note dgc-mp-window-note"${w.checking ? ' data-state="checking"' : ""}>${esc(line)}</p>`) + `</section>`;     // (one line at a time: a wrong size's says it)
+      }
+      if (!(t && t.levels && t.levels.length) && !w && p.none) html += `<p class="dgc-mp-say">${esc(p.none)}</p>`;
+      html += `</div><div class="dgc-mp-page-foot"><button type="button" class="dgc-btn primary dgc-mp-done" data-k="done" data-done="1">${esc(p.done || "Done")}</button></div>`;
+      return html;
+    }
+    function paintPage() {
+      const node = $("page"), p = data.page && typeof data.page === "object" ? data.page : null;
+      node.hidden = !p;
+      $("main").hidden = !!p;
+      box.classList.toggle("dgc-mp-paged", !!p);
+      if (!p) { node.innerHTML = ""; node.removeAttribute("aria-label"); return; }
+      $("tabs").hidden = true;                // (the page is one model's: the way out is Back)
+      node.setAttribute("aria-label", p.label || `${String(p.name || "")} for sub-agents`);
+      node.innerHTML = pageHtml(p);
+    }
     function paintSettings() {
       const node = $("settings"), items = Array.isArray(data.settings) ? data.settings : [];
       node.hidden = !items.length;
@@ -348,7 +449,7 @@
       box.setAttribute("aria-label", data.title || "Model");
       layer.dataset.locked = data.locked ? "1" : "";
       if (!connOf(state.sel)) state.sel = (connOf(data.selected) || conns().find((c) => c.current && !c.disabled) || conns().find((c) => !c.disabled) || conns()[0] || { id: "" }).id;
-      paintTabs(); paintRail(); paintPane(); paintThinking(); paintSettings(); paintFoot();
+      paintTabs(); paintRail(); paintPane(); paintThinking(); paintSettings(); paintFoot(); paintPage();
       const shown = `${data.tab || ""}|${state.query ? "?" : state.sel}`;
       list.dataset.shown = shown;
       const again = key ? byKey(key) : null;
@@ -370,6 +471,8 @@
       if (key && key !== "q") { if (again && again !== was) again.focus({ preventScroll: again.classList.contains("dgc-mp-row") && shown === shownFor }); else if (!again && was && !was.isConnected) rest(); }
       const typed = box.querySelector(".dgc-mp-input");
       if (typed && focused() !== typed && state.typing) typed.focus();
+      const sized = box.querySelector(".dgc-mp-custom-input");
+      if (sized && focused() === sized && key === "custom-in") { const end = sized.value.length; try { sized.setSelectionRange(end, end); } catch { /* (not a text field) */ } }
       // (Drawn again while it is open: it does not arrive a second time. media/shared/dialog.css)
       if (!state.first) layer.classList.add("dgc-still");
       state.first = false;
@@ -404,9 +507,32 @@
     // What happens in the picker stays in it: the page under it has its own click and key handlers (a Pip's view reads
     // every click's data), and none of them is meant for the picker's rows.
     for (const type of ["click", "dblclick", "keydown", "keyup", "keypress", "input", "change", "submit"]) layer.addEventListener(type, (event) => event.stopPropagation());
+    /** Back (or Escape on the page): the list again, the focus on the chosen model. */
+    function goBack() {
+      state.custom = false; state.wrong = ""; state.customText = "";
+      if (typeof on.back === "function") on.back();
+    }
+    function openCustom() { state.custom = true; state.wrong = ""; paint(); byKey("custom-in")?.focus(); }
+    function closeCustom() { state.custom = false; state.wrong = ""; state.customText = ""; paint(); byKey("custom")?.focus(); }
+    /** Custom…'s size, typed: saved when it is one DGC takes and the model takes; else the one line says why. */
+    function saveCustom() {
+      const p = data.page || {}, w = p.window || {}, tokens = parseSize(state.customText), problem = sizeProblem(tokens, Number(w.max) || 0);
+      if (problem) { state.wrong = problem; paint(); byKey("custom-in")?.focus(); say(problem); return; }
+      state.custom = false; state.wrong = ""; state.customText = "";
+      if (typeof on.pageWindow === "function") on.pageWindow(tokens, { keys: false, typed: true });
+      paint();
+      byKey(`ps:${tokens}`)?.focus();
+    }
+    box.addEventListener("input", (event) => { if (event.target.classList && event.target.classList.contains("dgc-mp-custom-input")) { state.customText = event.target.value; if (state.wrong) { state.wrong = ""; const line = box.querySelector(".dgc-mp-wrong"); if (line) line.remove(); event.target.setAttribute("aria-invalid", "false"); event.target.removeAttribute("aria-describedby"); } } });
     box.addEventListener("click", (event) => {
       const t = event.target.closest ? event.target.closest("button, [data-rail]") : null;
       if (!t || !box.contains(t)) return;
+      if (t.dataset.back !== undefined) { goBack(); return; }
+      if (t.dataset.done !== undefined) { if (typeof on.done === "function") on.done(); else close("done"); return; }
+      if (t.dataset.pthink !== undefined) { if (typeof on.pageThinking === "function") on.pageThinking(t.dataset.pthink, { keys: false }); return; }
+      if (t.dataset.size !== undefined) { if (typeof on.pageWindow === "function") on.pageWindow(Number(t.dataset.size) || 0, { keys: false }); return; }
+      if (t.dataset.custom !== undefined) { openCustom(); return; }
+      if (t.dataset.save !== undefined) { saveCustom(); return; }
       if (t.dataset.tab !== undefined) { if (t.dataset.tab !== data.tab && typeof on.tab === "function") on.tab(t.dataset.tab); return; }
       if (t.dataset.rail !== undefined) { select(t.dataset.rail, { focusRail: true }); return; }
       if (t.dataset.more !== undefined) {
@@ -416,7 +542,15 @@
         return;
       }
       const conn = connOf(t.dataset.conn || ""), row = conn ? rowsOf(conn).find((r) => String(r.value) === t.dataset.value) : null;
-      if (t.dataset.act !== undefined) { state.more = ""; if (typeof on.action === "function") on.action(t.dataset.act, { connection: conn, row }); return; }
+      if (t.dataset.act !== undefined) {
+        const was = state.more;
+        state.more = "";
+        if (typeof on.action === "function") on.action(t.dataset.act, { connection: conn, row });
+        // (The choice made, its list folds and the focus is back on the row's ⋯, where it was opened.)
+        if (state.open && box.querySelector(".dgc-mp-choices")) paint();
+        if (state.open && !data.page) byKey(`m:${was}`)?.focus();
+        return;
+      }
       if (t.classList.contains("dgc-mp-row")) {
         if (t.getAttribute("aria-disabled") === "true" || !row) return;
         if (typeof on.pick === "function") on.pick(row, conn);
@@ -454,6 +588,8 @@
       const t = event.target, key = event.key;
       if (key === "Escape") {
         event.preventDefault(); event.stopPropagation();
+        if (data.page && state.custom) { closeCustom(); return; }
+        if (data.page) { goBack(); return; }
         if (state.typing) { const back = state.typing; state.typing = ""; paint(); byKey(back)?.focus(); return; }
         if (state.query) { state.query = ""; search.value = ""; paint(); search.focus(); say("Search cleared"); return; }
         close("escape"); return;
@@ -461,9 +597,27 @@
       if (key === "Tab") {
         const stops = [...box.querySelectorAll("button, input, select")].filter((n) => !n.disabled && n.tabIndex >= 0 && n.getClientRects().length);
         if (!stops.length) return;
-        const at = stops.indexOf(t);
-        const next = event.shiftKey ? (at <= 0 ? stops[stops.length - 1] : stops[at - 1]) : (at < 0 || at === stops.length - 1 ? stops[0] : stops[at + 1]);
+        // A radio the arrows moved to (not the group's stop yet, until the page answers) stands for its group.
+        const anchor = stops.includes(t) ? t : (t.getAttribute && t.getAttribute("role") === "radio" && t.parentElement ? [...t.parentElement.children].find((n) => stops.includes(n)) : null) || t;
+        let at = stops.indexOf(anchor);
+        if (at < 0) { const later = stops.findIndex((n) => t.compareDocumentPosition(n) & 4); at = later < 0 ? stops.length : later; if (!event.shiftKey) at -= 1; }
+        const next = event.shiftKey ? (at <= 0 ? stops[stops.length - 1] : stops[at - 1]) : (at < 0 || at >= stops.length - 1 ? stops[0] : stops[at + 1]);
         event.preventDefault(); event.stopPropagation(); next.focus(); return;
+      }
+      if (t.classList.contains("dgc-mp-custom-input")) {
+        if (key === "Enter") { event.preventDefault(); saveCustom(); }
+        event.stopPropagation(); return;
+      }
+      if (t.dataset.pthink !== undefined || t.dataset.size !== undefined) {
+        const group = [...t.parentElement.querySelectorAll("button:not(:disabled)")], at = group.indexOf(t);
+        const to = key === "ArrowRight" || key === "ArrowDown" ? group[Math.min(group.length - 1, at + 1)] : key === "ArrowLeft" || key === "ArrowUp" ? group[Math.max(0, at - 1)] : key === "Home" ? group[0] : key === "End" ? group[group.length - 1] : null;
+        if (!to) return;
+        event.preventDefault(); event.stopPropagation();
+        if (to === t) return;
+        // A radio group: the choice follows the focus (the page waits for the keys to rest before it tells DGC).
+        if (to.dataset.pthink !== undefined) { if (typeof on.pageThinking === "function") on.pageThinking(to.dataset.pthink, { keys: true }); byKey(`pt:${to.dataset.pthink}`)?.focus(); }
+        else { if (typeof on.pageWindow === "function") on.pageWindow(Number(to.dataset.size) || 0, { keys: true }); byKey(`ps:${to.dataset.size}`)?.focus(); }
+        return;
       }
       if (t.classList.contains("dgc-mp-input")) {
         if (key === "Enter") { event.preventDefault(); const text = t.value.trim(); if (text && typeof on.action === "function") on.action(t.dataset.typed, { connection: connOf(t.dataset.conn), row: null, text }); }
@@ -534,7 +688,7 @@
     for (const type of ["keydown", "pointerdown"]) box.addEventListener(type, () => { waiting = false; }, true);
     paint({ keep: false });
     railIntoView();
-    rest();
+    if (data.page) byKey("back")?.focus(); else rest();
     return {
       el: layer,
       isOpen: () => state.open,
@@ -542,13 +696,20 @@
       update(next) {
         if (!state.open) return;
         const turned = (next.tab || "") !== (data.tab || "");       // another tab is another list: it opens on its own choice
+        const before = pageKeyOf(data.page), after = pageKeyOf(next.page);
         data = next;
         if (turned) { state.sel = ""; state.more = ""; state.typing = ""; state.query = ""; search.value = ""; }
+        if (before !== after) { state.custom = false; state.wrong = ""; state.customText = ""; }
         paint();
         if (turned) railIntoView();
+        // The page opens on its Back; leaving it, the focus is on the model it was for (the chosen row).
+        if (after && before !== after) { byKey("back")?.focus(); waiting = false; return; }
+        if (before && !after) { const row = rove() && $("list").querySelector('.dgc-mp-row[aria-selected="true"]'); if (row) { row.focus(); if (row.scrollIntoView) row.scrollIntoView({ block: "nearest" }); waiting = false; return; } }
         const at = focused();
         if (!at || at === box || (waiting && !state.query)) rest();   // (its first data arriving, or the focused part gone)
       },
+      /** Whether the second page is showing. */
+      paged: () => !!data.page,
       /** Show one connection (a page that just asked for its models). */
       show(cid) { if (state.open && connOf(cid)) select(cid); },
       selected: () => (state.query ? "" : state.sel),
@@ -556,5 +717,6 @@
     };
   }
 
-  return { open, markOf, tipOf, markHtml, glyph, facts, versionLabel, claudeRows, ollamaSections, isCloudModel, MARK_NAMES, PROVIDER_MARKS, CAP_WORDS };
+  return { open, markOf, tipOf, markHtml, glyph, facts, versionLabel, claudeRows, ollamaSections, isCloudModel, sizeWords, windowSizes, parseSize, sizeProblem,
+    WINDOW_STEPS, MARK_NAMES, PROVIDER_MARKS, CAP_WORDS };
 });
