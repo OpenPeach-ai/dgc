@@ -749,6 +749,41 @@ def _is_cache(path: str) -> bool:
     return any(part in _CACHE_DIRS for part in parts[:-1]) or path.endswith((".pyc", ".pyo"))
 
 
+# What a tool writes rather than a person: a test run's coverage and result reports, a package build. A file like
+# this that was uncommitted before a delegation never refuses the helper's hand-back on its own (the goal soak, 16
+# Nov: a helper's regenerated coverage.json held back all of its work). Only a file Git doesn't track can be one: a
+# tracked file is somebody's source, whatever it is called. Git's own ignore rules are asked first
+# (TaskWorkspace._generated); these names only cover the common ones a project forgot to ignore.
+_GENERATED_NAMES = frozenset({".coverage", "coverage.json", "coverage.xml", "coverage.lcov", "lcov.info",
+                              "junit.xml", ".testmondata"})
+_GENERATED_DIRS = frozenset({"htmlcov", ".nyc_output", "dist"})
+
+
+def _generated_by_name(path: str) -> bool:
+    parts = path.split("/")
+    name = parts[-1]
+    return (name in _GENERATED_NAMES or name.startswith(".coverage.")
+            or any(part in _GENERATED_DIRS or part.endswith(".egg-info") for part in parts[:-1]))
+
+
+def _ignored_paths(root: Path, paths) -> set[str]:
+    """The ones among `paths` (repo-relative) that Git's ignore rules match in the checkout at `root`, tracked or not.
+    Best-effort: a failure reports none, so a file is never treated as generated on a guess."""
+    paths = sorted(paths)
+    if not paths:
+        return set()
+    try:
+        out = _git_bytes(["ls-files", "--ignored", "--exclude-standard", "--cached", "--others", "-z", "--",
+                          *paths], root)
+    except Exception:
+        return set()
+    if out.returncode != 0:
+        return set()
+    wanted = set(paths)
+    return {name for name in (os.fsdecode(raw) for raw in (out.stdout or b"").split(b"\0") if raw)
+            if name in wanted}
+
+
 def _gitlink_paths(repo: Path, project_rel: Path) -> set[str]:
     """Submodule paths, by index mode. `git ls-files --stage` writes mode 160000 for a gitlink."""
     pathspec = str(project_rel) if project_rel != Path(".") else "."
@@ -1220,6 +1255,35 @@ class TaskIntegration:
     left_out: list[str] = field(default_factory=list)
 
 
+def session_written(workspace, left_hash) -> frozenset:
+    """The uncommitted files of a fresh copy that hold exactly what the delegating session itself last wrote there.
+
+    The goal soak (16 Nov) found 7 of 9 hand-backs refused as "changed files that were already dirty before
+    delegation": the dirty files were the session's own edits, not yet committed. `left_hash` is the session's own
+    record (CheckpointManager.left_hash: sha256 of what one of its file tools, its commands or an integration last
+    left in a file, "" for one it removed). A file counts only when the bytes copied into the helper's copy are
+    exactly those, never by its path alone: a file the user changed since holds something else, and stays theirs.
+    A file the copy left out is never one of these (it is not in `baseline`).
+    """
+    if not callable(left_hash):
+        return frozenset()
+    repo = Path(getattr(workspace, "repo", ""))
+    dirty = getattr(workspace, "initial_dirty", ()) or ()
+    own = set()
+    for repo_path, state in (getattr(workspace, "baseline", None) or {}).items():
+        if repo_path not in dirty:
+            continue
+        target = repo / repo_path
+        try:
+            recorded = {left_hash(str(target)), left_hash(str(target.resolve(strict=False)))} - {None}
+        except Exception:
+            continue
+        digest = "" if state.kind == "missing" else hashlib.sha256(state.data).hexdigest()
+        if digest in recorded:
+            own.add(repo_path)
+    return frozenset(own)
+
+
 @dataclass
 class TaskWorkspace:
     source_root: Path
@@ -1242,8 +1306,9 @@ class TaskWorkspace:
     # treats such a file like any other: applied when untouched since, merged or held back if not.
     # A class attribute, not a field: every construction of this dataclass is positional.
     protect_dirty = True
-    # Uncommitted files that are a continued helper's OWN earlier work, exactly as it landed (dgc/helper_memory.py):
-    # not the user's, so its next run's change to them integrates like any file's. Set per checkout.
+    # Uncommitted files that are not the user's: ones holding exactly what this session itself last wrote there
+    # (session_written, set by `prepare`), and a continued helper's own earlier work exactly as it landed
+    # (dgc/helper_memory.py). A helper's change to one integrates like any file's. Set per checkout.
     own_dirty: frozenset = frozenset()
     # The user's untracked files this copy has no room for (_populate), each with what lstat said
     # about it then (_lstat_print, or None). They are in `initial_dirty`, never in `baseline`, and
@@ -1254,7 +1319,10 @@ class TaskWorkspace:
 
     @classmethod
     def prepare(cls, source_root: Path, name: str, storage_root: Path | None = None,
-                link_paths=()) -> tuple["TaskWorkspace | None", str | None]:
+                link_paths=(), left_hash=None) -> tuple["TaskWorkspace | None", str | None]:
+        """A helper's fresh copy of the project. `left_hash` is the delegating session's record of what it last wrote
+        in a file (CheckpointManager.left_hash): an uncommitted file still holding exactly that is the session's own
+        work, not the user's (session_written)."""
         source_root = Path(source_root).resolve(strict=False)
         repo = repo_root(source_root)
         if repo is None:
@@ -1312,6 +1380,7 @@ class TaskWorkspace:
         try:
             # The same copy a kept checkout gets (KeptTaskWorkspace.sync): one rule for both.
             task._populate()
+            task.own_dirty = session_written(task, left_hash)
             # LAST: after the baseline is copied and verified, so a link can never be mistaken for
             # source state that changed mid-isolation.
             task._link_shared(link_paths)
@@ -1416,6 +1485,19 @@ class TaskWorkspace:
     def _expected(self, repo_path: str) -> _FileState:
         return self.baseline.get(repo_path) or _head_state(self.repo, self.base_commit, repo_path)
 
+    def _generated(self, paths) -> set[str]:
+        """The ones among `paths` that are generated files (see _GENERATED_NAMES): untracked at the base commit, and
+        either ignored by Git (in the user's checkout or in this one) or named like a typical tool output."""
+        untracked = set()
+        for repo_path in paths:
+            try:
+                if _head_state(self.repo, self.base_commit, repo_path).kind == "missing":
+                    untracked.add(repo_path)
+            except Exception:
+                pass
+        ignored = _ignored_paths(self.repo, untracked) | _ignored_paths(self.path, untracked)
+        return {path for path in untracked if path in ignored or _generated_by_name(path)}
+
     def changed_paths(self) -> list[str]:
         # A left-out path is a candidate only when this checkout now holds a file there: one the
         # helper made. Its absence is how the copy was made, never a deletion.
@@ -1500,6 +1582,11 @@ class TaskWorkspace:
                       and path not in held_set]
                      if self.protect_dirty else [])
         if protected:
+            # A generated file (a coverage report, a build) is no one's unsaved work: it never refuses a hand-back on
+            # its own, and lands like any file. A file the user wrote stays protected beside it.
+            generated = self._generated(protected)
+            protected = [path for path in protected if path not in generated]
+        if protected:
             conflicts = [self._display_path(path) for path in [*protected, *held_out]]
             reason = "sub-agent changed files that were already dirty before delegation"
             if held_out:
@@ -1539,10 +1626,10 @@ class TaskWorkspace:
                 # sides touched the same lines. Reconcile them, and keep the child's work on this
                 # file -- and on every other file in the delta -- when they did not.
                 #
-                # Nothing dirty before delegation reaches here: `protected` is checked above and
-                # returns first, so a file the user already had uncommitted work in is still
-                # refused outright rather than merged into. That ordering is the whole safety
-                # argument, and tests/test_task_merge.py holds it.
+                # Nothing the user had uncommitted work in reaches here: `protected` is checked above
+                # and returns first, so such a file is still refused outright rather than merged
+                # into (the session's own uncommitted edits and generated files do reach here). That
+                # ordering is the whole safety argument, and tests/test_task_merge.py holds it.
                 union = _merge_file(expected[repo_path], prior[repo_path], child[repo_path],
                                     self.repo)
                 if union is None:

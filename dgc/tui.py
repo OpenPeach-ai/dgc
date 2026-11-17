@@ -1771,7 +1771,7 @@ class TUI:
             return
         if action == "show" and len(parts) == 2:
             from .tools import bash_output
-            out = bash_output({"id": parts[1]}, self.agent.ctx)
+            out = bash_output({"id": parts[1]}, self.agent.ctx, model_look=False)
             self.blocks.append({"kind": "tool", "name": "bash_output", "route_name": "bash_output",
                                 "call_id": None, "summary": parts[1], "running": False,
                                 "error": out.startswith("no bash output"),

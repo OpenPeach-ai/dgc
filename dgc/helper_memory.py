@@ -890,7 +890,8 @@ def _start(parent, agent_id, record, text, *, by, background, call_id, descripti
             configured = str(parent.config.get("subagent_worktree_root", "") or "").strip()
             workspace, isolation_error = TaskWorkspace.prepare(
                 root, description or "delegated-work", Path(configured) if configured else None,
-                link_paths=parent._subagent_link_paths())
+                link_paths=parent._subagent_link_paths(),
+                left_hash=getattr(getattr(parent, "checkpoints", None), "left_hash", None))
         except Exception as exc:                        # noqa: BLE001 -- said, never thrown
             isolation_error = f"{type(exc).__name__}: {exc}"
     finally:
@@ -900,8 +901,9 @@ def _start(parent, agent_id, record, text, *, by, background, call_id, descripti
                                      f"{(isolation_error or 'unknown error').rstrip('.')}. Nothing was changed.")
     if workspace is not None:
         # Uncommitted files that hold exactly what it landed last are its own work: its next change to them lands
-        # like any file's. A file the user changed since is theirs, and keeps the standing rule.
-        workspace.own_dirty = own_dirty(workspace, record)
+        # like any file's. A file the user changed since is theirs, and keeps the standing rule. (The session's own
+        # edits, which `prepare` already found, stay its own too.)
+        workspace.own_dirty = frozenset(workspace.own_dirty) | own_dirty(workspace, record)
     copy_root = str(workspace.project_root) if workspace is not None else ""
     earlier_held = copy.deepcopy(record.get("held")) if isinstance(record.get("held"), dict) else None
     changed = changed_since(root, record.get("project")) if record.get("project") else None

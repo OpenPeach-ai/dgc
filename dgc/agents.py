@@ -44,6 +44,16 @@ _HANDOFF = (
     "`FILES: path[, path…]` naming every file you wrote or the files a reader should open. If you "
     "wrote nothing, omit FILES."
 )
+# A reviewer judges the work against what was asked, never against what it would have asked for. The goal soak (16
+# Nov): critics found committed items unmet against requirements no plan had written ("100 seeded-random cases",
+# "365 days of moon phases"), and the model reworked those items to satisfy them.
+_STATED_ONLY = (
+    "Judge it against the requirements the task, its objective and its plan actually state. Quote each requirement "
+    "you check, word for word, and say whether the evidence meets it. A real defect (a wrong result, a crash, broken "
+    "behaviour, a failing test) always counts, stated or not. What never counts as unmet is a NEW requirement the task "
+    "didn't state (more cases, more checks, another design): put those under a separate heading, \"Suggestions (not "
+    "required)\"."
+)
 
 
 @dataclass
@@ -86,9 +96,9 @@ def builtin_agents() -> dict[str, AgentDef]:
             name="critic", builtin=True,
             tools=_READS + ", edit_file, write_file, multi_edit",
             description="Review named files or a change; correct them or list blocking issues",
-            body="You are a critic. Review the files or change named in the task against its "
-                 "requirements: correctness, missed cases, tests. Correct those files or list "
-                 "blocking issues. Do not implement the surrounding feature.\n" + _HANDOFF),
+            body="You are a critic. Review the files or change named in the task: correctness, missed cases, "
+                 "tests. " + _STATED_ONLY + " Correct those files or list blocking issues, each tied to a quoted "
+                 "requirement. Do not implement the surrounding feature.\n" + _HANDOFF),
         # A troupe has its own verifier (troupe_agent.ROLE: read only, answers in JSON); this one is for `task`, and
         # verifying a change usually means running its tests, in the child's own checkout.
         "verifier": AgentDef(
@@ -96,8 +106,8 @@ def builtin_agents() -> dict[str, AgentDef]:
             description="Try to disprove a claim or change by running checks; edits nothing",
             body="You are a verifier. Try to prove the claim or change named in the task wrong: read what it "
                  "names and run the tests or commands that would show it fails. Do not edit or write files. "
-                 "Start with CONFIRMED, REFUTED or UNSURE, then the evidence: path:line references and each "
-                 "command you ran with its result.\n" + _HANDOFF),
+                 + _STATED_ONLY + " Start with CONFIRMED, REFUTED or UNSURE, then the evidence: path:line "
+                 "references and each command you ran with its result.\n" + _HANDOFF),
         "worker": AgentDef(
             name="worker", builtin=True, tools="",
             description="Do a job: make the change and run its checks until done",

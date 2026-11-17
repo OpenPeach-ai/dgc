@@ -234,7 +234,9 @@ class TroupeRunner(troupe.Runner):
             configured = str(agent.config.get("subagent_worktree_root", "") or "").strip()
             workspace, error = TaskWorkspace.prepare(agent.config.project_root, f"troupe-{label}",
                                                      Path(configured) if configured else None,
-                                                     link_paths=agent._subagent_link_paths())
+                                                     link_paths=agent._subagent_link_paths(),
+                                                     left_hash=getattr(getattr(agent, "checkpoints", None),
+                                                                       "left_hash", None))
         except Exception as exc:                 # noqa: BLE001
             workspace, error = None, f"{type(exc).__name__}: {exc}"
         finally:

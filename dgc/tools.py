@@ -2745,7 +2745,51 @@ def _adopt_foreground(proc, command: str, ctx, capture, route: dict, route_lock,
     return bid
 
 
-def bash_output(args: dict, ctx) -> str:
+# Checking a running task again when nothing has changed since the last look waits for something to change, up to
+# this long, then answers (the goal soak, 16 Nov: 233 of 270 steps in one hour were "still waiting" checks, each a
+# whole model request). Two minutes is the longest a foreground command already holds a turn by default (bash's
+# 120 s timeout), so a wait never keeps the person's next message waiting longer than a command could.
+REPEAT_CHECK_WAIT_S = 120.0
+_REPEAT_CHECK_STEP_S = 0.1
+
+
+def _bg_state(entry: dict) -> tuple:
+    """What a look at a background shell can see change: how much it has printed, and how it is running."""
+    return (int(entry.get("bytes_written") or 0), entry["proc"].poll() is None, entry.get("finished") is None)
+
+
+def _wait_for_change(entry: dict, ctx) -> tuple[float, bool]:
+    """Wait while a running shell shows nothing new since this caller's last look: (seconds waited, whether it
+    changed). (0, False) when there is nothing to wait for.
+
+    Only a look at the newest output of a shell still running waits, only when the last look saw this very state, and
+    never past REPEAT_CHECK_WAIT_S or a Stop."""
+    with entry["lock"]:
+        state = _bg_state(entry)
+        if entry.get("finished") is not None or entry.get("last_look") != state:
+            return 0.0, False
+    cancelled = getattr(ctx, "cancelled", None)
+    started = time.monotonic()
+    deadline = started + max(0.0, float(REPEAT_CHECK_WAIT_S))
+    changed = False
+    while time.monotonic() < deadline:
+        if cancelled is not None and cancelled.is_set():
+            break
+        with entry["lock"]:
+            if _bg_state(entry) != state:
+                changed = True
+                break
+        step = min(_REPEAT_CHECK_STEP_S, max(0.0, deadline - time.monotonic()))
+        if cancelled is not None and hasattr(cancelled, "wait"):
+            cancelled.wait(step)
+        else:
+            time.sleep(step)
+    return time.monotonic() - started, changed
+
+
+def bash_output(args: dict, ctx, *, model_look: bool = True) -> str:
+    """The tool. `model_look=False` is a person's own look (the terminal's /monitors show): it never waits and is not
+    the model's last look."""
     _reap_background()
     _reap_outputs()
     bid = str(args.get("id", ""))
@@ -2753,11 +2797,22 @@ def bash_output(args: dict, ctx) -> str:
     with _BG_LOCK:
         e = _BG.get(bid)
     if e is not None and e.get("owner") == owner:
+        # A look at the newest output (no offset, no query) of a shell that shows nothing new since the last such look
+        # waits for a change first, so checking again and again costs nothing (_wait_for_change).
+        newest = model_look and args.get("offset") is None and not args.get("query")
+        waited, changed = _wait_for_change(e, ctx) if newest else (0.0, False)
         with e["lock"]:
             snapshot = dict(e)
             snapshot["buf"] = list(e["buf"])
+            if newest:
+                e["last_look"] = _bg_state(e)
         snapshot["text"] = "".join(snapshot["buf"])
-        return _render_output(bid, snapshot, args, background=True)
+        rendered = _render_output(bid, snapshot, args, background=True)
+        cancelled = getattr(ctx, "cancelled", None)
+        if waited and not changed and not (cancelled is not None and cancelled.is_set()):
+            rendered += (f"\n(Nothing new since your last check: DGC waited {int(round(waited))} s for new output "
+                         "before answering.)")
+        return rendered
     with _OUTPUT_LOCK:
         output = _OUTPUTS.get(bid)
         output = dict(output) if output is not None and output.get("owner") == owner else None

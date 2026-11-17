@@ -4626,15 +4626,17 @@ class Backend:
                     if notification is not None:
                         outcome = self.agent.run_monitor_turn(notification, reset_cancel=False)
                     elif wakeup is not None:
+                        from .goals import woken
                         from .session_turn_events import foreground_turn
                         from .wakeups import turn_text
-                        with foreground_turn("monitor"):
+                        with foreground_turn("monitor"), woken(self.agent, "wakeup"):
                             outcome = self.agent.run_turn(turn_text(wakeup, now=self.agent.wakeups.clock()),
                                                           reset_cancel=False)
                     elif agent_notice is not None:
                         wake_prompt = _agent_wake_prompt(agent_notice)
+                        from .goals import woken
                         from .session_turn_events import foreground_turn
-                        with foreground_turn("agent_wake"):
+                        with foreground_turn("agent_wake"), woken(self.agent, "agent"):
                             outcome = self.agent.run_turn(wake_prompt, reset_cancel=False)
                         _note_agent_wake_delivered(self.agent, agent_notice, wake_prompt)
                     elif setup_notice is not None:

@@ -50,6 +50,7 @@ from .presentation import (PROGRESS_UPDATES, QUIET_NOTE_AFTER_S, RESPONSE_GUIDAN
 # this feature took the turn's starting value and moved its deadline (an endless test turn).
 _quiet_clock = time.monotonic
 from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, SYSTEM_GOAL_RULES, clean_details, clean_report, new_details, record_transition
+from .goals import PAUSED_WAKE_MAX_REQUESTS, PAUSED_WAKE_NOTE, PAUSED_WAKE_STOPPED
 from .workflows import STREAM_RECOVERY_TEXT, notice_kind as _notice_kind
 
 _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn the model
@@ -1541,18 +1542,67 @@ def _message_text(message: dict) -> str:
     return ""
 
 
+_FALLBACK_OPENING = "## The ask\n- Find what the user wants in the earlier notes or the first user line below.\n"
+_FALLBACK_DONE = "## Done so far\n"
+_FALLBACK_NEXT = "\n## Next step\n- Carry on from the user's own words that follow these notes.\n"
+_EARLIER_BRIEF = "### Earlier brief (merge this in)\n"
+_NEW_TRANSCRIPT = "### New transcript since then\n"
+_QUOTED_HEADING = "\n\n## The user's own messages, verbatim"
+_NOTES_HEADING = "\n\nEarlier in this project (context notes, most recent first):"
+
+
+def _flatten_prior(prior: str, quoted_carried: bool, depth: int = 0) -> tuple[str, str]:
+    """(the one earlier brief, the evidence kept since it) from a compacted message's text.
+
+    The no-model brief used to carry the whole earlier message inside itself (its envelope, the user's quoted words,
+    the notes, and the earlier brief it carried in turn), so a run of them nested three deep (the goal soak, 16 Nov).
+    The envelope is written again by the new message and the notes are read afresh, so neither is kept; the quoted
+    words are dropped only when the new message quotes them (`quoted_carried`). When the earlier brief was itself
+    written without a model, what it carried is unwrapped: its own earlier brief (the latest a model wrote) and the
+    evidence it kept, oldest first.
+    """
+    text = str(prior or "").strip()
+    if text.startswith(_COMPACT_ENVELOPE):
+        text = text[len(_COMPACT_ENVELOPE):].strip()
+    quoted = ""
+    at = text.rfind(_QUOTED_HEADING)
+    if at >= 0:
+        text, quoted = text[:at], text[at:]
+    at = text.rfind(_NOTES_HEADING)
+    if at >= 0:
+        text = text[:at]
+    text = text.strip()
+    keep = "" if quoted_carried else quoted
+    start = text.find(_FALLBACK_DONE)
+    if depth >= 8 or not text.startswith(_FALLBACK_OPENING) or start < 0:
+        return text + keep, ""
+    end = text.rfind(_FALLBACK_NEXT)
+    section = text[start + len(_FALLBACK_DONE):end if end > start else len(text)].strip("\n")
+    if section.startswith(_NEW_TRANSCRIPT):
+        return keep.strip(), section[len(_NEW_TRANSCRIPT):].strip()
+    if not section.startswith(_EARLIER_BRIEF):
+        return text + keep, ""
+    inner = section[len(_EARLIER_BRIEF):]
+    cut = inner.rfind("\n\n" + _NEW_TRANSCRIPT)
+    evidence = inner[cut + 2 + len(_NEW_TRANSCRIPT):].strip() if cut >= 0 else ""
+    brief, earlier = _flatten_prior(inner[:cut] if cut >= 0 else inner, quoted_carried, depth + 1)
+    return (brief + keep).strip(), "\n\n".join(part for part in (earlier, evidence) if part)
+
+
 def _mechanical_compaction_brief(prior: str, transcript_lines: list[str],
-                                 brief_chars: int = _COMPACT_SUMMARY_CHARS) -> str:
-    """Loss-aware no-model fallback: preserve old brief plus exact bounded transcript evidence."""
+                                 brief_chars: int = _COMPACT_SUMMARY_CHARS, *, quoted_carried: bool = False) -> str:
+    """Loss-aware no-model fallback: the one earlier brief plus exact bounded transcript evidence, never nested
+    (_flatten_prior). `quoted_carried`: the new message quotes the user's own words itself."""
     brief_chars = max(2_000, int(brief_chars))
-    source = _compaction_source(prior, transcript_lines, brief_chars - 700)
+    earlier, kept = _flatten_prior(prior, quoted_carried)
+    source = _compaction_source(earlier, ([kept] if kept else []) + list(transcript_lines), brief_chars - 700)
     return _bounded_head_tail(
-        "## The ask\n- Find what the user wants in the earlier notes or the first user line below.\n"
-        "## Rules to keep\n- Keep every rule the user stated in the evidence below.\n"
-        "## Done so far\n" + source + "\n"
-        "## Next step\n- Carry on from the user's own words that follow these notes.\n"
-        "## Exact details\n- Written without a model (none was available, or its notes couldn't be used): check "
-        "anything uncertain against the files.\n",
+        _FALLBACK_OPENING
+        + "## Rules to keep\n- Keep every rule the user stated in the evidence below; choices the assistant made there "
+          "are its own, and a later turn may revisit them.\n"
+        + _FALLBACK_DONE + source + _FALLBACK_NEXT
+        + "## Exact details\n- Written without a model (none was available, or its notes couldn't be used): check "
+          "anything uncertain against the files.\n",
         brief_chars)
 
 
@@ -5693,6 +5743,12 @@ class Agent(GoalLifecycle):
             "content scrolls inside its own container, not the page), and a mobile breakpoint.",
         ]
 
+    def _paused_wake_notes(self) -> str:
+        """The paused-goal note, framed as DGC's turn notes, for a monitor's wake (its notice carries no prompt)."""
+        body = PAUSED_WAKE_NOTE.replace(clock.NOTES_OPEN, "<dgc-turn-notes\u200b>").replace(
+            clock.NOTES_CLOSE, "</dgc-turn-notes\u200b>")
+        return f"{clock.NOTES_OPEN}\n{body}\n{clock.NOTES_CLOSE}"
+
     def _turn_notes(self, *, intents_only: bool = False) -> str:
         """This request's own guidance, for the END of its prompt: never in the system prompt.
 
@@ -5712,6 +5768,8 @@ class Agent(GoalLifecycle):
         adaptive = profile == "adaptive"
         given = self.__dict__.setdefault("_turn_notes_given", set())
         sections: list[tuple[str, str]] = []
+        if not intents_only and getattr(self, "_paused_wake", False):
+            sections.append(("paused_wake", PAUSED_WAKE_NOTE))
         if not intents_only:
             goal_status = getattr(self, "goal_status", "none")
             # Everything this note says is wrong somewhere, so it is fenced in hard:
@@ -6666,6 +6724,8 @@ class Agent(GoalLifecycle):
                 turn_completion = begin_for_agent(self)
             completed = None
             self._eta_begin(safe_user_text)
+            # A helper's report or a wake-up the model set (goals.woken) on a paused goal: told so, bounded, counted.
+            paused_wake = self._begin_paused_wake(bool(getattr(self, "_woken_by", "")))
             try:
                 self.reload_skills()
                 try:
@@ -6719,6 +6779,7 @@ class Agent(GoalLifecycle):
                     router_mod.release_main(self._router_turn_hold)
                     self._router_turn_hold = None
                 self._router_prefer = None       # an SDK run's system= is for that run's helpers alone
+                self._end_paused_wake(paused_wake)   # before the save below, so the goal's numbers are saved
                 self._close_turn_retry_runs(completed)
                 with self._steer_lock:
                     self._accepting_steer = False
@@ -6782,8 +6843,9 @@ class Agent(GoalLifecycle):
 
         Its own entry point rather than run_turn with a flag, because almost everything run_turn
         does to its text assumes a person wrote it. A wake turn:
-          - never runs goal steps or goal inputs: it is not a goal cycle, adds nothing to cycles,
-            stalled cycles or the goal's token budget, and cannot block or complete the goal;
+          - never runs goal steps or goal inputs: it is not a goal cycle, adds nothing to cycles or
+            stalled cycles, and cannot block or complete the goal; on a paused goal it is told so,
+            bounded, and its tokens and time join the goal's numbers (_begin_paused_wake);
           - opens no checkpoint (a chatty monitor must not evict the user's rewind points) and
             records no chat-changes step; its edits land in the latest user turn's point;
           - applies no thinking-keyword bumps, skill instructions, staged editor context, images,
@@ -6828,6 +6890,7 @@ class Agent(GoalLifecycle):
             self.eta = None
             self._monitor_turn = True
             self._monitor_turn_notice_chars = 0
+            paused_wake = self._begin_paused_wake(True)
             try:
                 self.reload_skills()
                 self._mcp_query_text = self._last_turn_mcp_query
@@ -6844,6 +6907,7 @@ class Agent(GoalLifecycle):
                     # listed them: the next event must not have the model list them again.
                     self._last_turn_tool_intents.discard("options")
             finally:
+                self._end_paused_wake(paused_wake)   # before the save below, so the goal's numbers are saved
                 self._close_turn_retry_runs(completed)
                 with self._steer_lock:
                     self._accepting_steer = False
@@ -8756,7 +8820,12 @@ class Agent(GoalLifecycle):
             # No clock line either: a monitor notice already stamps every batch of output it
             # carries with the time it arrived, so one here would be a second, vaguer copy.
             self._trim_session_notices(len(user_text))
-            self.messages.append(self._notice_message(notification, "wake"))
+            notice = self._notice_message(notification, "wake")
+            if getattr(self, "_paused_wake", False):
+                # A paused goal's wake: the note rides at the end of the notice, the one user-role message this
+                # turn has (DGC's turn notes, as a typed prompt carries them).
+                notice["content"] = f"{notice['content']}\n\n{self._paused_wake_notes()}"
+            self.messages.append(notice)
             self._note_subtasks_delivered(notification)
             self._monitor_turn_notice_chars += len(user_text)
             effort_text = ""
@@ -8983,6 +9052,17 @@ class Agent(GoalLifecycle):
         iteration = 0
         while max_turns is None or iteration < max_turns:
             iteration += 1
+
+            if getattr(self, "_paused_wake", False) and iteration > PAUSED_WAKE_MAX_REQUESTS:
+                # A turn that started on its own while the goal is paused only handles what woke it (the goal soak:
+                # one such turn ran 5 h 12 min). A planned stop, said plainly, never a failure.
+                if held_final_messages:
+                    withhold_final()
+                self.messages.append({"role": "assistant", "content": PAUSED_WAKE_STOPPED,
+                                      "_dgc_at": _written_at()})
+                self.ui.on_text(PAUSED_WAKE_STOPPED)
+                self.ui.end_stream("answer")
+                return True
 
             if self.cancelled.is_set():
                 if held_final_messages:
@@ -12721,7 +12801,8 @@ class Agent(GoalLifecycle):
                 workspace, isolation_error = TaskWorkspace.prepare(
                     self.config.project_root, description or "delegated-work",
                     Path(configured_root) if configured_root else None,
-                    link_paths=self._subagent_link_paths())
+                    link_paths=self._subagent_link_paths(),
+                    left_hash=getattr(getattr(self, "checkpoints", None), "left_hash", None))
             except Exception as exc:
                 isolation_error = f"{type(exc).__name__}: {exc}"
         finally:
@@ -14044,7 +14125,8 @@ class Agent(GoalLifecycle):
                     try:
                         workspace, error = TaskWorkspace.prepare(
                             self.config.project_root, description or "delegated-work", storage_root,
-                            link_paths=self._subagent_link_paths())
+                            link_paths=self._subagent_link_paths(),
+                            left_hash=getattr(getattr(self, "checkpoints", None), "left_hash", None))
                     except Exception as exc:
                         workspace, error = None, f"{type(exc).__name__}: {exc}"
                     if workspace is None:
@@ -14640,9 +14722,11 @@ class Agent(GoalLifecycle):
             "Use these sections, in this order (leave one out only when it has nothing):\n"
             "## The ask — what the user wants in the end, only from lines marked `user:`. If no such line says it, "
             "write that it isn't stated; never guess it from other lines.\n"
-            "## Rules to keep — what the user said to always or never do, and how they like things done\n"
+            "## Rules to keep — only what the user said to always or never do, and how they like things done; "
+            "never a rule the assistant or a helper made for itself\n"
             "## Done so far — files made or changed, commands run and what came of them\n"
-            "## Choices and why — what was decided, and the reason\n"
+            "## Choices and why — what the assistant decided along the way, and why, each written as its own choice "
+            "(\"Chose X because Y\"), not as a rule: a later turn may revisit it when the work calls for it\n"
             "## Next step — what is left, starting with the very next thing to do\n"
             "## Exact details — names, signatures, paths and values to keep exactly as they are\n"
             "Short bullets. Fold the earlier notes below into the new ones: keep all that still holds, correct what "
@@ -14652,7 +14736,7 @@ class Agent(GoalLifecycle):
             "it sounds like intent. Mark anything you keep that you can't trace to a `user:` line.\n\n"
             + source)
         fallback = self._safe_text(
-            _mechanical_compaction_brief(prior, transcript_lines, brief_chars))
+            _mechanical_compaction_brief(prior, transcript_lines, brief_chars, quoted_carried=bool(words)))
         now = time.monotonic()
         compact_deadline = min(deadline, now + _COMPACT_TIMEOUT_S) if deadline is not None \
             else now + _COMPACT_TIMEOUT_S

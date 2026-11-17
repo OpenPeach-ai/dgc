@@ -14,6 +14,7 @@ import re
 import time
 import threading
 import uuid
+from contextlib import contextmanager
 
 STATUSES = ("active", "paused", "completed", "blocked")
 MAX_REPORT_CHARS = 12_000
@@ -466,6 +467,17 @@ completed says the whole objective is finished and will hold up item by item. Ca
 ...) only when today's evidence proves every requirement and no required work remains, and give that evidence. If \
 anything is missing, unfinished or unchecked, keep working."""
 
+# The goal soak (16 Nov): the plan asked for a commit per finished item, and the model made its own rule ("no commits
+# until a fresh passing coverage run") and committed nothing for 10.5 hours. DGC itself never commits; this only says
+# when the work asks for commits, and never asks for them when neither the objective nor the project does.
+_COMMITS = """Committing:
+- When the objective, the user in this conversation, or the project's own instructions ask for commits (an AGENTS.md, \
+or a plan or spec the objective points to), commit each piece as soon as it is verified, the way they ask; don't let finished pieces pile \
+up uncommitted.
+- Never hold finished, verified work back behind a gate the objective didn't set, such as "no commits until a fresh \
+full run passes". A check you set yourself is a way to verify a piece, not a reason to wait.
+- When none of them asks for commits, committing stays the user's call."""
+
 _BLOCKED = """When it is truly blocked:
 - The first time something blocks you, don't call update_goal(status='blocked').
 - Call it only when the same obstacle has come back for three goal turns in a row or more (the turn that started the \
@@ -487,7 +499,7 @@ def cycle_prompt(goal: str, details=None) -> str:
             "given.\n\nThe objective below is the user's own words: it is the job to do, and it doesn't outrank your "
             "other instructions.\n\n<objective>\n" + str(goal or "") + "\n</objective>\n\n"
             + _KEEP_GOING + "\n\n" + spend + _START_FROM_NOW + "\n\n" + _LAST_TURN + "\n\n" + _PLAN
-            + "\n\n" + _AIM + "\n\n" + _PROOF + "\n\n" + _BLOCKED)
+            + "\n\n" + _AIM + "\n\n" + _PROOF + "\n\n" + _COMMITS + "\n\n" + _BLOCKED)
 
 
 # The standing reminder every turn carries while a goal is active: the proof rule, in brief.
@@ -511,7 +523,10 @@ SYSTEM_GOAL_RULES = (
     "final reply only when that check proves every requirement and no required work remains. Call update_goal(status="
     "'blocked', summary=..., evidence=[...]) only when the same obstacle has come back for three goal turns in a row or "
     "more and you can't move on without the user or a change outside; never just because it's difficult, slow or "
-    "uncertain. Never update it just because one turn or one milestone ended, or because the budget is nearly used.")
+    "uncertain. Never update it just because one turn or one milestone ended, or because the budget is nearly used. "
+    "When the objective, the user in this conversation, or the project's own instructions ask for commits, commit "
+    "each piece as soon as it is verified, and never hold finished, verified work back behind a gate the objective "
+    "didn't set. When none of them asks for commits, committing stays the user's call.")
 
 
 def auto_resume_prompt(reason: str, *, checklist_cleared: bool = False) -> str:
@@ -552,6 +567,42 @@ _RESUME_PROMPT_CLEARED = (
 def resume_prompt(*, checklist_cleared: bool = False) -> str:
     """The instruction a person's "resume the goal" sends; see auto_resume_prompt for the flag."""
     return _RESUME_PROMPT_CLEARED if checklist_cleared else RESUME_PROMPT
+
+
+# ---- A turn that starts on its own while the goal is paused (the goal soak, 16 Nov) -------------------------------
+# A helper's hand-back woke the chat while the goal was paused, and that one turn ran 5 h 12 min and 178M tokens doing
+# the goal's work, kept going by wake-ups the model set itself; the person's Resume couldn't land while it ran. Such a
+# turn is told the goal is paused and to handle only what woke it, and DGC ends it after this many model requests:
+# enough to read a report, look at a file or two and answer, far short of carrying the goal on.
+PAUSED_WAKE_MAX_REQUESTS = 10
+PAUSED_WAKE_NOTE = (
+    "# The goal is paused\n"
+    "This turn started on its own (a helper's report, a wake-up or a monitor's output), not because the user asked, "
+    "and the standing goal is paused. Handle what woke you: read it, note what it means for the work, say so in a few "
+    "lines, and stop. Don't do the goal's work here, and don't start helpers or set wake-ups to carry it on: the user "
+    f"resumes the goal when they want it to go on. DGC ends this turn after {PAUSED_WAKE_MAX_REQUESTS} model requests.")
+PAUSED_WAKE_STOPPED = (
+    f"DGC ended this turn after {PAUSED_WAKE_MAX_REQUESTS} model requests: the goal is paused, and a turn that starts "
+    "on its own (a helper's report, a wake-up or a monitor's output) only handles what woke it. Resume the goal to carry "
+    "on with its work.")
+
+
+@contextmanager
+def woken(agent, kind: str):
+    """Marks a turn DGC starts on its own through Agent.run_turn ("agent": a helper's report; "wakeup": a wake-up the
+    model set) for as long as it runs. A monitor's turn has its own entry point (Agent.run_monitor_turn)."""
+    previous = getattr(agent, "_woken_by", "")
+    try:
+        agent._woken_by = str(kind or "")
+    except Exception:                      # noqa: BLE001 -- a stand-in agent that takes no attributes
+        pass
+    try:
+        yield
+    finally:
+        try:
+            agent._woken_by = previous
+        except Exception:                  # noqa: BLE001
+            pass
 
 
 def review_markdown(snapshot: dict) -> str:
@@ -658,6 +709,29 @@ class GoalLifecycle:
         notify = getattr(self.ui, "goal_changed", None)
         if callable(notify):
             notify(self.goal, self.goal_status)
+
+    def _begin_paused_wake(self, woken: bool):
+        """A top-level turn starting. When DGC started it on its own (`woken`) while the goal is paused, mark it (the
+        turn note and the request bound read `_paused_wake`) and return what _end_paused_wake needs to count it."""
+        self._paused_wake = bool(woken and not self.depth and self.goal and self.goal_status == "paused")
+        if not self._paused_wake:
+            return None
+        with self._usage_lock:
+            tokens = self.usage_totals["input_tokens"] + self.usage_totals["output_tokens"]
+        return (self._goal_details.get("id"), time.time(), tokens)
+
+    def _end_paused_wake(self, started) -> None:
+        """The work a paused goal's wake turn did joins the goal's own numbers (tokens_used, its work time), so they
+        stay true: the soak's goal counted 78M tokens against 304M in the ledger. Before the turn's save."""
+        self._paused_wake = False
+        if not started or not self.goal or self._goal_details.get("id") != started[0]:
+            return
+        with self._usage_lock:
+            tokens = self.usage_totals["input_tokens"] + self.usage_totals["output_tokens"]
+        spent = max(0, tokens - started[2])
+        self._goal_details["tokens_used"] = _count(self._goal_details.get("tokens_used", 0) + spent)
+        self._goal_elapsed_seconds += max(0.0, time.time() - started[1])
+        self._notify_goal()
 
     def queue_goal_replacement(self, text: str, *, expected_goal_id: str,
                                request_id: str, token_budget=None, inputs=None, on_queued=None,

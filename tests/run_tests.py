@@ -2312,7 +2312,10 @@ def unit_tests(tmp: Path):
     # while the process has in fact gone. Read the settled state once more rather than asserting
     # against a snapshot taken a moment too early; under load that race is the difference between
     # a green suite and a release that will not push.
-    if _orphan_pid_match:
+    # Only when that snapshot is the stale one: a check of a running shell that shows nothing new
+    # since the last one waits for a change (tools.REPEAT_CHECK_WAIT_S), and here the next change
+    # is the orphan dying by itself, which would leave bash_kill nothing to kill.
+    if _orphan_pid_match and "finishing (leader exited" not in _orphan_output:
         _orphan_settle = _time_tools.monotonic() + 5.0
         while _time_tools.monotonic() < _orphan_settle:
             _orphan_output = execute("bash_output", {"id": _orphan_id}, ctx)
