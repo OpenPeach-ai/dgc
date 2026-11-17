@@ -13,6 +13,12 @@ posts outside that window, and browser telemetry, pass through so ordinary pages
 WebSockets are blocked because the gate cannot inspect their messages, and the box has no UDP.
 A payment initiated by the Pip is held for the user, with card details identified in its review.
 
+The gate's state is per tab (0.52, for Your Browser): each tab has an owner (a Pip, or the person), its own last
+action, sign-in pass and dialog, and each owner its own careful-mode gate, so two Pips in one browser never bleed into
+each other. A browser shared with the person (``shared``: Your Browser) never gates the person's own tabs; each Pip's
+tab there (its lane) is gated on that tab alone through Chrome's own controls, and confined to the sites the person let
+that Pip use.
+
 This module is the mechanism only. Who may start a computer, how held requests become reviews
 and how runs use it live in ``pip_computer``.
 """
@@ -227,6 +233,7 @@ ONLINE = {"offline": False, "latency": 40, "downloadThroughput": 12_500_000, "up
           "connectionType": "ethernet"}
 # A step on a tab whose page is asking a question (confirm or prompt): nothing else runs there until it is answered.
 DIALOG_OPEN = "the page is asking a question (a dialog is open); answer it with dialog first"
+PERSON = "person"                     # the owner of a tab that is no Pip's: the person's own (see BoxedBrowser.owner_of)
 # A new window on the computer's screen opens here.
 HOME_PAGE = "https://www.google.com/"
 
@@ -832,6 +839,7 @@ class HeldWrite:
     payment: bool = False           # carries a payment card number: the review says so
     site: bool = False              # careful mode: a page on a site this Pip hasn't visited (pip_careful)
     card_missing: bool = False      # a payment form sent with its card number empty (see card_missing)
+    owner: str = PERSON             # whose tab sent it: a Pip's id (its lane in Your Browser), or the person
 
     def summary(self) -> dict:
         parts = urlsplit(self.url)
@@ -940,12 +948,43 @@ def carries_card_number(post_data: str, *, loose: bool = False) -> bool:
     return loose and valid(text)
 
 
+@dataclass
+class _Tab:
+    """One tab's own gate state: whose it is, its last action, a sign-in's one pass and its open dialog."""
+    owner: str = PERSON
+    acted_at: float = 0.0           # its last click, typing, key or choice (see acting())
+    login_pass: object = None       # a saved login's one submit (pip_login_fill.LoginPass), while DGC signs in on it
+    dialog: dict | None = None      # its open confirm or prompt: {type, message, default, session, url}
+    dialog_seq: int = 0             # when it opened (the newest is told first)
+
+
+@dataclass
+class Lane:
+    """One owner's settings in a browser: a Pip's (its lane in Your Browser, or its own computer) or the person's."""
+    owner: str = PERSON
+    site_gate: object = None        # careful mode during its run (pip_careful): url -> whether its site may load
+    hold_dialogs: bool = False      # during its run a confirm or prompt waits for its answer (dialog)
+    grants: object = None           # Your Browser: the sites its lane may use (your_browser.Grants); None, no confinement
+    refused: list = field(default_factory=list)    # why its lane was refused a page or a write, newest last
+
+
 class BoxedBrowser(BrowserSession):
     """A BrowserSession in a box that holds writes associated with Pip or user actions."""
 
     def __init__(self, home: Path, egress_socket: Path, *, chrome: Path | None, log_path: Path,
-                 viewport: tuple[int, int] = DEFAULT_VIEWPORT, on_write=None):
+                 viewport: tuple[int, int] = DEFAULT_VIEWPORT, on_write=None, shared: bool = False):
         super().__init__(chrome, allow_unsandboxed=True, viewport=viewport)
+        # Who each tab is (owner_of): a Pip's computer is one owner's, every tab gated. Your Browser (shared) is the
+        # person's, whose own tabs DGC never gates, plus a lane per Pip (open_lane), gated and confined on that tab.
+        self.shared = bool(shared)
+        self.default_owner = PERSON
+        self._tabs: dict[str, _Tab] = {}          # targetId (a tab) -> its gate state
+        self._lanes: dict[str, Lane] = {}         # owner -> its settings
+        self._loose = _Tab()                      # what is set before any tab exists, and for a request with no tab
+        self._opened: set[str] = set()            # tabs DGC opened itself: only those become a Pip's lane
+        self.lane_sent = None                     # Your Browser: what each lane sent (your_browser.LaneSent)
+        self._lane_requests: dict[tuple, tuple] = {}   # (session, requestId) -> (owner, host, bytes up)
+        self._dialog_seq = 0
         self.home = Path(home)
         self.display_dir: Path | None = None      # set by the Host when the computer has a desktop
         self.files_dir: Path | None = None        # set by the Host of a Pip's second or later computer: shared Files
@@ -964,12 +1003,10 @@ class BoxedBrowser(BrowserSession):
         self._parents: dict[str, str] = {}        # targetId -> the session it was attached from ("" the browser)
         self._drag_data = None                    # an HTML drag Chrome caught during drag() (Input.dragIntercepted)
         self._chooser = None                      # a file chooser the page opened while DGC answers it (set_files)
-        # Careful mode (pip_careful), during a run: url -> True when its site may load. A page on any
-        # other site waits, like a submit, until the user allows the site.
-        self.site_gate = None
-        self.acted_at = 0.0                       # the last click, typing, key or choice (see acting())
-        # A saved login's one submit (pip_login_fill.LoginPass), while DGC signs the Pip in: let through, once.
-        self.login_pass = None
+        # Careful mode (pip_careful), during a run: url -> True when its site may load (site_gate, per owner). A page on
+        # any other site waits, like a submit, until the user allows the site. The last click, typing, key or choice
+        # (acted_at, see acting()) and a saved login's one submit while DGC signs the Pip in (login_pass, let through
+        # once) are the tab's own: the properties below read and set the tab in front's.
         self.login_sent: list[str] = []
         # What a step changed and what the page reported (pip_browser_steps): every note carries a number from one
         # counter, so a step asks for what came after the number it started at (``since``).
@@ -978,10 +1015,9 @@ class BoxedBrowser(BrowserSession):
         self.downloads: dict[str, dict] = {}       # guid -> {name, state, received, total, seq}
         self._requests: dict[tuple, tuple] = {}    # (session, requestId) -> (method, url, type)
         self._inflight: dict[tuple, tuple] = {}    # (session, requestId) -> (type, when) until it finishes or fails
-        # During a run (Host.begin): a confirm or prompt waits for the Pip's answer (dialog) instead of being dismissed,
-        # and a file picker the page opens waits for upload. With no run, both are answered at once, as before.
-        self.hold_dialogs = False
-        self.dialog: dict | None = None            # {type, message, default, session, url}
+        # During a run (Host.begin): a confirm or prompt waits for the Pip's answer (dialog, the tab's own) instead of
+        # being dismissed (hold_dialogs, per owner), and a file picker the page opens waits for upload. With no run,
+        # both are answered at once, as before.
         self.chooser: dict | None = None           # a file picker the page opened: {backendNodeId, mode, session}
         self._intercepting = False
         self._choosing = False                     # set_files is answering a picker itself
@@ -989,6 +1025,209 @@ class BoxedBrowser(BrowserSession):
         self._next_tab = 1
         self._openers: dict[str, str] = {}         # targetId -> the tab that opened it
         self._orphaned = ""                        # the tab in front, when it closed by itself
+
+    # -- whose each tab is, and its own state ------------------------------------------------
+
+    def _tab_of(self, target: str | None) -> str | None:
+        """The tab a target belongs to: itself for a tab, the tab whose page holds it for a frame from another site or
+        its worker; None for one with no tab (a service worker) or one not known."""
+        for _ in range(8):
+            if not target:
+                return None
+            if target in self._pages:
+                return target
+            parent = self._parents.get(target, "")
+            target = self._session_target(parent) if parent else None
+        return None
+
+    def owner_of(self, target: str | None) -> str:
+        """Whose a tab (or a frame or worker in it) is: a Pip's id for its lane, or the person ("person"). A tab a page
+        opens is its opener's; a target with no tab is the browser's own owner's."""
+        tab = self._tab_of(target)
+        return self._tabs[tab].owner if tab in self._tabs else self.default_owner
+
+    def lane(self, owner: str) -> Lane:
+        """One owner's settings (made on first use)."""
+        if owner not in self._lanes:
+            self._lanes[owner] = Lane(owner=owner)
+        return self._lanes[owner]
+
+    def _front_tab(self) -> _Tab:
+        target = self.page_target()
+        return self._tabs.get(target, self._loose) if target else self._loose
+
+    def _front_owner(self) -> str:
+        target = self.page_target()
+        return self._tabs[target].owner if target in self._tabs else self.default_owner
+
+    # What a step reads and sets is the tab in front's (the one DGC drives), and its owner's.
+    @property
+    def acted_at(self) -> float:
+        return self._front_tab().acted_at
+
+    @acted_at.setter
+    def acted_at(self, value: float) -> None:
+        self._front_tab().acted_at = float(value)
+
+    @property
+    def login_pass(self):
+        return self._front_tab().login_pass
+
+    @login_pass.setter
+    def login_pass(self, value) -> None:
+        self._front_tab().login_pass = value
+
+    @property
+    def site_gate(self):
+        lane = self._lanes.get(self._front_owner())
+        return lane.site_gate if lane is not None else None
+
+    @site_gate.setter
+    def site_gate(self, value) -> None:
+        self.lane(self._front_owner()).site_gate = value
+
+    @property
+    def hold_dialogs(self) -> bool:
+        lane = self._lanes.get(self._front_owner())
+        return lane.hold_dialogs if lane is not None else False
+
+    @hold_dialogs.setter
+    def hold_dialogs(self, value: bool) -> None:
+        self.lane(self._front_owner()).hold_dialogs = bool(value)
+
+    @property
+    def dialog(self) -> dict | None:
+        """The open confirm or prompt the tab in front has, or else the newest one on another tab of the same owner."""
+        front = self._front_tab()
+        if front.dialog is not None:
+            return front.dialog
+        held = [t for t in self._tabs.values() if t.owner == front.owner and t.dialog is not None]
+        return max(held, key=lambda t: t.dialog_seq).dialog if held else None
+
+    @dialog.setter
+    def dialog(self, value: dict | None) -> None:
+        if value is None:
+            owner = self._front_tab().owner
+            for tab in (self._loose, *self._tabs.values()):
+                if tab.owner == owner:
+                    tab.dialog = None
+        else:
+            self._tab_state(value.get("session")).dialog = value
+
+    def _tab_state(self, session) -> _Tab:
+        """The state of the tab a session belongs to; the browser's loose state for one with no tab."""
+        tab = self._tab_of(self._session_target(session)) if session else None
+        return self._tabs.get(tab, self._loose) if tab else self._loose
+
+    # -- Your Browser: a lane per Pip ---------------------------------------------------------
+
+    def open_lane(self, pip_id: str, url: str, grants=None) -> str:
+        """A new tab for a Pip (its lane), at ``url``, gated and confined to ``grants`` (your_browser.Grants) from its
+        first request, and driven by DGC without bringing it to the front: the person's view stays theirs. Returns its
+        target id."""
+        self.start()
+        try:
+            made = str(self._browser_call("Target.createTarget", {"url": "about:blank", "background": True}).get("targetId", ""))
+        except BrowserError:
+            made = str(self._browser_call("Target.createTarget", {"url": "about:blank"}).get("targetId", ""))
+        self._wait_attached(made)
+        self._opened.add(made)
+        self._make_lane(made, pip_id, grants)
+        self.switch_tab(made, settle=2.0, activate=False)
+        self.navigate(url)
+        return made
+
+    def _wait_attached(self, made: str) -> None:
+        deadline = time.monotonic() + 10
+        while made not in self._attached and time.monotonic() < deadline:
+            self._pipe.settimeout(max(0.05, deadline - time.monotonic()))
+            try:
+                self._observe(self._pipe.recv())
+            except socket.timeout:
+                break
+        if made not in self._attached:
+            raise BrowserError("the new tab did not open")
+
+    def _make_lane(self, target: str, pip_id: str, grants=None) -> None:
+        """Make a blank tab DGC just opened a Pip's lane: its owner, its settings, and (in Your Browser) its gate on that
+        tab alone, before it loads anything. A tab the person uses, or another Pip's, never becomes one."""
+        if not isinstance(pip_id, str) or not pip_id or pip_id == PERSON:
+            raise BrowserError("a lane is a Pip's")
+        tab = self._tabs.get(target)
+        if tab is None or target not in self._pages:
+            raise BrowserError("that tab has closed; tabs lists the open ones")
+        if tab.owner != pip_id and (tab.owner != PERSON or target not in self._opened):
+            raise BrowserError("only a tab DGC opened for this Pip becomes its lane")
+        first = tab.owner != pip_id
+        tab.owner = pip_id
+        lane = self.lane(pip_id)
+        if grants is not None:
+            lane.grants = grants
+        session = self._attached.get(target)
+        if first and self.shared and session:
+            self._guard(session)
+            self._guard_lane(session)
+
+    def _guard_lane(self, session: str) -> None:
+        """A Pip's lane in Your Browser, on its own tab (and each frame and worker in it): what the gate can't see is
+        off (a WebSocket, WebTransport or WebRTC connection carries whatever the page puts in it, and Your Browser has
+        the computer's own network), no service worker answers for it around the gate, and third-party cookies are off
+        there whatever the profile says (his answer 2)."""
+        from .pip_borrow import _OFF_JS
+        self._fire("Page.addScriptToEvaluateOnNewDocument", {"source": _OFF_JS, "runImmediately": True}, session)
+        self._fire("Runtime.evaluate", {"expression": _OFF_JS}, session)      # a worker, which has no Page
+        self._fire("Network.setBypassServiceWorker", {"bypass": True}, session)
+        self._fire("Network.setCookieControls", {"enableThirdPartyCookieRestriction": True,
+                                                 "disableThirdPartyCookieMetadata": True,
+                                                 "disableThirdPartyCookieHeuristics": True}, session)
+
+    def _confine(self, lane: Lane, owner: str, tab, params: dict, session: str, url: str, verb: str, kind: str) -> bool:
+        """A Pip's lane may open pages only on its sites and their exact sign-in hosts, and never send a write anywhere
+        else: a submit (a form, in any frame), or what the page sends right after the Pip acted. A read from another
+        site (a picture, a script, a frame) and the page's own background traffic load. True when refused."""
+        host = (urlsplit(url).hostname or "").lower()
+        if lane.grants.admits(host):
+            return False
+        top = kind == "Document" and str(params.get("frameId", "")) in self._pages
+        write = verb not in READ_METHODS
+        if not ((top and not write) or (write and (kind == "Document" or self._acting_for(tab)))):
+            return False
+        shown = host or url.split(":", 1)[0][:20]
+        reason = (f"DGC didn't open {shown} for this Pip: in Your Browser it uses only the sites you allowed it "
+                  f"({lane.grants.words()})." if not write else
+                  f"DGC didn't send this to {shown}: in Your Browser this Pip sends only to the sites you allowed it "
+                  f"({lane.grants.words()}).")
+        lane.refused.append(reason)
+        del lane.refused[:-20]
+        self._note("refused", session, url=url[:300], reason=reason)
+        if self.lane_sent is not None:
+            self.lane_sent.refused(owner, shown)
+        self._fire("Fetch.failRequest", {"requestId": str(params.get("requestId", "")), "errorReason": "BlockedByClient"},
+                   session)
+        return True
+
+    def _lane_traffic(self, method: str, params: dict, session: str) -> None:
+        """What a Pip's lane sent, per site, from its own tab's Network events (his answer 8); a request counts once it
+        finished. Never the person's tabs."""
+        key = (session, str(params.get("requestId", "")))
+        if method == "Network.requestWillBeSent":
+            owner = self.owner_of(self._session_target(session))
+            request = params.get("request") or {}
+            host = (urlsplit(str(request.get("url", ""))).hostname or "").lower()
+            if owner == PERSON or not host:
+                return
+            post = request.get("postData")
+            up = (len(str(post).encode("utf-8")) if post else
+                  sum(len(str(e.get("bytes", ""))) * 3 // 4 for e in request.get("postDataEntries") or [] if isinstance(e, dict)))
+            self._lane_requests[key] = (owner, host, up)
+            while len(self._lane_requests) > 400:
+                self._lane_requests.pop(next(iter(self._lane_requests)))
+        elif method == "Network.loadingFinished":
+            found = self._lane_requests.pop(key, None)
+            if found is not None:
+                self.lane_sent.add(found[0], found[1], up=found[2], down=int(params.get("encodedDataLength") or 0))
+        else:
+            self._lane_requests.pop(key, None)
 
     # -- lifecycle -------------------------------------------------------------------------
 
@@ -1088,7 +1327,13 @@ class BoxedBrowser(BrowserSession):
 
     def _cleanup(self) -> None:
         self._ws = None
-        self.dialog = self.chooser = None          # they went with the pages
+        self.chooser = None                        # it went with the pages, as each tab's dialog does
+        if self.lane_sent is not None:
+            self.lane_sent.flush()
+        self._tabs.clear()
+        self._opened.clear()
+        self._lane_requests.clear()
+        self._loose.dialog = None
         self._tab_names, self._next_tab = {}, 1   # a restarted browser's first tab is t1 again
         self._attached.clear()
         self._pages.clear()
@@ -1118,11 +1363,19 @@ class BoxedBrowser(BrowserSession):
                 if info.get("type") == "page":
                     target = str(info.get("targetId", ""))
                     self._pages.add(target)
+                    owner = self.default_owner
                     if info.get("openerId"):
                         # A link with target=_blank or a popup: the step that caused it moves the Pip there (opened_since).
                         self._openers[target] = str(info["openerId"])
                         self._note("opened", "", target=target, opener=str(info["openerId"]))
-                self._guard(child)
+                        owner = self.owner_of(str(info["openerId"]))      # what a lane opens is its Pip's
+                    self._tabs.setdefault(target, _Tab(owner=owner))
+                owner = self.owner_of(str(info.get("targetId", "")))
+                if not (self.shared and owner == PERSON):
+                    # Your Browser never gates the person's own tabs; everything else is gated before it runs.
+                    self._guard(child)
+                    if self.shared:
+                        self._guard_lane(child)
                 self._fire("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}, child)
                 self._fire("Runtime.runIfWaitingForDebugger", {}, child)
         elif method == "Target.detachedFromTarget":
@@ -1131,10 +1384,13 @@ class BoxedBrowser(BrowserSession):
                 for table in (self._attached, self._kinds, self._parents):
                     table.pop(gone, None)
                 self._pages.discard(gone)
+                self._tabs.pop(gone, None)              # its dialog and pass went with it
+                self._opened.discard(gone)
                 if self._ws is not None and params.get("sessionId") == getattr(self._ws, "session_id", None):
                     self._orphaned = gone       # the tab in front closed itself: recover_tab moves on
-            if self.dialog is not None and self.dialog.get("session") == params.get("sessionId"):
-                self.dialog = None
+            for tab in (self._loose, *self._tabs.values()):
+                if tab.dialog is not None and tab.dialog.get("session") == params.get("sessionId"):
+                    tab.dialog = None
         elif method == "Fetch.requestPaused":
             self._gate(params, message.get("sessionId", ""))
         elif method == "Input.dragIntercepted":
@@ -1145,21 +1401,28 @@ class BoxedBrowser(BrowserSession):
                 self.chooser = {**params, "session": str(message.get("sessionId", ""))}
                 self._note("chooser", str(message.get("sessionId", "")))
         elif method == "Page.frameNavigated" and not (params.get("frame") or {}).get("parentId"):
-            self.acted_at = 0.0          # a new page: its own requests are not the last action's effect
+            state = self._tab_state(str(message.get("sessionId", "")))
+            state.acted_at = 0.0         # a new page in that tab: its own requests are not the last action's effect
+            if self.lane_sent is not None and state.owner != PERSON:
+                self.lane_sent.flush(state.owner)
             if self.chooser is not None and self.chooser.get("session") == message.get("sessionId"):
                 self.chooser = None
         elif method == "Page.javascriptDialogOpening":
             self._dialog_opened(params, str(message.get("sessionId", "")))
             return                       # answered here (or held for the Pip), never by the plain session's rule
         elif method == "Page.javascriptDialogClosed":
-            if self.dialog is not None and self.dialog.get("session") == message.get("sessionId"):
-                self.dialog = None       # the user answered it on the computer's screen
+            state = self._tab_state(str(message.get("sessionId", "")))
+            if state.dialog is not None and state.dialog.get("session") == message.get("sessionId"):
+                state.dialog = None      # the user answered it on the computer's screen
             return
         elif method in ("Browser.downloadWillBegin", "Browser.downloadProgress"):
             self._download(method, params)
         elif method in ("Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed",
                         "Network.loadingFinished", "Log.entryAdded", "Runtime.consoleAPICalled", "Runtime.exceptionThrown"):
             self._health(method, params, str(message.get("sessionId", "")))
+            if self.lane_sent is not None and method in ("Network.requestWillBeSent", "Network.loadingFinished",
+                                                         "Network.loadingFailed"):
+                self._lane_traffic(method, params, str(message.get("sessionId", "")))
         super()._observe(message)
 
     # -- what a step changed, what the page reported --------------------------------------------
@@ -1253,17 +1516,25 @@ class BoxedBrowser(BrowserSession):
 
     def _dialog_opened(self, params: dict, session: str) -> None:
         kind = str(params.get("type", "alert"))
-        if self.hold_dialogs and kind in ("confirm", "prompt"):
-            # Left open: the Pip reads it in the step's answer and answers it with its dialog step. What its OK then
-            # makes the page send is held like any submit.
-            self.dialog = {"type": kind, "message": str(params.get("message", ""))[:2000],
-                           "default": str(params.get("defaultPrompt", ""))[:500], "session": session,
-                           "url": str(params.get("url", ""))[:500]}
+        state = self._tab_state(session)
+        lane = self._lanes.get(state.owner)
+        opened = {"type": kind, "message": str(params.get("message", ""))[:2000],
+                  "default": str(params.get("defaultPrompt", ""))[:500], "session": session,
+                  "url": str(params.get("url", ""))[:500]}
+        if self.shared and state.owner == PERSON:
+            # The person's own tab in Your Browser: they answer it in its window; DGC only knows it is open.
+            state.dialog = opened
+            return
+        if lane is not None and lane.hold_dialogs and kind in ("confirm", "prompt"):
+            # Left open, on its tab: the Pip whose run holds dialogs reads it in the step's answer and answers it with
+            # its dialog step. What its OK then makes the page send is held like any submit.
+            self._dialog_seq += 1
+            state.dialog, state.dialog_seq = opened, self._dialog_seq
             self._note("dialog", session)
             return
         # An alert, leaving the page (beforeunload), or no run: answered at once, on the tab it came from.
         self._fire("Page.handleJavaScriptDialog", {"accept": kind == "beforeunload"}, session or None)
-        if kind == "alert" and self.hold_dialogs:
+        if kind == "alert" and lane is not None and lane.hold_dialogs:
             self._note("alert", session, text=str(params.get("message", ""))[:300])
 
     def _session_call(self, session: str, method: str, params: dict | None = None, *, timeout: float = 10) -> dict:
@@ -1291,24 +1562,29 @@ class BoxedBrowser(BrowserSession):
         params = {"accept": bool(accept)}
         if accept and dialog["type"] == "prompt" and text is not None:
             params["promptText"] = str(text)[:2000]
-        self.acted_at = time.monotonic()
+        state = self._tab_state(dialog["session"])
+        state.acted_at = time.monotonic()
         self._session_call(dialog["session"], "Page.handleJavaScriptDialog", params)
-        self.dialog = None
-        self.acted_at = time.monotonic()
+        if state.dialog is dialog:
+            state.dialog = None
+        state.acted_at = time.monotonic()
         return dialog
 
     def dismiss_dialog(self) -> None:
-        """A run that ended with a dialog open: Cancel, so the page isn't left stuck for the user."""
-        if self.dialog is not None:
+        """A run that ended with a dialog open: Cancel each one its tabs hold, so no page is left stuck for the user."""
+        for _ in range(len(self._tabs) + 1):
+            dialog = self.dialog
+            if dialog is None:
+                return
             try:
                 self.answer_dialog(False)
             except (BrowserError, socket.timeout, OSError):
-                self.dialog = None
+                self._tab_state(dialog.get("session")).dialog = None
 
     def _blocked_by_dialog(self, method: str) -> bool:
         """A tab with an open dialog answers nothing that runs in its page (a script, a screenshot, input) until it
         is answered; the browser, its targets and the dialog itself still answer."""
-        dialog = self.dialog
+        dialog = self._front_tab().dialog
         return (dialog is not None and dialog.get("session") == getattr(self._ws, "session_id", None)
                 and not method.startswith(("Page.handleJavaScriptDialog", "Page.getNavigationHistory", "Target.", "Browser.")))
 
@@ -1413,11 +1689,16 @@ class BoxedBrowser(BrowserSession):
             return ""
         back = self._openers.get(gone)
         follow = back if back in open_tabs else max(open_tabs, key=lambda t: int(self._tab_name(t)[1:]))
-        self.switch_tab(follow, settle=2.0)
+        self.switch_tab(follow, settle=2.0, activate=self._may_activate(follow))
         return self._tab_name(follow)
 
-    def switch_tab(self, target: str, *, settle: float = 8.0) -> None:
-        """Make a tab the one the Pip (and the user's view of the browser) uses, and wait for it to load."""
+    def _may_activate(self, target: str) -> bool:
+        """Whether DGC may bring a tab to the front: never a Pip's lane in Your Browser (the window is the person's)."""
+        return not (self.shared and self.owner_of(target) != PERSON)
+
+    def switch_tab(self, target: str, *, settle: float = 8.0, activate: bool = True) -> None:
+        """Make a tab the one the Pip (and the user's view of the browser) uses, and wait for it to load. ``activate``
+        False: DGC drives it without bringing it to the front, so a Pip's step never takes the person's view."""
         session = self._attached.get(target)
         if not session or target not in self._pages:
             raise BrowserError("that tab has closed; tabs lists the open ones")
@@ -1430,10 +1711,11 @@ class BoxedBrowser(BrowserSession):
                 self.command("Page.setInterceptFileChooserDialog", {"enabled": True})
             except BrowserError:
                 pass
-        try:
-            self._browser_call("Target.activateTarget", {"targetId": target})
-        except (BrowserError, socket.timeout):
-            pass
+        if activate:
+            try:
+                self._browser_call("Target.activateTarget", {"targetId": target})
+            except (BrowserError, socket.timeout):
+                pass
         self._tab_name(target)
         self.settle(settle)
 
@@ -1461,19 +1743,17 @@ class BoxedBrowser(BrowserSession):
                 break
 
     def open_tab(self, url: str) -> str:
-        """A new tab at ``url``, made the one in front. Returns its target id."""
+        """A new tab at ``url``, made the one in front. Returns its target id. A tab a Pip's step opens from its lane
+        in Your Browser is its lane too, and stays out of the person's view."""
         self.start()
+        owner = self._front_owner()
         made = str(self._browser_call("Target.createTarget", {"url": "about:blank"}).get("targetId", ""))
-        deadline = time.monotonic() + 10
-        while made not in self._attached and time.monotonic() < deadline:
-            self._pipe.settimeout(max(0.05, deadline - time.monotonic()))
-            try:
-                self._observe(self._pipe.recv())
-            except socket.timeout:
-                break
-        if made not in self._attached:
-            raise BrowserError("the new tab did not open")
-        self.switch_tab(made, settle=2.0)
+        self._wait_attached(made)
+        lane = self.shared and owner != PERSON
+        if lane:
+            self._opened.add(made)
+            self._make_lane(made, owner)
+        self.switch_tab(made, settle=2.0, activate=not lane)
         self.navigate(url)
         return made
 
@@ -1498,7 +1778,7 @@ class BoxedBrowser(BrowserSession):
         left = [t["target"] for t in tabs if t["target"] != target]
         back = self._openers.get(target)
         follow = back if back in left else left[-1]
-        self.switch_tab(follow, settle=2.0)
+        self.switch_tab(follow, settle=2.0, activate=self._may_activate(follow))
         return follow
 
     # -- a run's file pickers ------------------------------------------------------------------------
@@ -1607,8 +1887,18 @@ class BoxedBrowser(BrowserSession):
         return self._await_load()
 
     def acting(self) -> bool:
-        """Whether the Pip or the user acted on this page in the last ACTION_SECONDS."""
-        return time.monotonic() - self.acted_at <= ACTION_SECONDS
+        """Whether the Pip or the user acted on the tab in front, or another tab of its owner, in the last
+        ACTION_SECONDS."""
+        return self._acting_for(self.page_target())
+
+    def _acting_for(self, tab: str | None) -> bool:
+        """Whether a tab's owner acted on any of its tabs in the last ACTION_SECONDS (one Pip's action never makes
+        another's or the person's traffic its own). A request from no tab (a service worker) goes by the browser's own
+        owner's tabs, as one action covered the whole browser before lanes."""
+        owner = self._tabs[tab].owner if tab in self._tabs else self.default_owner
+        now = time.monotonic()
+        tabs = [t for t in self._tabs.values() if t.owner == owner] + ([self._loose] if tab not in self._tabs else [])
+        return any(now - t.acted_at <= ACTION_SECONDS for t in tabs)
 
     # The Pip's actions (and the user's own hands below) start the window in which a write is theirs.
     def click(self, ref: str) -> str:
@@ -1632,7 +1922,16 @@ class BoxedBrowser(BrowserSession):
         request_id = str(params.get("requestId", ""))
         verb = str(request.get("method", "GET")).upper()
         kind = str(params.get("resourceType", ""))
-        gate = self.site_gate
+        # Whose request it is: its tab's (a frame or worker in a tab is that tab's), with that tab's own state and its
+        # owner's settings. One Pip's run, sign-in or action never decides another's request, nor the person's.
+        tab = self._tab_of(self._session_target(session))
+        state = self._tabs.get(tab, self._loose) if tab else self._loose
+        owner = state.owner if tab else self.default_owner
+        lane = self._lanes.get(owner)
+        if (lane is not None and lane.grants is not None and owner != PERSON
+                and self._confine(lane, owner, tab, params, session, str(request.get("url", "")), verb, kind)):
+            return
+        gate = lane.site_gate if lane is not None else None
         if (gate is not None and kind == "Document" and verb in READ_METHODS
                 and str(params.get("frameId", "")) in self._attached and not gate(str(request.get("url", "")))):
             # A tab's own page (never a frame inside one) on a site the Pip hasn't visited for this user. A
@@ -1640,27 +1939,31 @@ class BoxedBrowser(BrowserSession):
             if len(self.held) >= MAX_HELD:
                 self._fire("Fetch.failRequest", {"requestId": request_id, "errorReason": "BlockedByClient"}, session)
                 return
-            held = HeldWrite(request_id, session, verb, str(request.get("url", ""))[:2000], [], 0, time.time(), site=True)
+            held = HeldWrite(request_id, session, verb, str(request.get("url", ""))[:2000], [], 0, time.time(), site=True,
+                             owner=owner)
             self.held[request_id] = held
             if self.on_write is not None:
                 self.on_write(held)
             return
-        login = self.login_pass
+        login = state.login_pass
         if login is not None and verb not in READ_METHODS:
             headers = {str(k).lower(): str(v) for k, v in (request.get("headers") or {}).items()}
             if login.admits(str(request.get("url", "")), str(request.get("postData", "") or ""), headers.get("content-type", "")):
-                # The sign-in form DGC just filled with a saved login, sent to that login's site: the saved login is the
-                # user's say-so for this one request. The pass is spent, and what the page sends next is its own.
-                self.login_pass = None
+                # The sign-in form DGC just filled with a saved login, sent to that login's site from the tab it filled:
+                # the saved login is the user's say-so for this one request. The pass is spent, and what the page sends
+                # next is its own.
+                state.login_pass = None
                 parts = urlsplit(str(request.get("url", "")))
                 self.login_sent.append(f"{verb} {parts.hostname or ''}{parts.path or '/'}"[:300])
                 del self.login_sent[:-20]
-                self.acted_at = 0.0
+                for other in (self._loose, *self._tabs.values()):
+                    if other.owner == owner:
+                        other.acted_at = 0.0
                 self._fire("Fetch.continueRequest", {"requestId": request_id}, session)
                 return
         inner_form = kind == "Document" and str(params.get("frameId", "")) not in self._pages
         if (verb in READ_METHODS or kind in TELEMETRY_KINDS
-                or (kind in BACKGROUND_KINDS or inner_form) and not self.acting()):
+                or (kind in BACKGROUND_KINDS or inner_form) and not self._acting_for(tab)):
             # A read, telemetry, or the page's own background traffic: nothing the Pip did. Holding it
             # made every page with analytics ask for approval (and kept Google's own checks from running).
             # That includes a form a page posts into a hidden frame by itself, as Facebook's pixel does with a
@@ -1675,7 +1978,7 @@ class BoxedBrowser(BrowserSession):
         held = HeldWrite(request_id, session, verb, str(request.get("url", ""))[:2000],
                          _fields(post, headers.get("content-type", "")), len(post.encode("utf-8")), time.time(),
                          payment=carries_card_number(post, loose=kind == "Document"),
-                         card_missing=card_missing(post, headers.get("content-type", "")))
+                         card_missing=card_missing(post, headers.get("content-type", "")), owner=owner)
         self.held[request_id] = held
         if self.on_write is not None:
             self.on_write(held)
@@ -2114,3 +2417,5 @@ class BoxedBrowser(BrowserSession):
     def pump(self, seconds: float) -> None:
         """Let the page run (and the gate see its requests) for a while."""
         self._pump(seconds)
+        if self.lane_sent is not None:
+            self.lane_sent.flush_due()

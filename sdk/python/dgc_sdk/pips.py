@@ -497,6 +497,15 @@ READ_COMMANDS |= API101_READS
 # API 104: a Pip's own sub-agents model. set_pip_agents also takes model_choice, thinking, context_size and fallback
 # (what its sub-agents run on, and DGC's own helpers in its runs), each optional; it answers all five with slots.
 API104_FIELDS = {'set_pip_agents': frozenset({'model_choice', 'thinking', 'context_size', 'fallback'})}
+# API 105: Your Browser, the one shared browser you sign in to, each Pip in its own tab of it on the sites you let it
+# use. get_your_browser (kind host_profile, weaker, the sites with their Pips); set_your_browser_site (all, or the Pips
+# chosen) and sign_out_your_browser_site; open_your_browser and use_your_browser_view answer not_ready until its
+# window exists. Local only.
+API105_READS = frozenset({'get_your_browser'})
+API105_MUTATIONS = frozenset({'set_your_browser_site', 'sign_out_your_browser_site', 'open_your_browser',
+                              'use_your_browser_view'})
+READ_COMMANDS |= API105_READS
+MUTATION_COMMANDS |= API105_MUTATIONS
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -661,6 +670,11 @@ COMMAND_FIELDS = {
     'set_pip_agents': frozenset({'pip_id', 'slots', 'model_choice', 'thinking', 'context_size', 'fallback'}),
     'retry_pip_fix': frozenset({'pip_id', 'fix_id', 'again'}),
     'fill_pip_code': frozenset({'pip_id', 'action_id', 'expected_digest', 'code'}),
+    'get_your_browser': frozenset(),
+    'set_your_browser_site': frozenset({'site', 'mode', 'pips'}),
+    'sign_out_your_browser_site': frozenset({'site'}),
+    'open_your_browser': frozenset({'url', 'pip_id'}),
+    'use_your_browser_view': frozenset({'op', 'x', 'y', 'text', 'key', 'dy', 'url', 'pip_id'}),
     'commit_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'set_pip_goal': frozenset({'pip_id', 'objective', 'conversation_id'}),
     'get_pip_goal': frozenset({'pip_id', 'conversation_id'}),
@@ -985,7 +999,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API101_READS:
+        if command in API105_READS | API105_MUTATIONS:
+            minimum = 105
+        elif command in API101_READS:
             minimum = 101
         elif command in API98_MUTATIONS:
             minimum = 98

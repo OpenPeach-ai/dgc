@@ -183,10 +183,14 @@ def record_sent(path: Path, entry: dict) -> None:
             pass
 
 
-def sent_summary(paths) -> dict:
-    """{sites: [{host, times, sent_bytes, received_bytes, blocked, first_at, last_at}] newest first, note}."""
+def sent_summary(paths, *, lanes: Path | None = None, pip_id: str = "") -> dict:
+    """{sites: [{host, times, sent_bytes, received_bytes, blocked, your_browser, not_allowed, first_at, last_at}] newest
+    first, note}. ``lanes``: Your Browser's one log for every Pip's lane (your_browser.LaneSent), of which only
+    ``pip_id``'s lines count; ``your_browser`` is how many of a site's lines came from there, and ``not_allowed`` how
+    many pages or writes there DGC refused because the site isn't one the person let the Pip use (never ``blocked``,
+    which is a secret stopped)."""
     sites: dict = {}
-    for path in paths:
+    for path, lane in [*((p, False) for p in paths), *([(lanes, True)] if lanes is not None and pip_id else [])]:
         try:
             lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
@@ -198,10 +202,16 @@ def sent_summary(paths) -> dict:
                 continue
             if not isinstance(entry, dict) or not isinstance(entry.get("host"), str):
                 continue
+            if lane and entry.get("pip_id") != pip_id:
+                continue
             host, at = entry["host"][:255], str(entry.get("at") or "")
             site = sites.setdefault(host, {"host": host, "times": 0, "sent_bytes": 0, "received_bytes": 0,
-                                           "blocked": 0, "first_at": at, "last_at": at})
-            if entry.get("kind") in ("blocked", "refused"):
+                                           "blocked": 0, "your_browser": 0, "not_allowed": 0, "first_at": at,
+                                           "last_at": at})
+            site["your_browser"] += 1 if lane else 0
+            if lane and entry.get("kind") == "refused":
+                site["not_allowed"] += 1
+            elif entry.get("kind") in ("blocked", "refused"):
                 site["blocked"] += 1
             else:
                 site["times"] += 1

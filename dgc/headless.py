@@ -580,7 +580,14 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # fallback ({provider, model}, model "" none); it answers {slots, model_choice, thinking, context_size, fallback}, and
 # list_pip_agents carries the same four beside agents and slots. A sub-agent job's run runs on them and carries on with
 # that fallback in place of the Pip's; every run of the Pip gives DGC's own helpers inside it the same settings.
-PIPS_API_VERSION = 104
+# API 105 (0.52, Your Browser, the model and the API): get_your_browser {} (R: kind host_profile, weaker true, available,
+# reason, chrome installed | dgc_copy | "", sites [{site, shown, mode all | chosen, money, pips [{pip_id, name}],
+# sso_hosts, added_by, added_at, used_at}], signing_out, yours {open, tabs}, lanes); set_your_browser_site {site, mode,
+# pips} and sign_out_your_browser_site {site} (M: sign_out "waiting" until Your Browser clears it); open_your_browser
+# {url, pip_id} and use_your_browser_view {op, x, y, text, key, dy, url, pip_id} (M) answer not_ready until its window
+# exists. All local only. list_pip_sent's sites gain `your_browser` (how many of its lines came from the Pip's lane
+# there) and `not_allowed` (pages or writes there refused: not one of the Pip's sites).
+PIPS_API_VERSION = 105
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}
