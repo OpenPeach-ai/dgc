@@ -147,6 +147,17 @@ export async function removeProfile(context,id){
  if(ID.test(id))await context.secrets.delete(secretKey(id));
 }
 
+/** Connect again (a key the provider stopped taking, 17 Nov): the saved provider keeps its id, name and models, so
+ *  chats, the default and Pips set to it carry on with the new key. A subscription has no key to replace. */
+export async function replaceKey(context,id,key){
+ const row=listProfiles(context).find(row=>row.id===id);
+ if(!row)throw Error('Provider not found. Open Settings and add it again.');
+ if(row.kind==='subscription')throw Error('A subscription uses its own signed-in CLI, not an API key.');
+ const value=String(key||'');
+ if(!value||value.length>16384||/[\x00-\x1f\x7f]/.test(value))throw Error('The API key must be a single line of at most 16 KiB.');
+ await context.secrets.store(secretKey(id),value);
+}
+
 export async function profileCredential(context,id){
  const row=listProfiles(context).find(row=>row.id===id);
  if(!row)throw Error('Provider not found. Open Settings and add it again.');

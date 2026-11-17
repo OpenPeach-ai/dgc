@@ -3558,13 +3558,21 @@ test("Ollama Cloud is one of the providers to add: ollama.com, a key needed, its
   const x = ollamaCloudWorld();
   x.provider.refreshEditorSettings();
   const row = x.posted.find((m) => m.type === "providers").providers.find((p) => p.id === "ollamacloud");
-  assert.deepEqual(row, { id: "ollamacloud", label: "Ollama Cloud", url: "https://ollama.com", needsKey: true, keys: true });
+  assert.deepEqual(row, { id: "ollamacloud", label: "Ollama Cloud", url: "https://ollama.com", needsKey: true, keys: true, keysHost: "ollama.com" });
   const opened = [];
   globalThis.__DGC_TEST_VSCODE.Uri.parse = (s) => ({ toString: () => s });
   globalThis.__DGC_TEST_VSCODE.env.openExternal = async (uri) => { opened.push(uri.toString()); return true; };
   await x.provider.onSettingsMessage({ type: "openProviderKeys", id: "ollamacloud" });
   await x.provider.onSettingsMessage({ type: "openProviderKeys", id: "openai", url: "https://evil.invalid" });
-  assert.deepEqual(opened, ["https://ollama.com/settings/keys"], "only a preset's own keys page, never a URL from the page");
+  await x.provider.onSettingsMessage({ type: "openProviderKeys", id: "openrouter", page: "credits", url: "https://evil.invalid" });
+  await x.provider.onSettingsMessage({ type: "openProviderKeys", id: "groq", page: "credits" });
+  await x.provider.onSettingsMessage({ type: "openProviderKeys", id: "nope" });
+  // 17 Nov: every key-only host has its keys page (Get a key), and OpenRouter its credits page (Top up).
+  assert.deepEqual(opened, ["https://ollama.com/settings/keys", "https://platform.openai.com/api-keys", "https://openrouter.ai/settings/credits"],
+    "only a preset's own keys or credits page, never a URL from the page; no credits page, nothing opens");
+  const providers = x.posted.find((m) => m.type === "providers").providers;
+  assert.deepEqual(providers.filter((p) => p.connect).map((p) => p.id), ["openrouter"], "OpenRouter alone signs in");
+  assert.deepEqual(providers.filter((p) => p.needsKey && !p.keys).map((p) => p.id), [], "every host that needs a key has Get a key");
 });
 
 test("Ollama Cloud: a key ollama.com refuses says so at once, in plain words, and nothing is saved", async () => {
@@ -3737,4 +3745,128 @@ test("Settings › Sub-agents: a model from a saved provider is saved with that 
   assert.equal(await world.provider.agentsProviderKey(row.id, "https://other.example/v1"), "", "the page named a provider and another address: no key");
   assert.equal(await world.provider.agentsProviderKey("provider_" + "9".repeat(32), "https://spare.example/v1"), "");
   assert.equal(await world.provider.agentsProviderKey("", "https://spare.example/v1"), "");
+});
+
+// ---- Provider sign-ins (17 Nov): OpenRouter's Connect and Connect again, the key check, Sign in, Ollama's account ----
+async function browserComesBack(url, code = "code-1") {
+  const { request } = await import("node:http");
+  const page = new URL(url), back = new URL(page.searchParams.get("callback_url"));
+  setTimeout(() => {
+    const req = request({ host: "127.0.0.1", port: +back.port, path: `${back.pathname}?code=${code}&state=${page.searchParams.get("state")}`,
+      headers: { Host: back.host } }, (res) => res.resume());
+    req.on("error", () => {}); req.end();
+  }, 20);
+}
+function openRouterWorld({ keyInfo = [200, { data: { usage: 1, limit: 10, limit_remaining: 9 } }] } = {}) {
+  const x = ollamaCloudWorld();
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  const opened = [], fetched = [];
+  vs.Uri.parse = (s) => ({ toString: () => s });
+  vs.env.asExternalUri = async (uri) => uri;
+  vs.env.openExternal = async (uri) => { const url = uri.toString(); opened.push(url); if (url.startsWith("https://openrouter.ai/auth")) await browserComesBack(url); return true; };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    fetched.push({ url: u, method: init.method || "GET", auth: init.headers?.Authorization || "" });
+    const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+    if (u === "https://openrouter.ai/api/v1/auth/keys") return json(200, { key: "sk-or-v1-new" });
+    if (u === "https://openrouter.ai/api/v1/key") return json(...x.keyInfo);
+    if (u.endsWith(":11434/api/me")) return x.me ? json(200, x.me) : json(401, { error: "unauthorized" });
+    return realFetch(url, init);
+  };
+  x.keyInfo = keyInfo;
+  x.restore = () => { globalThis.fetch = realFetch; };
+  return Object.assign(x, { opened, fetched });
+}
+
+test("Connect: OpenRouter's sign-in saves it as a provider with the key it hands over, and says so", async () => {
+  const x = openRouterWorld();
+  try {
+    await x.provider.onSettingsMessage({ type: "connectProvider", preset: "openrouter", model: "" });
+    const { listProfiles, profileCredential } = await providerProfiles();
+    const rows = listProfiles(x.provider.context);
+    assert.deepEqual(rows.map((r) => [r.name, r.base_url]), [["OpenRouter", "https://openrouter.ai/api/v1"]]);
+    assert.equal((await profileCredential(x.provider.context, rows[0].id)).api_key, "sk-or-v1-new");
+    assert.equal(x.opened.length, 1);
+    const waiting = x.posted.filter((m) => m.type === "providerConnecting").map((m) => m.waiting);
+    assert.deepEqual(waiting, [true, false], "Settings shows the wait, then stops");
+    assert.equal(x.posted.filter((m) => m.type === "providerProfiles" && m.saved).at(-1)?.note, "Connected to OpenRouter.");
+    assert.equal(JSON.stringify(x.posted).includes("sk-or-v1-new"), false, "the key never reaches the page");
+    await x.provider.onSettingsMessage({ type: "connectProvider", preset: "groq" });
+    assert.equal(x.opened.length, 1, "only a preset that signs in can Connect");
+  } finally { x.restore(); }
+});
+
+test("Connect again: the saved provider keeps its id, the key is replaced, and a Pip's copy gets it with its own model", async () => {
+  const x = openRouterWorld({ keyInfo: [401, { error: { message: "No auth credentials found" } }] });
+  try {
+    const row = await addProviderProfile(x.world, { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1", model: "", api_mode: "auto", api_key: "sk-or-old" });
+    await x.provider.postProviderStates();
+    assert.deepEqual(x.posted.filter((m) => m.type === "providerStates").at(-1).states[row.id], { state: "signed_out" });
+    assert.deepEqual(x.fetched.filter((f) => f.url.endsWith("/api/v1/key")).map((f) => f.auth), ["Bearer sk-or-old"]);
+    x.keyInfo = [200, { data: { usage: 0, limit: null, limit_remaining: null } }];
+    await x.provider.onSettingsMessage({ type: "reconnectProvider", id: row.id });
+    const { listProfiles, profileCredential } = await providerProfiles();
+    assert.deepEqual(listProfiles(x.provider.context).map((r) => r.id), [row.id]);
+    assert.equal((await profileCredential(x.provider.context, row.id)).api_key, "sk-or-v1-new");
+    const saved = x.seen.filter((c) => c.type === "save_model_provider").at(-1);
+    assert.deepEqual([saved.id, saved.model, saved.api_key], [row.id, "", "sk-or-v1-new"], "a blank model: the Pips' copy keeps its own");
+    assert.equal(x.posted.filter((m) => m.type === "providerProfiles").at(-1)?.note, "Connected to OpenRouter again.");
+    assert.equal(x.posted.filter((m) => m.type === "providerStates").at(-1).states[row.id].state, "ok", "checked again, not the cached refusal");
+  } finally { x.restore(); }
+});
+
+test("Cancel stops Connect waiting; nothing is saved", async () => {
+  const x = openRouterWorld();
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  vs.env.openExternal = async () => { setTimeout(() => x.provider.onSettingsMessage({ type: "cancelProviderConnect" }), 30); return true; };
+  try {
+    await x.provider.onSettingsMessage({ type: "connectProvider", preset: "openrouter", model: "" });
+    const { listProfiles } = await providerProfiles();
+    assert.deepEqual(listProfiles(x.provider.context), []);
+    assert.match(x.posted.filter((m) => m.type === "providerProfileError").at(-1)?.message || "", /cancelled/);
+  } finally { x.restore(); }
+});
+
+test("Sign in runs an app's own sign-in in a terminal, no shell, and Settings looks again when it closes", async () => {
+  const x = openRouterWorld();
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  const made = [], listeners = [];
+  vs.window.createTerminal = (options) => { const term = { options, show() { made.push(options); } }; return term; };
+  vs.window.onDidCloseTerminal = (fn) => { listeners.push(fn); return { dispose() {} }; };
+  try {
+    await x.provider.onSettingsMessage({ type: "signInApp", app: "codex" });
+    await x.provider.onSettingsMessage({ type: "signInApp", app: "ollama" });
+    await x.provider.onSettingsMessage({ type: "signInApp", app: "rm -rf" });
+    assert.deepEqual(made.map((o) => [o.name, o.shellPath, o.shellArgs]), [["Sign in to Codex", "codex", ["login"]], ["Sign in to ollama.com", "ollama", ["signin"]]]);
+    const before = x.posted.filter((m) => m.type === "providers").length;
+    listeners[0]({ options: {} });            // another terminal closing changes nothing
+    assert.equal(x.posted.filter((m) => m.type === "providers").length, before);
+  } finally { x.restore(); delete vs.window.createTerminal; delete vs.window.onDidCloseTerminal; }
+});
+
+test("Ollama here says whether it is signed in to ollama.com, with the account's name and nothing else", async () => {
+  const x = openRouterWorld();
+  try {
+    await addProviderProfile(x.world, { name: "Ollama (local)", base_url: "http://localhost:11434/v1", model: "qwen", api_mode: "auto" });
+    await x.provider.postOllamaAccount();
+    assert.deepEqual(x.posted.filter((m) => m.type === "ollamaAccount").at(-1), { type: "ollamaAccount", signed_in: false });
+    x.me = { id: "u1", email: "person@example.com", name: "tilemaker", plan: "max" };
+    await x.provider.postOllamaAccount();
+    assert.deepEqual(x.posted.filter((m) => m.type === "ollamaAccount").at(-1), { type: "ollamaAccount", signed_in: true, name: "tilemaker" });
+    assert.equal(JSON.stringify(x.posted).includes("person@example.com"), false);
+  } finally { x.restore(); }
+});
+
+test("Ollama as the default from before saved providers is checked for its ollama.com sign-in too", async () => {
+  const x = openRouterWorld();
+  try {
+    x.provider.lastReadyEvent.capabilities.saved_route = { base_url: "http://127.0.0.1:11434/v1", model: "qwen", builtin: false };
+    await x.provider.postOllamaAccount();
+    assert.deepEqual(x.posted.filter((m) => m.type === "ollamaAccount").at(-1), { type: "ollamaAccount", signed_in: false });
+    x.provider.lastReadyEvent.capabilities.saved_route = { base_url: "", subscription_engine: "claude" };
+    const before = x.posted.length;
+    await x.provider.postOllamaAccount();
+    assert.equal(x.posted.length, before, "a subscription default isn't Ollama: nothing asked, nothing said");
+  } finally { x.restore(); }
 });

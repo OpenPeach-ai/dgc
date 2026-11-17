@@ -9040,7 +9040,12 @@ class TUI:
                     self.agent.refresh_client()
                 self._flash(f"{who} → {prov['base_url']}")
 
-            if prov["needs_key"]:
+            if prov["needs_key"] and prov["base_url"] == PROVIDERS["openrouter"]["base_url"]:
+                # OpenRouter: Enter signs in in the browser and hands DGC a key of the person's own; a pasted key works too.
+                self._ask_input("Enter: sign in with OpenRouter in your browser · or paste an OpenRouter key (masked)",
+                                lambda typed: finish(typed.strip()) if typed.strip() else self._connect_openrouter(finish),
+                                secret=True)
+            elif prov["needs_key"]:
                 self._ask_input(f"API key for {prov['label']} (masked) then Enter", finish, secret=True)
             else:
                 finish()
@@ -9167,6 +9172,40 @@ class TUI:
             self._run_setup_cmd(cmd, hint)
         self._show_picker(f"Sign in to {eng.short_label} now? (opens your browser)",
                           ["Yes, sign in", "No"], pick)
+
+    def _connect_openrouter(self, done) -> None:
+        """OpenRouter's sign-in (dgc.provider_connect) on a thread of its own, so the screen keeps working: the browser
+        opens; with none, the page's address lands in the transcript and the code OpenRouter shows is asked for.
+        `done(key)` once OpenRouter hands over the key."""
+        from . import provider_connect
+
+        def ask_code(url: str) -> str:
+            got, ready = {}, threading.Event()
+
+            def answer(text) -> None:
+                got["code"] = str(text or "")
+                ready.set()
+            self._ask_input("paste the code OpenRouter shows (blank cancels) then Enter", answer)
+            ready.wait(provider_connect.CODE_LIFE_S)
+            return got.get("code", "")
+
+        def say(text: str) -> None:
+            if "\n" in text:
+                words, _, url = text.partition("\n")
+                self._append_md(f"{words}\n\n<{url.strip()}>")
+            else:
+                self._flash(text, 30)
+
+        def work() -> None:
+            try:
+                key = provider_connect.connect(say=say, ask_code=ask_code)
+            except provider_connect.ConnectError as exc:
+                self._flash(str(exc), 8)
+                return
+            done(key)
+
+        self._flash("Opening OpenRouter in your browser…", 30)
+        threading.Thread(target=work, daemon=True, name="dgc-openrouter-connect").start()
 
     def _set_host(self, url: str, subagent: bool) -> None:
         if not url:

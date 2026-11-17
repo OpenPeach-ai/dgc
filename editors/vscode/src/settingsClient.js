@@ -60,6 +60,8 @@ const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${pat
 const sections = [['general', 'General'], ['models', 'Models'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers'], ['dev', 'Dev Mode']];
 let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], savedProfiles = [], defaultProviderModel = '', choosingDefaultId = '', typingDefaultModel = '', providerModelLists = {}, directProvider = null, signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
 let providerForm = {preset:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''}, defaultProviderId = '';
+// Provider sign-ins (17 Nov): each OpenRouter key's state, a Connect waiting on the browser, Ollama's ollama.com account.
+let providerStates = {}, providerConnecting = null, ollamaAccount = null;
 let mcpError = "";
 let mcpConfirm = '';     // a pending confirm in the MCP form's danger zone: '', 'forget' or 'remove'
 // Token usage shows Everything or the Pips' share of it; the range is shared by both.
@@ -418,6 +420,7 @@ function render() {
         return;
     }
     ui.providerProfiles=savedProfiles;ui.providerDraft=providerForm;ui.defaultProviderId=defaultProviderId;ui.defaultProviderModel=defaultProviderModel;ui.directProvider=directProvider;
+    ui.providerStates=providerStates;ui.providerConnecting=providerConnecting;ui.ollamaAccount=ollamaAccount;
     ui.choosingDefaultId=choosingDefaultId;ui.providerModels=providerModelLists;ui.typingDefaultModel=typingDefaultModel;
     const savedFormOpen=section==='models' && main.querySelector('details[data-more="saved-providers"]')?.open;
     // Security lists the rules an Always allow made, in words, each with Remove: asked of DGC when the page opens.
@@ -461,6 +464,16 @@ function render() {
             main.querySelector('#saved_provider_model')?.focus();
         });
         main.querySelectorAll('[data-provider-keys]').forEach(button=>button.addEventListener('click',()=>send({type:'openProviderKeys',id:button.dataset.providerKeys})));
+        // Sign-ins (17 Nov): Connect / Connect again wait on the browser (Cancel stops waiting); Top up opens the credits page;
+        // Sign in runs an app's own sign-in in a terminal here.
+        main.querySelectorAll('[data-provider-connect]').forEach(button=>button.addEventListener('click',()=>{
+            const named=String(providerForm.model||'').trim();
+            send({type:'connectProvider',preset:button.dataset.providerConnect,model:/^all models$/i.test(named)?'':named});
+        }));
+        main.querySelectorAll('[data-provider-connect-cancel]').forEach(button=>button.addEventListener('click',()=>send({type:'cancelProviderConnect'})));
+        main.querySelectorAll('[data-provider-reconnect]').forEach(button=>button.addEventListener('click',()=>send({type:'reconnectProvider',id:button.dataset.providerReconnect})));
+        main.querySelectorAll('[data-provider-topup]').forEach(button=>button.addEventListener('click',()=>send({type:'openProviderKeys',id:'openrouter',page:'credits'})));
+        main.querySelectorAll('[data-app-signin]').forEach(button=>button.addEventListener('click',()=>send({type:'signInApp',app:button.dataset.appSignin})));
         main.querySelector('#saved-provider-add')?.addEventListener('click',()=>{
             const status=main.querySelector('#saved-provider-status');if(status)status.textContent='Saving provider…';
             if(!providerForm.preset){if(status)status.textContent='Choose a provider first.';return;}
@@ -1571,6 +1584,18 @@ window.addEventListener('message', event => {
         if(config&&section==='models'){snapshot();render();}
         // What else the save did (Ollama Cloud's key for its web search too), said where the save was asked for.
         if(msg.saved&&typeof msg.note==='string'&&msg.note){const status=$('saved-provider-status');if(status)status.textContent=msg.note;}
+    }
+    else if(msg.type==='providerStates'){
+        providerStates=msg.states&&typeof msg.states==='object'?msg.states:{};
+        if(config&&section==='models'){snapshot();render();}
+    }
+    else if(msg.type==='providerConnecting'){
+        providerConnecting=msg.waiting?{preset:String(msg.preset||''),id:String(msg.id||''),waiting:true}:null;
+        if(config&&section==='models'){snapshot();render();if(providerConnecting&&!providerConnecting.id){const form=$('page').querySelector('details[data-more="saved-providers"]');if(form)form.open=true;}}
+    }
+    else if(msg.type==='ollamaAccount'){
+        ollamaAccount={signed_in:msg.signed_in===true,name:typeof msg.name==='string'?msg.name.slice(0,64):''};
+        if(config&&section==='models'){snapshot();render();}
     }
     else if(msg.type==='providerProfileError'){
         if(config&&section==='models'){snapshot();render();}      // a tick or a dropdown that was waiting goes back to what is so

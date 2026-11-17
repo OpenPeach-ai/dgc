@@ -1222,7 +1222,8 @@ test('with several providers each has a checkbox for the default, and a gone or 
   x.click('[data-nav=models]');
   const boxes=()=>[...x.d.querySelectorAll('input[data-provider-default]')];
   assert.deepEqual(boxes().map(b=>[b.type,b.checked]),[['checkbox',true],['checkbox',false],['checkbox',false]]);
-  assert.match(x.d.body.textContent,/Not signed in on this computer\. Run claude login first\./);
+  assert.match(x.d.body.textContent,/Not signed in on this computer\./);
+  assert.ok(x.d.querySelector('[data-app-signin="claude"]'),'Sign in runs its own sign-in (17 Nov)');
   assert.match(x.d.body.textContent,/CLI isn't installed on this computer/);
   // Its own box can't be cleared.
   boxes()[0].checked=false;boxes()[0].dispatchEvent(new x.w.Event('change',{bubbles:true}));

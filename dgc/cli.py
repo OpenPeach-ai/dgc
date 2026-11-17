@@ -858,6 +858,23 @@ def _search_key_prompt(meta: dict, saved: bool = False) -> str:
     return f"  API key for {meta['label']} › "
 
 
+def _provider_key(provider_id: str, prov: dict) -> str:
+    """A model provider preset's key, asked in the terminal. OpenRouter first offers its sign-in in the browser
+    (dgc.provider_connect: a key of the person's own, labelled DGC); a pasted key works for it too, and is the way for
+    every other preset. Blank: no key typed."""
+    from getpass import getpass
+    if provider_id == "openrouter":
+        answer = input("  Sign in with OpenRouter in your browser? [Y/n] (n: paste a key) › ").strip().lower()
+        if answer in ("", "y", "yes"):
+            from . import provider_connect
+            try:
+                return provider_connect.connect(say=lambda words: print("  " + words),
+                                                ask_code=lambda url: input("  code › "))
+            except provider_connect.ConnectError as exc:
+                print(f"  {exc}")
+    return getpass(f"  API key for {prov['label']} › ").strip()
+
+
 def _ask_search_key(cfg, provider: str, meta: dict) -> str:
     """Ask, masked, for `provider`'s own web search key and keep it as that provider's, never another's. Says what
     happened: "saved", "kept", "removed" or "" (none typed, none saved)."""
@@ -1040,8 +1057,7 @@ class CLI:
                     cfg.set("base_url", prov["base_url"])
                     cfg.set("api_mode", "auto")
                     if prov["needs_key"]:
-                        from getpass import getpass
-                        key = getpass(f"  API key for {prov['label']} › ").strip()
+                        key = _provider_key(pk[idx], prov)
                         cfg.set("api_key", key or prov["api_key"])
                     else:
                         cfg.set("api_key", prov["api_key"])
@@ -1062,8 +1078,7 @@ class CLI:
                     cfg.set("base_url", prov["base_url"])
                     cfg.set("api_mode", "auto")
                     if prov["needs_key"]:
-                        from getpass import getpass
-                        key = getpass(f"  API key for {prov['label']} › ").strip()
+                        key = _provider_key(target, prov)
                         cfg.set("api_key", key or prov["api_key"])
                     else:
                         cfg.set("api_key", prov["api_key"])
@@ -2913,8 +2928,7 @@ def run_setup(config: Config) -> None:
         prov = PROVIDERS[keys[idx]]
         base_url, api_key = prov["base_url"], prov["api_key"]
         if prov["needs_key"]:
-            from getpass import getpass
-            api_key = getpass(f"  API key for {prov['label']} › ").strip() or api_key
+            api_key = _provider_key(keys[idx], prov) or api_key
     else:
         base_url = input("  base URL (…/v1) › ").strip()
         if not base_url:

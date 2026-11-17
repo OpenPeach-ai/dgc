@@ -27,6 +27,7 @@ export function hasRunnableProfile(context: vscode.ExtensionContext): boolean;
 export function clearDefaultProfile(context: vscode.ExtensionContext): Promise<void>;
 export function addProfile(context: vscode.ExtensionContext, raw: any): Promise<ProviderProfile>;
 export function removeProfile(context: vscode.ExtensionContext, id: string): Promise<void>;
+export function replaceKey(context: vscode.ExtensionContext, id: string, key: string): Promise<void>;
 export function profileCredential(context: vscode.ExtensionContext, id: string): Promise<{
   route: ProviderProfile;
   api_key: string;

@@ -5983,7 +5983,16 @@ class Backend:
         remove = cmd.get("remove") is True
         record = None
         if not remove:
-            cleaned = _clean_native_route({"base_url": cmd.get("base_url"), "model": cmd.get("model"),
+            model = cmd.get("model")
+            if model == "" and isinstance(provider_id, str):
+                # Connect again (a new key for the same provider, 17 Nov): the model the Pips' copy was saved with stays.
+                # With no copy saved there is nothing to keep: a blank model is refused below, as before.
+                try:
+                    kept = Config(project_root=self.config.project_root).saved_provider(provider_id)
+                except Exception:                   # noqa: BLE001 -- an unreadable store keeps nothing
+                    kept = None
+                model = kept["model"] if kept else model
+            cleaned = _clean_native_route({"base_url": cmd.get("base_url"), "model": model,
                                            "api_mode": cmd.get("api_mode"), "thinking": "off"})
             name, key = cmd.get("name"), cmd.get("api_key", "")
             if (cleaned is None or not cleaned.get("model") or not isinstance(name, str) or not 1 <= len(name) <= 64

@@ -212,8 +212,36 @@ export function renderFields(section, main, config, providers, ui) {
         const subscriptionState = (row) => {
             const info = (Array.isArray(c.subscription_engines) ? c.subscription_engines : []).find(item => item && item.key === row.engine);
             if (info?.installed === false) return { problem: true, text: `Its CLI isn't installed on this computer. Install it first.` };
-            if (info?.auth_state === "signed_out") return { problem: true, text: `Not signed in on this computer. Run ${info.login_cmd || `${row.engine} login`} first.` };
+            // Sign in runs the app's own sign-in in a terminal here (signInApp); it opens the browser itself.
+            if (info?.auth_state === "signed_out") return { problem: true, signIn: true, text: `Not signed in on this computer.` };
             return { problem: false, text: "Signed-in CLI" };
+        };
+        // Provider sign-ins (17 Nov): OpenRouter's key, checked by the host (providerStates); Ollama here and its ollama.com
+        // account (ollamaAccount); a Connect that waits on the browser (providerConnecting), with Cancel.
+        const hostOf = (url) => { try { return new URL(String(url || "")).host.toLowerCase(); } catch { return ""; } };
+        const isOpenRouter = (row) => row.kind !== "subscription" && hostOf(row.base_url).replace(/^www\./, "") === "openrouter.ai";
+        const isLocalOllama = (row) => row.kind !== "subscription" && /^(localhost|127\.0\.0\.1|\[::1\]):11434$/.test(hostOf(row.base_url));
+        const connecting = ui.providerConnecting && ui.providerConnecting.waiting ? ui.providerConnecting : null;
+        const cancelButton = `<button type="button" class="secondary" data-provider-connect-cancel>Cancel</button>`;
+        const money = (n) => `$${Number(n).toFixed(2)}`;
+        const signInButton = (app, name) => `<button type="button" class="secondary" data-app-signin="${escapeHtml(app)}" aria-label="Sign in to ${escapeHtml(name)}">Sign in</button>`;
+        // What a row adds after its usual words, and the buttons it adds before Remove.
+        const rowExtras = (row, state) => {
+            if (state?.signIn) return { words: "", buttons: signInButton(row.engine, row.name) };
+            if (isOpenRouter(row)) {
+                const key = (ui.providerStates || {})[row.id];
+                const waiting = connecting && connecting.id === row.id;
+                if (key?.state === "signed_out") return { problem: String(key.error || "Signed out of OpenRouter"),
+                    buttons: `<button type="button" class="secondary" data-provider-reconnect="${escapeHtml(row.id)}"${waiting ? " disabled" : ""}>${waiting ? "Waiting…" : "Connect again"}</button>${waiting ? cancelButton : ""}` };
+                if (key?.state === "no_credit") return { problem: "Out of OpenRouter credits",
+                    buttons: `<button type="button" class="secondary" data-provider-topup="${escapeHtml(row.id)}">Top up</button>` };
+                if (key?.state === "ok" && key.limit != null && typeof key.limit_remaining === "number") return { words: `${money(key.limit_remaining)} left`, buttons: "" };
+            }
+            if (isLocalOllama(row) && ui.ollamaAccount) {
+                if (ui.ollamaAccount.signed_in) return { words: `Signed in to ollama.com${ui.ollamaAccount.name ? ` as ${String(ui.ollamaAccount.name)}` : ""}`, buttons: "" };
+                return { words: "Not signed in to ollama.com (its cloud models need it)", buttons: signInButton("ollama", "ollama.com") };
+            }
+            return { words: "", buttons: "" };
         };
         // The default's model, chosen on its row: an All models provider needs one to be the default at all; a subscription's
         // first choice is its CLI's own. The row keeps saying what the provider is; the dropdown says what new chats start on.
@@ -237,17 +265,22 @@ export function renderFields(section, main, config, providers, ui) {
             const current = !isDefault ? "" : allModels ? (ui.defaultProviderId === row.id ? String(ui.defaultProviderModel || "") : "") : String(row.model || "");
             // The default row's dropdown names its model, so its words don't say it twice. All models always says so.
             const said = allModels ? "All models" : isDefault ? "" : row.model || "CLI default";
-            const detail = state ? `<span class="${state.problem ? "provider-problem" : ""}">${escapeHtml(state.text)}</span>` : escapeHtml(row.base_url);
+            const extra = rowExtras(row, state);
+            const detail = extra.problem ? `<span class="provider-problem">${escapeHtml(extra.problem)}</span>`
+                : state ? `<span class="${state.problem ? "provider-problem" : ""}">${escapeHtml(state.text)}</span>`
+                : escapeHtml(row.base_url) + (extra.words ? ` · ${escapeHtml(extra.words)}` : "");
             const hint = `${said ? escapeHtml(said) + " · " : ""}${detail}`;
             const choice = only
                 ? `<span class="provider-default-only">Default</span>`
                 : `<label class="provider-default-check"><input type="checkbox" data-provider-default="${escapeHtml(row.id)}" aria-label="Make ${escapeHtml(row.name)} the default"${isDefault ? " checked" : ""}>Default</label>`;
             const picker = isDefault || choosing ? defaultModelPicker(row, current) : "";
-            return `<div class="field provider-row${picker ? " with-default-model" : ""}"><span class="words"><span class="name-line"><span class="name">${escapeHtml(row.name)}</span></span><span class="hint">${hint}</span></span><span class="host-control">${choice}${picker}<button type="button" class="secondary" data-provider-remove="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.name)}">Remove</button></span></div>`;
+            return `<div class="field provider-row${picker ? " with-default-model" : ""}"><span class="words"><span class="name-line"><span class="name">${escapeHtml(row.name)}</span></span><span class="hint">${hint}</span></span><span class="host-control">${choice}${picker}${extra.buttons}<button type="button" class="secondary" data-provider-remove="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.name)}">Remove</button></span></div>`;
         }).join("");
         // The default from before saved providers: its key is only DGC's, so it isn't one of them, and it is still the default.
         const direct = ui.directProvider;
-        const directRow = direct ? `<div class="field provider-direct"><span class="words"><span class="name-line"><span class="name">${escapeHtml(direct.name)}</span></span><span class="hint">${escapeHtml(direct.model)} · ${escapeHtml(direct.base_url)}</span></span><span class="host-control"><span class="provider-default-only">Default</span></span></div>` : "";
+        // Ollama here as the default from before saved providers says its ollama.com sign-in too (an upgrade's usual case).
+        const directExtra = direct && isLocalOllama({ base_url: direct.base_url }) ? rowExtras({ base_url: direct.base_url }, null) : { words: "", buttons: "" };
+        const directRow = direct ? `<div class="field provider-direct"><span class="words"><span class="name-line"><span class="name">${escapeHtml(direct.name)}</span></span><span class="hint">${escapeHtml(direct.model)} · ${escapeHtml(direct.base_url)}${directExtra.words ? ` · ${escapeHtml(directExtra.words)}` : ""}</span></span><span class="host-control">${directExtra.buttons}<span class="provider-default-only">Default</span></span></div>` : "";
         const configuredUrls = new Set(savedProviders.map(row => String(row.base_url || '').replace(/\/+$/, '').toLowerCase()));
         const availableHosts = providers.filter(row => !configuredUrls.has(String(row.url || '').replace(/\/+$/, '').toLowerCase()));
         const savedEngines = new Set(savedProviders.filter(row => row.kind === "subscription").map(row => row.engine));
@@ -256,6 +289,22 @@ export function renderFields(section, main, config, providers, ui) {
             ["custom", "Custom model host"]];
         const addingSubscription = providerDraft.kind === "subscription";
         const keysPreset = providers.find(row => row.id === providerDraft.preset && row.keys && row.url);
+        // A preset that signs in (OpenRouter): Connect opens its page and its key comes back here; pasting one still works.
+        const connectPreset = providers.find(row => row.id === providerDraft.preset && row.connect && row.url);
+        const addWaiting = !!(connecting && !connecting.id);
+        const keysHost = (row) => escapeHtml(row.keysHost || new URL(row.url).hostname);
+        const keyField = connectPreset
+            ? field("Account", `Connect opens ${keysHost(connectPreset)}: sign in and approve DGC, and its key comes back here. Or paste a key.`,
+                // The box says what it is for (it sits empty beside Connect); Connect on the right, where Get a key sits.
+                `<span class="host-control">${inp("saved_provider_key", providerDraft.api_key || "", "password").replace("<input ", '<input placeholder="Or paste a key" aria-label="Or paste an OpenRouter key" ')}`
+                + `<button type="button" class="secondary" data-provider-connect="${escapeHtml(connectPreset.id)}"${addWaiting ? " disabled" : ""}>Connect</button></span>`)
+            : keysPreset
+                // A preset with a keys page of its own: Get a key opens it; you create one there and paste it.
+                ? field("API key", `Get a key opens ${keysHost(keysPreset)}: create one there and paste it here. Saved in VS Code.`,
+                    `<span class="host-control">${inp("saved_provider_key", providerDraft.api_key || "", "password")}`
+                    + `<button type="button" class="secondary" data-provider-keys="${escapeHtml(keysPreset.id)}">Get a key</button></span>`)
+                : field("API key", "Saved in VS Code, never shown again.", inp("saved_provider_key", providerDraft.api_key || "", "password"));
+        const waitingWords = addWaiting ? `Waiting for ${escapeHtml((providers.find(row => row.id === connecting.preset) || {}).label || "the provider")} in your browser…` : "";
         const addSaved = `<details class="more" data-more="saved-providers"><summary>+ Add provider</summary><div class="rows">`
             + field("Provider", "Choose the connection to add.", sel("saved_provider_preset", addChoices, providerDraft.preset || ""))
             + (addingSubscription ? field("Model", "Blank uses the signed-in CLI's default.", inp("saved_provider_model", providerDraft.model || ""))
@@ -263,13 +312,8 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Host", "Reachable from this computer.", inp("saved_provider_url", providerDraft.base_url || ""))
                 + model("saved_provider_model", "Model", "Each session or chat can choose, or name one.", providerDraft.model || "All models")
                 + field("Transport", "Auto works for most hosts.", sel("saved_provider_mode", TRANSPORTS, providerDraft.api_mode || "auto"))
-                + (keysPreset
-                    // A preset with a keys page of its own (Ollama Cloud): Get a key opens it; you create one there and paste it.
-                    ? field("API key", `Get a key opens ${escapeHtml(new URL(keysPreset.url).hostname)}: create one there and paste it here. Saved in VS Code.`,
-                        `<span class="host-control">${inp("saved_provider_key", providerDraft.api_key || "", "password")}`
-                        + `<button type="button" class="secondary" data-provider-keys="${escapeHtml(keysPreset.id)}">Get a key</button></span>`)
-                    : field("API key", "Saved in VS Code, never shown again.", inp("saved_provider_key", providerDraft.api_key || "", "password"))))
-            + `<div class="field"><span class="words"><span class="hint" id="saved-provider-status" role="status"></span></span><span class="host-control"><button type="button" class="secondary" id="saved-provider-add">Save provider</button></span></div></div></details>`;
+                + keyField)
+            + `<div class="field"><span class="words"><span class="hint" id="saved-provider-status" role="status">${waitingWords}</span></span><span class="host-control">${addWaiting ? cancelButton : ""}<button type="button" class="secondary" id="saved-provider-add">Save provider</button></span></div></div></details>`;
         const engine = String(c.subscription_engine || "");
         const subscription = (Array.isArray(c.subscription_engines) ? c.subscription_engines : [])
             .find(row => row && row.key === engine);

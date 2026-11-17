@@ -415,6 +415,23 @@ class TheEditorIsTold(IsolatedHome):
         self.assertEqual(self.frames("model_provider_saved")[-1]["removed"], True)
         self.assertNotIn("saved_providers", json.loads((self.user / "secrets.json").read_text()))
 
+    def test_connect_again_replaces_a_saved_providers_key_and_keeps_its_model(self):
+        # OpenRouter's Connect again (17 Nov): the editor sends the new key with no model; the model the Pips' copy was
+        # saved with stays. With no copy saved there is nothing to keep, and it is refused as before.
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        provider = "provider_" + "c" * 32
+        route = {"id": provider, "name": "OpenRouter", "base_url": "https://openrouter.example/api/v1", "api_mode": "auto"}
+        host.dispatch({"type": "save_model_provider", **route, "model": "some/model", "api_key": "old-key"})
+        host.dispatch({"type": "save_model_provider", **route, "model": "", "api_key": "new-key", "request_id": "again"})
+        self.assertEqual(self.frames("model_provider_saved")[-1]["request_id"], "again")
+        saved = json.loads((self.user / "secrets.json").read_text())["saved_providers"][provider]
+        self.assertEqual((saved["model"], saved["api_key"]), ("some/model", "new-key"))
+        self.assertNotIn("new-key", self.wire.getvalue())
+        other = "provider_" + "d" * 32
+        host.dispatch({"type": "save_model_provider", **route, "id": other, "model": "", "api_key": "k", "request_id": "none"})
+        self.assertEqual(self.frames("command_rejected")[-1]["command"], "save_model_provider")
+        self.assertNotIn(other, json.loads((self.user / "secrets.json").read_text())["saved_providers"])
+
     def test_new_chat_default_does_not_switch_the_open_chat(self):
         host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
         active = (host.default.config.base_url, host.default.config.model,

@@ -46,7 +46,8 @@ import { INSTANCE as STUCK_INSTANCE, heartbeatOf, isStuck, stuckHolder, type Stu
 import { whatsNewAnswered, whatsNewDue, whatsNewMessage } from "./whatsNew";
 import { NO_PIPS_MOVED, WELCOME_API, boxesOf, macNoteAnswered, macNoteDue, noteSession, pipsWelcomeAnswered, pipsWelcomeDue, pipsWelcomeMessage, pipsWelcomeOf, sessionNoteClosed, sessionNoteGone } from "./pipsWelcome";
 import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
-import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, startingModel } from "./providerProfiles.js";
+import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, replaceKey, startingModel } from "./providerProfiles.js";
+import { connectOpenRouter, keyState, OPENROUTER, type KeyState } from "./providerConnect.js";
 
 function isSlashCommandText(text: string): boolean {
   if (!text.startsWith("/")) { return false; }
@@ -185,20 +186,22 @@ const THINK = [
   { id: "high", detail: "sustained reasoning on complex work" },
   { id: "xhigh", detail: "deepest available reasoning effort" },
 ];
-const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string; apiKey?: string; keysPage?: string }> = {
+// keysPage: where Get a key sends you to make one (checked 17 Nov). connect: the preset signs in instead (OpenRouter's
+// Connect, src/providerConnect.js); creditsPage: where Top up goes.
+const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string; apiKey?: string; keysPage?: string; connect?: boolean; creditsPage?: string }> = {
   ollama: { url: "http://localhost:11434/v1", needsKey: false, label: "Ollama (local)", apiKey: "ollama" },
   // Ollama's cloud models with no Ollama installed (0.52): its own API, one key from its keys page.
   ollamacloud: { url: "https://ollama.com", needsKey: true, label: "Ollama Cloud", keysPage: "https://ollama.com/settings/keys" },
   llamacpp: { url: "http://localhost:8080/v1", needsKey: false, label: "llama.cpp (local)", apiKey: "sk-local" },
   lmstudio: { url: "http://localhost:1234/v1", needsKey: false, label: "LM Studio (local)", apiKey: "lm-studio" },
   vllm: { url: "http://localhost:8000/v1", needsKey: false, label: "vLLM (local)", apiKey: "sk-local" },
-  openai: { url: "https://api.openai.com/v1", needsKey: true, label: "OpenAI" },
-  anthropic: { url: "https://api.anthropic.com/v1", needsKey: true, label: "Anthropic" },
-  openrouter: { url: "https://openrouter.ai/api/v1", needsKey: true, label: "OpenRouter" },
-  groq: { url: "https://api.groq.com/openai/v1", needsKey: true, label: "Groq" },
-  deepseek: { url: "https://api.deepseek.com/v1", needsKey: true, label: "DeepSeek" },
-  together: { url: "https://api.together.xyz/v1", needsKey: true, label: "Together AI" },
-  mistral: { url: "https://api.mistral.ai/v1", needsKey: true, label: "Mistral" },
+  openai: { url: "https://api.openai.com/v1", needsKey: true, label: "OpenAI", keysPage: "https://platform.openai.com/api-keys" },
+  anthropic: { url: "https://api.anthropic.com/v1", needsKey: true, label: "Anthropic", keysPage: "https://platform.claude.com/settings/keys" },
+  openrouter: { url: "https://openrouter.ai/api/v1", needsKey: true, label: "OpenRouter", keysPage: OPENROUTER.keysPage, connect: true, creditsPage: OPENROUTER.creditsPage },
+  groq: { url: "https://api.groq.com/openai/v1", needsKey: true, label: "Groq", keysPage: "https://console.groq.com/keys" },
+  deepseek: { url: "https://api.deepseek.com/v1", needsKey: true, label: "DeepSeek", keysPage: "https://platform.deepseek.com/api_keys" },
+  together: { url: "https://api.together.xyz/v1", needsKey: true, label: "Together AI", keysPage: "https://api.together.ai/settings/api-keys" },
+  mistral: { url: "https://api.mistral.ai/v1", needsKey: true, label: "Mistral", keysPage: "https://console.mistral.ai/api-keys" },
 };
 /** ollama.com itself (Ollama Cloud), as dgc/model_watch.py is_hosted_ollama says. */
 function isOllamaCloud(base: string): boolean {
@@ -9162,6 +9165,143 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await this.requestState(this.ensureBackend(), "pip-provider", { type: "save_model_provider", id: route.id, name: route.name,
       base_url: route.base_url, model, api_mode: route.api_mode, api_key }, "model_provider_saved", 10000);
   }
+  /** Settings' Save provider, and Connect's save once OpenRouter hands over its key: a subscription must be signed in and
+   *  an Ollama Cloud key must work; the first provider becomes the default. `note`: said after the save. */
+  private async saveProvider(profile: any, be = this.ensureBackend(), note = ""): Promise<void> {
+    if (profile?.kind === "subscription") await this.verifySubscription(String(profile.engine || ""), be);
+    const ollamaCloud = profile?.kind !== "subscription" && isOllamaCloud(String(profile?.base_url || ""));
+    if (ollamaCloud) await this.checkOllamaCloudKey(profile);
+    await adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS);
+    const first = firstTakesDefault(this.context, this.lastReadyEvent);
+    const added = await addProfile(this.context, profile);
+    // The first provider is the default, and a default needs a model: saved with none, its row asks which.
+    const choose = first && added.kind !== "subscription" && !added.model;
+    if (first && !choose) {
+      try { await this.setDefaultProvider(added.id); }
+      catch (error) { await removeProfile(this.context, added.id); throw error; }
+      await this.firstProviderSaved(added.id);
+    }
+    const shared = ollamaCloud && await this.shareOllamaSearchKey(String(profile?.api_key || ""));
+    const said = shared ? "Saved. Settings › Web search › Ollama uses this key too." : note;
+    this.settingsEditor?.webview.postMessage(this.providerProfilesMessage({ saved: true, ...(choose ? { chooseDefault: added.id } : {}),
+      ...(said ? { note: said } : {}) }));
+    this.savedProvidersChanged();
+    void this.postProviderStates();
+  }
+
+  /** OpenRouter's Connect (src/providerConnect.js): the browser opens OpenRouter; the key comes back to this computer
+   *  through a one-time address, forwarded by asExternalUri over Remote-SSH. `id`: Connect again for that saved provider,
+   *  whose key is replaced in place (and in the copy a Pip set to it runs on). One at a time; Cancel stops the wait. */
+  private providerConnect?: AbortController;
+  private providerStateCache = new Map<string, { at: number; state: KeyState }>();
+  private async connectProvider(preset: string, options: { id?: string; model?: string }, be = this.ensureBackend()): Promise<void> {
+    if (!PROVIDERS[preset]?.connect) return;
+    const post = (message: Record<string, unknown>) => this.settingsEditor?.webview.postMessage(message);
+    this.providerConnect?.abort();
+    const stop = new AbortController();
+    this.providerConnect = stop;
+    const id = options.id || "";
+    post({ type: "providerConnecting", preset, id, waiting: true });
+    try {
+      const key = await connectOpenRouter({
+        external: async (url) => (await vscode.env.asExternalUri(vscode.Uri.parse(url))).toString(true),
+        open: async (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
+        signal: stop.signal,
+      });
+      if (id) {
+        await replaceKey(this.context, id, key);
+        this.providerStateCache.delete(id);
+        const { route } = await profileCredential(this.context, id);
+        // A Pip's copy keeps the model it was saved with (a blank model); with no copy saved, the backend keeps none.
+        if (route.kind !== "subscription" && (this.lastReadyEvent?.capabilities as any)?.saved_model_providers === 1) {
+          await this.requestState(be, "pip-provider", { type: "save_model_provider", id, name: route.name, base_url: route.base_url,
+            model: route.model || "", api_mode: route.api_mode, api_key: key }, "model_provider_saved", 10000).catch(() => null);
+        }
+        post(this.providerProfilesMessage({ note: "Connected to OpenRouter again." }));
+        this.savedProvidersChanged();
+        await this.postProviderStates();
+      } else {
+        await this.saveProvider({ name: PROVIDERS[preset].label, base_url: PROVIDERS[preset].url, model: options.model || "",
+          api_mode: "auto", api_key: key }, be, "Connected to OpenRouter.");
+      }
+    } catch (error: any) {
+      const message = String(error?.message || "Could not connect.");
+      // Connect again's trouble shows on its row; Connect's under Add provider.
+      if (id) { if (!stop.signal.aborted) post({ type: "providerStates", states: { ...this.cachedStates(), [id]: { state: "signed_out", error: message } } }); }
+      else post({ type: "providerProfileError", message });
+    } finally {
+      if (this.providerConnect === stop) this.providerConnect = undefined;
+      post({ type: "providerConnecting", preset, id, waiting: false });
+    }
+  }
+
+  private cachedStates(): Record<string, KeyState> {
+    return Object.fromEntries([...this.providerStateCache].map(([id, entry]) => [id, entry.state]));
+  }
+
+  /** Each saved OpenRouter key's state for Settings (signed out → Connect again, out of credit → Top up), at most once a
+   *  minute per key. The key goes only to OpenRouter's own key check. */
+  private async postProviderStates(): Promise<void> {
+    if (!this.settingsEditor) return;
+    const rows = listProfiles(this.context).filter((row) => row.kind !== "subscription" && sameHost(row.base_url, PROVIDERS.openrouter.url));
+    if (!rows.length) return;
+    const states: Record<string, KeyState> = {};
+    await Promise.all(rows.map(async (row) => {
+      const cached = this.providerStateCache.get(row.id);
+      if (cached && Date.now() - cached.at < 60_000) { states[row.id] = cached.state; return; }
+      const key = (await profileCredential(this.context, row.id).catch(() => null))?.api_key || "";
+      if (!key) return;
+      const state = await keyState(key);
+      if (state.state !== "unreachable") this.providerStateCache.set(row.id, { at: Date.now(), state });
+      states[row.id] = state;
+    }));
+    this.settingsEditor?.webview.postMessage({ type: "providerStates", states });
+  }
+
+  /** Whether Ollama on this computer is signed in to ollama.com (its cloud models need it), for a saved local Ollama row:
+   *  Ollama's own POST /api/me answers with the account when it is. Only the name reaches the page. */
+  private async postOllamaAccount(): Promise<void> {
+    if (!this.settingsEditor) return;
+    const hostOf = (url: string) => { try { return new URL(url); } catch { return null; } };
+    // A saved Ollama row, or the default from before saved providers (an upgrade's usual case) when it is Ollama here.
+    const direct = (this.lastReadyEvent?.capabilities as any)?.saved_route;
+    const candidates = [...listProfiles(this.context).filter((row) => row.kind !== "subscription").map((row) => String(row.base_url || "")),
+      ...(direct && !direct.subscription_engine ? [String(direct.base_url || "")] : [])];
+    const local = candidates.map(hostOf).find((url) => !!url && /^(localhost|127\.0\.0\.1|\[::1\]):11434$/i.test(url.host));
+    if (!local) return;
+    const root = local.origin;
+    try {
+      const response = await fetch(`${root}/api/me`, { method: "POST", signal: AbortSignal.timeout(5000), redirect: "manual" });
+      if (response.status === 200) {
+        const body: any = await response.json().catch(() => ({}));
+        this.settingsEditor?.webview.postMessage({ type: "ollamaAccount", signed_in: true, name: typeof body?.name === "string" ? body.name.slice(0, 64) : "" });
+      } else if (response.status === 401 || response.status === 403) {
+        this.settingsEditor?.webview.postMessage({ type: "ollamaAccount", signed_in: false });
+      }
+    } catch { /* Ollama isn't running, or is too old to say: the row says nothing about it */ }
+  }
+
+  /** Sign in for an app that signs itself in: its own sign-in runs in a terminal here (it opens the browser itself), the
+   *  program run directly, no shell. When that terminal closes, Settings looks again. */
+  private signInApp(app: string): void {
+    const SIGN_IN: Record<string, { argv: string[]; name: string }> = {
+      claude: { argv: ["claude", "auth", "login"], name: "Claude Code" },
+      codex: { argv: ["codex", "login"], name: "Codex" },
+      ollama: { argv: ["ollama", "signin"], name: "ollama.com" },
+    };
+    const run = SIGN_IN[app];
+    if (!run) return;
+    const terminal = vscode.window.createTerminal({ name: `Sign in to ${run.name}`, shellPath: run.argv[0], shellArgs: run.argv.slice(1) });
+    terminal.show();
+    const watch = vscode.window.onDidCloseTerminal((closed) => {
+      if (closed !== terminal) return;
+      watch.dispose();
+      this.providerStateCache.clear();
+      this.refreshEditorSettings();
+    });
+    this.context.subscriptions.push(watch);
+  }
+
   /** The provider list changed: every open Pips page lists it again. */
   private savedProvidersChanged(): void {
     const home = this.tab?.host || this;
@@ -9694,12 +9834,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  `!mcpEditing` on the client; `show` was the one that routed around that guard. */
   private refreshEditorSettings(): void {
     const providers = Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, url: p.url, needsKey: p.needsKey,
-                                                                      ...(p.keysPage ? { keys: true } : {}) }));
+                                                                      ...(p.keysPage ? { keys: true, keysHost: new URL(p.keysPage).hostname } : {}),
+                                                                      ...(p.connect ? { connect: true } : {}) }));
     this.settingsEditor?.webview.postMessage({ type: "providers", providers });
     // An upgrade's working model shows here as a saved provider from the first look (adoptWorkingRoute).
     void adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS).catch(() => null).then((adopted) => {
       this.settingsEditor?.webview.postMessage(this.providerProfilesMessage());
       if (adopted) this.savedProvidersChanged();
+      void this.postProviderStates();
+      void this.postOllamaAccount();
     });
     const be = this.ensureBackend();
     // The web search's address and whether its key is saved are opt-in fields (CONFIG_EVENT_FIELDS).
@@ -9858,31 +10001,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } else if (msg?.type === "saveSettings") {
       await this.saveSettings(msg.values || {}, String(msg.section || ""));
     } else if (msg?.type === "openProviderKeys") {
-      // A preset's own keys page (Ollama Cloud's), by its id: never a URL the page sends.
-      const page = PROVIDERS[String(msg.id || "")]?.keysPage;
+      // A preset's own keys page (or, page "credits", its credits page for Top up), by its id: never a URL the page sends.
+      const preset = PROVIDERS[String(msg.id || "")];
+      const page = msg.page === "credits" ? preset?.creditsPage : preset?.keysPage;
       if (page) await vscode.env.openExternal(vscode.Uri.parse(page));
     } else if (msg?.type === "addProviderProfile") {
       try {
-        if (msg.profile?.kind === "subscription") await this.verifySubscription(String(msg.profile.engine || ""), be);
-        const ollamaCloud = msg.profile?.kind !== "subscription" && isOllamaCloud(String(msg.profile?.base_url || ""));
-        if (ollamaCloud) await this.checkOllamaCloudKey(msg.profile);
-        await adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS);
-        const first = firstTakesDefault(this.context, this.lastReadyEvent);
-        const added = await addProfile(this.context, msg.profile);
-        // The first provider is the default, and a default needs a model: saved with none, its row asks which.
-        const choose = first && added.kind !== "subscription" && !added.model;
-        if (first && !choose) {
-          try { await this.setDefaultProvider(added.id); }
-          catch (error) { await removeProfile(this.context, added.id); throw error; }
-          await this.firstProviderSaved(added.id);
-        }
-        const shared = ollamaCloud && await this.shareOllamaSearchKey(String(msg.profile?.api_key || ""));
-        this.settingsEditor?.webview.postMessage(this.providerProfilesMessage({ saved: true, ...(choose ? { chooseDefault: added.id } : {}),
-          ...(shared ? { note: "Saved. Settings › Web search › Ollama uses this key too." } : {}) }));
-        this.savedProvidersChanged();
+        await this.saveProvider(msg.profile, be);
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not save provider.") });
       }
+    } else if (msg?.type === "connectProvider" || msg?.type === "reconnectProvider") {
+      // OpenRouter's Connect (a new provider) or Connect again (a saved one's key, replaced in place).
+      const id = msg.type === "reconnectProvider" ? String(msg.id || "") : "";
+      await this.connectProvider(id ? "openrouter" : String(msg.preset || ""), { id, model: String(msg.model || "") }, be);
+    } else if (msg?.type === "cancelProviderConnect") {
+      this.providerConnect?.abort();
+    } else if (msg?.type === "signInApp") {
+      this.signInApp(String(msg.app || ""));
     } else if (msg?.type === "removeProviderProfile") {
       try {
         const removing = String(msg.id || "");
