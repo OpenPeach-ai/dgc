@@ -2023,6 +2023,14 @@ _OUTPUT_RETAIN_S = 1800
 _CAPTURE_MARKER_RESERVE = 128
 
 
+def own_background_commands(ctx) -> list[str]:
+    """The commands of the background shells this agent started that are still running (auto_guard: stopping one of
+    them by name or port is its own work, not someone else's program)."""
+    owner = _tool_owner(ctx)
+    with _BG_LOCK:
+        return [str(e.get("command") or "") for e in _BG.values() if e.get("owner") == owner and e.get("finished") is None]
+
+
 def _tool_owner(ctx) -> str:
     """Separate task/output handles belonging to different agents in one headless process."""
     return str(getattr(ctx, "tool_owner", "") or f"context-{id(ctx)}")
