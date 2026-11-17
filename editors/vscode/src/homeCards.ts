@@ -103,9 +103,9 @@ function usageModels(rows: unknown, most: number): { models: HomeUsageModel[]; a
   for (const row of all) row.share = total ? Math.round((row.tokens / total) * 100) : 0;
   return { models: all.slice(0, most), all: all.length };
 }
-/** The token report (get_usage) as the card takes it. `period`: the thirty days' own report, for its models. `today`:
+/** The token report (get_usage) as the card takes it. `period`: the last 7 days' own report, for its models. `today`:
  *  today's own report, whose models are today's column's. A day that names its own models (`by_day[].models`, should
- *  the ledger send them) keeps its top three. `modelCount`: how many models the thirty days had in all. */
+ *  the ledger send them) keeps its top three. `modelCount`: how many models the 7 days had in all. */
 export function usageForHome(report: any, period: any, today?: any): { type: "homeUsage"; days: HomeUsageDay[]; models: HomeUsageModel[]; modelCount: number; error: string } {
   const days: HomeUsageDay[] = (Array.isArray(report?.by_day) ? report.by_day : []).filter((d: any) => typeof d?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.date)).slice(-120)
     .map((d: any) => { const own = Array.isArray(d.models) ? usageModels(d.models, 3).models : [];

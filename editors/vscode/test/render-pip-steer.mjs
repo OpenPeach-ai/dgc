@@ -46,21 +46,21 @@ for (const [tone, theme] of THEMES) for (const width of WIDTHS) {
       await x.page.waitForTimeout(500); await x.inPips(toEnd); await x.page.waitForTimeout(150);
       await x.page.screenshot({ path: `${out}/live-${tone}-${width}.png` }); console.log(`live-${tone}-${width}`, x.errors.length ? x.errors : "ok"); } finally { await x.close(); }
   }
-  // 3. The slider at each stop: Work's, and two Pips' with their own faces. One sheet per theme and width.
+  // 3. The picker's Thinking row at each level: Work's, and two Pips' with their own faces. One sheet per theme and width.
   if (want(`slider-${tone}-${width}`)) {
     const shots = [];
     const s = await openMapScene(browser, { width, height: 760, theme, open: false, capabilities: { agents_model: 1, model_fallback: 1 } });
-    try { await s.page.click("#btn-model"); await s.post(modelsMessage()); await s.page.waitForSelector("#modelmenu .effort-slider"); await s.page.waitForTimeout(250);
-      for (let stop = 0; stop <= 5; stop++) { await s.page.evaluate((v) => { const sl = document.querySelector("#modelmenu .effort-slider"); sl.value = String(v); sl.dispatchEvent(new Event("input", { bubbles: true })); }, stop); await s.page.waitForTimeout(350);
-        shots.push(["Work", stop, (await s.page.locator("#modelmenu .effort-control").screenshot()).toString("base64")]); }
+    try { await s.page.click("#btn-model"); await s.post(modelsMessage()); await s.page.waitForSelector(".dgc-mp .dgc-mp-level"); await s.page.waitForTimeout(250);
+      for (let stop = 0; stop <= 5; stop++) { await s.page.evaluate((v) => document.querySelectorAll(".dgc-mp-level")[v].click(), stop); await s.page.waitForTimeout(350);
+        shots.push(["Work", stop, (await s.page.locator(".dgc-mp-think").screenshot()).toString("base64")]); }
     } finally { await s.page.context().close(); }
     for (const [name, pip] of [["Tile checker", GST], ["Mornings", MORNINGS]]) {
       const x = await openOnePips(browser, { api: 99, width, height: 760, theme, faces: true, scale: 2, scene: { sub: true, waiting: false, model: MODEL } });
-      try { await x.openPip(pip); await x.waitIn("#chat-model:not([disabled])"); await x.click("#chat-model"); await x.waitIn("#chat-thinking"); await x.page.waitForTimeout(400);
-        for (let stop = 0; stop <= 5; stop++) { await x.inPips((root, v) => { const sl = root.querySelector("#chat-thinking"); sl.value = String(v); sl.dispatchEvent(new Event("input", { bubbles: true, composed: true })); }, stop); await x.page.waitForTimeout(350);
-          shots.push([name, stop, (await x.page.locator(".effort-control").screenshot()).toString("base64")]); }
-        if (name === "Tile checker") { await x.inPips((root) => root.querySelector("#chat-thinking").focus()); await x.page.keyboard.press("ArrowLeft"); await x.page.waitForTimeout(400);
-          shots.push([`${name}, by keyboard`, 4, (await x.page.locator(".effort-control").screenshot()).toString("base64")]);
+      try { await x.openPip(pip); await x.waitIn("#chat-model:not([disabled])"); await x.click("#chat-model"); await x.waitIn(".dgc-mp .dgc-mp-level"); await x.page.waitForTimeout(400);
+        for (let stop = 0; stop <= 5; stop++) { await x.inPips((root, v) => root.querySelectorAll(".dgc-mp-level")[v].click(), stop); await x.page.waitForTimeout(350);
+          shots.push([name, stop, (await x.page.locator(".dgc-mp-think").screenshot()).toString("base64")]); }
+        if (name === "Tile checker") { await x.inPips((root) => root.querySelector('.dgc-mp-level[aria-checked="true"]').focus()); await x.page.keyboard.press("ArrowLeft"); await x.page.waitForTimeout(400);
+          shots.push([`${name}, by keyboard`, 4, (await x.page.locator(".dgc-mp-think").screenshot()).toString("base64")]);
           await x.page.screenshot({ path: `${out}/menu-${tone}-${width}.png` }); }
         console.log(`slider-${tone}-${width} ${name}`, x.errors.length ? x.errors : "ok");
       } finally { await x.close(); }

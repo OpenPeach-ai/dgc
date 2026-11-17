@@ -195,7 +195,7 @@ ENGINES: dict[str, SubEngine] = {
         subcmd=(), resume=("--continue",),
         flags=("-p", "--output-format", "stream-json", "--verbose"),
         prompt_flag=None, stream="claude", model_flag="--model", effort_style="flag",
-        model_hints=("opus", "sonnet", "haiku"),
+        model_hints=("fable", "opus", "sonnet", "haiku"),
         install_cmd="npm install -g @anthropic-ai/claude-code", login_run="claude auth login"),
     "codex": SubEngine(
         key="codex", label="Codex (ChatGPT Plus / Pro subscription)", binary="codex",
@@ -235,6 +235,77 @@ ENGINES: dict[str, SubEngine] = {
 }
 
 ENGINE_KEYS = tuple(ENGINES)
+
+# --- Claude Code's models (the model picker, 0.52) ----------------------------
+# Its nicknames (model_hints) follow the newest model of each family; the CLI has no command that lists its models
+# (--model takes a nickname or a full name). So DGC keeps two things: this short list of current full names a user can
+# pin (REFRESH EACH RELEASE: the one place they are written), and what Claude Code itself reported when a session
+# started (its stream's system/init event carries the model's full name), in one small file in DGC's own folder:
+#   {"claude": {"versions": {"opus": "claude-opus-5-5", "": "<the CLI default's>"}, "seen": ["claude-opus-5-5", ...]}}
+CLAUDE_FIXED_MODELS = ("claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")
+_MODELS_SEEN_FILE = "subscription-models.json"
+_MODELS_SEEN_MOST = 16
+_MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,127}")
+_models_seen_lock = threading.Lock()
+
+
+def _models_seen_path() -> Path:
+    from .config import dgc_home
+    return dgc_home() / _MODELS_SEEN_FILE
+
+
+def _model_name(value) -> str:
+    return value if isinstance(value, str) and _MODEL_NAME.fullmatch(value) else ""
+
+
+def claude_models() -> dict:
+    """What Claude Code has reported here: ``versions`` (nickname -> the full name it last ran as; "" is the CLI's own
+    default) and ``seen`` (the full names, newest first). Empty when nothing is kept, or the file is not ours."""
+    try:
+        path = _models_seen_path()
+        if path.stat().st_size > 64 * 1024:
+            return {"versions": {}, "seen": []}
+        kept = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return {"versions": {}, "seen": []}
+    row = kept.get("claude") if isinstance(kept, dict) else None
+    row = row if isinstance(row, dict) else {}
+    hints = ("",) + ENGINES["claude"].model_hints if "claude" in ENGINES else ("",)
+    versions = row.get("versions") if isinstance(row.get("versions"), dict) else {}
+    seen = row.get("seen") if isinstance(row.get("seen"), list) else []
+    return {"versions": {k: v for k, v in versions.items() if k in hints and _model_name(v)},
+            "seen": list(dict.fromkeys(m for m in seen if _model_name(m)))[:_MODELS_SEEN_MOST]}
+
+
+def _record_claude_model(asked, reported) -> None:
+    """Keep what a Claude Code session said it runs as. Never raises: a turn does not depend on this file."""
+    reported = _model_name(reported)
+    if not reported or not isinstance(asked, str):
+        return
+    try:
+        with _models_seen_lock:
+            kept = claude_models()
+            before = json.dumps(kept, sort_keys=True)
+            if asked == "" or asked in ENGINES["claude"].model_hints:
+                kept["versions"][asked] = reported
+            kept["seen"] = [reported, *(m for m in kept["seen"] if m != reported)][:_MODELS_SEEN_MOST]
+            if json.dumps(kept, sort_keys=True) == before:
+                return
+            path = _models_seen_path()
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            temp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as out:
+                    json.dump({"claude": kept}, out)
+                os.replace(temp, path)
+            finally:
+                try:
+                    os.unlink(temp)
+                except OSError:
+                    pass
+    except (OSError, ValueError, KeyError):
+        pass
 
 
 def get_engine(key: str) -> SubEngine | None:
@@ -378,6 +449,11 @@ def status() -> list[dict]:
                     "model_hints": list(hints), "cli_default_model": cli_default,
                     "cli_default_listed": cli_default in hints if hints and cli_default else None,
                     "supports_effort": e.supports_effort()})
+        if e.key == "claude":
+            # The picker's Claude Code rows: what each nickname last ran as, and the full names a user can pin.
+            kept = claude_models()
+            out[-1]["model_versions"] = kept["versions"]
+            out[-1]["fixed_models"] = list(dict.fromkeys([*CLAUDE_FIXED_MODELS, *kept["seen"]]))
     return out
 
 
@@ -600,6 +676,10 @@ def _events_claude(obj: dict, state: dict | None = None) -> list[dict]:
     if t == "system":
         if obj.get("subtype") == "api_retry":
             return _claude_retry(obj)
+        # A session's start names the model it really runs (claude-opus-5-5 for "opus"). A reader that says which
+        # model it asked for (state["asked_model"]) has it kept for the model picker; the events are the same.
+        if obj.get("subtype") == "init" and state is not None and "asked_model" in state:
+            _record_claude_model(state["asked_model"], obj.get("model"))
         return _session_event(obj.get("session_id"))
     if t == "assistant":
         out = []
@@ -1379,6 +1459,8 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
 
     try:
         pieces: dict = {}                   # which messages came in pieces (parse_stream_events)
+        if engine.stream == "claude":
+            pieces["asked_model"] = model   # so its session start records what that name ran as
         assert proc.stdout is not None
         while True:
             raw = proc.stdout.readline(_MAX_STREAM_LINE_BYTES + 1)

@@ -212,6 +212,8 @@ class SubscriptionChatClient:
         refused = False
         # Which of its messages came in pieces: kept with its process, since one reply's calls share it.
         pieces = state.setdefault("pieces", {})
+        if self.engine == "claude":
+            pieces["asked_model"] = self.selected_model   # its session start records what that name ran as
         try:
             while True:
                 if cancel is not None and cancel.is_set():

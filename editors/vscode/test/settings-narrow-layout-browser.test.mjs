@@ -204,11 +204,11 @@ test("MCP servers at 270px: a server's words stay beside its mark, and its switc
   } finally { await close(); }
 });
 
-test("at 900px nothing moved: each control sits beside its words, the figures share one row, VS Code's gutter stays", async (t) => {
+test("at 900px nothing moved: each control sits beside its words, the figures share one row, no band down the side", async (t) => {
   if (skipOrFail(t)) return;
   let { p, close } = await open(900, "general");
   try {
-    assert.equal(await p.evaluate(() => getComputedStyle(document.body).paddingLeft), "20px", "VS Code's own webview gutter");
+    assert.equal(await p.evaluate(() => getComputedStyle(document.body).paddingLeft), "0px", "VS Code's own 20px webview gutter is undone (17 Nov: it showed as a band down the side)");
     assert.ok((await placement(p, ".field:has(#ultra_mode)>span", "#ultra_mode")).beside, "the Ultra switch beside its words");
     assert.ok((await placement(p, ".field:has(#mode)>span", "#mode")).beside, "the Permission mode select beside its words");
     assert.equal((await run(p, ".field:has(#ultra_mode) .hint")).lines, 1);

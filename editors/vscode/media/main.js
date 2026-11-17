@@ -2470,8 +2470,6 @@
     (menu.querySelector(".sel") || menu.querySelector("button"))?.focus();
   }
 
-  // in-composer model menu (rendered from the `models` message the extension posts)
-  function hideModelMenu() { $("modelmenu").hidden = true; $("btn-model").setAttribute("aria-expanded", "false"); }
   // Every other menu's toggle closes the context details through here, so the clock's popup closes with them too.
   function hideContextMenu() { $("ctxmenu").hidden = true; $("btn-ctx").setAttribute("aria-expanded", "false"); hideCacheMenu(); }
   function hideCacheMenu() {
@@ -2851,80 +2849,73 @@
     vscode.postMessage({ type: "contextBreakdown" });            // what fills it, part by part, as it opens
     $("ctx-compact").focus();
   }
+  // ---- the model picker (media/shared/modelpicker.js, window.DgcModelPicker: the one Work, ChatDGC and a Pip's chat
+  // share, 17 Nov). It opens centred over the page: the connections down its rail, the chosen one's models beside it,
+  // Thinking under both. Work puts in it what DGC's `models` answer says: this session's route and the saved providers,
+  // each provider's models as its host lists them (asked for when it is looked at, or searched), the session's
+  // fallback as a row's Main and Fallback words and its ⋯, and a second tab for the sub-agents' model.
+  const MP = window.DgcModelPicker;
+  let modelPicker = null, lastModelMenu = null;
+  let pickerTab = "main";                 // "main" | "agents"
+  const pickerLists = new Map();          // a saved provider's models: key -> {ids, error}, or null while its host is asked
+  const modelPickerOpen = () => !!modelPicker && modelPicker.isOpen();
+  function refreshModelPicker() { if (modelPickerOpen()) modelPicker.update(modelPickerView()); }
+  function askProviderModels(key) {
+    if (!String(key).startsWith("provider_") || pickerLists.has(key)) return;
+    pickerLists.set(key, null);
+    vscode.postMessage({ type: "providerModels", id: key });
+  }
+  function openModelPicker() {
+    hideModeMenu(); hideContextMenu(); hideAgentsMenu(); hideOutputMenu(); hideAddMenu();
+    pickerTab = "main"; pickerLists.clear(); lastModelMenu = null;
+    modelPicker = MP.open(document.body, modelPickerView(), {
+      pick: pickModelRow, thinking: pickThinking, action: pickerAction,
+      thinkingRest: () => { if (thinkChosen && thinkChosen.timer) chooseThink(thinkChosen.level, 0); },   // the keys came to rest: told now
+      select: (conn) => { if (conn.route) askProviderModels(conn.route.key); },
+      search: () => { for (const row of agentsRoutes()) if (row.kind !== "subscription" && row.key !== lastModelMenu?.currentRouteKey) askProviderModels(row.key); },
+      tab: (id) => {
+        pickerTab = id === "agents" && agentsModel.offered ? "agents" : "main";
+        if (pickerTab === "agents") {
+          vscode.postMessage({ type: "getAgentsModel" });       // as the tab opens: what DGC has now
+          const on = agentsRoutes().find(agentsOn);             // (the connection its list opens on is listed by its host)
+          if (on && on.key !== "native") askProviderModels(on.key);
+        }
+        refreshModelPicker();
+      },
+      setting: (id, value) => {
+        if (id !== "context") return;
+        if (value === "typed") { vscode.postMessage({ type: "agentsContextTyped" }); hideModelMenu(); return; }
+        const size = Number(value) || 0;
+        vscode.postMessage({ type: "setAgentsContext", size });
+        agentsModel = { ...agentsModel, context_size: size };       // shown at once; DGC's answer is what it says from then on
+        refreshModelPicker();
+      },
+      close: () => { modelPicker = null; $("btn-model").setAttribute("aria-expanded", "false"); if (thinkChosen && thinkChosen.timer) chooseThink(thinkChosen.level, 0); },
+    });
+    $("btn-model").setAttribute("aria-expanded", "true");
+    vscode.postMessage({ type: "listModels" });
+  }
+  // (Another menu opening, or a choice that hands over to the editor's own input box: closed with no focus moved.)
+  function hideModelMenu() { if (modelPickerOpen()) modelPicker.close("silent"); }
   function effortLabel(value, subscription = curSubscription) {
     const labels = { off: subscription ? "Default" : "Off", low: "Low", medium: "Medium",
-      high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" };
+      high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra" };
     return Object.hasOwn(labels, value) ? labels[value] : labels.off;
   }
-  function profileMenu(subscription, supportsEffort) {
-    const levels = subscription && supportsEffort === false ? ["off"]
+  /** The levels this session's model offers, with Ultra last (Work and Pips have it; ChatDGC never does). */
+  function thinkingView() {
+    const m = lastModelMenu, subscription = !!m.subscription;
+    const levels = subscription && m.supportsEffort === false ? ["off"]
       : subscription && curSubscription !== "codex" ? [...THINK, "max"] : THINK;
     const profiles = [...levels, "ultra"];
     const selected = curUltra ? "ultra" : profiles.includes(curThink) ? curThink : profiles[0];
-    const index = Math.max(0, profiles.indexOf(selected));
-    // The slider is the one a Pip's menu has too (media/shared/effort.js, window.DgcEffort).
-    return modelTabsHtml(`<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow dgc-menu-row model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>${window.DgcEffort.html({ levels: profiles.map((value) => ({ value, label: effortLabel(value, subscription) })), at: index })}<p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`);
+    return { levels: profiles.map((value) => ({ value, label: effortLabel(value, subscription) })), value: selected,
+      note: subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote() };
   }
-  // The note under the slider is three lines at most, with Show more when there is more to read: a
-  // long one (Ollama's levels) took over the menu. Measured once the menu is on screen.
-  function bindNote(card) {
-    const note = card.querySelector(".reasoning-note"), more = card.querySelector(".reasoning-more");
-    if (!note || !more) return;
-    const measure = () => {
-      if (!note.classList.contains("clamped")) return;
-      const laidOut = note.clientHeight > 0;
-      more.hidden = laidOut ? note.scrollHeight <= note.clientHeight + 1 : note.textContent.length <= 160;
-      note.classList.toggle("has-more", !more.hidden);
-    };
-    more.onclick = (e) => {
-      e.stopPropagation();
-      const open = note.classList.toggle("clamped") === false;
-      more.textContent = open ? "Show less" : "Show more";
-      more.setAttribute("aria-expanded", String(open));
-    };
-    measure();
-    requestAnimationFrame(measure);
-  }
-  function bindProfiles(mm) {
-    const card = mm.querySelector(".reasoning-card"), slider = mm.querySelector(".effort-slider");
-    bindNote(card);
-    const options = el("div", "model-options"); options.hidden = true;
-    const list = el("div", "model-list-scroll");
-    [...mm.children].filter(node => node !== card && !node.classList.contains("model-tabs")).forEach(node => {
-      if (node.classList.contains("mhead")) options.appendChild(node);
-      else list.appendChild(node);
-    });
-    options.appendChild(list);
-    mm.appendChild(options);
-    // Thinking is a primary control of this menu. The model-list disclosure must never hide it.
-    card.querySelector(".effort-control").hidden = false;
-    const toggle = card.querySelector(".model-summary");
-    toggle.onclick = () => {
-      // While agents are being chosen, the model's own row goes back to the session's models.
-      if (agentsStep) { leaveAgents(); return; }
-      options.hidden = !options.hidden;
-      toggle.setAttribute("aria-expanded", String(!options.hidden));
-      if (!options.hidden) (options.querySelector(".sel") || options.querySelector("button"))?.focus();
-    };
-    bindAgentsRow(mm);
-    slider.onpointerdown = () => slider.classList.add("by-pointer");
-    slider.onkeydown = () => slider.classList.remove("by-pointer");
-    // The slider itself is the shared one (media/shared/effort.js): its fill, its word and its bump follow the hand.
-    slider.oninput = () => { window.DgcEffort.follow(slider); };
-    slider.onchange = () => {
-      // The level is chosen when the hand lets go (W15, user test 15 Nov): the button says it at once, and DGC is told
-      // once. A drag's release is that moment, and closes the menu; arrow keys keep the menu open for the next step (it
-      // closed after one: final check, 2026-11-07) and are one choice when they rest, or when the slider is left. Each
-      // step used to be its own request, a couple of seconds each: the button showed the level before, then every
-      // step in turn, and each left its own "Thinking → x" line in the session.
-      const level = slider.dataset.profiles.split(",")[Number(slider.value)];
-      if (slider.classList.contains("by-pointer")) { chooseThink(level, 0); hideModelMenu(); }
-      else chooseThink(level, THINK_KEYS_REST);
-    };
-    slider.onblur = () => { if (thinkChosen && thinkChosen.timer) chooseThink(thinkChosen.level, 0); };
-  }
-  // What was just chosen on the slider: shown at once, told to DGC once (after `wait` ms with no further step), and kept
-  // on the button until DGC says the same; what DGC says meanwhile (the level before, a step on the way) is not shown.
+  // What was just chosen in the Thinking row: shown at once, told to DGC once (after `wait` ms with no further step), and
+  // kept on the button until DGC says the same; what DGC says meanwhile (the level before, a step on the way) is not
+  // shown. A click is one choice; arrow keys are one choice when they rest (each step used to be its own request, a
+  // couple of seconds each, and each left its own "Thinking → x" line in the session), or when the picker closes.
   const THINK_KEYS_REST = 650, THINK_SETTLE = 6000;
   let thinkChosen = null, thinkSaid = { think: "off", ultra: false };
   function thinkShown(level) { curUltra = level === "ultra"; if (!curUltra) curThink = level; updateModelControl(); }
@@ -2937,41 +2928,44 @@
       if (level === (thinkSaid.ultra ? "ultra" : thinkSaid.think)) { thinkChosen = null; return; }
       vscode.postMessage({ type: "setReasoningProfile", level });
       // DGC never said it (refused, or gone): the button goes back to what DGC last said.
-      thinkChosen.settle = setTimeout(() => { thinkChosen = null; thinkShown(thinkSaid.ultra ? "ultra" : thinkSaid.think); }, THINK_SETTLE);
+      thinkChosen.settle = setTimeout(() => { thinkChosen = null; thinkShown(thinkSaid.ultra ? "ultra" : thinkSaid.think); refreshModelPicker(); }, THINK_SETTLE);
     };
     thinkChosen = { level, timer: 0, settle: 0 };
     thinkShown(level);
     if (wait > 0) thinkChosen.timer = setTimeout(send, wait); else send();
   }
-  let lastModelMenu = null;
-  function showProviderStep() {
-    if (!lastModelMenu) return;
-    renderProviderChoices();
+  function pickThinking(level, { keys }) {
+    if (pickerTab === "agents") {
+      const value = level === "same" ? "" : level;
+      vscode.postMessage({ type: "setAgentsThinking", level: value });
+      agentsModel = { ...agentsModel, thinking: value };              // shown at once; DGC's answer is what it says from then on
+    } else chooseThink(level, keys ? THINK_KEYS_REST : 0);
+    refreshModelPicker();
   }
-  function renderModelMenu(ids, current, err, subscription, label, supportsEffort, routes, cliDefaultModel, cliDefaultListed, currentRouteKey, fallback) {
-    lastModelMenu = { ids, current, err, subscription, label, supportsEffort, routes,
-                      cliDefaultModel, cliDefaultListed, currentRouteKey,
-                      fallback: fallback && typeof fallback === "object" ? fallback : { offered: false } };
-    fbOpen = "";
-    // (An open menu on its Sub-agents tab stays there when DGC's list arrives again.)
-    const onAgents = !!agentsStep && !$("modelmenu").hidden && agentsModel.offered;
-    agentsStep = null; if (!onAgents) agentsDrop = "";
-    renderProviderModels(lastModelMenu);
-    if (onAgents) renderAgentsChoices();
+  /** DGC's `models` answer: this session's route, its models, the saved providers. */
+  function onModels(msg) {
+    const text = (value) => (typeof value === "string" ? value : "");
+    let routes = Array.isArray(msg.routes) ? msg.routes.filter((row) => row && row.key) : [];
+    // (An answer that names no routes still has the one the session is on.)
+    if (!routes.length && !msg.err) routes = [msg.subscription ? { key: curSubscription || "cli", label: text(msg.label) || "Subscription", kind: "subscription", engine: curSubscription } : { key: "native", label: "Current host" }];
+    let here = text(msg.currentRouteKey);
+    if (!routes.some((row) => row.key === here)) here = (routes.find((row) => (msg.subscription ? row.kind === "subscription" || row.key === curSubscription : row.kind !== "subscription")) || routes[0] || { key: "" }).key;
+    routes = routes.map((row) => (row.key === here && msg.subscription && row.kind !== "subscription" ? { ...row, kind: "subscription", engine: row.engine || curSubscription || row.key } : row));
+    lastModelMenu = { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string") : [], current: text(msg.current), err: !!msg.err, subscription: !!msg.subscription,
+      label: text(msg.label), supportsEffort: msg.supportsEffort, routes,
+      cliDefaultModel: text(msg.cliDefaultModel), cliDefaultListed: msg.cliDefaultListed, currentRouteKey: here, base: text(msg.base),
+      fallback: msg.fallback && typeof msg.fallback === "object" ? msg.fallback : { offered: false } };
+    refreshModelPicker();
   }
   // ---- this session's agents model (0.52) ----
   // What this session's agents use, as DGC said it (agents_model, through the extension): Settings' agents model, or
-  // the session's own. The Agents row of the model menu says which, and opens the same list the main model uses
-  // (every provider and its models) to choose for agents. A subscription CLI is shown greyed with its reason: it runs
-  // its own tools, and DGC's agents need an address, a key and a model.
-  // Since live round 1 (14 Nov): under the model row and the main slider the menu has two tabs, Main model and
-  // Sub-agents. The Sub-agents tab holds how the sub-agents think and how big their window is (two dropdowns: DGC's
-  // subagent_thinking and subagent_context_size, "Same as the chat" when unset; shown only when this DGC can set them)
-  // and then its own list, Settings' choice first.
+  // the session's own. The picker's Sub-agents tab says which, and lists the same connections the main model has
+  // (every provider and its models) to choose for agents, with Settings' choice first. A subscription CLI is shown
+  // greyed with its reason: it runs its own tools, and DGC's agents need an address, a key and a model. Its Thinking
+  // row and its Context window are the sub-agents' own (DGC's subagent_thinking and subagent_context_size, "Same as
+  // the session" when unset; shown only when this DGC can set them).
   const AGENTS_NONE = { offered: false, own: false, model: "", base_url: "", settings_model: "", settings_base_url: "", router: false, thinking: "", thinking_settable: false, context_size: 0, context_settable: false };
   let agentsModel = { ...AGENTS_NONE };
-  let agentsStep = null;          // null: the Main model tab; {provider: null}: the Sub-agents tab's list; {provider: row}: its models
-  let agentsDrop = "";            // the Sub-agents tab's open dropdown: "thinking" | "context" | ""
   const AGENTS_THINK = [["", "Same as the session"], ["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]];
   const AGENTS_SIZES = [4096, 8192, 16384, 32768, 65536, 131072, 262144];       // the sizes Settings offers (src/contextCombo.js)
   const agentsSizeWords = (n) => (n > 0 && n % 1024 === 0 ? `${n / 1024}K` : n > 0 ? n.toLocaleString("en-US") : "Same as the session");
@@ -3005,78 +2999,6 @@
     const settings = agentsSettingsWords();
     return settings ? `Same as settings · ${settings}` : "Same as this session’s model";
   }
-  /** "Same as settings · qwen3-coder" with each part kept whole: a narrow menu breaks the line at a " · ", never inside
-   *  a model's name ("qwen3-" / "coder"); a part wider than the row ends in "…" (its whole text is the row's title). */
-  const agentsParts = (words) => String(words).split(" · ").map((part) => `<span class="agents-part">${esc(part)}</span>`).join(" · ");
-  /** The tabs under the model row and the main slider. None on a DGC with no sub-agents model of a session's own. */
-  function modelTabsHtml(card) {
-    if (!agentsModel.offered) return card;
-    const tab = (id, label, on, title) => `<button type="button" role="tab" class="model-tab" data-model-tab="${id}" aria-selected="${on}" title="${esc(title)}">${label}</button>`;
-    return card + `<div class="model-tabs" role="tablist" aria-label="Main model, or sub-agents">${tab("main", "Main model", !agentsStep, "This session’s model and its fallback")}${tab("agents", "Sub-agents", !!agentsStep, `Sub-agents: ${agentsWords()}`)}</div>`;
-  }
-  function paintAgentsRow() {
-    const mm = $("modelmenu"), tabs = mm.querySelector(".model-tabs");
-    if (!tabs) return;
-    mm.dataset.tab = agentsStep ? "agents" : "main";
-    for (const tab of tabs.querySelectorAll("[data-model-tab]")) tab.setAttribute("aria-selected", String((tab.dataset.modelTab === "agents") === !!agentsStep));
-    tabs.querySelector('[data-model-tab="agents"]').title = `Sub-agents: ${agentsWords()}`;
-  }
-  function bindAgentsRow(mm) {
-    mm.dataset.tab = agentsStep ? "agents" : "main";
-    mm.querySelectorAll(".model-tabs [data-model-tab]").forEach((tab) => {
-      tab.onclick = (event) => {
-        event.stopPropagation();
-        if (tab.dataset.modelTab === "main") { if (agentsStep) leaveAgents(); return; }
-        if (agentsStep) return;
-        agentsDrop = "";
-        vscode.postMessage({ type: "getAgentsModel" });       // as the tab opens: what DGC has now
-        renderAgentsChoices('.model-tabs [data-model-tab="agents"]');
-      };
-      // Left and Right move between the two tabs, as tabs do.
-      tab.addEventListener("keydown", (event) => { if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return; event.preventDefault(); event.stopPropagation(); mm.querySelector(`.model-tabs [data-model-tab="${tab.dataset.modelTab === "main" ? "agents" : "main"}"]`)?.click(); });
-    });
-  }
-  function leaveAgents() {
-    agentsStep = null; agentsDrop = "";
-    if (lastModelMenu) renderProviderModels(lastModelMenu);
-    $("modelmenu").querySelector('.model-tabs [data-model-tab="main"]')?.focus();
-  }
-  /** The Sub-agents tab's two dropdowns: Thinking and Context window, each a button that opens its choices under it. */
-  function agentsSetHtml() {
-    const drop = (kind, label, value, choices) => {
-      const open = agentsDrop === kind;
-      return `<div class="agents-set-row"><span class="agents-set-name" id="agents-set-${kind}">${label}</span><button type="button" class="agents-drop" data-agents-drop="${kind}" aria-haspopup="listbox" aria-expanded="${open}" aria-labelledby="agents-set-${kind} agents-drop-${kind}"><span id="agents-drop-${kind}" class="agents-drop-value">${esc(value)}</span><span class="codicon codicon-chevron-${open ? "up" : "down"}" aria-hidden="true"></span></button></div>`
-        + (open ? `<div class="agents-drop-list" role="listbox" aria-labelledby="agents-set-${kind}">${choices.map(([v, words, on]) => `<button type="button" role="option" aria-selected="${on}" class="mrow dgc-menu-row${on ? " sel" : ""}" data-value="${esc(v)}"><span class="mi dgc-menu-icon ${on ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label">${esc(words)}</span></button>`).join("")}</div>` : "");
-    };
-    const rows = [];
-    if (agentsModel.thinking_settable) {
-      const now = agentsModel.thinking;
-      rows.push(drop("thinking", "Thinking", AGENTS_THINK.find(([level]) => level === now)[1], AGENTS_THINK.map(([level, words]) => [level, words, level === now])));
-    }
-    if (agentsModel.context_settable) {
-      const now = agentsModel.context_size, sizes = [...new Set([...AGENTS_SIZES, ...(now > 0 ? [now] : [])])].sort((a, b) => a - b);
-      rows.push(drop("context", "Context window", agentsSizeWords(now), [["0", "Same as the session", !(now > 0)], ...sizes.map((n) => [String(n), agentsSizeWords(n), n === now]), ["typed", "Another size…", false]]));
-    }
-    return rows.length ? `<div class="agents-set">${rows.join("")}</div>` : "";
-  }
-  function bindAgentsSet(options) {
-    options.querySelectorAll("[data-agents-drop]").forEach((button) => button.onclick = (event) => {
-      event.stopPropagation();
-      const kind = button.dataset.agentsDrop;
-      agentsDrop = agentsDrop === kind ? "" : kind;
-      renderAgentsChoices(agentsDrop ? ".agents-drop-list .sel" : `[data-agents-drop="${kind}"]`);
-    });
-    options.querySelectorAll(".agents-drop-list [data-value]").forEach((row) => row.onclick = (event) => {
-      event.stopPropagation();
-      const kind = agentsDrop, value = row.dataset.value;
-      agentsDrop = "";
-      if (kind === "context" && value === "typed") { vscode.postMessage({ type: "agentsContextTyped" }); hideModelMenu(); return; }
-      // Shown at once; DGC's answer (agentsModel) is what it says from then on.
-      if (kind === "thinking") { vscode.postMessage({ type: "setAgentsThinking", level: value }); agentsModel = { ...agentsModel, thinking: value }; }
-      else { const size = Number(value) || 0; vscode.postMessage({ type: "setAgentsContext", size }); agentsModel = { ...agentsModel, context_size: size }; }
-      renderAgentsChoices(`[data-agents-drop="${kind}"]`);
-    });
-  }
   /** Whether a provider row is where the session's own agents model runs. */
   function agentsOn(row) {
     if (!agentsModel.own) return false;
@@ -3084,266 +3006,161 @@
     if (!agentsModel.base_url) return row.key === lastModelMenu?.currentRouteKey;
     return !!row.base_url && row.base_url === agentsModel.base_url;
   }
-  // The Sub-agents tab: its two dropdowns, then its list: Settings' choice first, then every provider the main model's list has.
-  function renderAgentsChoices(focus = "") {
-    const mm = $("modelmenu"), options = mm.querySelector(".model-options");
-    if (!options || !lastModelMenu) return;
-    agentsStep = { provider: null };
-    fbOpen = ""; allModelsStep = null;
-    const routes = agentsRoutes(), same = !agentsModel.own, settings = agentsSettingsWords();
-    const check = (on) => `<span class="mi dgc-menu-icon ${on ? "codicon codicon-check" : ""}" aria-hidden="true"></span>`;
-    // Two lines, never cut: "Same as settings", and under it what that is now (Settings' model, DGC Router, or this
-    // chat's own model when Settings names none). Found live 14 Nov: one line read "Same as settings · this chat's …".
-    const sameWhat = agentsModel.router ? "Now: DGC Router, which picks a free worker for each sub-agent" : settings ? `Now: ${settings}` : "Now: same as this session’s model";
-    const sameRow = `<button type="button" role="menuitemradio" aria-checked="${same}" class="mrow dgc-menu-row dgc-menu-row-sub${same ? " sel" : ""}" data-agents-same="1" title="${esc(`Settings’ choice. ${sameWhat}`)}">${check(same)}`
-      + `<span class="dgc-menu-words"><span class="dgc-menu-label">Settings’ choice</span><span class="dgc-menu-sub agents-same-what">${esc(sameWhat)}</span></span></button>`;
-    options.innerHTML = agentsSetHtml() + `<div class="model-list-scroll" role="group" aria-label="Model for this session’s sub-agents">` + sameRow
-      + routes.map((row, i) => {
-        const label = String(row.label || row.key);
-        if (row.kind === "subscription") {
-          // Shown, never hidden: greyed, with why. (aria-disabled, not disabled: it can still be reached and read.)
-          return `<button type="button" role="menuitemradio" aria-checked="false" aria-disabled="true" class="mrow dgc-menu-row dgc-menu-row-sub agents-unavailable" data-agents-no="${i}" title="${esc(`${label}: ${AGENTS_CLI_REASON}`)}">${check(false)}<span class="dgc-menu-words"><span class="dgc-menu-label">${esc(label)}</span><span class="dgc-menu-sub">${AGENTS_CLI_REASON}</span></span></button>`;
-        }
-        const on = agentsOn(row), name = agentsHostLabel(row);         // "Custom host", not "Current host · Custom host"
-        return `<button type="button" role="menuitemradio" aria-checked="${on}" class="mrow dgc-menu-row${on ? " sel" : ""}" data-agents-provider="${i}">${check(on)}<span class="dgc-menu-label" title="${esc(label)}">${esc(name)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
-      }).join("")
-      + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-manage-providers="1"><span class="mi dgc-menu-icon codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
-    options.hidden = false;
-    paintAgentsRow();
-    bindAgentsSet(options);
-    options.querySelector("[data-agents-same]").onclick = (event) => {
-      event.stopPropagation();
-      if (agentsModel.own) {
-        vscode.postMessage({ type: "resetAgentsModel" });
-        agentsModel = { ...agentsModel, own: false, model: agentsModel.settings_model, base_url: agentsModel.settings_base_url };
-        updateModelControl(); agentMapChanged();
-      }
-      renderAgentsChoices("[data-agents-same]");
-    };
-    options.querySelectorAll("[data-agents-no]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); });
-    options.querySelectorAll("[data-agents-provider]").forEach((button) => button.onclick = (event) => {
-      event.stopPropagation();
-      showAgentsModels(routes[Number(button.dataset.agentsProvider)]);
-    });
-    options.querySelector("[data-manage-providers]").onclick = () => { vscode.postMessage({ type: "openSettings", section: "models" }); hideModelMenu(); };
-    (focus.startsWith(".model-tabs") ? mm.querySelector(focus) : options.querySelector(focus || ".model-list-scroll .sel") || options.querySelector(".model-list-scroll button"))?.focus();
-  }
-  // One provider's models, to choose for agents (the list has the menu's height here: the two dropdowns are a step back).
-  // Room kept for the sub-agents' own fallback (finding 13c; its backend is not built): each model row here becomes
-  // fbItem's shape, a ⋯ with "Use as fallback" and a Fallback word at the row's end, as on the Main model tab.
-  // this chat's own host from the list the menu already has, any other
-  // from its host (providerModels, as an All models provider's are listed).
-  function showAgentsModels(row, listed = null) {
-    const mm = $("modelmenu"), options = mm.querySelector(".model-options");
-    if (!options || !row) return;
-    const own = row.key === "native";
-    if (own && !listed) listed = { ids: lastModelMenu.subscription || lastModelMenu.err ? [] : (lastModelMenu.ids || []), error: !!lastModelMenu.err };
-    agentsStep = { provider: row, listed }; agentsDrop = "";
-    if (!listed) vscode.postMessage({ type: "providerModels", id: row.key });
-    const ids = listed?.ids || [], on = agentsOn(row);
-    const wait = !listed ? `<div class="mhead dgc-menu-head"><span>Listing its models…</span></div>`
-      : !ids.length ? `<div class="mhead dgc-menu-head"><span>${listed.error ? "Couldn’t list its models" : "It lists no models"}</span></div>` : "";
-    options.innerHTML = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-agents-providers="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Sub-agents</span></button>`
-      + `<div class="mhead dgc-menu-head"><span>${esc(agentsHostLabel(row))} model for sub-agents</span></div><div class="model-list-scroll">${wait}`
-      + ids.map((id, i) => { const chosen = on && id === agentsModel.model;
-        return `<button type="button" role="menuitemradio" aria-checked="${chosen}" class="mrow dgc-menu-row${chosen ? " sel" : ""}" data-agents-model="${i}"><span class="mi dgc-menu-icon ${chosen ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(id)}">${esc(id)}</span></button>`; }).join("")
-      + (listed && !own ? `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-agents-typed="1"><span class="mi dgc-menu-icon codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>` : "")
-      + `</div>`;
-    options.hidden = false;
-    options.querySelector("[data-agents-providers]").onclick = (event) => { event.stopPropagation(); renderAgentsChoices(); };
-    options.querySelectorAll("[data-agents-model]").forEach((button) => button.onclick = (event) => {
-      event.stopPropagation();
-      const model = ids[Number(button.dataset.agentsModel)];
-      vscode.postMessage({ type: "setAgentsModel", provider: own ? "" : row.key, model });
-      // Shown at once; DGC's answer (agentsModel) is what it says from then on.
-      agentsModel = { ...agentsModel, own: true, model, base_url: own ? "" : String(row.base_url || "") };
-      updateModelControl(); agentMapChanged();
-      showAgentsModels(row, listed);
-      paintAgentsRow();
-      options.querySelector(".sel")?.focus();
-    });
-    const typed = options.querySelector("[data-agents-typed]");
-    if (typed) typed.onclick = () => { vscode.postMessage({ type: "agentsModelTyped", id: row.key }); hideModelMenu(); };
-    (options.querySelector(".sel") || options.querySelector("[data-agents-model]") || options.querySelector("button"))?.focus();
-  }
-  /** DGC's word on this session's agents model arrived: the button, the map and an open menu follow it. */
+  /** DGC's word on this session's agents model arrived: the button, the map and an open picker follow it. */
   function onAgentsModel(view) {
     setAgentsModel(view);
+    if (!agentsModel.offered) pickerTab = "main";
     updateModelControl();
     agentMapChanged();
-    if ($("modelmenu").hidden) return;
-    if (agentsStep?.provider) showAgentsModels(agentsStep.provider, agentsStep.listed);
-    else if (agentsStep) renderAgentsChoices();
-    paintAgentsRow();
+    refreshModelPicker();
   }
   // D14: this session's fallback. A model DGC runs itself (this host's, or a saved provider's), Claude Code and Codex
-  // have a ⋯ with Use as main and Use as fallback; once one is set, Main and Fallback sit at the rows' right end. DGC's
-  // own Current host row and an All models provider row have no ⋯ (they name no one model), and neither have a CLI's
-  // own models (a CLI is a fallback on its default model).
-  let fbOpen = "", fallbackActive = "", lastAllListed = null;
+  // have a ⋯ with Use as main and Use as fallback; once one is set, Main and Fallback sit at the rows' right end. A
+  // CLI is a fallback on its own default model, so of its rows only "CLI default" has the ⋯.
+  let fallbackActive = "";
   const fbView = () => lastModelMenu?.fallback || { offered: false };
-  const fbPills = (isMain, isFallback) => (fbView().model || fbView().engine ? (isMain ? DgcMenu.pill("Main", "main") : isFallback ? DgcMenu.pill("Fallback", "fallback") : "") : "");
-  function fbItem(key, rowHtml, label, isMain, isFallback) {
-    if (!fbView().offered) return rowHtml;
-    const open = fbOpen === key;
-    const choices = open ? `<div class="dgc-menu-choices" role="group" aria-label="${esc(label)}">`
-      + (isMain ? "" : `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-fb-main="${key}"><span>Use as main</span></button>`)
-      + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-fb-set="${key}"${isMain ? " disabled" : ""}><span>${isFallback ? "Stop using as fallback" : "Use as fallback"}</span></button></div>` : "";
-    return DgcMenu.item(rowHtml, DgcMenu.more(`More for ${label}`, `data-fb-more="${key}"`, open), choices);
+
+  // ---- what the picker shows ----
+  const connName = (row) => MP.tipOf(agentsHostLabel(row), "");
+  /** A route as a connection of the rail: its mark and badge by what it is (never by its name alone). */
+  function routeConn(row) {
+    const sub = row.kind === "subscription";
+    const from = sub ? { engine: String(row.engine || row.key) } : { base_url: row.key === "native" ? lastModelMenu.base : String(row.base_url || ""), name: agentsHostLabel(row) };
+    return { id: row.key, name: connName(row), ...MP.markOf(from), route: row, loaded: true, sections: [] };
   }
-  // key: "m:<i>" a model of this session's route, "p:<i>" a saved provider, "a:<i>" a model an All models provider lists.
-  function fbTarget(key) {
-    const [kind, at] = [key[0], Number(key.slice(2))];
-    if (kind === "m") return { provider: "", model: lastModelMenu.ids[at], base_url: "" };
-    if (kind === "p") {
-      const row = (lastModelMenu.routes || [])[at];
-      if (row.kind === "subscription") return { provider: row.key, model: "", base_url: "", engine: row.engine || row.key };
-      return { provider: row.key, model: row.model, base_url: row.base_url };
+  const plainRows = (ids, current) => ids.map((id) => ({ id, value: id, name: id, caps: MP.facts(id), current: id === current }));
+  const listed = (conn, rows) => (conn.mark === "ollama" && conn.badge !== "cloud" ? MP.ollamaSections(rows) : [{ title: "", rows }]);
+  /** A CLI's rows: its own default first, then its models: Claude Code's by nickname with the version each last ran
+   *  as, then its fixed versions; any other CLI's as it lists them. `current`: the chosen name, or null when the
+   *  session isn't on this CLI. */
+  function cliSections(row, info, current) {
+    const engine = String(row.engine || row.key), name = connName(row);
+    // (The session's own CLI can't be its own fallback: its rows have no ⋯, and the chosen one says Main.)
+    const fb = fbView(), here = current !== null, cli = !here && (engine === "claude" || engine === "codex") ? engine : "";
+    const mains = (rows) => (here && fb.offered && (fb.model || fb.engine) ? rows.map((r) => (r.current ? { ...r, pills: [["Main", "main"]] } : r)) : rows);
+    const now = info.cliDefaultModel ? (engine === "claude" ? MP.versionLabel(info.cliDefaultModel) : info.cliDefaultModel) : "";
+    const first = { value: "", name: "CLI default", current: current === "", disabled: info.cliDefaultListed === false,
+      desc: info.cliDefaultListed === false ? `${info.cliDefaultModel} isn’t one of its models` : now ? `Now ${now}` : `Whatever ${name} is set to use`,
+      ...(cli ? fbParts({ provider: row.key, model: "", base_url: "", engine: cli }, false, !!fb.engine && fb.engine === cli) : {}) };
+    if (engine === "claude") {
+      const rows = MP.claudeRows({ hints: info.hints, versions: info.versions, fixed: info.fixed, held: current || "", current });
+      return [{ title: "", rows: mains([first, ...rows.followed]) }, ...(rows.fixed.length ? [{ title: "Fixed versions", rows: mains(rows.fixed) }] : [])];
     }
-    return { provider: allModelsStep?.key, model: (lastAllListed?.ids || [])[at], base_url: allModelsStep?.base_url || "" };
+    const ids = [...new Set([...(current ? [current] : []), ...info.hints])];
+    return [{ title: "", rows: mains([first, ...plainRows(ids, current)]) }];
   }
-  function fbRedraw(key, focusChoice) {
-    const kind = key[0];
-    if (kind === "m") renderProviderModels(lastModelMenu);
-    else if (kind === "p") renderProviderChoices();
-    else if (allModelsStep) showAllModels(allModelsStep, lastAllListed);
-    const mm = $("modelmenu"), dots = mm.querySelector(`[data-fb-more="${key}"]`);
-    (focusChoice ? dots?.closest(".dgc-menu-item")?.nextElementSibling?.querySelector("button:not(:disabled)") : dots)?.focus();
+  /** A row's Main and Fallback words and its ⋯ (D14). */
+  function fbParts(target, isMain, isFallback) {
+    const fb = fbView();
+    if (!fb.offered) return {};
+    const set = !!(fb.model || fb.engine);
+    return { fb: target, pills: set ? (isMain ? [["Main", "main"]] : isFallback ? [["Fallback", "fallback"]] : []) : [],
+      actions: [...(isMain ? [] : [{ id: "main", label: "Use as main" }]), { id: "fallback", label: isFallback ? "Stop using as fallback" : "Use as fallback", disabled: isMain }] };
   }
-  function bindFallback(mm, useAsMain) {
-    mm.querySelectorAll("[data-fb-more]").forEach((button) => button.onclick = (event) => {
-      event.stopPropagation();
-      const key = button.dataset.fbMore;
-      fbOpen = fbOpen === key ? "" : key;
-      fbRedraw(key, !!fbOpen);
+  function mainConnections() {
+    const m = lastModelMenu, fb = fbView();
+    return m.routes.map((row) => {
+      const conn = routeConn(row), here = row.key === m.currentRouteKey;
+      conn.current = here;
+      if (row.kind === "subscription") {
+        const info = here ? { hints: m.ids, versions: row.versions || {}, fixed: row.fixed || [], cliDefaultModel: m.cliDefaultModel, cliDefaultListed: m.cliDefaultListed }
+          : { hints: Array.isArray(row.hints) ? row.hints : [], versions: row.versions || {}, fixed: row.fixed || [], cliDefaultModel: String(row.cli_default_model || ""), cliDefaultListed: row.cli_default_listed };
+        conn.sections = cliSections(row, info, here ? m.current : null);
+        conn.note = row.installed === false ? "Install its CLI first." : row.auth_state === "signed_out" ? "Sign in to it first." : "";
+        conn.footer = [{ id: here ? "typed" : "typedFor", label: "Enter another model…", icon: "edit" }];
+        return conn;
+      }
+      const base = row.key === "native" ? "" : String(row.base_url || "");
+      const withFb = (rows) => rows.map((r) => { const isMain = here && r.current;
+        const isFallback = !isMain && !!fb.model && fb.model === r.value && (here ? !fb.base_url || fb.base_url === fb.route_base || fb.base_url === base : fb.base_url === base);
+        return { ...r, ...fbParts({ provider: here ? "" : row.key, model: r.value, base_url: here ? "" : base }, isMain, isFallback) }; });
+      if (here) {
+        if (m.err || !m.ids.length) { conn.error = m.err ? "Can’t reach its host." : "It lists no models."; conn.footer = [{ id: "connect", label: "Connect…", icon: "plug" }]; return conn; }
+        conn.sections = listed(conn, withFb(plainRows(m.ids, m.current)));
+        return conn;
+      }
+      const list = pickerLists.get(row.key);
+      if (!list) { conn.loaded = false; return conn; }
+      if (list.error && !list.ids.length) conn.error = "Couldn’t list its models.";
+      conn.sections = listed(conn, withFb(plainRows(list.ids, null)));
+      conn.footer = [{ id: "typedFor", label: "Enter another model…", icon: "edit" }];
+      return conn;
     });
-    mm.querySelectorAll("[data-fb-main]").forEach((button) => button.onclick = (event) => { event.stopPropagation(); fbOpen = ""; useAsMain(button.dataset.fbMain); });
-    mm.querySelectorAll("[data-fb-set]").forEach((button) => button.onclick = (event) => {
-      event.stopPropagation();
-      const key = button.dataset.fbSet, target = fbTarget(key), view = fbView();
+  }
+  // The Sub-agents tab: Settings' choice first, then every connection the main model has.
+  function agentsConnections() {
+    const m = lastModelMenu, same = !agentsModel.own, settings = agentsSettingsWords();
+    // What Settings' choice is now (Settings' model, DGC Router, or this chat's own model when Settings names none).
+    const sameWhat = agentsModel.router ? "Now: DGC Router, which picks a free worker for each sub-agent" : settings ? `Now: ${settings}` : "Now: same as this session’s model";
+    const first = { id: "agents:settings", name: "Settings’ choice", tip: "Settings’ choice", mark: "dgc", badge: "", current: same, loaded: true,
+      sections: [{ title: "", rows: [{ value: "same", name: "Settings’ choice", desc: sameWhat, title: `Settings’ choice. ${sameWhat}`, current: same }] }] };
+    return [first, ...m.routes.map((row) => {
+      const conn = routeConn(row), on = agentsOn(row);
+      conn.current = on;
+      if (row.kind === "subscription") return { ...conn, disabled: true, reason: `${AGENTS_CLI_REASON}.` };
+      const own = row.key === "native";
+      const list = own ? { ids: m.subscription || m.err ? [] : m.ids, error: m.err } : pickerLists.get(row.key);
+      if (!list) { conn.loaded = false; return conn; }
+      if (list.error && !list.ids.length) conn.error = "Couldn’t list its models.";
+      conn.sections = listed(conn, plainRows(list.ids, on ? agentsModel.model : null));
+      if (!own) conn.footer = [{ id: "agentsTyped", label: "Enter another model…", icon: "edit" }];
+      return conn;
+    })];
+  }
+  function modelPickerView() {
+    const view = { title: "Model", trigger: $("btn-model"), footer: [{ id: "settings", label: "Add provider in Settings…", icon: "add" }] };
+    const m = lastModelMenu;
+    if (!m) return { ...view, connections: [], empty: { title: "Loading…" }, footer: [] };
+    if (!m.routes.length) return { ...view, connections: [], empty: { title: "Can’t reach DGC", text: "Its models didn’t load." }, footer: [{ id: "connect", label: "Connect…", icon: "plug" }] };
+    const tabbed = agentsModel.offered;
+    const tabs = tabbed ? { tabs: [{ id: "main", label: "Main model", title: "This session’s model and its fallback" }, { id: "agents", label: "Sub-agents", title: `Sub-agents: ${agentsWords()}` }], tab: pickerTab } : {};
+    if (tabbed && pickerTab === "agents") {
+      const now = agentsModel.context_size, sizes = [...new Set([...AGENTS_SIZES, ...(now > 0 ? [now] : [])])].sort((a, b) => a - b);
+      return { ...view, ...tabs, title: "Model for this session’s sub-agents", connections: agentsConnections(),
+        selected: agentsModel.own ? (m.routes.find(agentsOn) || {}).key : "agents:settings",
+        thinking: agentsModel.thinking_settable ? { label: "Their thinking", value: agentsModel.thinking || "same",
+          levels: AGENTS_THINK.map(([value, label]) => ({ value: value || "same", label: value ? label : "Same", title: value ? "" : "Same as the session" })) } : null,
+        settings: agentsModel.context_settable ? [{ id: "context", label: "Their context window", value: String(now > 0 ? now : 0),
+          options: [{ value: "0", label: "Same as the session" }, ...sizes.map((n) => ({ value: String(n), label: agentsSizeWords(n) })), { value: "typed", label: "Another size…" }] }] : [] };
+    }
+    return { ...view, ...tabs, connections: mainConnections(), thinking: thinkingView() };
+  }
+  function pickModelRow(row, conn) {
+    const m = lastModelMenu, route = conn.route;
+    if (pickerTab === "agents" && agentsModel.offered) {
+      if (!route) {
+        if (agentsModel.own) { vscode.postMessage({ type: "resetAgentsModel" }); agentsModel = { ...agentsModel, own: false, model: agentsModel.settings_model, base_url: agentsModel.settings_base_url }; updateModelControl(); agentMapChanged(); }
+      } else {
+        const own = route.key === "native";
+        vscode.postMessage({ type: "setAgentsModel", provider: own ? "" : route.key, model: row.value });
+        // Shown at once; DGC's answer (agentsModel) is what it says from then on.
+        agentsModel = { ...agentsModel, own: true, model: row.value, base_url: own ? "" : String(route.base_url || "") };
+        updateModelControl(); agentMapChanged();
+      }
+      refreshModelPicker();
+      return;
+    }
+    if (route.key === m.currentRouteKey) vscode.postMessage({ type: "setModel", model: row.value });
+    else vscode.postMessage({ type: "setSubscription", engine: route.key === "native" ? "" : route.key, model: row.value });
+    modelPicker.close("picked");
+  }
+  function pickerAction(id, { connection, row }) {
+    const route = connection?.route;
+    if (id === "settings") { vscode.postMessage({ type: "openSettings", section: "models" }); hideModelMenu(); return; }
+    if (id === "connect") { vscode.postMessage({ type: "connect" }); hideModelMenu(); return; }
+    if (id === "typed") { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); return; }
+    if (id === "typedFor" && route) { vscode.postMessage(route.kind === "subscription" ? { type: "subscriptionModelTyped", id: route.key } : { type: "providerModelTyped", id: route.key }); hideModelMenu(); return; }
+    if (id === "agentsTyped" && route) { vscode.postMessage({ type: "agentsModelTyped", id: route.key }); hideModelMenu(); return; }
+    if (id === "main" && row) { pickModelRow(row, connection); return; }
+    if (id === "fallback" && row?.fb) {
+      const target = row.fb, view = fbView();
       const already = target.engine ? view.engine === target.engine
-        : !!view.model && view.model === target.model && (view.base_url || "") === (target.base_url || "");
+        : !!view.model && view.model === target.model && ((view.base_url || "") === (target.base_url || "") || (!target.base_url && view.base_url === view.route_base));
       const chosen = already ? { provider: "", model: "", base_url: "" } : target;
       vscode.postMessage({ type: "setFallback", provider: chosen.provider || "", model: chosen.model || "" });
       lastModelMenu.fallback = { ...view, model: chosen.model || "", base_url: chosen.base_url || "", engine: chosen.engine || "" };
-      fbOpen = "";
-      fbRedraw(key, false);
-    });
-  }
-  function renderProviderChoices() {
-    const { routes, currentRouteKey } = lastModelMenu;
-    const mm = $("modelmenu");
-    const options = mm.querySelector(".model-options");
-    if (!options) return;
-    const choices = (Array.isArray(routes) ? routes : [{ key: "native", label: "Current host" }])
-      .filter(row => row && row.key);
-    // Keep the same model/effort control mounted while only the lower list changes.
-    options.innerHTML = `<div class="mhead dgc-menu-head"><span>Provider</span></div><div class="model-list-scroll">`
-      + choices.map((row, i) => {
-        const selected = row.key === currentRouteKey;
-        const note = row.installed === false ? " · install CLI first"
-          : row.auth_state === "signed_out" ? " · sign in first" : "";
-        const fb = fbView(), engine = row.kind === "subscription" ? String(row.engine || row.key) : "";
-        const cli = engine === "claude" || engine === "codex" ? engine : "";
-        const isFallback = !selected && (cli ? !!fb.engine && fb.engine === cli
-          : !!fb.model && !!row.model && fb.model === row.model && fb.base_url === row.base_url);
-        const html = `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow dgc-menu-row${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi dgc-menu-icon ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(String(row.label || row.key) + note)}">${esc(String(row.label || row.key) + note)}</span>${fbPills(selected, isFallback)}<span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
-        const can = !!cli || (row.kind && row.kind !== "subscription" && !row.allModels && row.key !== "native" && !!row.model);
-        return can ? fbItem(`p:${i}`, html, String(row.label || row.key), selected, isFallback) : html;
-      }).join("")
-      + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-manage-providers="1"><span class="mi dgc-menu-icon codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
-    options.hidden = false;
-    mm.querySelector(".model-summary")?.setAttribute("aria-expanded", "true");
-    options.querySelectorAll("[data-provider-i]").forEach(button => button.onclick = (event) => {
-      event.stopPropagation();
-      const row = choices[Number(button.dataset.providerI)];
-      if (row.key === currentRouteKey) {
-        renderProviderModels(lastModelMenu);
-      } else if (row.allModels) {
-        // All models: what its API offers, from here. The session moves only when one of them is chosen.
-        showAllModels(row);
-      } else {
-        vscode.postMessage({ type: "setSubscription", engine: row.key === "native" ? "" : row.key });
-        hideModelMenu();
-      }
-    });
-    options.querySelector("[data-manage-providers]").onclick = () => {
-      vscode.postMessage({ type: "openSettings", section: "models" }); hideModelMenu();
-    };
-    bindFallback(options, (key) => { const row = choices[Number(key.slice(2))]; vscode.postMessage({ type: "setSubscription", engine: row.key === "native" ? "" : row.key }); hideModelMenu(); });
-    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
-    (options.querySelector(".sel") || options.querySelector("button"))?.focus();
-  }
-  // The step an All models provider opens: its host's models in the same menu, listed by the host with its saved key.
-  let allModelsStep = null;
-  function showAllModels(row, listed = null) {
-    const mm = $("modelmenu"), options = mm.querySelector(".model-options");
-    if (!options) return;
-    allModelsStep = row;
-    lastAllListed = listed;
-    if (!listed) vscode.postMessage({ type: "providerModels", id: row.key });
-    const ids = listed?.ids || [];
-    const wait = !listed ? `<div class="mhead dgc-menu-head"><span>Listing its models…</span></div>`
-      : !ids.length ? `<div class="mhead dgc-menu-head"><span>${listed.error ? "Couldn’t list its models" : "It lists no models"}</span></div>` : "";
-    options.innerHTML = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-back="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`
-      + `<div class="mhead dgc-menu-head"><span>${esc(row.label)} model</span></div><div class="model-list-scroll">${wait}`
-      + ids.map((id, i) => { const fb = fbView(), isFallback = !!fb.model && fb.model === id && fb.base_url === row.base_url;
-        return fbItem(`a:${i}`, `<button type="button" role="menuitemradio" aria-checked="false" class="mrow dgc-menu-row" data-provider-model="${i}"><span class="mi dgc-menu-icon" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(id)}">${esc(id)}</span>${fbPills(false, isFallback)}</button>`, id, false, isFallback); }).join("")
-      + (listed ? `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-typed="1"><span class="mi dgc-menu-icon codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>` : "")
-      + `</div>`;
-    options.hidden = false;
-    options.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); allModelsStep = null; showProviderStep(); };
-    options.querySelectorAll("[data-provider-model]").forEach((button) => button.onclick = () => {
-      allModelsStep = null;
-      vscode.postMessage({ type: "setSubscription", engine: row.key, model: ids[Number(button.dataset.providerModel)] });
-      hideModelMenu();
-    });
-    bindFallback(options, (key) => { allModelsStep = null; vscode.postMessage({ type: "setSubscription", engine: row.key, model: ids[Number(key.slice(2))] }); hideModelMenu(); });
-    const typed = options.querySelector("[data-provider-typed]");
-    if (typed) typed.onclick = () => { allModelsStep = null; vscode.postMessage({ type: "providerModelTyped", id: row.key }); hideModelMenu(); };
-    (options.querySelector("[data-provider-model]") || options.querySelector("button"))?.focus();
-  }
-  function renderProviderModels({ ids, current, err, subscription, label, supportsEffort,
-                                  cliDefaultModel, cliDefaultListed }) {
-    const mm = $("modelmenu");
-    const profile = profileMenu(subscription, supportsEffort);
-    const back = `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-provider-back="1"><span class="mi dgc-menu-icon codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`;
-    if (subscription) {
-      mm.innerHTML = profile + `<div class="mhead dgc-menu-head"><span>${esc(label || "Subscription")} model</span></div>`
-        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow dgc-menu-row${!current ? " sel" : ""}" data-default="1"${cliDefaultListed === false ? " disabled" : ""}><span class="mi dgc-menu-icon ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(cliDefaultModel ? `CLI default · ${cliDefaultModel}${cliDefaultListed === false ? " (not listed)" : ""}` : "CLI default")}">${esc(cliDefaultModel ? `CLI default · ${cliDefaultModel}${cliDefaultListed === false ? " (not listed)" : ""}` : "CLI default")}</span></button>`
-        + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(id)}">${esc(id)}</span></button>`).join("")
-        + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-custom="1"><span class="mi dgc-menu-icon codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>`;
-      bindProfiles(mm);
-      mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
-      mm.querySelector(".model-summary")?.click();
-      mm.querySelector("[data-default]").onclick = () => { vscode.postMessage({ type: "setModel", model: "" }); hideModelMenu(); };
-      mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
-      mm.querySelector("[data-custom]").onclick = () => { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); };
-      mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
-      mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
-      mm.querySelector(".model-summary")?.focus(); return;
+      refreshModelPicker();
     }
-    if (err || !ids.length) {
-      mm.innerHTML = profile + `<button type="button" role="menuitem" class="mrow dgc-menu-row" data-connect="1"><span class="mi dgc-menu-icon codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
-      bindProfiles(mm);
-      mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
-      mm.querySelector(".model-summary")?.click();
-      mm.querySelector("[data-connect]").onclick = () => { vscode.postMessage({ type: "connect" }); hideModelMenu(); };
-      mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
-      mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); mm.querySelector("button")?.focus(); return;
-    }
-    const fb = fbView(), ownHost = (base) => !base || base === fb.route_base;
-    mm.innerHTML = profile + `<div class="mhead dgc-menu-head"><span>Model</span></div>` +
-      ids.map((id, i) => { const isFallback = !!fb.model && fb.model === id && ownHost(fb.base_url) && id !== current;
-        return fbItem(`m:${i}`, `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow dgc-menu-row${id === current ? " sel" : ""}" data-i="${i}"><span class="mi dgc-menu-icon ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span class="dgc-menu-label" title="${esc(id)}">${esc(id)}</span>${fbPills(id === current, isFallback)}</button>`, id, id === current, isFallback); }).join("");
-    bindProfiles(mm);
-    mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
-    mm.querySelector(".model-summary")?.click();
-    mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
-    bindFallback(mm, (key) => { vscode.postMessage({ type: "setModel", model: ids[Number(key.slice(2))] }); hideModelMenu(); });
-    mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
-    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
-    mm.querySelector(".model-summary")?.focus();
   }
 
   // "xhigh" capitalised reads "Xhigh", which is not a thing. Spell the profiles out.
@@ -3391,8 +3208,6 @@
   DgcMenu.keys($("addmenu"), { close: hideAddMenu, trigger: $("btn-add"), rows: ROWS });
   DgcMenu.keys($("modemenu"), { close: hideModeMenu, trigger: $("btn-mode"), rows: ROWS });
   DgcMenu.keys($("outputmenu"), { close: hideOutputMenu, trigger: $("btn-output"), rows: ROWS });
-  DgcMenu.keys($("modelmenu"), { close: hideModelMenu, trigger: $("btn-model"), rows: `${ROWS}, button[role='tab'], button.agents-drop, button[role='option']` });
-  DgcMenu.slide($("modelmenu"));     // a long model or provider name slides while its row is pointed at (9 Nov)
 
   // animated DGC mark — the three stripes light up one-by-one, hold all three,
   // then repeat (CSS-driven, ~1.2s loop, single purple). Replaces the old braille
@@ -10612,7 +10427,7 @@ function permissionChoices(ev) {
       case "command_rejected":
         // A thinking level DGC refused: the button goes back to what DGC last said, at once (a refused level never
         // stays on it).
-        if (thinkChosen && ["set_think", "set_config"].includes(ev.command)) { clearTimeout(thinkChosen.timer); clearTimeout(thinkChosen.settle); thinkChosen = null; thinkShown(thinkSaid.ultra ? "ultra" : thinkSaid.think); }
+        if (thinkChosen && ["set_think", "set_config"].includes(ev.command)) { clearTimeout(thinkChosen.timer); clearTimeout(thinkChosen.settle); thinkChosen = null; thinkShown(thinkSaid.ultra ? "ultra" : thinkSaid.think); if (lastModelMenu) refreshModelPicker(); }
         // The agent map asked, and the map says what became of it (the output not available, a Stop
         // that did not take): a refusal of its polling must not fill the chat with lines.
         if (["get_background_output", "list_background_shells", "stop_background_shell"].includes(ev.command)
@@ -11960,11 +11775,8 @@ function permissionChoices(ev) {
   $("btn-model").onclick = (e) => {
     e.stopPropagation();
     if (noProvider) { vscode.postMessage({ type: "openSettings", section: "models" }); return; }
-    const mm = $("modelmenu");
-    if (!mm.hidden) { hideModelMenu(); return; }
-    mm.innerHTML = `<div class="mhead dgc-menu-head"><span>Loading…</span></div>`;
-    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu(); hideContextMenu(); hideAgentsMenu();
-    vscode.postMessage({ type: "listModels" });
+    if (modelPickerOpen()) { hideModelMenu(); return; }
+    openModelPicker();
   };
   // ---- running chats ---------------------------------------------------------------------------
   // Each chat has its own backend, so the chat you are not looking at keeps working. The rail says
@@ -12185,7 +11997,6 @@ function permissionChoices(ev) {
   document.addEventListener("click", (e) => {          // dismiss the picker menus on outside click
     if (!$("modemenu").hidden && !$("btn-mode").contains(e.target) && !$("modemenu").contains(e.target)) hideModeMenu();
     if (!$("outputmenu").hidden && !$("btn-output").contains(e.target) && !$("outputmenu").contains(e.target)) hideOutputMenu();
-    if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
     if (!$("ctxmenu").hidden && !$("btn-ctx").contains(e.target) && !$("ctxmenu").contains(e.target)) hideContextMenu();
     if ($("cachemenu") && !$("cachemenu").hidden && !$("cache-clock").contains(e.target) && !$("cachemenu").contains(e.target)) hideCacheMenu();
     hideAgentsMenu(e);
@@ -13960,6 +13771,7 @@ function permissionChoices(ev) {
       renderCacheClock();                        // a model change can change whose cache it is
       if (!thinkChosen) curUltra = thinkSaid.ultra;
       updateModelControl();
+      if (lastModelMenu) refreshModelPicker();   // an open picker's Thinking row follows what DGC says
       renderContext();                           // on a subscription the CLI keeps the window: no percentage of DGC's
       agentMapChanged();                         // the map's root names the model
       if (pmodel) { pmodel.textContent = noProvider ? "No provider" : curModel || "dgc"; pmodel.title = noProvider ? "No model provider yet. Click to add one in Settings → Models." : "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
@@ -13968,9 +13780,8 @@ function permissionChoices(ev) {
       joinGoal(msg.state.goal);                 // a goal already running when this window opened: its end is said too
     }
     else if (msg.type === "agentsModel") onAgentsModel(msg);
-    else if (msg.type === "providerModels" && agentsStep?.provider && agentsStep.provider.key === msg.id) { if (!$("modelmenu").hidden) showAgentsModels(agentsStep.provider, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: !!msg.error }); }
-    else if (msg.type === "providerModels") { if (allModelsStep && allModelsStep.key === msg.id && !$("modelmenu").hidden) showAllModels(allModelsStep, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: msg.error }); }
-    else if (msg.type === "models" && !$("modelmenu").hidden) { if ("agents" in msg) { setAgentsModel(msg.agents); updateModelControl(); } renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort, msg.routes, msg.cliDefaultModel, msg.cliDefaultListed, msg.currentRouteKey, msg.fallback); }
+    else if (msg.type === "providerModels") { if (modelPickerOpen() && typeof msg.id === "string") { pickerLists.set(msg.id, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: !!msg.error }); refreshModelPicker(); } }
+    else if (msg.type === "models" && modelPickerOpen()) { if ("agents" in msg) { setAgentsModel(msg.agents); updateModelControl(); } onModels(msg); }
     else if (msg.type === "fallbackActive") { fallbackActive = typeof msg.model === "string" ? msg.model.slice(0, 256) : ""; updateModelControl(); }
     else if (msg.type === "chat_changes") {
       if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);

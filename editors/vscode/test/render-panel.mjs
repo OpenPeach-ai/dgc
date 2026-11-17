@@ -32,7 +32,7 @@ import { chromium } from "@playwright/test";
 const here = dirname(fileURLToPath(import.meta.url));
 const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
 const css = readStylesheet(here + "/../media/main.css");
-const mainJs = readFileSync(here + "/../media/shared/effort.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/icons.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
+const mainJs = readFileSync(here + "/../media/shared/modelpicker.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/icons.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
 import { buildSync } from "esbuild";
 import { readStylesheet } from "./support/stylesheet.mjs";
 const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
@@ -695,7 +695,7 @@ if (process.argv.includes("--menus")) {
   // anchored to its own trigger, which sits ~100px in; this is the check that catches that.
   const out = process.argv[2] || "/tmp/menus.png";
   const triggers = [["#btn-add", "#addmenu"], ["#btn-ctx", "#ctxmenu"],
-                    ["#btn-mode", "#modemenu"], ["#btn-model", "#modelmenu"]];
+                    ["#btn-mode", "#modemenu"]];     // (the model button opens the model picker, a centred dialog: test/render-model-picker.mjs)
   let bad = 0;
   for (const w of [300, 360, 460, 720]) {
     await page.setViewportSize({ width: w, height: 900 });

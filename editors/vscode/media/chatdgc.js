@@ -89,7 +89,7 @@
   // has no switch for it (reported 2026-10-18: "it anyway uses web, so let's not confuse users"). Settings -> Web
   // search -> Search in ChatDGC turns it off for every chat.
   const searchMode = () => "auto";
-  const state = { fallback: "", fallbackOn: null, fallbackOffered: false, fallbackMore: "",
+  const state = { fallback: "", fallbackOn: null, fallbackOffered: false, cliFacts: {}, host: null,
                   conversation: null, messages: [], earlier: 0, busy: false, maxAttachments: 10, replyId: "", models: [], defaultModel: "", modelProfiles: [], providerModels: {}, providerErrors: {}, menuProvider: "", menuProviders: false, windows: [], breakdown: null,
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
@@ -3986,7 +3986,7 @@
     thinkingPick.value = state.thinking || state.conversation?.thinking || "off";
     updatePill();
     meter();
-    if (!modelMenu.hidden) renderModelMenu();
+    refreshPicker();
   }
 
   // ---- the welcome: ChatDGC's mark, its slashes drawn in one after another, and a line for the time of day,
@@ -4032,11 +4032,9 @@
     return box;
   }
 
-  // ---- the model and its thinking, as main DGC shows them: one pill (the model's name and a small arc for how much it
-  // thinks) opening a menu of the models and a dial for thinking. The selects underneath are what a send reads.
-  const pill = $("cd-model-pill"), modelMenu = $("cd-model-menu");
-  DgcMenu.slide(modelMenu);           // a long name slides to show its end while its row is pointed at (9 Nov)
-  const labelEl = (text) => Object.assign(el("span", "cd-menu-name dgc-menu-label", text), { title: text });
+  // ---- the model and its thinking, as main DGC shows them: one button (the model's name and a small arc for how much it
+  // thinks) opening the model picker. The selects underneath are what a send reads.
+  const pill = $("cd-model-pill");
   const SVG = "http://www.w3.org/2000/svg";
   const levelOf = (value) => Math.max(0, LEVELS.findIndex(([v]) => v === value));
   const svgEl = (tag, attrs) => { const n = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v)); return n; };
@@ -4121,190 +4119,120 @@
     thinkingPick.value = LEVELS[n][0];
     thinkingPick.dispatchEvent(new Event("change"));
     updatePill();
-    showDial();
+    refreshPicker();
   }
-  function dialNode() {
-    const box = el("div", "cd-dial");
-    const face = svgEl("svg", { viewBox: "0 0 120 66", class: "cd-dial-face", role: "slider", tabindex: "0", "aria-label": "Thinking",
-                                "aria-valuemin": 0, "aria-valuemax": LEVELS.length - 1 });
-    face.append(svgEl("path", { class: "cd-dial-track", d: arc(0, DIAL.r) }), svgEl("path", { class: "cd-dial-fill", d: "" }));
-    LEVELS.forEach((_, i) => {
-      const [x, y] = at(angleOf(i), DIAL.r);
-      const mark = svgEl("circle", { class: "cd-dial-mark", cx: x.toFixed(2), cy: y.toFixed(2), r: 2.4, "data-level": i });
-      const hit = svgEl("circle", { class: "cd-dial-hit", cx: x.toFixed(2), cy: y.toFixed(2), r: 10, "data-level": i });
-      face.append(mark, hit);
-    });
-    const needle = svgEl("g", { class: "cd-dial-needle" });
-    needle.append(svgEl("line", { x1: DIAL.cx, y1: DIAL.cy, x2: DIAL.cx + DIAL.r - 15, y2: DIAL.cy }), svgEl("circle", { cx: DIAL.cx, cy: DIAL.cy, r: 4 }));
-    face.append(needle);
-    // Click a mark, or drag round the dial: the nearest level. Arrow keys step it, Home and End go to the ends.
-    const pick = (e) => {
-      const box = face.getBoundingClientRect();
-      const x = (e.clientX - box.left) * 120 / box.width, y = (e.clientY - box.top) * 66 / box.height;
-      let angle = Math.atan2(y - DIAL.cy, x - DIAL.cx) * 180 / Math.PI;
-      if (angle > 0) angle = angle < 90 ? 0 : -180;               // below the dial: the nearer end
-      setThinking(Math.round((angle + 180) / 45));
+  // ---- the model picker (media/shared/modelpicker.js, window.DgcModelPicker: the one Work, ChatDGC and a Pip's chat
+  // share, 17 Nov). The pill opens it, centred: the saved connections down its rail, the chosen one's models beside it,
+  // Thinking under both (ChatDGC has no Ultra: that is Work's and a Pip's). The selects underneath stay what a send reads.
+  const MP = window.DgcModelPicker;
+  let picker = null;
+  const pickerAsked = new Set();           // the connections whose models were asked for since it opened
+  const pickerOpen = () => !!picker && picker.isOpen();
+  function refreshPicker() { if (pickerOpen()) picker.update(pickerView()); }
+  function askModels(id) {            // ("" is the host DGC itself is on, when it isn't a saved provider)
+    if (typeof id !== "string" || pickerAsked.has(id)) return;
+    pickerAsked.add(id);
+    vscode.postMessage({ type: "models", provider: id });
+  }
+  /** A model's value for a send, as fillModels names them: a subscription's, a saved provider's, or the host's own. */
+  const valueOf = (profile, id) => (!profile || !profile.id ? id : profile.kind === "subscription" ? `subscription:${profile.engine}${id ? `:${id}` : ""}` : `provider:${profile.id}:${id}`);
+  function pickerView() {
+    const current = modelPick.value, at = providerOf(current);
+    // D14: Main and Fallback at the row's end, once a fallback is set; every model row has a ⋯ with Use as main and Use
+    // as fallback (Claude Code and Codex too, 9 Nov).
+    const dress = (row) => {
+      const on = row.value === current, isFallback = row.value === state.fallback && !on;
+      const more = state.fallbackOffered && fallbackable(row.value) ? { pills: state.fallback ? (on ? [["Main", "main"]] : isFallback ? [["Fallback", "fallback"]] : []) : [],
+        actions: [...(on ? [] : [{ id: "main", label: "Use as main" }]), { id: "fallback", label: isFallback ? "Stop using as fallback" : "Use as fallback", disabled: on }] } : {};
+      return { ...row, current: on, ...more };
     };
-    face.addEventListener("pointerdown", (e) => { face.setPointerCapture?.(e.pointerId); pick(e); });
-    face.addEventListener("pointermove", (e) => { if (e.buttons & 1) pick(e); });
-    face.addEventListener("keydown", (e) => {
-      const n = levelOf(thinkingPick.value);
-      const to = { ArrowLeft: n - 1, ArrowDown: n - 1, ArrowRight: n + 1, ArrowUp: n + 1, Home: 0, End: LEVELS.length - 1 }[e.key];
-      if (to === undefined) return;
-      e.preventDefault(); e.stopPropagation();
-      setThinking(to);
-    });
-    const words = el("div", "cd-dial-words");
-    words.append(el("strong", "cd-dial-level", ""), el("span", "cd-dial-desc", ""), el("span", "cd-dial-hint", "Click a mark, drag, or use the arrow keys"));
-    box.append(face, words);
-    return box;
-  }
-  function showDial() {
-    const box = modelMenu.querySelector(".cd-dial");
-    if (!box) return;
-    const level = levelOf(thinkingPick.value), face = box.querySelector(".cd-dial-face");
-    face.setAttribute("aria-valuenow", level);
-    face.setAttribute("aria-valuetext", `${LEVELS[level][1]}: ${LEVELS[level][2]}`);
-    face.querySelector(".cd-dial-fill").setAttribute("d", level ? arc(angleOf(level), DIAL.r) : "");
-    face.querySelector(".cd-dial-needle").style.transform = `rotate(${angleOf(level)}deg)`;
-    for (const mark of face.querySelectorAll(".cd-dial-mark")) {
-      mark.classList.toggle("on", Number(mark.dataset.level) <= level && level > 0);
-      mark.classList.toggle("now", Number(mark.dataset.level) === level);
-    }
-    box.querySelector(".cd-dial-level").textContent = LEVELS[level][1];
-    box.querySelector(".cd-dial-desc").textContent = LEVELS[level][2];
-    box.dataset.level = LEVELS[level][0];
-  }
-  function renderModelMenu() {
-    const currentProvider = providerOf(modelPick.value);
-    if (!state.menuProvider || !state.modelProfiles.some((p) => p.id === state.menuProvider))
-      state.menuProvider = currentProvider || state.modelProfiles[0]?.id || "";
-    const profilesOn = state.modelProfiles.length > 0;
-    const header = profilesOn && !state.menuProviders
-      ? (() => {
-          const back = el("button", "cd-menu-row cd-menu-back dgc-menu-row", "←  Providers");
-          back.type = "button";
-          back.addEventListener("click", () => { state.menuProviders = true; renderModelMenu();
-            modelMenu.querySelector(".cd-menu-row.sel")?.focus(); });
-          return back;
-        })()
-      : el("div", "cd-menu-kicker dgc-menu-head", profilesOn ? "Provider" : "Model");
-    const options = profilesOn && state.menuProviders
-      ? state.modelProfiles.map((profile) => {
-          const on = profile.id === currentProvider;
-          const row = el("button", `cd-menu-row dgc-menu-row${on ? " sel is-selected" : ""}`);
-          row.type = "button";
-          row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
-          row.append(menuIcon(profile.kind === "subscription" ? "terminal" : "server"),
-                     labelEl(profile.name), ...(on ? [icon("check")] : []));
-          row.addEventListener("click", () => {
-            state.menuProvider = profile.id;
-            state.menuProviders = false;
-            vscode.postMessage({ type: "models", provider: profile.id });
-            renderModelMenu();
-          });
-          return row;
-        })
-      : [...modelPick.options].filter((option) => !profilesOn || providerOf(option.value) === state.menuProvider)
-        .map((option) => {
-          const on = option.value === modelPick.value;
-          const row = el("button", `cd-menu-row dgc-menu-row${on ? " sel is-selected" : ""}`);
-          row.type = "button";
-          row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
-          const useAsMain = () => {
-            state.fallbackMore = "";
-            modelPick.value = option.value;
-            modelPick.dispatchEvent(new Event("change"));
-            updatePill(); renderModelMenu();
-            modelMenu.querySelector(".cd-menu-row.sel")?.focus();
-          };
-          // D14: Main and Fallback at the row's end, once a fallback is set; every model row has a ⋯ with Use as main and
-          // Use as fallback (Claude Code and Codex too, 9 Nov).
-          const pills = state.fallback ? (on ? DgcMenu.pill("Main", "main") : option.value === state.fallback ? DgcMenu.pill("Fallback", "fallback") : "") : "";
-          row.append(menuIcon("zap"), labelEl(modelName(option.value)), ...(on ? [icon("check")] : []));
-          if (pills) row.insertAdjacentHTML("beforeend", pills);
-          row.addEventListener("click", useAsMain);
-          if (!state.fallbackOffered || !fallbackable(option.value)) return row;
-          const open = state.fallbackMore === option.value, isFallback = option.value === state.fallback && !on;
-          const item = el("div", "dgc-menu-item"); item.setAttribute("role", "presentation");
-          item.append(row);
-          item.insertAdjacentHTML("beforeend", DgcMenu.more(`More for ${modelName(option.value)}`, "", open));
-          item.lastElementChild.addEventListener("click", (event) => {
-            event.stopPropagation();
-            state.fallbackMore = open ? "" : option.value; renderModelMenu();
-            const again = [...modelMenu.querySelectorAll(".dgc-menu-item")].find((n) => n.firstElementChild?.dataset.value === option.value);
-            (state.fallbackMore ? again?.nextElementSibling?.querySelector("button:not(:disabled)") : again?.querySelector(".dgc-menu-more"))?.focus();
-          });
-          row.dataset.value = option.value;
-          if (!open) return item;
-          const choices = el("div", "dgc-menu-choices"); choices.setAttribute("role", "group"); choices.setAttribute("aria-label", modelName(option.value));
-          if (!on) {
-            const main = el("button", "cd-menu-row dgc-menu-row", "Use as main"); main.type = "button";
-            main.addEventListener("click", useAsMain); choices.append(main);
-          }
-          const fb = el("button", "cd-menu-row dgc-menu-row", isFallback ? "Stop using as fallback" : "Use as fallback"); fb.type = "button";
-          fb.disabled = on;
-          fb.addEventListener("click", () => setFallback(isFallback ? "" : option.value));
-          choices.append(fb);
-          const both = document.createDocumentFragment(); both.append(item, choices);
-          return both;
-        });
-    // A provider with nothing to choose from yet says why, rather than showing an empty list.
-    if (profilesOn && !state.menuProviders && !options.length) {
-      const listed = state.providerModels[state.menuProvider];
-      if (!listed) options.push(el("div", "cd-menu-kicker dgc-menu-head", "Listing its models…"));
-      else {
-        options.push(el("div", "cd-menu-kicker dgc-menu-head", state.providerErrors[state.menuProvider] ? "Couldn’t list its models" : "It lists no models"));
-        const settings = el("button", "cd-menu-row dgc-menu-row", "Settings → Models");
-        settings.type = "button";
-        settings.addEventListener("click", () => vscode.postMessage({ type: "openModels" }));
-        options.push(settings);
+    const plain = (profile, ids) => ids.filter(Boolean).map((id) => dress({ id, value: valueOf(profile, id), name: id, caps: MP.facts(id) }));
+    const sections = (conn, rows) => (conn.mark === "ollama" && conn.badge !== "cloud" ? MP.ollamaSections(rows) : [{ title: "", rows }]);
+    const typed = { id: "typed", label: "Enter another model…", icon: "edit", input: { placeholder: "A model’s name, as its host knows it", label: "Model name" } };
+    const connections = state.modelProfiles.length ? state.modelProfiles.map((profile) => {
+      const conn = { id: profile.id || "host", name: MP.tipOf(String(profile.name || "").replace(/^Current host · /, ""), ""), profile, loaded: true, sections: [], current: profile.id === at,
+        ...(typeof profile.mark === "string" ? { mark: profile.mark, badge: String(profile.badge || "") } : MP.markOf(profile.kind === "subscription" ? { engine: profile.engine } : { name: profile.name })) };
+      if (!profile.id) { conn.sections = sections(conn, plain(null, [...new Set([...(conn.current && current ? [current] : []), ...(state.hostModels || [])])])); return conn; }
+      const listed = state.providerModels[profile.id];
+      if (profile.kind === "subscription") {
+        // The CLI's own default, then its models (Claude Code's by nickname, with the version each last ran as, then
+        // its fixed versions), then any other by name: the same rows as Work and a Pip's chat.
+        const prefix = `subscription:${profile.engine}`, held = conn.current && current.startsWith(prefix + ":") ? current.slice(prefix.length + 1) : "";
+        const first = dress({ value: prefix, name: "CLI default", desc: `Whatever ${conn.name} is set to use` });
+        const names = [...new Set([...(listed || [profile.model || ""]), held])].filter(Boolean);
+        if (profile.engine === "claude") {
+          const facts = state.cliFacts[profile.id] || { versions: {}, fixed: [] };
+          const rows = MP.claudeRows({ hints: (listed || []).filter(Boolean).filter((id) => !/^claude-/.test(id)), versions: facts.versions, fixed: [...facts.fixed, ...names.filter((id) => /^claude-/.test(id))], held,
+            value: (name) => `${prefix}:${name}`, current: conn.current ? held : null });
+          conn.sections = [{ title: "", rows: [first, ...rows.followed.map(dress)] }, ...(rows.fixed.length ? [{ title: "Fixed versions", rows: rows.fixed.map(dress) }] : [])];
+        } else conn.sections = [{ title: "", rows: [first, ...plain(profile, names)] }];
+        conn.loaded = !!listed;
+        conn.footer = [typed];
+        return conn;
       }
-    }
-    // The models scroll in a list of their own (a provider can list dozens), so the dial is always in view, by the pill.
-    const list = el("div", "cd-menu-models");
-    list.setAttribute("role", "menu"); list.setAttribute("aria-label", "Model");
-    list.append(...options);
-    modelMenu.replaceChildren(header, list, el("div", "cd-menu-sep dgc-menu-div"), el("div", "cd-menu-kicker dgc-menu-head", "Thinking"), dialNode());
-    showDial();
-    const selected = list.querySelector(".cd-menu-row.sel");
-    if (selected) list.scrollTop = Math.max(0, selected.offsetTop - list.offsetTop - list.clientHeight / 2);
+      const ids = [...new Set([...(listed || [profile.model || ""]), ...(conn.current ? [current.slice(`provider:${profile.id}:`.length)] : [])])];
+      conn.sections = sections(conn, plain(profile, ids));
+      // (Its own model is there at once; the rest once its host has listed them. One with no model of its own waits.)
+      conn.loaded = !!listed || ids.some(Boolean);
+      if (listed && state.providerErrors[profile.id] && !ids.some(Boolean)) conn.error = "Couldn’t list its models.";
+      conn.footer = [typed];
+      return conn;
+    }) : [...modelPick.options].length ? [(() => {
+      const host = state.host || { name: "Models", mark: "", badge: "" };
+      const conn = { id: "host", name: MP.tipOf(host.name, ""), mark: host.mark, badge: host.badge, profile: null, loaded: true, current: true };
+      return { ...conn, sections: sections(conn, plain(null, [...modelPick.options].map((option) => option.value))) };
+    })()] : [];
+    const level = levelOf(thinkingPick.value);
+    return { title: "Model", trigger: pill, connections, selected: (connections.find((c) => c.current) || connections[0] || {}).id,
+      empty: { title: "No models", text: "Its host listed none." },
+      thinking: { levels: LEVELS.map(([value, label]) => ({ value, label })), value: LEVELS[level][0], note: `${LEVELS[level][1]}: ${LEVELS[level][2].toLowerCase()}.` },
+      footer: [{ id: "settings", label: "Add provider in Settings…", icon: "add" }] };
+  }
+  function chooseModel(value) {
+    if (![...modelPick.options].some((option) => option.value === value)) { const option = el("option", "", value); option.value = value; modelPick.append(option); }
+    modelPick.value = value;
+    modelPick.dispatchEvent(new Event("change"));
+    updatePill();
+  }
+  const MODEL_NAME = /^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,199}$/;
+  function openPicker() {
+    pickerAsked.clear();
+    picker = MP.open(document.body, pickerView(), {
+      pick: (row) => { chooseModel(row.value); picker.close("picked"); },
+      thinking: (value) => setThinking(LEVELS.findIndex(([v]) => v === value)),
+      select: (conn) => askModels(conn.profile ? conn.profile.id : null),
+      search: () => { for (const profile of state.modelProfiles) if (profile.id && !state.providerModels[profile.id]) askModels(profile.id); },
+      action: (id, { connection, row, text }) => {
+        if (id === "settings") { picker.close("silent"); vscode.postMessage({ type: "openModels" }); return; }
+        if (id === "main" && row) { chooseModel(row.value); picker.close("picked"); return; }
+        if (id === "fallback" && row) { setFallback(row.value === state.fallback ? "" : row.value); return; }
+        if (id === "typed" && connection?.profile) {
+          if (!MODEL_NAME.test(text) || text.includes("://")) { announce("Enter the model’s name or alias, such as opus."); return; }
+          chooseModel(valueOf(connection.profile, text)); picker.close("picked");
+        }
+      },
+      close: () => { picker = null; pill.setAttribute("aria-expanded", "false"); },
+    });
+    pill.setAttribute("aria-expanded", "true");
+    // Its own connection's models as its host lists them now (a subscription's names, a provider's whole list).
+    if (state.modelProfiles.length) askModels(providerOf(modelPick.value));
   }
   // D14: a chat's fallback model: any model it can run, Claude Code or Codex included (9 Nov). The host adds it to every
   // turn this chat sends; the chat keeps it with its next reply, and a new chat starts with the last one.
   const fallbackable = (value) => !!value;
   function setFallback(value) {
-    state.fallback = value; state.fallbackMore = "";
+    state.fallback = value;
     if (!value) state.fallbackOn = null;
     vscode.postMessage({ type: "fallback", value });
     announce(value ? `${modelName(value)} answers when ${modelName(modelPick.value) || "its model"} doesn’t.` : "No fallback model for this chat.");
-    updatePill(); renderModelMenu();
+    updatePill(); refreshPicker();
   }
-  function closeModelMenu(focusPill) {
-    if (modelMenu.hidden) return;
-    modelMenu.hidden = true;
-    pill.setAttribute("aria-expanded", "false");
-    if (focusPill) pill.focus();
-  }
+  function closeModelMenu(focusPill) { if (pickerOpen()) picker.close(focusPill ? "escape" : "silent"); }
   pill.addEventListener("click", () => {
     if (state.noProvider) { vscode.postMessage({ type: "openModels" }); return; }
-    if (!modelMenu.hidden) { closeModelMenu(false); return; }
-    state.menuProviders = false;
-    state.menuProvider = providerOf(modelPick.value);
-    renderModelMenu();
-    modelMenu.hidden = false;
-    // (In a narrow chat the pill is not at the box's right end, and a menu hung from its right edge ran past the
-    // window's left: it is put back inside.)
-    window.DgcMenu?.keepInside(modelMenu);
-    pill.setAttribute("aria-expanded", "true");
-    (modelMenu.querySelector(".cd-menu-row.sel") || modelMenu.querySelector(".cd-dial-face"))?.focus();
+    if (pickerOpen()) { closeModelMenu(false); return; }
+    openPicker();
   });
-  // Arrows, Home and End between its rows, as every menu (media/shared/menu.js); the thinking dial keeps its own keys.
-  window.DgcMenu?.keys(modelMenu, { close: closeModelMenu, trigger: pill });
-  // On the document: choosing a provider or a model draws the menu again, and the focus goes with the row it was on.
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modelMenu.hidden) { e.preventDefault(); e.stopPropagation(); closeModelMenu(true); } }, true);
-  // Where the click was, as it happened: choosing a model draws the menu again, so its row is gone by now.
-  document.addEventListener("click", (e) => { if (!e.composedPath().some((n) => n === modelMenu || n === pill)) closeModelMenu(false); });
 
   // ---- links and copy buttons inside rendered Markdown
   log.addEventListener("click", (e) => {
@@ -4519,7 +4447,6 @@
         // D14: the chat's own fallback, and whether its fallback is answering now.
         if (!keep) state.fallback = typeof msg.conversation?.fallback === "string" ? msg.conversation.fallback.slice(0, 200) : "";
         state.fallbackOn = msg.conversation?.fallback_on && typeof msg.conversation.fallback_on.model === "string" ? { model: msg.conversation.fallback_on.model } : null;
-        state.fallbackMore = "";
         if (state.conversation?.id !== msg.conversation?.id) {
           state.picks = {}; removedWidgets.clear(); closeWidgets(false);
           // Another chat: its own folder is asked for as it opens (the host does), and nothing of this one's carries.
@@ -4944,6 +4871,10 @@
         if (Array.isArray(msg.profiles)) state.modelProfiles = msg.profiles.filter((row) => row && typeof row.id === "string" && typeof row.name === "string").slice(0, 12);
         if (typeof msg.providerId === "string" && msg.providerId) { state.providerModels[msg.providerId] = state.models; state.providerErrors[msg.providerId] = msg.listError === true; }
         else state.hostModels = state.models;
+        // The picker's Claude Code rows (the version each nickname last ran as, the versions to pin), and its host's mark.
+        if (typeof msg.providerId === "string" && msg.providerId && msg.cli && typeof msg.cli === "object") state.cliFacts[msg.providerId] = { versions: msg.cli.versions && typeof msg.cli.versions === "object" ? msg.cli.versions : {},
+          fixed: Array.isArray(msg.cli.fixed) ? msg.cli.fixed.filter((id) => typeof id === "string").slice(0, 64) : [] };
+        if (msg.host && typeof msg.host === "object") state.host = { name: String(msg.host.name || "").slice(0, 80), mark: String(msg.host.mark || ""), badge: String(msg.host.badge || "") };
         fillModels();
         return;
       case "breakdown":

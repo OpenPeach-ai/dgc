@@ -135,11 +135,15 @@ export const PLAN = [
   { scene: "library-tab", name: "the Library (side bar)", states: { list: MAIN, widgets: "LR", images: "LR", videos: "LR", files: "LRs", "kind-menu": "O", "maker-menu": "O", "more-menu": "O", "many-long": "LRs", "many-long-end": "E", empty: "R", "home-top-row": "R" } },
   { scene: "library-page", name: "the Library (editor tab)", states: { list: MAIN, widgets: "LR", images: "LR", videos: "LR", files: "LRs", "list-end": "LE" } },
   { scene: "work-chat", name: "a Work session", states: { "running-queue": MAIN, approval: "LRs" }, extra: "work", prepare: workHost },
-  { scene: "work-model-menu", name: "a Work session's model menu and agent map", states: { menu: "O", "sub-agents": "O", "sub-agents-models": "O", "agent-map": "OR", "agent-map-opened": "OR" }, passes: "AB" },
+  // The model picker (media/shared/modelpicker.js) on each surface: its connections and rows, Claude Code's rows, a search,
+  // twelve connections, and the Sub-agents tab.
+  { scene: "work-model-menu", name: "a Work session's model picker and agent map", states: { menu: "O", "menu-claude": "O", "menu-search": "O", "menu-many": "O", "sub-agents": "O", "sub-agents-models": "O", "agent-map": "OR", "agent-map-opened": "OR" }, passes: "AB" },
+  // (The picker alone in a short and a tall window, at the editor's font sizes, and in forced colours.)
+  { scene: "work-model-menu", name: "a Work session's model picker and agent map", states: { menu: "O", "menu-claude": "O", "menu-search": "O", "menu-many": "O", "sub-agents": "O", "sub-agents-models": "O" }, passes: "CDE" },
   { scene: "chat-files", name: "a chat's file cards", states: { "work-files": "LKR", "chatdgc-files": "LKR" }, passes: "AB", extra: "files", prepare: workHost },
-  { scene: "chatdgc", name: "ChatDGC", states: { "a-chat": MAIN, "library-artifacts": "LRs" }, extra: "chatdgc" },
+  { scene: "chatdgc", name: "ChatDGC", states: { "a-chat": MAIN, "model-picker": "O", "model-picker-claude": "O", "library-artifacts": "LRs" }, extra: "chatdgc" },
   { scene: "pips-list", name: "the Pips list", states: { list: MAIN, "filter-menu": "O", "new-pip": "OR", "pips-settings": "LRs", empty: "R", welcome: "OR", many: "LRs", "many-end": "E" }, split: true },
-  { scene: "pips-chat", name: "a Pip's chat and page", states: { "chat-ask": MAIN, "chat-ready": "LR", "level-menu": "O", "model-menu": "O", "model-menu-sub-agents": "O", "pip-chat": "LKR", page: "LKRs", "page-runs": "LR" }, split: true },
+  { scene: "pips-chat", name: "a Pip's chat and page", states: { "chat-ask": MAIN, "chat-ready": "LR", "level-menu": "O", "model-menu": "O", "model-menu-claude": "O", "model-menu-sub-agents": "O", "pip-chat": "LKR", page: "LKRs", "page-runs": "LR" }, split: true },
   { scene: "pip-chat", name: "a Pip's chat (long words)", states: { chat: "LRsH" }, passes: "AB", split: true, extra: "pip" },
   { scene: "pip-held-cards", name: "a Pip's held steps", states: null, ops: "R", passes: "A", split: true },
   { scene: "pip-computer", name: "a Pip's computer tab", states: { screen: MAIN } },
@@ -149,7 +153,7 @@ export const PLAN = [
   { scene: "stress-chats", name: "chats with awkward words", states: { "work-long-words": "Rs", "chatdgc-long-words": "Rs" }, passes: "A" },
   // A layer the scene opens itself, with the layers inside it (each ends its entry: see I above).
   ...[["work-list", "Work's list (side bar)", "folder-menu"], ["work-list", "Work's list (side bar)", "whats-new-1"], ["work-list", "Work's list (side bar)", "new-session"], ["home-library", "Home's Cards library (a dialog)", "library"],
-    ["work-model-menu", "a Work session's model menu and agent map", "menu"], ["work-model-menu", "a Work session's model menu and agent map", "sub-agents-models"], ["home-notes", "Notes on Home", "a-note-menu"]]
+    ["work-model-menu", "a Work session's model picker and agent map", "menu"], ["work-model-menu", "a Work session's model picker and agent map", "sub-agents-models"], ["home-notes", "Notes on Home", "a-note-menu"]]
     .map(([scene, name, state]) => ({ scene, name, states: { [state]: "I" }, passes: "A" })),
   ...[["pips-list", "the Pips list", "new-pip"], ["pips-list", "the Pips list", "filter-menu"], ["pips-chat", "a Pip's chat and page", "level-menu"], ["pips-chat", "a Pip's chat and page", "model-menu"]]
     .map(([scene, name, state]) => ({ scene, name, states: { [state]: "I" }, passes: "A", split: true })),

@@ -46,6 +46,7 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *    logins   list_pip_logins' rows; context: get_pip_chat_context answers (used tokens)
  *    look     {[pip id]: body}: that Pip's chosen character (its profile's body)
  *    models   list_pip_models' rows ({id, name}; none by default)
+ *    catalog  more of list_pip_models' answer: subscriptions, providers, router, host (the model picker's connections)
  *    convs    list_pip_conversations answers (the first conversation), and create_pip_conversation makes one
  *    pending  changes saved for GST watchdog that wait for you (its `proposals`)
  *    answers  {[request type]: result}: what DGC answers to a request this stand-in has no answer of its own for (or in
@@ -191,7 +192,7 @@ export function makeBackend(o = {}) {
     create_pip: (r) => { const made = pip("pip_" + hex(String(state.made.length + 1)), r.workspace_id, r.name, r.pip_type, { goal: r.goal || "Help with what I ask in this chat" }); pips.push(made); state.made.push(made); state.order = [made.id, ...(typeof state.order === "function" ? state.order() : state.order)]; return { pip: made }; },
     introduce_pip: () => ({ started: true }), add_project_folder: (r) => ({ workspace: { id: ws("7"), name: r.folder.split("/").pop(), kind: "git" } }),
     get_pip_runner: () => ({ runner }), get_workspace_context: (r) => ({ context: { workspace_id: r.workspace_id, revision: 0, entries: [] } }),
-    list_pip_models: () => ({ default_model: "m", models: o.models || [], connection: "configured" }),
+    list_pip_models: () => ({ default_model: "m", models: o.models || [], connection: "configured", ...(o.catalog || {}) }),
     list_pip_runs: (r) => ({ runs: r.pip_id === GST ? runs : [] }),
     run_pip: () => ({ run: runs[0] }),
     get_pip_run: (r) => ({ run: { ...runs.find((x) => x.id === r.run_id), result: { summary: "Three findings.", findings: [], limitations: [] } } }),

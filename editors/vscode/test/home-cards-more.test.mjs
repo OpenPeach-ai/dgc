@@ -206,7 +206,7 @@ for (const [theme, width] of [["dark-modern", 300], ["dark-modern", 460], ["ligh
 
 // ---- 4. Token usage: the models, their providers, and the way to Settings ------------------------------------------------
 for (const theme of ["dark-modern", "light-modern"]) {
-  test(`Token usage, ${theme}: Medium names the top three models with provider and share, Large five, the rest as “+N more”; Small is as it was`, async (t) => {
+  test(`Token usage, ${theme}: Medium names the top three models with provider and share, Large five, the rest as “+N more”; Small counts the week`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openGrid(browser, { width: 460, theme, layout: ["token", "needs"] });
     try {
@@ -224,8 +224,8 @@ for (const theme of ["dark-modern", "light-modern"]) {
       assert.deepEqual((await posted(p, "openSettings")).at(-1), { type: "openSettings", section: "usage" }, "the link opens Settings on Token Usage");
       await x.resize(300);
       const small = await p.evaluate(() => { const c = document.querySelector('.hc-grid .hc-card[data-card="token"]'); return { text: c.innerText.replace(/\s+/g, " "), models: c.querySelectorAll(".hc-model").length, link: c.querySelectorAll(".hc-usage-link").length, strip: c.querySelectorAll(".hc-strip .hc-col").length }; });
-      assert.deepEqual([small.models, small.link, small.strip], [0, 0, 7], "Small stays as it is: today's tokens and the strip");
-      assert.match(small.text, /Tokens today.*1\.24M/);
+      assert.deepEqual([small.models, small.link, small.strip], [0, 0, 7], "Small: the week's tokens and its strip");
+      assert.match(small.text, /Tokens · 7 days.*7\.20M.*In 5\.89M · Out 1\.31M/, "the week's tokens, then them in two (the scene's own numbers)");
       await p.click(sel("token")); await x.rest(200);
       m = await read(".hc-open .hc-card");
       assert.equal(m.link, "Open Token Usage", "opened: the link is there too");
@@ -396,6 +396,25 @@ test("the new cards in every form, dark and light: nothing spills out of the sid
       assert.deepEqual(spill, [], `${width}px ${theme}: nothing reaches past its card's sides`);
       if (width === 300) for (const c of g.cards) if (c.id !== "note") assert.ok(Math.abs(c.width - c.height) <= 1, `${c.id} is a square at 300 px`);
       assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  }
+});
+
+// The three tiles' second lines (17 Nov): at a Large card's narrow tiles nothing is cut short with "…"; tokens' In and
+// Out go on two lines when they don't fit on one.
+test("Token usage: each tile's second line is whole at every size (In and Out wrap, never cut)", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const width of [460, 700]) {
+    const x = await openGrid(browser, { width, layout: ["token", "needs"] });
+    try {
+      const lines = await x.page.evaluate(() => [...document.querySelectorAll('.hc-grid .hc-card[data-card="token"] .hc-kd')].map((n) => ({ text: n.innerText.replace(/\s+/g, " ").trim(),
+        cut: n.scrollWidth > n.clientWidth + 1 || [...n.children].some((c) => c.getBoundingClientRect().right > n.getBoundingClientRect().right + 0.5) })));
+      assert.equal(lines.length, 3, `${width}px`);
+      for (const l of lines) assert.equal(l.cut, false, `${width}px: "${l.text}" is whole`);
+      assert.match(lines[0].text, /^In [\d.]+M Out [\d.]+M$/);
+      assert.match(lines[2].text, /^[\d.]+M cached$/);
+      const clipped = await x.page.evaluate(() => { const c = document.querySelector('.hc-grid .hc-card[data-card="token"]'); return [...c.querySelectorAll(".hc-kt, .hc-usage-link")].some((n) => n.getBoundingClientRect().bottom > c.getBoundingClientRect().bottom + 0.5); });
+      assert.equal(clipped, false, `${width}px: the tiles stay inside the card`);
     } finally { await x.close(); }
   }
 });

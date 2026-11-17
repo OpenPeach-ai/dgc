@@ -147,7 +147,7 @@ test("no provider: the button says so, goes to Settings, and a send stays in the
   x.posted.length = 0;
   x.doc.getElementById("btn-model").click();
   assert.deepEqual(JSON.parse(JSON.stringify(x.posted)), [{ type: "openSettings", section: "models" }]);
-  assert.ok(x.doc.getElementById("modelmenu").hidden, "no menu of models that may not exist");
+  assert.equal(x.doc.querySelector(".dgc-mp-layer"), null, "no picker of models that may not exist");
 });
 
 test("no provider: no meter, since nobody chose a model to measure it against", () => {

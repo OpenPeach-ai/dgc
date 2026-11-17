@@ -99,6 +99,8 @@ const CONTENT = [
   ["media/main.js", /TROUPE_TILES/, "the agent faces' colours in the troupe mark"],
   ["media/main.js", /^\[12\.6, 12\.6, \[|^\[2, 12\.6, \[/, "the agent faces' colours in the troupe mark"],
   ["src/pipProfile.js", /'lilac', 'Lilac'/, "a Pip's profile colour choice"],
+  // The model picker's rail: a connection wears its company's mark, in that company's own colour (media/shared/modelpicker.js).
+  ["media/shared/modelpicker.js", /^(qwen|lmstudio|together|gemini): `</, "a provider's own logo, in its company's colours"],
   // His Library icon (Iris): his own stylesheet, shipped byte for byte (library-iris-browser.test.mjs), its shades and all.
   ["media/icons/library-iris/library.css", /\.library-iris/, "the Library icon's own drawing, as he made it"],
 ];

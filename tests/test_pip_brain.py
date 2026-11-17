@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dgc import pip_brain, pip_chat, pip_computer, pip_models, pips
+from dgc.subscriptions import CLAUDE_FIXED_MODELS
 from dgc.workspace_registry import RegistryError
 from tests import test_pips_local as fixtures
 from tests.test_pip_eyes import JPEG, catalog_setup
@@ -124,7 +125,7 @@ class Choices(unittest.TestCase):
         self.assertEqual(str(signed_out.exception), "Codex isn't signed in on this computer. Run `codex login` once.")
         from dgc.pip_models import list_pip_models
         listed = list_pip_models(cfg)
-        self.assertEqual(listed["subscriptions"], [{"engine": "claude", "name": "Claude Code", "models": ["opus", "sonnet", "haiku"]}])
+        self.assertEqual(listed["subscriptions"], [{"engine": "claude", "name": "Claude Code", "models": ["fable", "opus", "sonnet", "haiku"], "versions": {}, "fixed": list(CLAUDE_FIXED_MODELS)}])
         self.assertEqual(listed["default_engine"], {"engine": "codex", "name": "Codex", "available": False,
                                                     "reason": "Codex isn't signed in on this computer. Run `codex login` once."})
         self.assertEqual(listed["default_model"], "", "Same as DGC is the subscription, not the native model")
@@ -143,7 +144,7 @@ class Choices(unittest.TestCase):
     def test_the_picker_lists_the_signed_in_subscriptions(self):
         from dgc.pip_models import list_pip_models
         listed = list_pip_models(self.cfg)
-        self.assertEqual(listed["subscriptions"], [{"engine": "claude", "name": "Claude Code", "models": ["opus", "sonnet", "haiku"]},
+        self.assertEqual(listed["subscriptions"], [{"engine": "claude", "name": "Claude Code", "models": ["fable", "opus", "sonnet", "haiku"], "versions": {}, "fixed": list(CLAUDE_FIXED_MODELS)},
                                                    {"engine": "codex", "name": "Codex", "models": []}])
         self.assertNotIn("default_engine", listed)
         self.assertEqual(listed["default_model"], "fixture")

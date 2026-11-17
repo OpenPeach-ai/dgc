@@ -124,10 +124,12 @@ test("a new chat: the question and the box together, and a message goes out with
     assert.equal(await s.page.locator("#cd-send").isDisabled(), true, "nothing to send yet");
     assert.equal(await s.page.locator("#cd-model").inputValue(), "deepseek-v4.1-flash:cloud", "your model by default");
     assert.equal(await shown(s.page, "#cd-menu"), false, "nothing to rename until it has a message");
-    // As main DGC: one pill for the model and its thinking, opening a menu (the model, then the dial).
+    // As main DGC: one button for the model and its thinking, opening the model picker (the models, Thinking under them).
     await s.page.locator("#cd-model-pill").click();
-    await s.page.locator(".cd-menu-row", { hasText: "qwen3:32b" }).click();
-    await s.page.locator(".cd-dial-face").focus();
+    await s.page.locator(".dgc-mp-row", { hasText: "qwen3:32b" }).click();
+    assert.equal(await s.page.locator(".dgc-mp-layer").count(), 0, "choosing a model closes the picker");
+    await s.page.locator("#cd-model-pill").click();
+    await s.page.locator('.dgc-mp-level[aria-checked="true"]').focus();
     for (let i = 0; i < 3; i++) await s.page.keyboard.press("ArrowRight");
     await s.page.keyboard.press("Escape");
     await s.page.locator("#cd-input").fill("What's the capital of France?");
@@ -150,31 +152,34 @@ test("a new ChatDGC chat uses the saved provider default and changes providers w
   const nativeId = `provider_${"a".repeat(32)}`;
   const codex = "subscription:codex";
   const native = `provider:${nativeId}:deepseek-v4.1-flash:cloud`;
-  const profiles = [{ id: "subscription_codex", name: "Codex", kind: "subscription", engine: "codex", model: "" },
-                    { id: nativeId, name: "Ollama", kind: "native", model: "deepseek-v4.1-flash:cloud" }];
+  const profiles = [{ id: "subscription_codex", name: "Codex", kind: "subscription", engine: "codex", model: "", mark: "openai", badge: "cli" },
+                    { id: nativeId, name: "Ollama", kind: "native", model: "deepseek-v4.1-flash:cloud", mark: "ollama", badge: "" }];
   try {
     await s.send({ type: "opened", conversation: conversation({ model: "old-direct-model" }), messages: [], earlier: 0, busy: false });
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: "subscription_codex",
                    current: codex, ids: ["", "gpt-5.6-sol"] });
     assert.equal(await s.page.locator("#cd-model").inputValue(), codex, "the saved default wins for an empty chat");
     await s.page.locator("#cd-model-pill").click();
-    const menu = s.page.locator("#cd-model-menu");
-    assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["Codex default", "Codex gpt-5.6-sol"]);
-    const dial = menu.locator(".cd-dial-face");
-    await menu.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));   // at rest: the menu opens over 150 ms
-    const dialBefore = await dial.boundingBox();
-    await menu.locator(".cd-menu-back").click();
-    assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["Codex", "Ollama"]);
-    await menu.locator(".cd-menu-row", { hasText: "Ollama" }).click();
+    const picker = s.page.locator(".dgc-mp");
+    assert.deepEqual(await picker.locator(".dgc-mp-conn").evaluateAll((all) => all.map((b) => [b.title, b.querySelector(".dgc-mp-mark").dataset.mark, b.getAttribute("aria-selected")])),
+      [["Codex · your subscription", "openai", "true"], ["Ollama", "ollama", "false"]], "the rail: the saved connections, the one in use shown");
+    assert.deepEqual(await picker.locator(".dgc-mp-list .dgc-mp-name").allInnerTexts(), ["CLI default", "gpt-5.6-sol"]);
+    assert.deepEqual(await picker.locator('.dgc-mp-row[aria-selected="true"] .dgc-mp-name').allInnerTexts(), ["CLI default"]);
+    await picker.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));   // at rest: it opens over 180 ms
+    const before = await picker.locator(".dgc-mp-seg").boundingBox();
+    await picker.locator('.dgc-mp-conn[data-rail="' + nativeId + '"]').click();
     assert.deepEqual((await s.posted("models")).at(-1), { type: "models", provider: nativeId });
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: nativeId,
-                   current: codex, ids: ["deepseek-v4.1-flash:cloud"] });
-    await menu.locator(".cd-menu-row", { hasText: "deepseek-v4.1-flash:cloud" }).click();
+                   current: codex, ids: ["deepseek-v4.1-flash:cloud", "qwen3:32b"] });
+    assert.deepEqual(await picker.locator(".dgc-mp-list .dgc-mp-name").allInnerTexts(), ["qwen3:32b", "deepseek-v4.1-flash:cloud"]);
+    assert.deepEqual(await picker.locator(".dgc-mp-sec").allInnerTexts(), ["On this computer", "Cloud"], "Ollama's list in two sections");
+    const after = await picker.locator(".dgc-mp-seg").boundingBox();
+    assert.ok(Math.abs(before.y - after.y) < 2 && Math.abs(before.height - after.height) < 1, "Thinking stays fixed while the connection and its rows change");
+    await picker.locator(".dgc-mp-row", { hasText: "deepseek-v4.1-flash:cloud" }).click();
     assert.equal(await s.page.locator("#cd-model").inputValue(), native);
     assert.equal(await s.page.locator("#cd-model-name").textContent(), "deepseek-v4.1-flash:cloud");
-    const dialAfter = await menu.locator(".cd-dial-face").boundingBox();
-    assert.ok(Math.abs(dialBefore.y - dialAfter.y) < 2, "Thinking stays fixed while provider and model rows change");
-    await s.page.keyboard.press("Escape");
+    assert.equal(await s.page.locator(".dgc-mp-layer").count(), 0);
+    assert.equal(await s.page.evaluate(() => document.activeElement?.id), "cd-model-pill", "the focus is back on the model button");
     await s.page.locator("#cd-input").fill("Say ready.");
     await s.page.locator("#cd-input").press("Enter");
     assert.equal((await s.posted("send")).at(-1).model, native);
@@ -182,28 +187,43 @@ test("a new ChatDGC chat uses the saved provider default and changes providers w
   } finally { await s.page.close(); }
 });
 
-test("a default that isn't a saved provider stays in ChatDGC's list as the current host, and can be gone back to", async (t) => {
+test("a default that isn't a saved provider stays in ChatDGC's picker as its own connection, shown first", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
-  const profiles = [{ id: "", name: "Current host · Groq", kind: "native", model: "some-model" },
-                    { id: "subscription_claude", name: "Claude Code", kind: "subscription", engine: "claude", model: "" }];
+  const profiles = [{ id: "", name: "Current host · Groq", kind: "native", model: "some-model", mark: "groq", badge: "key" },
+                    { id: "subscription_claude", name: "Claude Code", kind: "subscription", engine: "claude", model: "", mark: "anthropic", badge: "cli" }];
   try {
     await s.send({ type: "opened", conversation: conversation({ model: "" }), messages: [], earlier: 0, busy: false });
     await s.send({ type: "models", profiles, current: "some-model", ids: ["some-model", "another-model"] });
     assert.equal(await s.page.locator("#cd-model-name").textContent(), "some-model");
     await s.page.locator("#cd-model-pill").click();
-    const menu = s.page.locator("#cd-model-menu");
-    assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["some-model", "another-model"], "it opens on what's running");
-    await menu.locator(".cd-menu-back").click();
-    assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["Current host · Groq", "Claude Code"]);
-    assert.equal(await menu.locator(".cd-menu-row.sel .cd-menu-name").textContent(), "Current host · Groq");
-    await menu.locator(".cd-menu-row", { hasText: "Current host" }).click();
-    assert.deepEqual((await s.posted("models")).at(-1), { type: "models", provider: "" });
+    const picker = s.page.locator(".dgc-mp");
+    assert.deepEqual(await picker.locator(".dgc-mp-list .dgc-mp-name").allInnerTexts(), ["some-model", "another-model"], "it opens on what's running");
+    assert.deepEqual(await picker.locator(".dgc-mp-conn").evaluateAll((all) => all.map((b) => [b.title, b.getAttribute("aria-selected")])), [["Groq · your key", "true"], ["Claude Code · your subscription", "false"]]);
+    assert.equal(await picker.locator(".dgc-mp-conn-name").textContent(), "Groq");
+    assert.deepEqual((await s.posted("models")).at(-1), { type: "models", provider: "" }, "its host is asked what it lists now, as it opens");
+    // Claude Code's rows, once it says what it has: its nicknames with the version each ran as, then the fixed versions.
+    await picker.locator('.dgc-mp-conn[data-rail="subscription_claude"]').click();
+    assert.deepEqual((await s.posted("models")).at(-1), { type: "models", provider: "subscription_claude" });
+    assert.equal(await picker.locator(".dgc-mp-list").textContent(), "Listing its models…");
+    await s.send({ type: "models", profiles, current: "some-model", providerId: "subscription_claude", ids: ["", "fable", "opus", "sonnet", "haiku"],
+                   cli: { versions: { opus: "claude-opus-5-5" }, fixed: ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] } });
+    assert.deepEqual(await picker.locator(".dgc-mp-list .dgc-mp-name").allInnerTexts(), ["CLI default", "Fable (newest)", "Opus 5.5", "Sonnet (newest)", "Haiku (newest)", "Fable 5.2", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"]);
+    assert.deepEqual(await picker.locator(".dgc-mp-sec").allInnerTexts(), ["Fixed versions"]);
+    await picker.locator('.dgc-mp-row[data-value="subscription:claude:claude-opus-5-5"]').click();
+    assert.equal(await s.page.locator("#cd-model").inputValue(), "subscription:claude:claude-opus-5-5", "a fixed version goes out by its full name");
+    assert.equal(await s.page.locator("#cd-model-name").textContent(), "Claude Code claude-opus-5-5");
+    // Back to the host it started on.
+    await s.page.locator("#cd-model-pill").click();
+    assert.equal(await picker.locator('.dgc-mp-conn[data-rail="subscription_claude"]').getAttribute("aria-selected"), "true");
+    await picker.locator('.dgc-mp-conn[data-rail="host"]').click();
+    await picker.locator(".dgc-mp-row", { hasText: "another-model" }).click();
+    assert.equal(await s.page.locator("#cd-model").inputValue(), "another-model");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
 
-test("Escape closes ChatDGC's model menu after choosing a provider redraws it", async (t) => {
+test("Escape closes ChatDGC's model picker after looking at another connection redraws it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   const nativeId = `provider_${"a".repeat(32)}`;
@@ -214,14 +234,15 @@ test("Escape closes ChatDGC's model menu after choosing a provider redraws it", 
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: "subscription_codex",
                    current: "subscription:codex", ids: ["", "gpt-5.6-sol"] });
     await s.page.locator("#cd-model-pill").click();
-    const menu = s.page.locator("#cd-model-menu");
-    await menu.locator(".cd-menu-back").click();
-    await menu.locator(".cd-menu-row", { hasText: "Ollama" }).click();
+    const picker = s.page.locator(".dgc-mp-layer");
+    await picker.locator(`.dgc-mp-conn[data-rail="${nativeId}"]`).click();
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: nativeId,
                    current: "subscription:codex", ids: ["deepseek-v4.1-flash:cloud"] });
-    assert.equal(await menu.isVisible(), true, "the provider's models show");
+    assert.equal(await picker.locator(".dgc-mp-row").first().isVisible(), true, "the provider's models show");
     await s.page.keyboard.press("Escape");
-    assert.equal(await menu.isVisible(), false, "Escape closes it, wherever the redraw left the focus");
+    assert.equal(await picker.count(), 0, "Escape closes it, wherever the redraw left the focus");
+    assert.equal(await s.page.evaluate(() => document.activeElement?.id), "cd-model-pill");
+    assert.equal(await s.page.locator("#cd-model").inputValue(), "subscription:codex", "looking at a connection chooses nothing");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
@@ -245,27 +266,33 @@ test("on a subscription the meter has no percentage and its details no setter: o
   } finally { await s.page.close(); }
 });
 
-test("an All models provider offers no empty model: its menu lists what the host offers, once it has", async (t) => {
+test("an All models provider offers no empty model: its connection lists what the host offers, once it has", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   const id = `provider_${"b".repeat(32)}`;
   const profiles = [{ id: "subscription_codex", name: "Codex", kind: "subscription", engine: "codex", model: "" },
-                    { id, name: "OpenAI", kind: "native", model: "" }];
+                    { id, name: "OpenAI", kind: "native", model: "", mark: "openai", badge: "key" }];
   try {
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: "subscription_codex", current: "subscription:codex", ids: [""] });
     const options = () => s.page.locator("#cd-model option").evaluateAll((all) => all.map((o) => o.value));
     assert.ok(!(await options()).some((v) => /^provider:provider_b+:$/.test(v)), "never provider:<id>: with no model");
     await s.page.locator("#cd-model-pill").click();
-    const menu = s.page.locator("#cd-model-menu");
-    await menu.locator(".cd-menu-back").click();
-    await menu.locator(".cd-menu-row", { hasText: "OpenAI" }).click();
-    assert.match(await menu.textContent(), /Listing its models/);
+    const picker = s.page.locator(".dgc-mp");
+    await picker.locator(`.dgc-mp-conn[data-rail="${id}"]`).click();
+    assert.match(await picker.locator(".dgc-mp-list").textContent(), /Listing its models/);
     assert.deepEqual((await s.posted("models")).at(-1).provider, id);
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: id, current: "subscription:codex", ids: ["gpt-a", "gpt-b"] });
-    await menu.locator(".cd-menu-row", { hasText: "gpt-b" }).click();
+    await picker.locator(".dgc-mp-row", { hasText: "gpt-b" }).click();
     assert.equal(await s.page.locator("#cd-model").inputValue(), `provider:${id}:gpt-b`);
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: id, current: "subscription:codex", ids: [], listError: true });
+    // A model its host doesn't list: by name, in the picker.
+    await s.page.locator("#cd-model-pill").click();
+    await picker.locator('[data-foot="typed"]').click();
+    await s.page.keyboard.type("gpt-preview-9");
+    await s.page.keyboard.press("Enter");
+    assert.equal(await s.page.locator("#cd-model").inputValue(), `provider:${id}:gpt-preview-9`);
+    assert.equal(await s.page.locator(".dgc-mp-layer").count(), 0);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
@@ -2230,36 +2257,40 @@ test("keyboard shortcuts, and the list of them", async (t) => {
   } finally { await s.page.close(); }
 });
 
-test("the thinking menu keeps its height at every level, though some levels' words take two lines", async (t) => {
+test("the picker keeps its height and its place at every thinking level, though some levels' words take two lines", async (t) => {
   if (skipOrFail(t)) return;
-  for (const width of [900, 420]) {
+  for (const width of [900, 300]) {
     const s = await openScreen({ width });
     try {
       await s.send({ type: "opened", conversation: conversation({ thinking: "off" }), earlier: 0, busy: false, messages: [] });
       await s.send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "qwen3:32b"], current: "deepseek-v4.1-flash:cloud" });
       await s.frame();
       await s.page.locator("#cd-model-pill").click();
-      const menu = s.page.locator("#cd-model-menu");
-      // Measured at rest: the menu opens over 150 ms from 98% (the shared menu's motion), which a box measures mid-way.
-      await menu.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));
-      await menu.locator(".cd-dial-face").focus();
+      const picker = s.page.locator(".dgc-mp");
+      // Measured at rest: it opens over 180 ms from 98% (the shared dialog's motion), which a box measures mid-way.
+      await picker.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));
+      await picker.locator('.dgc-mp-level[aria-checked="true"]').focus();
       await s.page.keyboard.press("Home");
       const seen = [];
       for (let level = 0; level < 5; level++) {
-        if (level) await s.page.keyboard.press("ArrowUp");
+        if (level) await s.page.keyboard.press("ArrowRight");
         await s.frame();
-        const box = await menu.boundingBox(), lines = await menu.locator(".cd-dial-desc").evaluate((n) => Math.round(n.scrollHeight / parseFloat(getComputedStyle(n).lineHeight)));
-        seen.push([await menu.locator(".cd-dial-level").textContent(), Math.round(box.height), Math.round(box.y), lines]);
+        const box = await picker.boundingBox(), lines = await picker.locator(".dgc-mp-think-note").evaluate((n) => Math.round(n.scrollHeight / parseFloat(getComputedStyle(n).lineHeight)));
+        seen.push([await picker.locator(".dgc-mp-think-now").textContent(), Math.round(box.height), Math.round(box.y), lines, await picker.locator(".dgc-mp-think-note").textContent()]);
       }
+      assert.deepEqual(seen.map(([name]) => name), ["Off", "Low", "Medium", "High", "Extra high"]);
+      assert.equal(seen[3][4], "High: thinks hard: slower, more careful.", "what the level costs, in words");
       assert.equal(new Set(seen.map(([, h]) => h)).size, 1, `${width}px: one height for every level: ${JSON.stringify(seen)}`);
-      assert.equal(new Set(seen.map(([, , y]) => y)).size, 1, `${width}px: and the menu's top never moves`);
-      if (width === 420) assert.ok(seen.some(([, , , lines]) => lines === 2), "at this width a description does wrap: the case this guards");
+      assert.equal(new Set(seen.map(([, , y]) => y)).size, 1, `${width}px: and the picker never moves`);
+      if (width === 300) assert.ok(seen.some(([, , , lines]) => lines === 2), "at this width a description does wrap: the case this guards");
+      assert.equal(await s.page.locator("#cd-thinking").inputValue(), "xhigh");
+      assert.deepEqual(await picker.locator(".dgc-mp-level").evaluateAll((all) => all.map((b) => b.dataset.level)), ["off", "low", "medium", "high", "xhigh"], "ChatDGC has no Ultra");
       assert.deepEqual(s.errors, []);
     } finally { await s.page.close(); }
   }
 });
 
-test("the box as main DGC's: no accent ring, one pill for the model and a dial for thinking, the window's size in the meter", async (t) => {
+test("the box as main DGC's: no accent ring, one button for the model opening the picker with its thinking levels, the window's size in the meter", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -2275,66 +2306,59 @@ test("the box as main DGC's: no accent ring, one pill for the model and a dial f
       return [box.borderTopColor, strong];
     });
     assert.equal(ring[0], ring[1], "focused, the box keeps its quiet border");
-    assert.equal(await s.page.locator("select:visible").count(), 0, "no dropdowns: the pill");
+    assert.equal(await s.page.locator("select:visible").count(), 0, "no dropdowns: the model button");
     const pill = s.page.locator("#cd-model-pill");
     assert.equal(await pill.locator("#cd-model-name").textContent(), "deepseek-v4.1-flash:cloud");
     assert.equal(await pill.getAttribute("data-level"), "medium", "the chat's thinking");
     assert.match(await pill.getAttribute("aria-label"), /^Model deepseek-v4\.1-flash:cloud, thinking Medium\./);
     await pill.click();
-    const menu = s.page.locator("#cd-model-menu");
-    assert.equal(await menu.isVisible(), true);
+    const picker = s.page.locator(".dgc-mp");
+    assert.equal(await picker.isVisible(), true);
     assert.equal(await pill.getAttribute("aria-expanded"), "true");
-    assert.deepEqual(await menu.locator(".cd-menu-row").allInnerTexts(), ["deepseek-v4.1-flash:cloud", "qwen3:32b"]);
-    assert.equal(await menu.locator(".cd-menu-row.sel").getAttribute("aria-checked"), "true");
-    const dial = menu.locator(".cd-dial-face");
-    assert.deepEqual([await dial.getAttribute("role"), await dial.getAttribute("aria-valuenow"), await menu.locator(".cd-dial-level").textContent(),
-                      await menu.locator(".cd-dial-desc").textContent()], ["slider", "2", "Medium", "Thinks it through"]);
-    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-composer-dial.png") });
-    // A click on a mark: that level.
-    const end = await dial.locator('.cd-dial-hit[data-level="4"]').boundingBox();
-    await s.page.mouse.click(end.x + end.width / 2, end.y + end.height / 2);
+    assert.deepEqual(await picker.locator(".dgc-mp-list .dgc-mp-name").allInnerTexts(), ["deepseek-v4.1-flash:cloud", "qwen3:32b"]);
+    assert.deepEqual(await picker.locator('.dgc-mp-row[aria-selected="true"] .dgc-mp-name').allInnerTexts(), ["deepseek-v4.1-flash:cloud"]);
+    const seg = picker.locator(".dgc-mp-seg");
+    assert.deepEqual([await seg.getAttribute("role"), await picker.locator('.dgc-mp-level[aria-checked="true"]').getAttribute("data-level"), await picker.locator(".dgc-mp-think-now").textContent(),
+                      await picker.locator(".dgc-mp-think-note").textContent()], ["radiogroup", "medium", "Medium", "Medium: thinks it through."]);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-composer-picker.png") });
+    // A click on a level: that level.
+    await picker.locator('.dgc-mp-level[data-level="xhigh"]').click();
     assert.equal(await s.page.locator("#cd-thinking").inputValue(), "xhigh");
-    assert.equal(await menu.locator(".cd-dial-level").textContent(), "Extra high");
-    assert.equal(await pill.getAttribute("data-level"), "xhigh", "the pill's arc follows");
-    // A drag across it: the nearest mark as it goes.
-    const off = await dial.locator('.cd-dial-hit[data-level="0"]').boundingBox(), mid = await dial.locator('.cd-dial-hit[data-level="2"]').boundingBox();
-    await s.page.mouse.move(off.x + off.width / 2, off.y + off.height / 2);
-    await s.page.mouse.down();
-    assert.equal(await s.page.locator("#cd-thinking").inputValue(), "off");
-    await s.page.mouse.move(mid.x + mid.width / 2, mid.y + mid.height / 2, { steps: 4 });
-    await s.page.mouse.up();
-    assert.equal(await s.page.locator("#cd-thinking").inputValue(), "medium");
+    assert.equal(await picker.locator(".dgc-mp-think-now").textContent(), "Extra high");
+    assert.equal(await pill.getAttribute("data-level"), "xhigh", "the button's arc follows");
+    assert.equal(await picker.isVisible(), true, "still open, for the model next");
     // Keys: step, ends.
-    await dial.focus();
-    await s.page.keyboard.press("End");
-    assert.equal(await dial.getAttribute("aria-valuetext"), "Extra high: Thinks longest: slowest, most careful");
+    await picker.locator('.dgc-mp-level[aria-checked="true"]').focus();
     await s.page.keyboard.press("Home");
-    await s.page.keyboard.press("ArrowUp");
+    assert.equal(await s.page.locator("#cd-thinking").inputValue(), "off");
+    await s.page.keyboard.press("End");
+    assert.equal(await s.page.locator("#cd-thinking").inputValue(), "xhigh");
+    await s.page.keyboard.press("Home");
+    await s.page.keyboard.press("ArrowRight");
     assert.equal(await s.page.locator("#cd-thinking").inputValue(), "low");
-    await menu.locator(".cd-menu-row", { hasText: "qwen3:32b" }).click();
+    await picker.locator(".dgc-mp-row", { hasText: "qwen3:32b" }).click();
     assert.equal(await s.page.locator("#cd-model").inputValue(), "qwen3:32b");
     assert.equal(await pill.locator("#cd-model-name").textContent(), "qwen3:32b");
-    assert.equal(await menu.isVisible(), true, "still open, for thinking next");
-    await s.page.keyboard.press("Escape");
-    assert.equal(await menu.isHidden(), true);
-    assert.equal(await s.page.evaluate(() => document.activeElement?.id), "cd-model-pill", "back on the pill");
+    assert.equal(await s.page.locator(".dgc-mp-layer").count(), 0, "choosing a model closes it");
+    assert.equal(await s.page.evaluate(() => document.activeElement?.id), "cd-model-pill", "back on the button");
     await pill.click();
-    await s.page.locator("#cd-log").click({ position: { x: 5, y: 5 } });
-    assert.equal(await menu.isHidden(), true, "a click elsewhere closes it");
-    // A provider listing dozens of models: they scroll in their own list; the dial stays in view and takes a real click.
+    await s.page.mouse.click(6, 6);
+    assert.equal(await s.page.locator(".dgc-mp-layer").count(), 0, "a click outside closes it");
+    // A provider listing dozens of models: they scroll in their own list; Thinking stays in view and takes a real click.
     await s.send({ type: "models", ids: Array.from({ length: 22 }, (_, i) => `model-${String(i).padStart(2, "0")}:latest`), current: "model-17:latest" });
+    await s.page.evaluate(() => { const pick = document.getElementById("cd-model"); pick.value = "model-17:latest"; pick.dispatchEvent(new Event("change")); });
     await pill.click();
-    const [menuBox, dialBox] = [await menu.boundingBox(), await menu.locator(".cd-dial-face").boundingBox()];
-    assert.ok(dialBox.y >= menuBox.y && dialBox.y + dialBox.height <= menuBox.y + menuBox.height && dialBox.y >= 0, "the dial is in view");
-    assert.equal(await menu.locator(".cd-menu-models").evaluate((n) => n.scrollHeight > n.clientHeight), true, "the models scroll");
-    const chosen = await menu.locator(".cd-menu-row.sel").boundingBox(), list = await menu.locator(".cd-menu-models").boundingBox();
+    const [box, segBox, view] = [await picker.boundingBox(), await picker.locator(".dgc-mp-seg").boundingBox(), s.page.viewportSize()];
+    assert.ok(segBox.y >= box.y && segBox.y + segBox.height <= box.y + box.height && box.y >= 0 && box.y + box.height <= view.height, "Thinking is in view, inside the page");
+    assert.equal(await picker.locator(".dgc-mp-list").evaluate((n) => n.scrollHeight > n.clientHeight), true, "the models scroll");
+    const chosen = await picker.locator('.dgc-mp-row[aria-selected="true"]').boundingBox(), list = await picker.locator(".dgc-mp-list").boundingBox();
     assert.ok(chosen.y >= list.y && chosen.y + chosen.height <= list.y + list.height + 1, "the chosen model shown in its list");
-    const high = await menu.locator('.cd-dial-hit[data-level="3"]').boundingBox();
-    await s.page.mouse.click(high.x + high.width / 2, high.y + high.height / 2);
+    await picker.locator('.dgc-mp-level[data-level="high"]').click();
     assert.equal(await s.page.locator("#cd-thinking").inputValue(), "high");
     await s.page.keyboard.press("Escape");
     await s.send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "qwen3:32b"], current: "qwen3:32b" });
-    await pill.click(); await menu.locator(".cd-dial-face").focus(); await s.page.keyboard.press("Home"); await s.page.keyboard.press("ArrowUp");
+    await s.page.evaluate(() => { const pick = document.getElementById("cd-model"); pick.value = "qwen3:32b"; pick.dispatchEvent(new Event("change")); });
+    await pill.click(); await picker.locator('.dgc-mp-level[data-level="low"]').click();
     await s.page.keyboard.press("Escape");
     // The window's size, in the meter's details, as main DGC's.
     await s.send({ type: "context", window: 32768, limit: 262144, used: 5200, preset: "32k", source: "reported", parts: { conversation: 5200 }, compactable: true });
@@ -4499,7 +4523,7 @@ test("a card's place never cuts the reply's Markdown: inside a code fence or a l
   } finally { await s.page.close(); }
 });
 
-test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined up at the right end, the pill in olive while it answers", async (t) => {
+test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined up at the right end, the model button in olive while it answers", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen({ width: 700 });
   const at = "2026-11-09T10:00:00.000Z";
@@ -4508,24 +4532,25 @@ test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined u
     await s.send({ type: "opened", conversation: conversation({ model: "deepseek-v4.1-flash:cloud" }), messages: [], earlier: 0, busy: false });
     await s.send({ type: "models", current: "deepseek-v4.1-flash:cloud", ids: ["deepseek-v4.1-flash:cloud", "glm-5.3:cloud"] });
     await s.page.locator("#cd-model-pill").click();
-    const menu = s.page.locator("#cd-model-menu");
-    await menu.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));
-    assert.equal(await menu.locator(".dgc-menu-pill").count(), 0, "no fallback yet: no words");
-    const glm = menu.locator(".dgc-menu-item", { hasText: "glm-5.3:cloud" });
+    const picker = s.page.locator(".dgc-mp");
+    await picker.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));
+    assert.equal(await picker.locator(".dgc-menu-pill").count(), 0, "no fallback yet: no words");
+    const glm = picker.locator(".dgc-mp-item", { hasText: "glm-5.3:cloud" });
     await glm.hover();
-    await glm.locator(".dgc-menu-more").click();
-    assert.deepEqual(await menu.locator(".dgc-menu-choices button").allInnerTexts(), ["Use as main", "Use as fallback"]);
-    await menu.locator(".dgc-menu-choices button", { hasText: "Use as fallback" }).click();
+    await glm.locator(".dgc-mp-more").click();
+    assert.deepEqual(await picker.locator(".dgc-mp-choices button").allInnerTexts(), ["Use as main", "Use as fallback"]);
+    await picker.locator(".dgc-mp-choices button", { hasText: "Use as fallback" }).click();
     assert.deepEqual((await s.posted("fallback")).at(-1), { type: "fallback", value: "glm-5.3:cloud" });
     await s.page.mouse.move(1, 1);
-    const main = menu.locator(".cd-menu-row", { hasText: "deepseek-v4.1-flash:cloud" }).locator(".dgc-menu-pill");
-    const fallback = menu.locator(".cd-menu-row", { hasText: "glm-5.3:cloud" }).locator(".dgc-menu-pill");
+    await s.page.keyboard.press("Tab");                 // (the focus off the row: its ⋯ and the room it takes are gone)
+    const main = picker.locator(".dgc-mp-row", { hasText: "deepseek-v4.1-flash:cloud" }).locator(".dgc-menu-pill");
+    const fallback = picker.locator(".dgc-mp-row", { hasText: "glm-5.3:cloud" }).locator(".dgc-menu-pill");
     assert.equal(await main.textContent(), "Main");
     assert.equal(await fallback.textContent(), "Fallback");
     const [a, b] = [await main.boundingBox(), await fallback.boundingBox()];
     assert.ok(Math.abs((a.x + a.width) - (b.x + b.width)) < 1.5, `Main and Fallback end on one line (${a.x + a.width} vs ${b.x + b.width})`);
-    const rowBox = await menu.locator(".cd-menu-row", { hasText: "glm-5.3:cloud" }).boundingBox();
-    assert.ok(rowBox.x + rowBox.width - (b.x + b.width) <= 14, "at the row's right end");
+    const rowBox = await picker.locator(".dgc-mp-row", { hasText: "glm-5.3:cloud" }).boundingBox();
+    assert.ok(rowBox.x + rowBox.width - (b.x + b.width) <= 34, "at the row's right end, before the check's place");
     await s.page.keyboard.press("Escape");
     // Its model didn't answer: the waiting line names the fallback, and so does the pill, in olive, with the word.
     await s.send({ type: "turn", state: "started", replyId: M(2) });
@@ -4558,17 +4583,19 @@ test("a chat's fallback: Claude Code or Codex can be one too, and nothing is off
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: "subscription_codex", current: "subscription:codex", ids: ["", "gpt-5.6-sol"] });
     await s.page.locator("#cd-model-pill").click();
-    assert.equal(await s.page.locator("#cd-model-menu .dgc-menu-more").count(), 2, "Codex's rows have a ⋯: a subscription can be the fallback (9 Nov)");
-    assert.equal(await s.page.locator("#cd-model-menu .dgc-menu-label", { hasText: "gpt-5.6-sol" }).getAttribute("title"), "Codex gpt-5.6-sol",
+    const picker = s.page.locator(".dgc-mp");
+    assert.equal(await picker.locator(".dgc-mp-more").count(), 2, "Codex's rows have a ⋯: a subscription can be the fallback (9 Nov)");
+    assert.equal(await picker.locator(".dgc-menu-label", { hasText: "gpt-5.6-sol" }).getAttribute("title"), "gpt-5.6-sol",
                  "a long name's whole name is its tooltip (it slides while pointed at)");
-    await s.page.locator("#cd-model-menu .dgc-menu-item", { hasText: "gpt-5.6-sol" }).locator(".dgc-menu-more").click();
-    await s.page.locator("#cd-model-menu .dgc-menu-choices button", { hasText: "Use as fallback" }).click();
+    await picker.locator(".dgc-mp-item", { hasText: "gpt-5.6-sol" }).locator(".dgc-mp-more").click({ force: true });
+    await picker.locator(".dgc-mp-choices button", { hasText: "Use as fallback" }).click();
     assert.deepEqual((await s.posted("fallback")).at(-1), { type: "fallback", value: "subscription:codex:gpt-5.6-sol" });
     await s.page.keyboard.press("Escape");
     await s.send({ type: "fallbackOffered", on: false });
     await s.send({ type: "models", profiles, defaultId: nativeId, providerId: nativeId, current: `provider:${nativeId}:deepseek-v4.1-flash:cloud`, ids: ["deepseek-v4.1-flash:cloud"] });
     await s.page.locator("#cd-model-pill").click();
-    assert.equal(await s.page.locator("#cd-model-menu .dgc-menu-more").count(), 0, "an older process: no ⋯");
+    assert.ok(await picker.locator(".dgc-mp-row").count() > 0);
+    assert.equal(await picker.locator(".dgc-mp-more").count(), 0, "an older process: no ⋯");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

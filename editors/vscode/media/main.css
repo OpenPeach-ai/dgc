@@ -28,7 +28,7 @@
 @import url("./shared/folderpick.css");
 @import url("./shared/links.css");
 @import url("./shared/inline.css");
-@import url("./shared/effort.css");
+@import url("./shared/modelpicker.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — a quiet editor hierarchy with a restrained DGC accent. */
 * { box-sizing: border-box; }
@@ -1678,61 +1678,7 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 .cmenu { position: absolute; bottom: 100%; margin-bottom: var(--sp-2);
   width: min(310px, calc(100vw - 20px)); min-width: min(280px, calc(100vw - 20px));
   max-height: min(440px, calc(100vh - 96px)); overflow-y: auto; z-index: 20; }
-#modelmenu { width: min(260px, calc(100vw - 20px)); min-width: min(240px, calc(100vw - 20px));
-  max-height: calc(100vh - 170px); }   /* in a short editor its model list scrolls inside it, below */
-#modelmenu:not([hidden]) { display: flex; flex-direction: column; overflow: hidden; }
-#modelmenu .reasoning-card { flex: none; }
-#modelmenu .model-options:not([hidden]) { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
-#modelmenu .model-options > .mrow, #modelmenu .model-options > .mhead { flex: none; }
-#modelmenu .model-list-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.reasoning-card { padding: 0; }
-/* This session's agents model (0.52): one row between the model's card and its list, with what the agents use under its
-   name; a hairline above sets it apart from the thinking note. Its chevron sits level with the name. */
-/* The tabs under the model row and the main slider (14 Nov): Main model | Sub-agents. One shape: a bar of the button
-   family's corner at a button's height, the tab you are on on the wash. Never a pill, never purple. */
-#modelmenu .model-tabs { flex: none; display: flex; gap: 2px; margin: 4px 4px 4px; padding: 2px; border: 1px solid var(--hair); border-radius: var(--btn-r, 6px); }
-#modelmenu .model-tab { appearance: none; flex: 1 1 0; min-width: 0; box-sizing: border-box; height: 26px; margin: 0; padding: 0 6px; border: 0; border-radius: max(3px, calc(var(--btn-r, 6px) - 2px)); background: transparent; color: var(--muted);
-  font: var(--w-med) var(--t-sm)/1 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
-#modelmenu .model-tab:hover { color: var(--text); }
-#modelmenu .model-tab[aria-selected="true"] { background: var(--wash); color: var(--text-strong); }
-#modelmenu .model-tab:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
-/* On the Sub-agents tab the note under the main slider steps aside: the room is the tab's. */
-#modelmenu[data-tab="agents"] :is(.reasoning-note, .reasoning-more) { display: none; }
-/* Its two dropdowns: a name, and a button of the 6 px family that opens its choices under it. */
-#modelmenu .agents-set { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 4px 8px 8px; border-bottom: 1px solid var(--hair); }
-#modelmenu .agents-set-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-#modelmenu .agents-set-name { flex: 0 0.001 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--t-sm); }
-#modelmenu .agents-drop { appearance: none; flex: 1 1 0; max-width: 152px; min-width: 72px; margin: 0 0 0 auto; display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; box-sizing: border-box; height: 26px; padding: 0 6px 0 8px;
-  border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: transparent; color: var(--text); font: var(--w-reg) var(--t-sm)/1 var(--sans); cursor: pointer; }
-#modelmenu .agents-drop:hover, #modelmenu .agents-drop[aria-expanded="true"] { background: var(--wash); }
-#modelmenu .agents-drop:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-#modelmenu .agents-drop-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#modelmenu .agents-drop > .codicon { flex: none; color: var(--muted); font-size: 12px; }
-#modelmenu .agents-drop-list { flex: none; display: flex; flex-direction: column; box-sizing: border-box; width: min(100%, 190px); max-height: 184px; margin: -2px 0 0 auto; padding: 3px; overflow-y: auto; border: 1px solid var(--hair); border-radius: var(--btn-r, 6px); }
-#modelmenu .agents-drop-list .mrow { flex: none; min-height: 26px; }
-/* A list always has room for a few rows: in a short window the menu scrolls, the list is never crushed to one row. */
-#modelmenu:not([hidden]) { overflow: hidden auto; }
-#modelmenu .model-options:not([hidden]):has(.model-list-scroll > :nth-child(4)) { min-height: 190px; }
-#modelmenu .model-options:not([hidden]):has(.agents-set):has(.model-list-scroll > :nth-child(4)) { min-height: 210px; }
-#modelmenu .model-list-scroll:has(> :nth-child(4)) { min-height: 124px; }
-#modelmenu .agents-part { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-/* In the agents list: a provider that can't run DGC's agents is shown, greyed, with why (never hidden). */
-#modelmenu .agents-unavailable { cursor: default; }
-#modelmenu .agents-unavailable:hover { background: transparent; }
-#modelmenu .agents-unavailable .dgc-menu-label { opacity: .55; }
-#modelmenu .model-list-scroll .dgc-menu-row-sub .dgc-menu-sub { overflow-wrap: anywhere; }
-.model-summary-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-summary > .codicon:first-child { color: var(--accent); }
-.reasoning-note { margin: 10px 14px 14px; color: var(--muted); font-size: 11px; line-height: 1.5; white-space: normal; }
-.reasoning-note.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.reasoning-note.has-more { margin-bottom: 2px; }
-.reasoning-more { display: block; margin: 0 14px 12px; padding: 0; min-height: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: 11px; cursor: pointer; }
-.reasoning-more:hover { text-decoration: underline; }
-.reasoning-more:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.reasoning-more[hidden] { display: none; }
-
-/* Combined model + reasoning selector. The continuous rail reads as one power scale while every
-   stop remains a real keyboard-focusable radio item. Ultra gets motion only as status feedback. */
+/* (The model picker is not one of these: it is the shared dialog of media/shared/modelpicker.css.) */
 @media (max-width: 640px) {
   #btn-ctx span:not(.codicon) { display: none; }
   #btn-output .output-label, #btn-output .output-prefix { display: none; }
@@ -1984,7 +1930,7 @@ body.vscode-light .fbtn.output-control.on, body.vscode-high-contrast-light .fbtn
     outline: 2px solid Highlight !important; outline-offset: 2px;
   }
   .tool, .diff, .card, .tasks-panel, .artifact, .md-table, .md-table th, .md-table td, .rail-item,
-  #cbox, .cmenu, .pop, .reasoning-card, .effort-slider, .goal-dialog, .change-row,
+  #cbox, .cmenu, .pop, .goal-dialog, .change-row,
   button.act, button.link, :is(.artifact, .card) .abtn:not(.dgc-doc-open) {
     border-color: CanvasText;
   }
@@ -3804,9 +3750,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
   border-radius: 999px; font: var(--w-semi) 10px/14px var(--sans); color: var(--err-text);
 }
 /* A provider row's Fallback word sits before its chevron. */
-#modelmenu .mrow > .dgc-menu-pill + .codicon-chevron-right { margin-left: 6px; }
 /* A provider row's chevron sits at the row's right end, as the Sub-agents row's does (not right after its name). */
-#modelmenu .model-options .mrow > .codicon-chevron-right:last-child { margin-left: auto; }
 
 /* Permission rules: each rule in words, with where it applies (or the rule as written) on a quiet line under it. */
 .rule-row .surface-badge { margin-left: 0; align-self: flex-start; margin-top: 2px; }
@@ -3919,14 +3863,6 @@ button.act.am-wide { width: 100%; }
   #phead .pd { display: none; }
   #phead .pm, .cd-head .pm { font-size: 0; letter-spacing: 0; }
   #phead .thread-title { min-width: 24px; }
-  /* The Sub-agents tab's two dropdowns: each under its own word, with the menu's whole width ("Sam" was cut at the
-     menu's edge at 170 px). */
-  #modelmenu :has(> .agents-drop) { flex-wrap: wrap; row-gap: 2px; }
-  #modelmenu .agents-drop { flex: 1 1 100%; max-width: none; margin-left: 0; }
-  #modelmenu .agents-drop-list { width: 100%; }
-  /* The model menu's two tabs keep their whole names. */
-  #modelmenu .model-tab { flex: 1 1 auto; padding: 0 1px; font-size: 11px; letter-spacing: -.02em; }
-  #modelmenu .model-tabs { gap: 0; margin-left: -2px; margin-right: -2px; padding: 1px; }
   /* New, beside the search box: its plus alone, so the box keeps room for what is typed. */
   #sessions-host .home-new, #sessions-host .home-new:is(:hover, :active) { width: var(--control); min-width: var(--control); padding: 0; justify-content: center; }
   #sessions-host .home-new > span:not(.codicon) { display: none; }

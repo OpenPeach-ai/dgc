@@ -26,24 +26,6 @@ const windows = [];
 before(async () => { if (!chromium) return; try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] }); } catch { browser = null; } });
 after(async () => { await browser?.close(); for (const w of windows) w.close(); });
 
-for (const theme of ["dark-modern", "light-modern"]) {
-  test(`Work's thinking slider: at Off the row reads Off … Ultra (one Off), a level between shows in the middle, and the track has an edge (${theme})`, async (t) => {
-    if (skipOrFail(t)) return;
-    const s = await openMapScene(browser, { width: 440, height: 760, theme, open: false, capabilities: { agents_model: 1, model_fallback: 1 } }), { page, post } = s;
-    try {
-      await page.click("#btn-model"); await post(modelsMessage()); await page.waitForSelector("#modelmenu .effort-slider"); await page.waitForTimeout(200);
-      const shown = () => page.evaluate(() => [...document.querySelectorAll("#modelmenu .effort-labels > *")].filter((n) => getComputedStyle(n).visibility !== "hidden" && n.textContent.trim()).map((n) => n.textContent.trim()));
-      assert.deepEqual(await shown(), ["Off", "Ultra"], "Off is said once");
-      const track = await page.evaluate(() => { const sl = document.querySelector("#modelmenu .effort-slider"), st = getComputedStyle(sl); return { shadow: st.boxShadow, border: `${st.borderTopWidth} ${st.borderTopStyle}` }; });
-      assert.ok(track.shadow !== "none" || /^[1-9].* solid/.test(track.border), `the track has an edge of its own at Off (${JSON.stringify(track)})`);
-      await page.focus("#modelmenu .effort-slider"); await page.keyboard.press("ArrowRight"); await page.keyboard.press("ArrowRight"); await page.waitForTimeout(150);
-      assert.deepEqual(await shown(), ["Off", "Medium", "Ultra"]);
-      await page.keyboard.press("End"); await page.waitForTimeout(150);
-      assert.deepEqual(await shown(), ["Off", "Ultra"], "at Ultra, Ultra is said once");
-    } finally { await page.close(); }
-  });
-}
-
 test("a right-click on a session's row opens the row's own menu, not the browser's", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { tab: "work", width: 300, height: 700 });

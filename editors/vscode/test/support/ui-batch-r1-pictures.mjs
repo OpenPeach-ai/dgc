@@ -37,14 +37,13 @@ PICTURES.menu = async ({ browser, shot }) => {
   for (const theme of THEMES) for (const [width, height] of [[170, 700], [220, 700], [300, 900], [440, 760], [700, 760]]) {
     const s = await openMapScene(browser, { width, height, theme: `${theme}-modern`, open: false, capabilities: { agents_model: 1, model_fallback: 1 } }), { page, post } = s;
     try {
-      await page.click("#btn-model"); await post(modelsMessage({ thinking: "medium" })); await page.waitForSelector("#modelmenu .model-tabs"); await page.waitForTimeout(250);
-      await page.locator("#modelmenu .dgc-menu-item", { hasText: "gpt-oss:120b-32k" }).hover(); await page.waitForTimeout(250);
+      await page.click("#btn-model"); await post(modelsMessage({ thinking: "medium" })); await page.waitForSelector(".dgc-mp .dgc-mp-row"); await page.waitForTimeout(250);
+      await page.locator(".dgc-mp .dgc-menu-item", { hasText: "gpt-oss:120b-32k" }).hover(); await page.waitForTimeout(250);
       await shot(page, `2-menu-main-${width}-${theme}`);
-      await page.click("#modelmenu [data-model-tab='agents']"); await page.waitForTimeout(250); await page.mouse.move(2, 2); await shot(page, `2-menu-sub-agents-${width}-${theme}`);
-      if (width === 300 || width === 440) { await page.click("#modelmenu [data-agents-drop='thinking']"); await page.waitForTimeout(250); await shot(page, `2-menu-thinking-open-${width}-${theme}`); await page.click("#modelmenu [data-agents-drop='thinking']");
-        await page.click("#modelmenu [data-agents-drop='context']"); await page.waitForTimeout(250); await shot(page, `2-menu-context-open-${width}-${theme}`); await page.click("#modelmenu [data-agents-drop='context']"); }
-      await page.click('#modelmenu [data-agents-provider="1"]'); await post({ type: "providerModels", id: `provider_${"c".repeat(32)}`, ids: ["gpt-oss:120b", "own-coder", "qwen3-coder:30b", "glm-5.3:cloud", "deepseek-v4.1-flash:cloud", "codellama:13b", "qwen2.5:14b", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"] });
-      await page.waitForSelector("#modelmenu [data-agents-model]"); await page.waitForTimeout(250); await shot(page, `2-menu-sub-agents-models-${width}-${theme}`);
+      await page.click('.dgc-mp-tab[data-tab="agents"]'); await page.waitForTimeout(250); await page.mouse.move(2, 2); await shot(page, `2-menu-sub-agents-${width}-${theme}`);
+      // (Their thinking is the picker's own Thinking row and their window its one field: nothing more to open.)
+      await page.click(`.dgc-mp-conn[data-rail="provider_${"c".repeat(32)}"]`); await post({ type: "providerModels", id: `provider_${"c".repeat(32)}`, ids: ["gpt-oss:120b", "own-coder", "qwen3-coder:30b", "glm-5.3:cloud", "deepseek-v4.1-flash:cloud", "codellama:13b", "qwen2.5:14b", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"] });
+      await page.waitForSelector(".dgc-mp .dgc-mp-row"); await page.waitForTimeout(250); await shot(page, `2-menu-sub-agents-models-${width}-${theme}`);
     } finally { await page.close(); }
   }
 };

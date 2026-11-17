@@ -545,12 +545,13 @@ export class PipsEditor implements vscode.Disposable {
   private readonly mic: DictationOwner = { post: (message) => this.post({ ...message, from: 'pips' }) };
   useDictation(dictation: () => Dictation, readAloud?: () => ReadAloud): void { this.dictation = dictation; this.readAloud = readAloud; }
   /** A plugin's logo by its id (a data: URI), for a reply's "Used Aave" line; "" when it has none. */
-  private savedProviders?: { list: () => Promise<unknown[]>; save: (id: string, model: string) => Promise<void>; none: () => boolean };
+  private savedProviders?: { list: () => Promise<unknown[]>; save: (id: string, model: string) => Promise<void>; none: () => boolean; host: () => unknown };
   private pluginLogo?: (plugin: string) => string;
   usePluginLogos(lookup: (plugin: string) => string): void { this.pluginLogo = lookup; }
   /** Providers saved in Settings: the host lists them for a Pip's model menus, and saves one (with its key, which never
    *  comes here) before a Pip is set to it. */
-  useSavedProviders(list: () => Promise<unknown[]>, save: (id: string, model: string) => Promise<void>, none: () => boolean = () => false): void { this.savedProviders = { list, save, none }; }
+  /** `host`: the name and mark of the host DGC itself is on, for the model picker's "your connection" (never its address). */
+  useSavedProviders(list: () => Promise<unknown[]>, save: (id: string, model: string) => Promise<void>, none: () => boolean = () => false, host: () => unknown = () => undefined): void { this.savedProviders = { list, save, none, host }; }
   /** A reply's links and Settings → Models, on the page in its own tab. The side bar's page shares the panel's own. */
   private pageActions?: (message: any) => void;
   usePageActions(act: (message: any) => void): void { this.pageActions = act; }
@@ -1181,7 +1182,7 @@ export class PipsEditor implements vscode.Disposable {
     }
     if (owner.command === 'list_pip_models' && event.type === 'pips_result' && event.ok === true && this.savedProviders) {
       void this.savedProviders.list().catch(() => [] as unknown[]).then(providers =>
-        this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { ...event.result, providers, ...(this.savedProviders?.none() ? { no_provider: true } : {}) } }, owner.surface));
+        this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { ...event.result, providers, ...(this.savedProviders?.host() ? { host: this.savedProviders.host() } : {}), ...(this.savedProviders?.none() ? { no_provider: true } : {}) } }, owner.surface));
       return true;
     }
     if (event.type === 'pips_status') this.state.enabled = event.enabled === true;

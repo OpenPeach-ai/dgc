@@ -97,6 +97,21 @@ identify a connector without making a request to that service. They are used unm
 identifiers, and imply no partnership, endorsement or completed authorization. Each file's origin
 and download date is recorded in `media/plugin-logos/SOURCES.md`, which ships with them.
 
+## Provider marks in the model picker
+
+`media/shared/modelpicker.js` carries each model connection's company icon, so the picker identifies a connection
+without asking that company for anything. The icons are used unmodified (made 48 px pictures), as identifiers, and imply
+no partnership or endorsement.
+
+- Each company's own website icon, fetched from its site on 17 Nov 2026: Claude (claude.com), Ollama, Qwen
+  (chat.qwen.ai), Kimi and Moonshot AI, OpenRouter, Groq, DeepSeek, Together AI, Mistral AI, LM Studio, vLLM (vllm.ai),
+  Gemini (gemini.google.com), xAI (x.ai), and llama.cpp (its GitHub organisation's picture).
+- Drawn in the text's colour, the same shapes as on their sites: Anthropic's mark from
+  [Simple Icons](https://simpleicons.org) (public domain), and OpenAI's blossom from its public-domain file on
+  Wikimedia Commons (`ChatGPT_logo.svg`).
+- GitHub Copilot, which has no website icon of its own: the `copilot-24` icon from GitHub's Primer Octicons, under the
+  MIT License; see `licenses/PRIMER-OCTICONS-MIT.txt`. Copyright © GitHub Inc.
+
 ## noVNC 1.7.0
 
 The Pip computer tab bundles the noVNC core library ([`@novnc/novnc` 1.7.0](https://www.npmjs.com/package/@novnc/novnc/v/1.7.0),

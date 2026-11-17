@@ -57,7 +57,7 @@
    media/shared/tokens.css: the side bar's Pips inherit it from Work's page, a Pip's own tab has it in this bundle. */
 .pip-composer .composer-controls{display:flex;align-items:center;flex-wrap:wrap;gap:4px;row-gap:4px;padding:4px 8px 8px}.composer-left,.composer-right{display:flex;align-items:center;gap:4px;min-width:0}.composer-left{flex:0 1 auto}.composer-right{flex:1 1 200px;justify-content:flex-end}.composer-left>*,.composer-right>*{flex:0 0 auto}.pip-composer .composer-chip,.pip-composer .model-control{height:28px;min-height:28px;min-width:28px;border:0;border-radius:8px;background:transparent;color:var(--composer-faint);padding:0 8px;display:inline-flex;align-items:center;justify-content:center;gap:4px;font:500 12px/1 var(--vscode-font-family,system-ui)}.pip-composer .composer-chip{width:28px;padding:0}.pip-composer .model-control{flex:0 1 auto;max-width:100%;min-width:0;padding:0 4px 0 8px}.model-copy{min-width:0;display:flex;align-items:baseline;gap:4px}.composer-model-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--vscode-foreground,#d7d7da)}.composer-effort-name{flex:0 0 auto;font-size:11px;color:var(--composer-faint);white-space:nowrap}.composer-chevron{flex:none;display:flex}.composer-chevron svg{width:12px;height:12px}.pip-composer .composer-chip:hover,.pip-composer .model-control:hover{background:var(--vscode-toolbar-hoverBackground,#ffffff0a);color:var(--vscode-foreground)}
 .pip-composer .chat-send{height:28px;width:28px;min-height:28px;margin-left:4px;border:0;border-radius:9999px;padding:0;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--composer-faint);background:transparent;transition:background .12s,color .12s}.pip-composer .chat-send.ready{background:var(--accent-fill);color:#fff}.pip-composer .chat-send.ready:hover{background:var(--accent-hover)}.pip-composer .chat-send:not(.ready):hover{background:var(--vscode-panel-border,#303032);color:var(--vscode-foreground)}.pip-composer .chat-send:disabled{opacity:1;cursor:default}.pip-composer #chat-stop{flex:none}.composer-hint{font-size:11px;line-height:1.45;margin:4px 2px 0;color:var(--muted,#96969b)}
-.composer-model-menu{position:absolute;bottom:calc(100% + 8px);right:0;z-index:20;display:flex;flex-direction:column;width:min(300px,100%);max-height:min(440px,62vh,calc(100vh - 200px));overflow-y:auto}.composer-model-menu>.section-head{flex:none;margin:0 0 4px}.composer-model-menu>.section-head strong{font-size:12px}.composer-model-menu>.section-head button{font-size:11px;min-height:24px;padding:0 4px;background:transparent}.composer-model-menu>p,.composer-model-heading p{font-size:11px;line-height:1.45;flex:none}.composer-model-heading{flex:none;border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.composer-model-heading strong{font-size:12px}.composer-model-menu>input{font-size:12px;flex:none;margin:4px 0}.composer-model-options{overflow-y:auto;min-height:32px;flex:1 1 auto}.composer-model-options small{display:block;font-size:11px;color:inherit;opacity:.8}.composer-model-menu>#chat-refresh-models{flex:none;margin-top:4px;font-size:11px;align-self:flex-start;background:transparent}
+.composer-model-menu{position:absolute;bottom:calc(100% + 8px);right:0;z-index:20;display:flex;flex-direction:column;width:min(300px,100%);max-height:min(440px,62vh,calc(100vh - 200px));overflow-y:auto}.composer-model-menu>.section-head{flex:none;margin:0 0 4px}.composer-model-menu>.section-head strong{font-size:12px}.composer-model-menu>.section-head button{font-size:11px;min-height:24px;padding:0 4px;background:transparent}.composer-model-menu>p,.composer-model-heading p{font-size:11px;line-height:1.45;flex:none}.composer-model-heading{flex:none;border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.composer-model-heading strong{font-size:12px}.composer-model-menu>input{font-size:12px;flex:none;margin:4px 0}.composer-model-menu>#chat-refresh-models{flex:none;margin-top:4px;font-size:11px;align-self:flex-start;background:transparent}
 .composer-scope,.composer-unavailable{font-size:11px;line-height:1.45;color:var(--muted)}.composer-context-menu{left:0;right:auto;padding:12px}.composer-context-size{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.composer-context-size label{margin:0;font-size:11px}.composer-context-size select{width:auto;height:24px;padding:0 8px;font:600 11px/1 var(--vscode-editor-font-family,monospace);border:1px solid var(--line);border-radius:6px}.composer-context-menu p{margin:8px 0 0}
 @media(prefers-reduced-motion:reduce){.pip-composer .chat-send{transition:none}}
 .pip-composer-shell{position:relative;flex:none;min-width:0}
@@ -648,32 +648,14 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 
 
 .pip-menu .tabs-menu button.danger-text{color:var(--vscode-errorForeground)}
-/* The prompt box's menus, as DGC's own: the reasoning card (model row, effort slider, a short note
-   with Show more; the model list one click deeper) and the context meter. */
-.composer-reasoning{overflow:hidden}
-.composer-model-summary{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:var(--vscode-foreground);font-size:12px;text-align:left}
-.composer-model-summary:hover{background:var(--vscode-list-hoverBackground)}
-.composer-model-summary svg{flex:none}
-.composer-model-summary svg:first-child{color:var(--accent)}
-.composer-summary-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.composer-summary-label .muted{font-size:11px}
+/* The prompt box's own menus (the context meter, Add, how much it asks). Its model and thinking are the model picker's
+   (media/shared/modelpicker.css), which opens over the whole view. */
 .composer-note{margin:10px 4px 4px;color:var(--muted);font-size:11px;line-height:1.5}
 .composer-note.clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .composer-more{display:block;align-self:flex-start;margin:0 4px 6px;padding:0;min-height:0!important;border:0;background:none;color:var(--vscode-textLink-foreground,var(--link));font-size:11px;cursor:pointer}
 .composer-more:hover{text-decoration:underline;background:none}
-.composer-model-list{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
-.composer-reasoning .composer-note,.composer-reasoning .composer-more{margin-left:10px;margin-right:10px}
-.composer-reasoning .composer-model-list{margin-top:8px}
 .composer-unavailable[role="alert"]{margin:0 12px 6px;color:var(--vscode-errorForeground,var(--muted))}
-.composer-list-title{flex:none;margin:0;padding:4px 8px;font-size:11px;line-height:1;color:var(--vscode-disabledForeground,var(--muted))}
-.composer-model-options{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
-/* The Pips' menus: where they open and how big; how they look is the shared menu (media/shared/menu.css). */ .composer-model-options .composer-model-option,.composer-model-action{flex:none}
-
-.composer-model-options .composer-model-option[aria-selected="true"]{background:var(--vscode-list-activeSelectionBackground,rgba(255,255,255,.06));color:var(--vscode-list-activeSelectionForeground,var(--vscode-foreground))}
-.composer-model-check{display:inline-flex;flex:none;align-items:center;justify-content:center;width:16px;height:16px;color:var(--muted)}
-.composer-model-option[aria-selected="true"] .composer-model-check{color:inherit}
-.composer-model-row{min-width:0;overflow-wrap:anywhere}.composer-model-row small{display:block;margin-top:2px;font-size:11px;color:var(--muted)}
-.composer-model-list>#chat-refresh-models{flex:none;margin-top:4px;font-size:11px;align-self:flex-start;background:transparent}
+/* The Pips' menus: where they open and how big; how they look is the shared menu (media/shared/menu.css). */
 .composer-context-menu{left:0;right:auto;padding:12px}
 .ctx-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
 .ctx-head>div{min-width:0;display:grid;gap:4px}
@@ -993,7 +975,6 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .chat-style .pip-turn>.pip-message.user.pin-off{position:relative;z-index:auto}
 .chat-style .pip-turn>.pip-message.user.pin-off::before{content:none}
 @media(forced-colors:active){.chat-style .pip-turn>.pip-message.user::before{background:Canvas;bottom:-4px;-webkit-mask-image:none;mask-image:none}}
-.composer-model-custom{padding:2px 4px 4px 4px}.composer-model-custom input{width:100%;min-height:26px;padding:3px 8px;border:1px solid var(--vscode-input-border,var(--line));border-radius:6px;background:var(--vscode-input-background,transparent);color:var(--vscode-input-foreground,var(--vscode-foreground));font-size:12px}
 /* Only connecting or loading: DGC's slash logo in the accent, the three slashes breathing in turn, as the panel's header (main.css brand-slash-pulse). */
 .pips-loading{display:flex;align-items:center;justify-content:center;min-height:min(62vh,420px);color:var(--accent)}.pips-loading svg{display:block;width:44px;height:44px}.pips-loading path{animation:pips-slash-pulse 2.1s ease-in-out infinite;animation-delay:var(--pulse,0ms)}.pips-loading path:nth-child(2){animation-delay:calc(var(--pulse,0ms) + .22s)}.pips-loading path:nth-child(3){animation-delay:calc(var(--pulse,0ms) + .44s)}@keyframes pips-slash-pulse{0%{opacity:.28}22%,80%{opacity:1}100%{opacity:.28}}@media(prefers-reduced-motion:reduce){.pips-loading path{animation:none}}
 /* A Connect card's accounts, by address: the person picks; and the one quiet line it settles to. */
@@ -1036,7 +1017,6 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-composer .model-control.on-fallback .composer-chevron{color:var(--err-text);opacity:.7}
 .pip-composer .composer-fallback-word{flex:none;margin:0 2px;padding:0 5px;border:1px solid color-mix(in srgb,var(--err) 60%,transparent);border-radius:999px;font-size:10px;font-weight:600;line-height:14px;color:var(--err-text)}
 /* A row with Main or Fallback keeps its name on one line, cut short, so the word never pushes it onto two. */
-.composer-model-option:has(.dgc-menu-pill) .composer-model-row{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;overflow-wrap:normal}
 /* A Personal Pip's own change, applied at once in a turn you started (API 77, D6): one quiet line after the reply that
    made it, as .memory-kept is, with Undo and Details; Details lists the new values under it. */
 .own-change{margin:6px 0 2px;font-size:12px;line-height:1.5;color:var(--muted)}
@@ -2102,14 +2082,4 @@ body.vscode-light .error,body.vscode-high-contrast-light .error,:host-context(bo
  .chat-style .pip-message .answer.split{max-width:100%}
 }
 
-/* The two tabs of a Pip's model menu, under its model row and its slider: Work's own (media/main.css #modelmenu
-   .model-tabs), so the menu is one shape on every surface. The Sub-agents tab says what its sub-agents run on. */
-.composer-model-menu .model-tabs{flex:none;display:flex;gap:2px;margin:8px 0 4px;padding:2px;border:1px solid var(--hair,var(--line));border-radius:var(--btn-r,6px)}
-.composer-model-menu .model-tab{appearance:none;flex:1 1 0;min-width:0;box-sizing:border-box;height:26px;min-height:0;margin:0;padding:0 6px;border:0;border-radius:max(3px,calc(var(--btn-r,6px) - 2px));background:transparent;color:var(--muted);font:var(--w-med,500) var(--t-sm,12px)/1 var(--vscode-font-family,system-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;box-shadow:none;transition:background-color var(--dur-hover,120ms) ease,color var(--dur-hover,120ms) ease}
-.composer-model-menu .model-tab:hover{color:var(--vscode-foreground)}
-.composer-model-menu .model-tab[aria-selected="true"]{background:var(--wash,var(--pip-wash));color:var(--text-strong,var(--vscode-foreground))}
-.composer-model-menu .model-tab:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
-.composer-agents{display:flex;flex-direction:column;min-height:0}
-.composer-agents .composer-agents-own{cursor:default}
-.composer-agents .composer-agents-note{margin:6px 4px 2px}
-@container(max-width:230px){.composer-model-menu .model-tab{flex:1 1 auto;padding:0 1px;font-size:11px;letter-spacing:-.02em}.composer-model-menu .model-tabs{gap:0;padding:1px;margin-left:-6px;margin-right:-6px}.composer-model-menu{width:100%}}
+@container(max-width:230px){.composer-model-menu{width:100%}}

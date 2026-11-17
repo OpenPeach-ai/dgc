@@ -106,9 +106,7 @@ test("a Small card opens to its full form over Home, and Back or Escape returns 
     assert.ok(near(g.open.width, 300 - 24, 2), "the full form has the side bar's width");
     assert.equal(await p.locator("#side-tabs").isVisible(), true, "the tabs stay"); assert.equal(await p.locator("#dgc-dock").isVisible(), true, "and the dock");
     const full = await p.evaluate(() => { const c = document.querySelector(".hc-open .hc-card"); return { cols: c.querySelectorAll(".hc-plot .hc-col").length, tabs: [...c.querySelectorAll('[role="tab"]')].map((b) => b.dataset.metric), ranges: [...c.querySelectorAll(".hc-seg button")].map((b) => b.textContent), models: [...c.querySelectorAll(".hc-by .hc-mn")].map((n) => n.textContent) }; });
-    assert.deepEqual(full, { cols: 30, tabs: ["tokens", "requests", "cache"], ranges: ["7d", "30d"], models: ["deepseek-v4.1-flash:cloud · Ollama", "claude-opus-4.1 · Claude Code", "qwen3.5-coder:32b · Ollama", "qwen3:8b · Ollama", "gpt-5.1-codex · Codex"] }, "everything the card does is here at 300 px: thirty days, every tab, the range, and the models with their providers");
-    await p.click(".hc-open .hc-seg button[data-range='7d']"); await x.rest(300);
-    assert.equal(await p.locator(".hc-open .hc-plot .hc-col").count(), 7, "7d shows a week");
+    assert.deepEqual(full, { cols: 7, tabs: ["tokens", "requests", "cache"], ranges: [], models: ["deepseek-v4.1-flash:cloud · Ollama", "claude-opus-4.1 · Claude Code", "qwen3.5-coder:32b · Ollama", "qwen3:8b · Ollama", "gpt-5.1-codex · Codex"] }, "everything the card does is here at 300 px: the last 7 days, every tab, no range to choose (his call, 17 Nov), and the models with their providers");
     await p.click("#home-hub .hc-back"); await x.rest(300);
     g = await x.grid();
     assert.equal(g.open, null); assert.equal(g.shown, true); assert.equal(g.focus, "token", "the keyboard is back on the card that was opened");
@@ -292,11 +290,18 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
     const x = await openGrid(browser, { width, theme, layout: EVERY, settings: SETTINGS, notes: NOTES, news: NEWS, height: 1400 });
     try {
       const g = await x.grid(), text = (id) => card(g, id).text, form = (id) => card(g, id).form;
-      // Token usage: today's tokens Small; the period's total and its change Medium and Large.
-      if (form("token") === "s") { assert.match(text("token"), /Tokens today/); assert.match(text("token"), /1\.24M/); }
-      else { assert.match(text("token"), /Token usage/); assert.match(text("token"), form("token") === "l" ? /last 30 days/ : /last 14 days/); assert.match(text("token"), /Requests/); assert.match(text("token"), /[+−]\d+(\.\d)?%/); }
+      // Token usage: the last 7 days at every size, never compared with another week (his call, 17 Nov). Small: the week's
+      // tokens and them in two; Medium and Large: the three counts, each with what it is made of.
+      const week = usageDays().slice(-7), sum = (f) => week.reduce((a, d) => a + d[f], 0), M = (n) => `${(n / 1e6).toFixed(2)}M`;
+      const split = `In ${M(sum("input_tokens"))} · Out ${M(sum("output_tokens"))}`;
+      if (form("token") === "s") { assert.match(text("token"), /Tokens · 7 days/); assert.ok(text("token").includes(M(sum("input_tokens") + sum("output_tokens"))), text("token")); assert.ok(text("token").includes(split), text("token")); }
+      else {
+        assert.match(text("token"), /Token usage/); assert.match(text("token"), /last 7 days/);
+        for (const words of ["Requests", `${Math.round(sum("requests") / 7)} a day`, "Cache saved", `${Math.round((sum("cached_input_tokens") / sum("input_tokens")) * 100)}%`, `${M(sum("cached_input_tokens"))} cached`, `In ${M(sum("input_tokens"))}`, `Out ${M(sum("output_tokens"))}`]) assert.ok(text("token").includes(words), `${words} in ${text("token")}`);
+      }
+      assert.doesNotMatch(text("token"), /[+−]\d+(\.\d)?(%| pts)|\bvs\b|Tokens today|30 days|14 days/, "nothing compared, one span");
       const cols = await x.page.evaluate(() => { const c = document.querySelector('.hc-grid .hc-card[data-card="token"]'); return { n: c.querySelectorAll(".hc-col").length, on: c.querySelectorAll(".hc-cell.on, .hc-cell.cap").length, tabs: c.querySelectorAll('[role="tab"]').length, last: [...c.querySelectorAll(".hc-col")].at(-1)?.dataset.day }; });
-      assert.deepEqual([cols.n, cols.tabs], { s: [7, 0], m: [14, 2], l: [30, 3] }[form("token")], "a week Small, two weeks and two tabs Medium, thirty days and every tab Large");
+      assert.deepEqual([cols.n, cols.tabs], { s: [7, 0], m: [7, 3], l: [7, 3] }[form("token")], "a week at every size; the three tabs Medium and Large");
       assert.ok(cols.on >= cols.n, "its columns are filled from the report"); assert.equal(cols.last, today.date, "the last column is today");
       // Recent: the reply nobody saw is first, in bold, marked New; then the newest of Work and Chat.
       assert.match(text("recent"), form("recent") === "s" ? /New/ : /The totals now round half up/);
@@ -437,6 +442,7 @@ test("Token usage: a column inks under the pointer and the arrow keys, with its 
     assert.ok(n.line, "a hairline drops through it");
     const d = days.at(-5), total = d.input_tokens + d.output_tokens;
     assert.match(n.tip, new RegExp(`${(total / 1e6).toFixed(2)}M tokens`), `its tooltip says the day's own number (${n.tip})`);
+    assert.match(n.tip, /tokens · In [\d.]+[KM] · Out [\d.]+[KM]/, `and the day's tokens in two (${n.tip})`);
     assert.ok(!grey(n.ink), `the inked column is the accent (${n.ink})`);
     await p.mouse.move(2, 2); await x.rest();
     assert.equal((await now()).hot, "", "leaving clears it");
@@ -448,8 +454,8 @@ test("Token usage: a column inks under the pointer and the arrow keys, with its 
     assert.equal((await now()).hot, "", "Escape clears it");
     assert.equal((await x.grid()).open, null);
     // Tabs: the arrows move between them, and the board counts the new thing.
-    const sum = (f) => days.slice(-30).reduce((a, r) => a + f(r), 0);
-    assert.equal(n.total, `${(sum((r) => r.input_tokens + r.output_tokens) / 1e6).toFixed(1)}M`);
+    const sum = (f) => days.slice(-7).reduce((a, r) => a + f(r), 0);         // the last 7 days, the card's one span
+    assert.equal(n.total, `${(sum((r) => r.input_tokens + r.output_tokens) / 1e6).toFixed(2)}M`);
     await p.focus(`${sel} [role="tab"][data-metric="tokens"]`); await p.keyboard.press("ArrowRight"); await x.rest(900);
     n = await now();
     assert.equal(n.tab, "requests"); assert.equal(n.total, sum((r) => r.requests).toLocaleString("en-US")); assert.equal(n.badge, "Requests");

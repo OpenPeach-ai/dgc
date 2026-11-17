@@ -45,7 +45,7 @@
     pips: { name: "Pips", line: "Core first, then the others and what waits", group: "Lists" },
     widgets: { name: "Widgets", line: "The widgets made for you, one at a time", group: "Made for you", large: true },
     artifacts: { name: "Artifacts", line: "Pages, documents, slides, sheets and dashboards", group: "Made for you", large: true },
-    token: { name: "Token usage", line: "Tokens, requests and cache, day by day", group: "Usage and start", large: true },
+    token: { name: "Token usage", line: "Tokens, requests and cache, the last 7 days", group: "Usage and start", large: true },
     quick: { name: "Quick start", line: "New work, chat or Pip", group: "Usage and start" },
     folders: { name: "Folders", line: "Your Work folders, each a tile", group: "Usage and start", large: true },
     clock: { name: "Clock", line: "The time here, and in up to three more cities", group: "Everyday" },
@@ -132,14 +132,20 @@
     const p = 10 ** Math.floor(Math.log10(max)), m = max / p;
     return (([1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((s) => s >= m - 1e-9)) || 10) * p;
   }
+  /** Tokens in two: what was sent (input) and what came back (output), "In 1.52M · Out 320K". */
+  const splitWords = (ds) => `In ${compact(ds.reduce((a, d) => a + d.input, 0))} · Out ${compact(ds.reduce((a, d) => a + d.output, 0))}`;
+  // (In a tile: two parts, so a narrow tile puts Out under In instead of cutting it short.)
+  const splitParts = (ds) => `<span>In ${compact(ds.reduce((a, d) => a + d.input, 0))}</span><span>Out ${compact(ds.reduce((a, d) => a + d.output, 0))}</span>`;
+  // The card counts one span, the last 7 days, at every size (his call, 17 Nov: "lets just show there for 7 Days Range").
+  const TOKEN_DAYS = 7;
   const METRICS = {
     tokens: { name: "Tokens", unit: "tokens", of: (d) => d.input + d.output, total: (ds) => ds.reduce((a, d) => a + d.input + d.output, 0), say: compact,
-      icon: '<path d="M4 18l5-6 4 3 7-9"/>' },
+      info: (ds) => splitWords(ds), icon: '<path d="M4 18l5-6 4 3 7-9"/>' },
     requests: { name: "Requests", unit: "requests", of: (d) => d.requests, total: (ds) => ds.reduce((a, d) => a + d.requests, 0), say: (n) => Math.round(n).toLocaleString("en-US"),
-      icon: '<path d="M4 7h16M4 12h10M4 17h6"/>' },
-    // Cache saved: of what was sent, the share that came from the cache.
+      info: (ds) => `${Math.round(ds.reduce((a, d) => a + d.requests, 0) / Math.max(1, ds.length)).toLocaleString("en-US")} a day`, icon: '<path d="M4 7h16M4 12h10M4 17h6"/>' },
+    // Cache saved: of what was sent, the share that came from the cache; under it, how many tokens that was.
     cache: { name: "Cache saved", unit: "from the cache", of: (d) => (d.input ? (d.cached / d.input) * 100 : 0), total: (ds) => { const sent = ds.reduce((a, d) => a + d.input, 0); return sent ? (ds.reduce((a, d) => a + d.cached, 0) / sent) * 100 : 0; },
-      say: (n) => `${Math.round(n)}%`, share: true, icon: '<path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5"/>' },
+      info: (ds) => `${compact(ds.reduce((a, d) => a + d.cached, 0))} cached`, say: (n) => `${Math.round(n)}%`, share: true, icon: '<path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5"/>' },
   };
   // The weather's conditions as a small drawing (WMO weather codes, as Open-Meteo gives them), and in a word.
   function wx(code, day = true, size = 22) {
@@ -174,7 +180,7 @@
     let usage = null, usageAt = 0, usageStale = false, usageTimer = 0, weather = null, weatherAt = 0, weatherAsked = 0, weatherWait = 30 * 60000, weatherRetried = "";
     // What the Library lists, for the Widgets and Artifacts cards: null until the host has said; when each was asked.
     const made = { widgets: null, artifacts: null }, madeAt = { widgets: 0, artifacts: 0 };
-    const ui = { open: TYPES.includes(kept?.()?.open) ? kept().open : "", arranging: false, lifted: "", token: { metric: "tokens", hot: "", range: "30d" }, weatherEdit: false };
+    const ui = { open: TYPES.includes(kept?.()?.open) ? kept().open : "", arranging: false, lifted: "", token: { metric: "tokens", hot: "" }, weatherEdit: false };
     let filling = false, library = null, libraryAdding = "", pending = 0, drag = null, liftedFrom = null, focusNext = "";
     host.classList.add("dgc-home");
     host.innerHTML = '<div class="hc-head"></div><div class="hc-notes"></div><div class="hc-grid" data-form="s"></div><div class="hc-open" hidden></div><div class="hc-pantry" hidden></div><p class="hc-live" role="status" aria-live="polite"></p>';
@@ -208,14 +214,6 @@
       }
       return out;
     }
-    /** The change against the period before, as "+12.0%" (a share: in points), and whether it rose. */
-    function change(metric, now, before) {
-      const m = METRICS[metric], a = m.total(now), b = m.total(before);
-      if (!(b > 0)) return null;
-      const by = m.share ? a - b : ((a - b) / b) * 100;
-      return { text: `${by >= 0 ? "+" : "−"}${Math.abs(by).toFixed(1)}${m.share ? " pts" : "%"}`, up: by >= 0 };
-    }
-    const delta = (c, tail = "") => (c ? `<span class="${c.up ? "hc-good" : "hc-bad"}">${c.text}</span>${tail}` : tail ? '<span class="hc-flat">No earlier use to compare</span>' : "");
     function columns(days, metric, rows, top) {
       const m = METRICS[metric];
       return days.map((d) => { const v = m.of(d), lv = v > 0 ? Math.max(1, Math.min(rows, Math.round((v / top) * rows))) : 0;
@@ -224,17 +222,15 @@
     }
     function tokenCard(form) {
       const st = ui.token, none = !usage ? "Counting what DGC used…" : usage.error && !(usage.days || []).length ? usage.error : !(usage.days || []).some((d) => d.input_tokens || d.output_tokens || d.requests) ? "No use yet. What DGC uses shows here, day by day." : "";
+      // Small: the week's tokens, its days as a strip, and the tokens in two (sent, and what came back).
       if (form === "s") {
-        const week = series(7), today = week[6], yesterday = week[5], t = today.input + today.output, y = yesterday.input + yesterday.output;
-        const by = y > 0 ? Math.round(((t - y) / y) * 100) : null, top = nice(Math.max(...week.map(METRICS.tokens.of)));
-        return `<span class="hc-lbl">Tokens today${by === null || none ? "" : `<span class="${by >= 0 ? "hc-good" : "hc-bad"}">${by >= 0 ? "+" : "−"}${Math.abs(by)}%</span>`}</span><span class="hc-big">${none ? "0" : compact(t)}</span><span class="hc-grow"></span>`
-          + (none ? `<span class="hc-sub">${esc(usage ? "No use yet" : "Counting…")}</span>` : `<span class="hc-strip" aria-hidden="true">${columns(week, "tokens", 5, top)}</span><span class="hc-sub">last 7 days</span>`);
+        const week = series(TOKEN_DAYS), t = METRICS.tokens.total(week), top = nice(Math.max(...week.map(METRICS.tokens.of)));
+        return `<span class="hc-lbl">Tokens · 7 days</span><span class="hc-big">${none ? "0" : compact(t)}</span><span class="hc-grow"></span>`
+          + (none ? `<span class="hc-sub">${esc(usage ? "No use yet" : "Counting…")}</span>` : `<span class="hc-strip" aria-hidden="true">${columns(week, "tokens", 5, top)}</span><span class="hc-sub">${esc(splitWords(week))}</span>`);
       }
-      const n = form === "m" ? 14 : form === "full" && st.range === "7d" ? 7 : 30, tabs = form === "m" ? ["tokens", "requests"] : ["tokens", "requests", "cache"];
-      const metric = tabs.includes(st.metric) ? st.metric : "tokens", m = METRICS[metric], days = series(n), before = series(n, n);
-      const span = form === "full" ? `prior ${n}d` : n === 14 ? "the 2 weeks before" : "the 30 days before";
-      const title = `<div class="hc-ch"><span class="hc-tx"><span class="hc-ct">Token usage</span><span class="hc-cap">Daily · last ${n} days</span></span>`
-        + (form === "full" ? `<span class="hc-seg" role="group" aria-label="Range">${["7d", "30d"].map((r) => `<button type="button" data-range="${r}" aria-pressed="${st.range === r}"${st.range === r ? ' class="on"' : ""}>${r}</button>`).join("")}</span>` : `<span class="hc-badge">${m.name}</span>`) + "</div>";
+      const n = TOKEN_DAYS, tabs = ["tokens", "requests", "cache"];
+      const metric = tabs.includes(st.metric) ? st.metric : "tokens", m = METRICS[metric], days = series(n);
+      const title = `<div class="hc-ch"><span class="hc-tx"><span class="hc-ct">Token usage</span><span class="hc-cap">Daily · last ${n} days</span></span><span class="hc-badge">${m.name}</span></div>`;
       if (none) return `${title}<p class="hc-quiet">${esc(none)}</p>`;
       const models = usage.models || [], shownModels = form === "m" ? models.slice(0, 3) : form === "l" ? models.slice(0, 5) : [], restModels = Math.max(0, (Number(usage.modelCount) || models.length) - shownModels.length);
       const top = m.share ? 100 : nice(Math.max(...days.map(m.of))), rows = form === "m" ? 8 : form === "l" && shownModels.length ? 6 : 10;
@@ -242,15 +238,17 @@
       const chart = `<div class="hc-chart"><div class="hc-y" aria-hidden="true"><span style="top:0%">${tick(top)}</span><span style="top:50%">${tick(top / 2)}</span><span style="top:100%">0</span></div>`
         + `<div class="hc-plot" tabindex="0" role="img" data-fk="plot" aria-label="${m.name} per day, last ${n} days. The arrow keys read a day."><span class="hc-grd" style="top:0%"></span><span class="hc-grd" style="top:50%"></span>${columns(days, metric, rows, top)}<span class="hc-line" hidden></span><div class="hc-tip" hidden></div></div>`
         + `<div class="hc-xs" aria-hidden="true"><span>${SHORT.format(dayOf(days[0].date))}</span><span>${SHORT.format(dayOf(days[Math.floor(n / 2)].date))}</span><span>Today</span><span class="hc-pin" hidden></span></div></div>`;
-      const kt = `<div class="hc-kt hc-kt-${tabs.length}${form === "full" ? " hc-kt-wrap" : ""}" role="tablist" aria-label="What is counted">${tabs.map((id) => { const k = METRICS[id], c = change(id, days, before), on = id === metric;
-        return `<button type="button" role="tab" class="hc-kb${on ? " on" : ""}" data-metric="${id}" data-fk="tab:${id}" aria-selected="${on}" tabindex="${on ? 0 : -1}"><span class="hc-kl">${form === "m" ? `<span class="hc-ki">${svg(k.icon, 11, 2.4)}</span>` : ""}${k.name}</span><span class="hc-kv">${k.say(k.total(days))}</span><span class="hc-kd">${delta(c, form === "l" ? "" : ` vs ${span}`)}</span></button>`; }).join("")}</div>`;
-      // The models of the last thirty days, with their provider and share: three on a Medium card, five on a Large one,
+      // The three counts, each a tab that puts its days on the board: its total for the week, and under it what it is
+      // made of (tokens in and out, requests a day, the tokens the cache gave). Nothing is compared with another week.
+      const kt = `<div class="hc-kt hc-kt-${tabs.length}${form === "full" ? " hc-kt-wrap" : ""}" role="tablist" aria-label="What is counted">${tabs.map((id) => { const k = METRICS[id], on = id === metric;
+        return `<button type="button" role="tab" class="hc-kb${on ? " on" : ""}" data-metric="${id}" data-fk="tab:${id}" aria-selected="${on}" tabindex="${on ? 0 : -1}"><span class="hc-kl">${k.name}</span><span class="hc-kv">${k.say(k.total(days))}</span><span class="hc-kd">${id === "tokens" ? splitParts(days) : esc(k.info(days))}</span></button>`; }).join("")}</div>`;
+      // The models of the last 7 days, with their provider and share: three on a Medium card, five on a Large one,
       // the rest as "+N more"; and the way to Settings' own Token Usage page.
       const link = '<button type="button" class="hc-lnk hc-usage-link" title="Open Settings on Token Usage: every model, provider and day">Open Token Usage</button>';
-      const named = form === "full" ? "" : `<div class="hc-models-wrap">${shownModels.length ? `${form === "m" ? '<span class="hc-bh">By model · last 30 days</span>' : ""}<div class="hc-models">${shownModels.map(modelLine).join("")}</div>` : ""}`
-        + `<div class="hc-mfoot">${restModels ? `<span class="hc-models-more" title="${restModels} more ${restModels === 1 ? "model" : "models"} in the last 30 days">+${restModels} more</span>` : ""}<span class="hc-sp"></span>${link}</div></div>`;
+      const named = form === "full" ? "" : `<div class="hc-models-wrap">${shownModels.length ? `${form === "m" ? '<span class="hc-bh">By model · last 7 days</span>' : ""}<div class="hc-models">${shownModels.map(modelLine).join("")}</div>` : ""}`
+        + `<div class="hc-mfoot">${restModels ? `<span class="hc-models-more" title="${restModels} more ${restModels === 1 ? "model" : "models"} in the last 7 days">+${restModels} more</span>` : ""}<span class="hc-sp"></span>${link}</div></div>`;
       const top5 = models.slice(0, 5), most = Math.max(1, ...top5.map((r) => r.tokens));
-      const by = form === "full" ? `${top5.length ? `<div class="hc-by"><span class="hc-bh">By model · last 30 days</span>${top5.map((r) => `<div class="hc-mr"><span class="hc-mt"><span class="hc-mn">${esc(r.model || r.name)}${r.provider ? `<span class="hc-mp"> · ${esc(r.provider)}</span>` : ""}</span><span class="hc-mv">${compact(r.tokens)}${Number.isFinite(r.share) ? ` · ${r.share}%` : ""}</span></span><span class="hc-track"><span class="hc-fill" style="width:${Math.max(2, Math.round((r.tokens / most) * 100))}%"></span></span></div>`).join("")}</div>` : ""}<div class="hc-mfoot"><span class="hc-sp"></span>${link}</div>` : "";
+      const by = form === "full" ? `${top5.length ? `<div class="hc-by"><span class="hc-bh">By model · last 7 days</span>${top5.map((r) => `<div class="hc-mr"><span class="hc-mt"><span class="hc-mn">${esc(r.model || r.name)}${r.provider ? `<span class="hc-mp"> · ${esc(r.provider)}</span>` : ""}</span><span class="hc-mv">${compact(r.tokens)}${Number.isFinite(r.share) ? ` · ${r.share}%` : ""}</span></span><span class="hc-track"><span class="hc-fill" style="width:${Math.max(2, Math.round((r.tokens / most) * 100))}%"></span></span></div>`).join("")}</div>` : ""}<div class="hc-mfoot"><span class="hc-sp"></span>${link}</div>` : "";
       return title + chart + named + kt + by;
     }
     /** A model on one line: its name, its provider, its share ("qwen3:8b · Ollama · 62%"); a long name gives way, never the share. */
@@ -560,7 +558,7 @@
       const day = series(cols.length).find((x) => x.date === ui.token.hot) || { input: 0, output: 0, cached: 0, requests: 0 };
       const x = ((at + 0.5) / cols.length) * 100;
       line.style.left = `${x}%`;
-      const words = `${m.say(m.of(day))} ${m.unit}`;
+      const words = `${m.say(m.of(day))} ${m.unit}${metric === "tokens" ? ` · ${splitWords([day])}` : ""}`;
       // The day's top models, when the report names them (today's always; another day's when the ledger says).
       const named = (Array.isArray(day.models) ? day.models : []).slice(0, 3).map(modelSays);
       tip.innerHTML = `<div class="hc-tip-d">${DAY.format(dayOf(ui.token.hot))}</div><div class="hc-tip-v"><i></i>${words}</div>${named.map((line) => `<div class="hc-tip-m">${esc(line)}</div>`).join("")}`;
@@ -902,9 +900,8 @@
       if (t.closest(".dgc-hub-retry")) { act?.("retry"); return; }
       if (!card) return;
       if (ui.arranging && card.parentNode === grid) { if (t.closest(".hc-x")) remove(id); e.preventDefault(); return; }
-      const row = t.closest("[data-open]"), tab = t.closest("[data-tab]"), range = t.closest("[data-range]"), unit = t.closest("[data-unit]"), metric = t.closest('[role="tab"][data-metric]');
+      const row = t.closest("[data-open]"), tab = t.closest("[data-tab]"), unit = t.closest("[data-unit]"), metric = t.closest('[role="tab"][data-metric]');
       if (metric) { chooseMetric(metric.dataset.metric, false); return; }
-      if (range) { ui.token.range = range.dataset.range; focusNext = `.hc-open [data-range="${range.dataset.range}"]`; cancelAnimationFrame(pending); drawNow(); return; }
       if (unit) { setting("weather", { unit: unit.dataset.unit }); focusNext = `${ui.open ? ".hc-open" : ".hc-grid"} .hc-weather [data-unit="${unit.dataset.unit}"]`; draw(); return; }
       if (t.closest(".hc-city-edit")) {
         // The field in this card when it has the room (opened, or a Medium card as tall as it needs); else the card opens whole at it.

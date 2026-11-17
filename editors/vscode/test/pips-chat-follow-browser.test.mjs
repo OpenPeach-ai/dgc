@@ -183,7 +183,7 @@ test("a reader who scrolled away is left there: the pill says New when more arri
   } finally { await close(); }
 });
 
-test("the model menu opens over the Latest pill, so its last rows can be read and clicked", async (t) => {
+test("the model picker opens over the Latest pill and the box: nothing of the page shows through it or takes its clicks", async (t) => {
   if (skipOrFail(t)) return;
   const { p, errors, close } = await open({ start: CHAT });
   try {
@@ -192,15 +192,17 @@ test("the model menu opens over the Latest pill, so its last rows can be read an
     assert.notEqual((await view(p)).pill, "", "the pill is showing");
     const box = await p.locator("#pip-to-latest").boundingBox();
     await p.click("#chat-model");
-    await p.waitForFunction(() => { const m = document.querySelector(".composer-menu, .composer-model-menu, [data-composer-panel]"); return m && m.getBoundingClientRect().height > 0; });
+    await p.waitForFunction(() => { const m = document.querySelector(".dgc-mp"); return m && m.getBoundingClientRect().height > 0; });
     const onTop = await p.evaluate(({ x, y }) => {
-      const hit = document.elementFromPoint(x, y);
-      const menu = document.querySelector(".composer-menu, .composer-model-menu, [data-composer-panel]");
-      return { pill: !!hit?.closest("#pip-to-latest"), menuBottom: menu.getBoundingClientRect().bottom, menuTop: menu.getBoundingClientRect().top };
+      const hit = document.elementFromPoint(x, y), composer = document.querySelector(".pip-composer").getBoundingClientRect(), over = document.elementFromPoint(composer.left + composer.width / 2, composer.top + composer.height / 2);
+      return { pill: !!hit?.closest("#pip-to-latest"), layer: !!hit?.closest(".dgc-mp-layer"), box: !!over?.closest(".dgc-mp-layer") };
     }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
-    if (onTop.menuTop <= box.y && box.y <= onTop.menuBottom) assert.equal(onTop.pill, false, `the pill paints over the menu: ${JSON.stringify(onTop)}`);
+    assert.deepEqual(onTop, { pill: false, layer: true, box: true }, "the picker's layer is over the pill and over the box");
+    // The box and its own menus (the context window, Add) still stack above the pill.
     const stacks = await p.evaluate(() => [getComputedStyle(document.querySelector("#pip-to-latest")).zIndex, getComputedStyle(document.querySelector(".pip-composer")).zIndex].map(Number));
     assert.ok(stacks[0] < stacks[1], `the box and its menus stack above the pill: ${stacks}`);
+    await p.keyboard.press("Escape");
+    assert.equal(await p.locator(".dgc-mp-layer").count(), 0);
     assert.deepEqual(errors, []);
   } finally { await close(); }
 });

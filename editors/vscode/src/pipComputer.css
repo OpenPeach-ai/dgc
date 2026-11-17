@@ -3,7 +3,7 @@
  --line:var(--vscode-panel-border,rgba(128,128,128,.28));--muted:var(--vscode-descriptionForeground,#8b8b8b);--surface:var(--vscode-sideBar-background,rgba(127,127,127,.06));
  --mono:var(--vscode-editor-font-family,ui-monospace,SFMono-Regular,Menlo,monospace)}
 *{box-sizing:border-box}
-body{margin:0;height:100vh;background:var(--vscode-editor-background)}
+body{margin:0;padding:0;height:100vh;background:var(--vscode-editor-background)}
 #app{display:flex;flex-direction:column;height:100%;min-height:0}
 button{font:inherit;color:var(--vscode-button-foreground,#fff);background:var(--accent);border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}

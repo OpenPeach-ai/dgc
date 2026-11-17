@@ -16,7 +16,7 @@ const out = resolve(process.argv[2] || "images-shots");
 mkdirSync(out, { recursive: true });
 const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
 const css = readStylesheet(here + "/../media/main.css");
-const mainJs = readFileSync(here + "/../media/shared/effort.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/icons.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
+const mainJs = readFileSync(here + "/../media/shared/modelpicker.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/icons.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
 const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
   format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
 const codicon = readFileSync(here + "/../media/codicon.css", "utf8")

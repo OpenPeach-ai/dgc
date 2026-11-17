@@ -185,11 +185,16 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-kt { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: auto -12px -12px; border-top: 1px solid var(--hair); }
 .hc-kt.hc-kt-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .hc-kt.hc-kt-wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; }
-.hc-kb { appearance: none; position: relative; min-width: 0; margin: 0; padding: 10px 12px 12px; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color var(--dur-hover) var(--ease-out); }
+.hc-kb { appearance: none; position: relative; min-width: 0; margin: 0; padding: 10px 12px 12px; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color var(--dur-hover) var(--ease-out);
+  display: flex; flex-direction: column; justify-content: flex-start; }   /* a button centres what it holds: the tiles align at their tops, a taller one (In over Out) grows down */
 .hc-kb:hover { background: var(--wash); }
 .hc-kb + .hc-kb { box-shadow: -1px 0 0 var(--hair); }
 .hc-kt-wrap .hc-kb { box-shadow: inset 0 -1px 0 var(--hair); }
 .hc-kt-wrap .hc-kb:nth-child(2n) { box-shadow: inset 1px 0 0 var(--hair), inset 0 -1px 0 var(--hair); }
+/* Three tiles in two columns: the third takes the whole row, never half of it beside an empty half. */
+.hc-kt-wrap .hc-kb:last-child:nth-child(odd) { grid-column: 1 / -1; }
+/* The narrowest side bars: one tile to a row, so a tile's words are never cut. */
+@media (max-width: 260px) { .hc-kt.hc-kt-wrap { grid-template-columns: minmax(0, 1fr); } .hc-kt-wrap .hc-kb:nth-child(2n) { box-shadow: inset 0 -1px 0 var(--hair); } }
 .hc-kb.on::before { content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--accent); }
 .hc-kb:focus-visible { outline-offset: -2px; }
 .hc-kl { display: flex; align-items: center; gap: 6px; overflow: hidden; color: var(--hc-quiet); font-size: var(--t-xs); text-overflow: ellipsis; white-space: nowrap; }
@@ -198,6 +203,8 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-kv { display: block; margin-top: 8px; color: var(--hc-quiet); font: var(--w-semi) 20px/1 var(--mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .hc-kb.on .hc-kv { color: var(--text-strong); }
 .hc-kd { display: block; min-height: 13px; margin-top: 6px; overflow: hidden; color: var(--hc-quiet); font-size: 10.5px; line-height: 13px; text-overflow: ellipsis; white-space: nowrap; }
+/* Tokens' In and Out: side by side, or Out under In where the tile is too narrow for both (never cut short). */
+.hc-kd:has(> span) { display: flex; flex-wrap: wrap; column-gap: 8px; white-space: nowrap; text-overflow: clip; }
 .hc-card[data-form="l"] .hc-kb { padding: 9px 10px 11px; }
 .hc-card[data-form="l"] .hc-kv { margin-top: 6px; font-size: 15px; }
 .hc-card[data-form="l"] .hc-kd { margin-top: 5px; font-size: 10px; }
@@ -210,7 +217,7 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-mr { display: flex; flex-direction: column; gap: 4px; }
 .hc-mt { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; }
 .hc-mn { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
-.hc-mv { color: var(--text); font: var(--w-med) 11px/1 var(--mono); }
+.hc-mv { flex: none; color: var(--text); font: var(--w-med) 11px/1 var(--mono); white-space: nowrap; }   /* "19.7M · 55%" stays one piece; the name gives way */
 .hc-mp { color: var(--hc-quiet); }
 /* The models under the chart: a name, its provider, its share; the name is the one cut short. */
 .hc-models-wrap { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
@@ -485,7 +492,6 @@ dialog.hc-library:not([open]) { display: none; }
 /* Two Small cards a row in a narrow side bar: the label keeps its words, and the change beside "Tokens today" (it is on
    the opened card) gives way rather than being cut in half. */
 @media (min-width: 201px) and (max-width: 260px) {
-  .hc-grid:not([data-form="l"]) > .hc-card[data-form="s"] .hc-lbl > .hc-good { display: none; }
 }
 /* The Cards dialog in the narrowest side bar: one card to a row, and a row's words over its buttons. */
 @media (max-width: 260px) {

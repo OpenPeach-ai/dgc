@@ -33,26 +33,33 @@ const skipOrFail = (t) => {
 
 test("every menu in Work, ChatDGC and a Pip's chat is the shared menu", () => {
   const panel = read("src/panel.ts");
-  for (const id of ["addmenu", "modemenu", "outputmenu", "modelmenu", "ctxmenu", "cachemenu"]) {
+  for (const id of ["addmenu", "modemenu", "outputmenu", "ctxmenu", "cachemenu"]) {
     assert.match(panel, new RegExp(`id="${id}" class="[^"]*\\bdgc-menu\\b`), `Work's #${id}`);
   }
   const chat = read("src/chatdgc.ts");
-  for (const id of ["cd-model-menu", "cd-output-menu", "cd-folder-menu"]) {
+  for (const id of ["cd-output-menu", "cd-folder-menu"]) {
     assert.match(chat, new RegExp(`id="${id}" class="[^"]*\\bdgc-menu\\b`), `ChatDGC's #${id}`);
   }
   const pips = read("src/pipsClient.js");
-  for (const kind of ["composer-model-menu composer-reasoning", "composer-model-menu composer-context-menu", "pip-routines-popover"]) {
+  for (const kind of ["composer-model-menu composer-context-menu", "pip-routines-popover"]) {
     assert.match(pips, new RegExp(`class="${kind} dgc-menu\\b`), `a Pip's ${kind}`);
   }
   const pageMenus = pips.match(/class="tabs-menu[^"]*"/g) || [];
   assert.ok(pageMenus.length >= 3 && pageMenus.every((c) => c === 'class="tabs-menu dgc-menu dgc-menu-rows"'), "a Pip's page menus");
-  for (const row of ["composer-model-option", "composer-model-action"]) {
-    assert.ok(!new RegExp(`class="${row}(?! dgc-menu-row)[ "]`).test(pips), `every ${row} is a shared row`);
-  }
+  // The model picker is one module for all three (media/shared/modelpicker.js), and its rows are the shared menu's rows:
+  // none of the three keeps a model menu of its own.
+  const picker = read("media/shared/modelpicker.js");
+  assert.match(picker, /class="dgc-mp dgc-dialog dgc-menu"/, "the picker's rows sit in a shared menu");
+  assert.match(picker, /class="dgc-menu-row dgc-mp-row/, "and are shared rows");
+  assert.match(read("media/main.js"), /MP\.open\(document\.body, modelPickerView\(\)/, "Work opens it");
+  assert.match(read("media/chatdgc.js"), /MP\.open\(document\.body, pickerView\(\)/, "ChatDGC opens it");
+  assert.match(pips, /globalThis\.DgcModelPicker\.open\(host,pipPickerView\(\)/, "a Pip's chat opens it");
+  assert.doesNotMatch(panel, /id="modelmenu"/); assert.doesNotMatch(chat, /id="cd-model-menu"/);
+  assert.doesNotMatch(pips, /composer-model-menu composer-reasoning|composer-model-option|chat-model-summary/, "no model menu of a Pip's own");
 });
 
 test("no menu keeps a look of its own: surface, corner, shadow and rows are the shared menu's", () => {
-  const surfaces = [["media/main.css", /(^|\n)\.cmenu \{[^}]*\}/], ["media/chatdgc.css", /\.cd-model-menu \{[^}]*\}/],
+  const surfaces = [["media/main.css", /(^|\n)\.cmenu \{[^}]*\}/],
     ["media/chatdgc.css", /\.cd-output-menu \{[^}]*\}/], ["src/pips.css", /\.composer-model-menu\{[^}]*\}/],
     ["src/pips.css", /\.pip-routines-popover\{[^}]*\}/], ["src/pips.css", /\.tabs-menu\{position[^}]*\}/]];
   for (const [file, rule] of surfaces) {
@@ -183,7 +190,7 @@ test("Work's + menu: three groups with headings, key caps for the keys, plain wo
   } finally { await s.page.close(); }
 });
 
-test("ChatDGC's and a Pip's menus draw exactly as Work's, and ChatDGC's model menu answers the same keys", async (t) => {
+test("ChatDGC's and a Pip's menus draw exactly as Work's, and ChatDGC's model picker has the same rows and answers a list's keys", async (t) => {
   if (skipOrFail(t)) return;
   const work = await openWorkTab(browser, { width: 900, height: 760 });
   let workLook;
@@ -196,19 +203,20 @@ test("ChatDGC's and a Pip's menus draw exactly as Work's, and ChatDGC's model me
   try {
     await chat.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
     await chat.send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "glm-5.3:cloud", "qwen3.6:cloud"], current: "glm-5.3:cloud" });
+    // Its model picker (media/shared/modelpicker.js): the same rows, and the keys a list answers.
     await chat.page.click("#cd-model-pill");
-    const chatLook = await chat.page.evaluate(LOOK, ["#cd-model-menu", ".dgc-menu-row"]);
-    assert.deepEqual(chatLook, workLook, "ChatDGC's model menu is Work's menu");
-    const focused = () => chat.page.evaluate(() => document.activeElement?.textContent?.trim());
-    const order = await chat.page.evaluate(() => [...document.querySelectorAll("#cd-model-menu .dgc-menu-row")].map((r) => r.textContent.trim()));
+    const rowLook = await chat.page.evaluate(() => { const r = document.querySelector(".dgc-mp .dgc-mp-row:not([aria-selected='true'])"), s = getComputedStyle(r); return { rowRadius: s.borderTopLeftRadius, rowFont: s.fontSize }; });
+    assert.deepEqual(rowLook, { rowRadius: workLook.rowRadius, rowFont: workLook.rowFont }, "the picker's rows are the shared menu's rows");
+    const focused = () => chat.page.evaluate(() => document.activeElement?.querySelector?.(".dgc-mp-name")?.textContent || document.activeElement?.className);
+    const order = await chat.page.evaluate(() => [...document.querySelectorAll(".dgc-mp-list .dgc-mp-name")].map((r) => r.textContent));
     const opened = await focused();
     assert.match(opened, /glm-5\.3/, "it opens on the chosen model");
     await chat.page.keyboard.press("ArrowDown");
-    assert.equal(await focused(), order[(order.indexOf(opened) + 1) % order.length], "Down moves to the next row (it answered no arrows before)");
+    assert.equal(await focused(), order[order.indexOf(opened) + 1], "Down moves to the next row");
     await chat.page.keyboard.press("ArrowUp");
     assert.equal(await focused(), opened, "and Up back");
     await chat.page.keyboard.press("Escape");
-    assert.deepEqual(await chat.page.evaluate(() => [document.getElementById("cd-model-menu").hidden, document.activeElement.id]), [true, "cd-model-pill"]);
+    assert.deepEqual(await chat.page.evaluate(() => [!document.querySelector(".dgc-mp-layer"), document.activeElement.id]), [true, "cd-model-pill"]);
     await chat.send({ type: "artifacts", offered: OFFER });
     await chat.page.click("#cd-output");
     assert.deepEqual(await chat.page.evaluate(LOOK, ["#cd-output-menu", ".dgc-menu-row"]), workLook, "and so is its Artifact menu");
@@ -231,12 +239,12 @@ test("ChatDGC's and a Pip's menus draw exactly as Work's, and ChatDGC's model me
     const css = readStylesheet(TOKENS_CSS) + readStylesheet(new URL("../media/shared/menu.css", import.meta.url)) + readStylesheet(new URL("../src/pips.css", import.meta.url));
     await pip.setContent(`<style>${css}</style><style>:root{--vscode-font-family:system-ui,sans-serif;--vscode-editor-font-family:ui-monospace,monospace;${THEMES["dark-modern"]}}</style>
       <body class="vscode-dark pip-app-root"><div class="pip-composer" style="position:relative;margin:420px 40px 0;width:400px">
-      <div class="composer-model-menu composer-reasoning dgc-menu from-right" role="dialog"><div class="composer-model-list"><p class="composer-list-title dgc-menu-head">Model</p>
-      <div class="composer-model-options" role="listbox"><button type="button" class="composer-model-option dgc-menu-row" role="option" aria-selected="true"><span class="composer-model-check dgc-menu-icon"></span><span class="composer-model-row">glm-5.3:cloud</span></button>
-      <button type="button" class="composer-model-option dgc-menu-row" role="option" aria-selected="false"><span class="composer-model-check dgc-menu-icon"></span><span class="composer-model-row">qwen3.6:cloud</span></button></div></div></div></div>
+      <div class="composer-add-menu dgc-menu" role="menu"><div class="dgc-menu-head">Add to the message</div>
+      <button type="button" class="dgc-menu-row" role="menuitem" aria-checked="true"><span class="dgc-menu-icon"></span><span class="dgc-menu-label">Upload pictures and files</span></button>
+      <button type="button" class="dgc-menu-row" role="menuitem"><span class="dgc-menu-icon"></span><span class="dgc-menu-label">Take a screenshot</span></button></div></div>
       <details class="pip-menu" open style="margin:20px 40px"><summary>More</summary><div class="tabs-menu dgc-menu dgc-menu-rows"><button type="button">Workspace context</button><button type="button">Notifications</button></div></details></body>`);
-    const pipLook = await pip.evaluate(LOOK, [".composer-model-menu", ".composer-model-option"]);
-    assert.deepEqual(pipLook, { ...workLook, menuPad: pipLook.menuPad }, "a Pip's model menu is Work's menu");
+    const pipLook = await pip.evaluate(LOOK, [".composer-add-menu", ".dgc-menu-row"]);
+    assert.deepEqual(pipLook, { ...workLook, menuPad: pipLook.menuPad }, "a Pip's Add menu is Work's menu");
     assert.equal(pipLook.menuPad, workLook.menuPad, "with the same padding");
     const pageLook = await pip.evaluate(LOOK, [".tabs-menu", "button"]);
     assert.deepEqual(pageLook, workLook, "and so is a Pip's page menu");

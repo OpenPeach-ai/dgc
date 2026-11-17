@@ -94,13 +94,18 @@ def available(key: str) -> str:
 def offered() -> list[dict]:
     """The subscriptions a Pip can use here, for its model picker: installed, signed in, locked down. ``models``: that
     CLI's model names, the same list Work and ChatDGC offer (subscriptions.status), from which a Pip may choose one."""
-    hints = {}
+    hints, more = {}, {}
     try:
         from .subscriptions import status
-        hints = {row["key"]: [m for m in row.get("model_hints") or [] if isinstance(m, str)][:32] for row in status()}
+        rows = status()
+        hints = {row["key"]: [m for m in row.get("model_hints") or [] if isinstance(m, str)][:32] for row in rows}
+        # Claude Code's rows in the picker: what each nickname last ran as, and the full names a user can pin.
+        more = {row["key"]: {"versions": dict(row["model_versions"]), "fixed": list(row.get("fixed_models") or [])[:32]}
+                for row in rows if isinstance(row.get("model_versions"), dict)}
     except Exception:                                   # noqa: BLE001 -- the list never fails for its model names
-        pass
-    return [{"engine": key, "name": name(key), "models": hints.get(key, [])} for key in ENGINES if not available(key)]
+        more = {}
+    return [{"engine": key, "name": name(key), "models": hints.get(key, []), **more.get(key, {})}
+            for key in ENGINES if not available(key)]
 
 
 def route(config, choice) -> dict | None:
@@ -632,6 +637,8 @@ class Turn:
         from .redaction import StreamingRedactor
         from .subscriptions import parse_stream_events
         agent = self.agent
+        if self.engine.stream == "claude":
+            self.pieces["asked_model"] = self.brain["model"]   # its session start records what that name ran as
         folder = Path(self.launch["folder"])
         system = agent.messages[0]["content"] if agent.messages and agent.messages[0].get("role") == "system" else ""
         system_file = folder / "instructions.md"

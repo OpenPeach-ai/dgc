@@ -1,0 +1,347 @@
+/* The model picker (media/shared/modelpicker.js): one for Work, ChatDGC and a Pip's chat. Centred over a dim page, as
+   the agent map is (the shared dialog's scrim, lift and arrival: media/shared/dialog.css); its rows are the shared
+   menu's rows (media/shared/menu.css). In a side bar it fills the width but for 16 px each side; in an editor tab it is
+   a panel 432 px (27 rem) wide. Every control here has the button family's corner (--btn-r): the search field, the rail's
+   buttons, the tabs and the thinking levels, which are one segmented control. Nothing is a pill. Tokens from
+   media/shared/tokens.css. */
+.dgc-mp-layer {
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: var(--sp-4, 16px);
+  box-sizing: border-box; overflow: hidden;
+}
+.dgc-menu.dgc-mp {
+  --mp-rail: 44px; container: dgc-mp / inline-size;
+  position: relative; box-sizing: border-box; display: flex; flex-direction: column;
+  /* One size, whatever a connection lists: looking down the rail never moves the rail under the pointer. */
+  width: min(432px, 100%); height: min(512px, 100%); min-height: 0; padding: 0;      /* (27 rem at the editor's 16 px; a Pips tab's root is 13 px) */
+  border-radius: var(--r-dialog); background: var(--raised, var(--surface2)); color: var(--text);
+  font: var(--w-reg) var(--t-base)/1.35 var(--sans); overflow: hidden; outline: 0; text-align: left;
+}
+/* It arrives as a dialog does (a fade and 2% of scale), once: its rows are the shared menu's, and the menu's own
+   arrival (from just below) is not this one's. Drawn again while open, it does not arrive a second time. */
+@media (prefers-reduced-motion: no-preference) {
+  .dgc-mp-layer > .dgc-menu.dgc-mp:not([hidden]) { animation: dgc-dialog-in var(--dur-dialog, 180ms) var(--ease-out, ease-out); transform-origin: center; }
+  .dgc-mp-layer.dgc-still, .dgc-mp-layer.dgc-still > .dgc-menu.dgc-mp:not([hidden]) { animation: none; }
+}
+@media (prefers-reduced-motion: reduce) { .dgc-mp-layer, .dgc-mp-layer > .dgc-menu.dgc-mp { animation: none; } }
+.dgc-mp *, .dgc-mp *::before, .dgc-mp *::after { box-sizing: border-box; }
+.dgc-mp [hidden] { display: none !important; }
+.dgc-mp button { font: inherit; letter-spacing: 0; text-transform: none; }
+.dgc-mp :is(button, input, select):focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+
+/* Main model | Sub-agents: a segmented control across the top. */
+.dgc-mp-tabs { flex: none; display: flex; gap: 2px; margin: 10px 10px 0; padding: 2px; border: 1px solid var(--hair); border-radius: var(--btn-r, 6px); }
+.dgc-mp-tab {
+  appearance: none; flex: 1 1 0; min-width: 0; height: 24px; margin: 0; padding: 0 6px; border: 0;
+  border-radius: max(3px, calc(var(--btn-r, 6px) - 2px)); background: transparent; color: var(--muted-raised, var(--muted));
+  font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dgc-mp-tab:hover { color: var(--text); }
+.dgc-mp-tab[aria-selected="true"] { background: var(--wash); color: var(--text-strong); }
+
+/* The rail and, beside it, the search, the connection's name and its models. */
+.dgc-mp-main { flex: 1 1 auto; min-height: 0; display: flex; }
+.dgc-mp-rail {
+  flex: none; width: var(--mp-rail); display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 0; border-right: 1px solid var(--hair); overflow-y: auto; scrollbar-width: none;
+}
+.dgc-mp-rail::-webkit-scrollbar { display: none; }
+.dgc-mp-conn {
+  appearance: none; position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; margin: 0; padding: 0; border: 1px solid transparent; border-radius: var(--btn-r, 6px);
+  background: transparent; color: var(--text-strong); cursor: pointer;
+  transition: background-color var(--dur-hover) ease, border-color var(--dur-hover) ease;
+}
+.dgc-mp-conn:hover { background: var(--wash); }
+/* The chosen one is raised: its own ground, a hairline and the menu's low lift. */
+.dgc-mp-conn[aria-selected="true"] { background: var(--surface, var(--wash)); border-color: var(--hair-strong); box-shadow: 0 1px 2px rgba(0,0,0,.18); }
+.dgc-mp-conn[aria-disabled="true"] .dgc-mp-mark { opacity: .45; }
+.dgc-mp-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; color: var(--text-strong); }
+.dgc-mp-mark > svg { display: block; width: 18px; height: 18px; }
+.dgc-mp-tile {
+  width: 20px; height: 20px; border-radius: 5px; font: var(--w-semi) 11px/1 var(--sans);
+  background: color-mix(in srgb, hsl(var(--mp-hue, 213) 62% 50%) 24%, transparent);
+  color: color-mix(in srgb, hsl(var(--mp-hue, 213) 70% 50%) 62%, var(--text-strong));
+}
+/* Told apart at a glance: a terminal for a subscription app, a key for an API key, a cloud for hosted Ollama. */
+.dgc-mp-badge {
+  position: absolute; right: -3px; bottom: -3px; display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border: 1px solid var(--hair-strong); border-radius: 4px;
+  background: var(--raised, var(--surface2)); color: var(--muted-raised, var(--muted));
+}
+.dgc-mp-badge > svg { width: 10px; height: 10px; }
+/* The connection in use: a small live mark at its side (the session's own, whichever one is being looked at). */
+.dgc-mp-now { position: absolute; left: -6px; top: 50%; width: 3px; height: 12px; margin-top: -6px; border-radius: 2px; background: var(--accent-text, var(--accent)); }
+.dgc-mp-glyph { flex: none; display: block; width: 14px; height: 14px; }
+
+.dgc-mp-pane { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 10px 8px 6px; }
+.dgc-mp-norail .dgc-mp-pane { padding-left: 10px; }
+.dgc-mp-search {
+  flex: none; display: flex; align-items: center; gap: 6px; height: var(--btn-h, 28px); margin: 0 2px; padding: 0 8px;
+  border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--field, transparent); color: var(--muted-raised, var(--muted));
+}
+.dgc-mp-search:focus-within { border-color: var(--vscode-focusBorder, var(--ring)); }
+.dgc-mp input.dgc-mp-q {
+  flex: 1 1 auto; min-width: 0; height: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; outline: 0; background: transparent;
+  color: var(--text-strong); font: var(--w-reg) var(--t-base)/1 var(--sans); box-shadow: none;
+}
+.dgc-mp input.dgc-mp-q::placeholder { color: var(--faint); }
+.dgc-mp-head { flex: none; display: flex; align-items: baseline; gap: 6px; min-height: 28px; padding: 10px 10px 4px; }
+.dgc-mp-conn-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-semi) var(--t-sm)/1.2 var(--sans); color: var(--text-strong); }
+.dgc-mp-conn-kind { flex: none; font: var(--w-reg) var(--t-xs)/1.2 var(--sans); color: var(--muted-raised, var(--muted)); }
+.dgc-mp-list { flex: 1 1 auto; min-width: 0; min-height: 76px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+/* An edge with more rows beyond it fades out (modelpicker.js sets data-fade), so a cut row reads as more to scroll. */
+.dgc-mp-list[data-fade="top"] { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px); mask-image: linear-gradient(to bottom, transparent 0, #000 18px); }
+.dgc-mp-list[data-fade="bottom"] { -webkit-mask-image: linear-gradient(to top, transparent 0, #000 18px); mask-image: linear-gradient(to top, transparent 0, #000 18px); }
+.dgc-mp-list[data-fade="top bottom"] { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%); }
+@media (forced-colors: active) { .dgc-mp-list[data-fade] { -webkit-mask-image: none; mask-image: none; } }
+.dgc-mp .dgc-mp-sec { padding: 8px 10px 2px; }
+.dgc-mp .dgc-mp-sec:first-child { padding-top: 2px; }
+.dgc-menu.dgc-mp .dgc-mp-row { gap: 8px; padding-right: 8px; align-items: center; }
+.dgc-menu.dgc-mp .dgc-mp-row.dgc-menu-row-sub { padding-block: 5px; }
+.dgc-mp .dgc-mp-row .dgc-menu-words { gap: 1px; }
+.dgc-mp .dgc-mp-row .dgc-menu-label { flex: none; max-width: 100%; }
+/* The line under a name: whole where it fits, two lines at the most in a narrow list (its end is then "…"). */
+.dgc-mp .dgc-mp-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; white-space: normal; font-size: var(--t-xs); line-height: 1.35; color: var(--muted-raised, var(--muted)); }
+.dgc-mp-row-mark { margin-right: 2px; }
+.dgc-mp-caps { flex: none; display: inline-flex; align-items: center; gap: 5px; color: var(--muted-raised, var(--muted)); }
+.dgc-mp-cap { display: inline-flex; }
+.dgc-mp-cap > svg { width: 13px; height: 13px; }
+.dgc-menu.dgc-mp .dgc-mp-row .dgc-menu-pill { margin-left: 0; }
+/* The check has its place on every row, so no row's words move when the choice does. */
+.dgc-mp-check { flex: none; display: inline-flex; width: 14px; height: 14px; color: var(--accent-text); }
+.dgc-mp .dgc-mp-item > .dgc-mp-more { right: 26px; }
+.dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row,
+.dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row { padding-right: 8px; }
+/* While its ⋯ shows, the row's capability marks give it their room, and its Main or Fallback word moves left of it. */
+.dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row .dgc-mp-caps,
+.dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row .dgc-mp-caps { display: none; }
+.dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row .dgc-mp-check,
+.dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row .dgc-mp-check { margin-left: 28px; }
+/* A narrow list: a row that says Main or Fallback gives its capability marks' room to its name. Narrower (a 220 px
+   side bar): the line under a name is one line, cut with "…". At the side bar's least (170 px): the names alone, a
+   smaller rail, and the rows under the list on as many lines as their words need. */
+.dgc-mp-pane { container: dgc-mp-pane / inline-size; }
+@container dgc-mp-pane (max-width: 300px) { .dgc-mp-row:has(.dgc-menu-pill) .dgc-mp-caps { display: none; } }
+@container dgc-mp-pane (max-width: 200px) {
+  .dgc-mp .dgc-mp-desc { display: block; white-space: nowrap; text-overflow: ellipsis; }
+  .dgc-mp-head { flex-wrap: wrap; row-gap: 0; }
+}
+@container dgc-mp-pane (max-width: 130px) {
+  .dgc-mp .dgc-mp-desc, .dgc-mp-caps, .dgc-mp-conn-kind, .dgc-mp-row-mark { display: none; }
+  .dgc-menu.dgc-mp .dgc-mp-row { gap: 4px; padding-left: 6px; padding-right: 4px; }
+  .dgc-mp-row:has(.dgc-menu-pill) .dgc-mp-check { display: none; }      /* (Main says it is the chosen one) */
+  .dgc-mp .dgc-mp-sec, .dgc-mp-head { padding-inline: 6px; }
+  .dgc-menu.dgc-mp .dgc-mp-action { min-height: 30px; height: auto; padding: 4px 6px; }
+  .dgc-mp .dgc-mp-action .dgc-menu-icon { display: none; }
+  .dgc-mp .dgc-mp-action .dgc-menu-label { white-space: normal; overflow: visible; }
+}
+/* A narrow card: an action's words go on two lines rather than being cut ("Enter another model…" at 220 px). */
+@container dgc-mp-pane (max-width: 200px) {
+  .dgc-menu.dgc-mp .dgc-mp-under .dgc-mp-action { min-height: 30px; height: auto; padding-block: 4px; }
+  .dgc-mp .dgc-mp-under .dgc-mp-action .dgc-menu-label { white-space: normal; overflow: visible; }
+}
+@media (max-width: 200px) { .dgc-mp-layer { padding: var(--sp-2, 8px); } .dgc-menu.dgc-mp { --mp-rail: 38px; } .dgc-mp-conn { width: 28px; height: 28px; } .dgc-mp-pane { padding-inline: 4px; } }
+.dgc-mp-say { margin: 0; padding: 8px 10px; color: var(--muted-raised, var(--muted)); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); overflow-wrap: anywhere; }
+.dgc-mp-under { flex: none; }
+.dgc-mp-under:not(:empty) { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--hair); }
+.dgc-mp-note { margin: 0; padding: 4px 10px; color: var(--muted-raised, var(--muted)); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
+.dgc-mp-typed { padding: 2px; }
+.dgc-mp input.dgc-mp-input {
+  width: 100%; height: var(--btn-h, 28px); margin: 0; padding: 0 8px; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px);
+  background: var(--field, transparent); color: var(--text-strong); font: var(--w-reg) var(--t-base)/1 var(--sans);
+}
+
+/* Thinking: its name, a small stepped meter and the level's word; under them the levels, one segmented control. */
+.dgc-mp-think { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--hair); container: dgc-mp-think / inline-size; }
+.dgc-mp-think-head { display: flex; align-items: center; gap: 8px; min-height: 16px; }
+.dgc-mp-think-name { font: var(--w-semi) var(--t-sm)/1.2 var(--sans); color: var(--text-strong); }
+.dgc-mp-meter { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.dgc-mp-meter > i { display: block; width: 3px; height: calc(4px + var(--mp-step, 0) * 1.4px); max-height: 12px; border-radius: 1px; background: var(--hair-strong); }
+.dgc-mp-meter > i.on { background: var(--text-strong); }
+.dgc-mp-think.is-ultra .dgc-mp-meter > i.on { background: var(--accent-text); }
+/* (A Pip's face, where it is this Pip's thinking: beside the level it is at.) */
+.dgc-mp-think-face { flex: none; display: inline-flex; width: 20px; height: 20px; margin: -4px 0 -4px auto; overflow: hidden; }
+/* (The face is the page's own markup, sized by the page's rules wherever else it is drawn: here it is this size.) */
+.dgc-mp .dgc-mp-think-face > * { display: block; flex: none; width: 20px !important; height: 20px !important; margin: 0 !important; }
+.dgc-mp-think-face + .dgc-mp-think-now { margin-left: 0; }
+.dgc-mp-think-now { margin-left: auto; font: var(--w-reg) var(--t-xs)/1.2 var(--sans); color: var(--muted-raised, var(--muted)); }
+.dgc-mp-think-none { margin: 6px 0 0; color: var(--muted-raised, var(--muted)); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
+.dgc-mp-seg {
+  display: grid; grid-template-columns: repeat(var(--mp-levels, 5), minmax(0, 1fr)); gap: 2px; margin-top: 8px; padding: 2px;
+  border: 1px solid var(--hair); border-radius: var(--btn-r, 6px);
+}
+.dgc-mp-level {
+  appearance: none; min-width: 0; height: 24px; margin: 0; padding: 0 2px; border: 0;
+  border-radius: max(3px, calc(var(--btn-r, 6px) - 2px)); background: transparent; color: var(--muted-raised, var(--muted));
+  font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; white-space: nowrap; overflow: hidden;
+  transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease;
+}
+.dgc-mp-level:hover:not(:disabled) { color: var(--text); }
+.dgc-mp-level[aria-checked="true"] { background: var(--wash-strong, color-mix(in srgb, var(--text) 12%, transparent)); color: var(--text-strong); }
+.dgc-mp-level[data-level="ultra"][aria-checked="true"] { color: var(--accent-text); }
+.dgc-mp-level:disabled { cursor: default; opacity: .55; }
+/* Too narrow for every whole word on one line: the long ones are said short; narrower still (a 300 px side bar), six
+   or seven levels take two lines of the same control. */
+@container dgc-mp-think (max-width: 470px) {
+  .dgc-mp-level-word { font-size: 0; }
+  .dgc-mp-level-word::after { content: attr(data-short); font-size: var(--t-xs, 11px); }
+}
+@container dgc-mp-think (max-width: 545px) {
+  .dgc-mp-seg:has(> :nth-child(7)) .dgc-mp-level-word { font-size: 0; }
+  .dgc-mp-seg:has(> :nth-child(7)) .dgc-mp-level-word::after { content: attr(data-short); font-size: var(--t-xs, 11px); }
+}
+@container dgc-mp-think (max-width: 340px) { .dgc-mp-seg:has(> :nth-child(6)) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* (Two lines' room always, so the picker keeps its height and its place when a level's words wrap.) */
+.dgc-mp-think-note { padding: 6px 2px 0; min-height: calc(6px + 2 * 1.45 * var(--t-xs, 11px)); }
+.dgc-mp-think-note.is-clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.dgc-mp-more-note { appearance: none; margin: 2px 0 0; padding: 0 2px; border: 0; border-radius: 3px; background: none; color: var(--text); text-decoration: underline; text-underline-offset: 2px; font: var(--w-reg) var(--t-xs)/1.5 var(--sans); cursor: pointer; }
+.dgc-mp-more-note:hover { color: var(--text-strong); }
+/* A very narrow side bar (220 px): the tabs' words a size down, and the levels three to a line. */
+@container dgc-mp (max-width: 240px) {
+  .dgc-mp-tab { padding: 0 2px; font-size: var(--t-xs, 11px); }
+  .dgc-mp-seg:has(> :nth-child(4)) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dgc-mp-think { padding-inline: 8px; }
+}
+.dgc-mp-settings { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 0 12px 12px; }
+.dgc-mp-setting { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dgc-mp-setting-name { font: var(--w-semi) var(--t-sm)/1.2 var(--sans); color: var(--text-strong); }
+.dgc-mp select.dgc-mp-select {
+  flex: 0 1 12rem; min-width: 0; height: var(--btn-h, 28px); margin: 0; padding: 0 6px; border: 1px solid var(--hair-strong);
+  border-radius: var(--btn-r, 6px); background: var(--field, transparent); color: var(--text); font: var(--w-reg) var(--t-sm)/1 var(--sans);
+}
+.dgc-mp-foot { flex: none; padding: 4px 6px 6px; border-top: 1px solid var(--hair); }
+.dgc-mp-live { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.dgc-mp-layer[data-locked="1"] .dgc-mp-row { cursor: default; }
+
+@media (prefers-reduced-motion: reduce) { .dgc-mp-conn, .dgc-mp-level { transition: none; } }
+@media (forced-colors: active) {
+  .dgc-mp-conn[aria-selected="true"], .dgc-mp-search, .dgc-mp-seg, .dgc-mp-tabs, .dgc-mp-badge { border-color: CanvasText; box-shadow: none; }
+  .dgc-mp-level[aria-checked="true"], .dgc-mp-tab[aria-selected="true"] { background: Highlight; color: HighlightText; forced-color-adjust: none; }
+  .dgc-mp-meter > i { background: GrayText; } .dgc-mp-meter > i.on, .dgc-mp-now { background: CanvasText; }
+  .dgc-mp-mark > svg, .dgc-mp-tile { forced-color-adjust: none; }
+}
+
+/* ---- The look (17 Nov, his reference picture): two layers. A quiet frame holds the rail of connections and the search;
+   a card inside it holds the connection's models and Thinking. The connection being looked at sits on a raised tile; the
+   current model's row is softly shaded, its check right after its name; a model's capabilities are a small framed group
+   in colour. Every control keeps the family's 6 px corner (--btn-r): nothing here is a pill. ---- */
+.dgc-menu.dgc-mp {
+  --mp-frame: color-mix(in srgb, var(--text) 5%, var(--raised, var(--surface2)));
+  --mp-card: var(--raised, var(--surface2));
+  --mp-rail: 52px;
+  background: var(--mp-frame);
+}
+body.vscode-dark .dgc-menu.dgc-mp, .vscode-dark .dgc-menu.dgc-mp { --mp-frame: color-mix(in srgb, #000 22%, var(--raised, var(--surface2))); }
+.dgc-mp-tabs { margin: 10px 10px 0; background: transparent; }
+.dgc-mp-side { flex: none; width: var(--mp-rail); display: flex; flex-direction: column; align-items: center; min-height: 0; }
+.dgc-mp-side:not(:has(> .dgc-mp-rail:not([hidden]))):not(:has(> .dgc-mp-foot:not([hidden]))) { display: none; }
+.dgc-mp-rail { width: 100%; flex: 1 1 auto; min-height: 0; gap: 14px; padding: 12px 0 10px; border-right: 0; }
+.dgc-mp-conn { width: 36px; height: 36px; border-radius: var(--btn-r, 6px); }
+.dgc-mp-conn:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.dgc-mp-conn[aria-selected="true"] { background: var(--mp-card); border-color: var(--hair); box-shadow: 0 1px 3px rgba(0, 0, 0, .14), 0 0 0 .5px rgba(0, 0, 0, .04); }
+.dgc-mp-mark, .dgc-mp-mark > svg { width: 20px; height: 20px; }
+.dgc-mp-badge { right: -4px; bottom: -4px; background: var(--mp-card); }
+/* The connection in use: a small dot under its tile, clear of it (his 17 Nov look: 1 px under it read as touching):
+   4 px under the tile, 6 px over the next one, so it belongs to its own. */
+.dgc-mp-now { left: 50%; top: auto; bottom: -8px; width: 4px; height: 4px; margin: 0 0 0 -2px; border-radius: 50%; }
+/* Add provider: a tile at the foot of the rail, its words its hover label. */
+.dgc-mp-side > .dgc-mp-foot { flex: none; width: 100%; display: flex; justify-content: center; padding: 6px 0 12px; border-top: 0; }
+.dgc-menu.dgc-mp .dgc-mp-side .dgc-mp-action { appearance: none; display: inline-flex; align-items: center; width: 36px; height: 36px; min-height: 0; margin: 0; padding: 0; justify-content: center;
+  border: 0; border-radius: var(--btn-r, 6px); background: transparent; color: var(--muted-raised, var(--muted)); cursor: pointer; transition: background-color var(--dur-hover) ease; }
+.dgc-menu.dgc-mp .dgc-mp-side .dgc-mp-action:hover { background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text-strong); }
+.dgc-menu.dgc-mp .dgc-mp-side .dgc-mp-action:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.dgc-mp .dgc-mp-side .dgc-mp-action .dgc-menu-label { display: none; }
+.dgc-mp .dgc-mp-side .dgc-mp-action .dgc-menu-icon { margin: 0; }
+.dgc-mp-pane { padding: 10px 0 0; }
+.dgc-mp-norail .dgc-mp-pane { padding-left: 0; }
+/* The search sits on the frame: no box of its own until it has the focus. */
+.dgc-mp-search { height: var(--btn-h, 28px); margin: 0 10px 6px 0; padding: 0 8px; border-color: transparent; background: transparent; }
+.dgc-mp-norail .dgc-mp-search { margin-left: 10px; }
+.dgc-mp-search:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.dgc-mp-search:focus-within { background: var(--mp-card); }
+.dgc-mp input.dgc-mp-q { font-size: var(--t-base); }
+.dgc-mp-card {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 4px 6px 8px;
+  border: 1px solid var(--hair); border-right: 0; border-bottom: 0; border-top-left-radius: var(--r-lg, 12px); background: var(--mp-card);
+}
+.dgc-mp-norail .dgc-mp-card { border-left: 0; border-top-left-radius: 0; }
+/* The connection's name: a small, quiet label over its models. */
+.dgc-mp-head { min-height: 0; padding: 6px 10px 4px; }
+.dgc-mp-conn-name { font: var(--w-reg) var(--t-xs)/1.2 var(--mono, ui-monospace, monospace); letter-spacing: .02em; color: var(--muted-raised, var(--muted)); }
+.dgc-mp-conn-kind { font: var(--w-reg) var(--t-xs)/1.2 var(--mono, ui-monospace, monospace); color: var(--faint); }
+.dgc-mp-conn-kind::before { content: "· "; }
+.dgc-mp .dgc-mp-sec { padding: 10px 10px 4px; }
+/* A model: its name (the check right after it when it is the one), the line under it, its capabilities at the end. */
+.dgc-menu.dgc-mp .dgc-mp-row { gap: 10px; padding: 7px 8px 7px 10px; }   /* one line: the shared row's height; with its line under, its own */
+/* The actions under the list are rows of the same list: the same padding, so they grow with the editor's font as the rows do. */
+.dgc-menu.dgc-mp .dgc-mp-under .dgc-mp-action { height: auto; min-height: 0; padding-block: 7px; }
+.dgc-mp .dgc-mp-under .dgc-mp-action .dgc-menu-label { line-height: calc(var(--t-base, 13px) * 1.3); }   /* a model name's line */   /* its corner is the shared menu row's (media/shared/menu.css) */
+.dgc-menu.dgc-mp .dgc-mp-row.dgc-menu-row-sub { padding-block: 7px; }
+.dgc-mp-nameline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dgc-mp .dgc-mp-row .dgc-mp-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-med) var(--t-base)/1.3 var(--sans); color: var(--text-strong); }
+.dgc-mp-check { width: 14px; height: 14px; color: var(--text-strong); }
+.dgc-mp-check:empty { display: none; }
+.dgc-mp .dgc-mp-desc { margin-top: 1px; font-size: var(--t-sm); }
+.dgc-menu.dgc-mp .dgc-mp-row[aria-selected="true"] { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.dgc-menu.dgc-mp .dgc-mp-row:hover:not([aria-selected="true"]) { background: color-mix(in srgb, var(--text) 4%, transparent); }
+/* Capabilities: one small framed group, each mark in its own colour (thinks: DGC's purple; takes images: teal). */
+.dgc-mp-caps { gap: 0; padding: 3px 2px; margin-block: -4px; border: 1px solid var(--hair); border-radius: var(--btn-r, 6px); background: var(--mp-card); }   /* (sits in the row's own padding: a row with marks is as tall as one without) */
+.dgc-mp-cap { padding: 0 5px; }
+.dgc-mp-cap + .dgc-mp-cap { border-left: 1px solid var(--hair); }
+.dgc-mp-cap > svg { width: 14px; height: 14px; }
+.dgc-mp-cap[data-cap="thinks"] { color: var(--accent-text, var(--accent)); }
+.dgc-mp-cap[data-cap="images"] { color: color-mix(in srgb, #1A9E8C 82%, var(--text)); }
+.dgc-mp-cap[data-cap="cloud"] { color: var(--muted-raised, var(--muted)); }
+/* Thinking, inside the card: the meter, its name, the level it is at; the levels one segmented control whose chosen
+   level is raised. */
+.dgc-mp-think { margin: 4px 0 0; padding: 8px 6px 0; border-top: 1px solid var(--hair); }
+.dgc-mp-think-head { gap: 8px; }
+.dgc-mp-meter { order: -1; }
+.dgc-mp-think-name { font: var(--w-reg) var(--t-xs)/1.2 var(--mono, ui-monospace, monospace); letter-spacing: .02em; color: var(--muted-raised, var(--muted)); }
+/* The level chosen is said whole: the name gives way ("Their thin…"), and in the narrowest side bar the meter goes (the
+   word says the level). */
+.dgc-mp-think-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgc-mp-think-now { flex: none; white-space: nowrap; }
+@container dgc-mp (max-width: 240px) { .dgc-mp-think-head > .dgc-mp-meter { display: none; } }
+.dgc-mp-seg { gap: 2px; padding: 3px; border: 0; background: color-mix(in srgb, var(--text) 7%, transparent); }
+.dgc-mp .dgc-mp-level { height: 28px; font-size: var(--t-sm); }
+.dgc-mp-level[aria-checked="true"] { background: var(--mp-card); color: var(--text-strong); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
+.dgc-mp-settings { padding: 10px 6px 0; }
+@media (forced-colors: active) {
+  .dgc-mp-card, .dgc-mp-caps { border-color: CanvasText; }
+  .dgc-mp-cap { forced-color-adjust: auto; }
+  .dgc-mp-level[aria-checked="true"], .dgc-mp-conn[aria-selected="true"] { box-shadow: none; }
+}
+body.vscode-high-contrast .dgc-mp-card, body.vscode-high-contrast-light .dgc-mp-card { border-color: var(--vscode-contrastBorder, CanvasText); }
+/* In a short window (the bottom panel open) the connection's label gives its room to the models; Thinking stays whole. */
+@media (max-height: 420px) {
+  .dgc-mp-head { display: none; } .dgc-mp-card { padding-top: 2px; }
+  /* (The levels' explanation steps aside; each level says it in its hover label.) */
+  .dgc-mp-think-note, .dgc-mp-more-note { display: none; }
+}
+/* High contrast: the levels' control keeps an edge of its own. */
+body.vscode-high-contrast .dgc-mp-seg, body.vscode-high-contrast-light .dgc-mp-seg { border: 1px solid var(--vscode-contrastBorder, CanvasText); }
+@media (forced-colors: active) { .dgc-mp-seg { border: 1px solid CanvasText; } }
+/* Thinking sits inside the card, narrower than the picker: there the levels take the small size, so every word stays whole. */
+@container dgc-mp-think (max-width: 480px) { .dgc-mp .dgc-mp-level { font-size: var(--t-xs, 11px); } }
+/* A row's ⋯ (Use as main / fallback): at the row's far edge, the row making room for it while it shows; the check is
+   beside the name now, so nothing else moves. */
+.dgc-mp .dgc-mp-item > .dgc-mp-more { right: 6px; }
+.dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row,
+.dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row { padding-right: 38px; }
+.dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row .dgc-mp-check,
+.dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row .dgc-mp-check { margin-left: 0; }
+/* Seven levels in the card's width: four to a line under 340 px, three under 230, two under 150; no word is cut. */
+@container dgc-mp-think (max-width: 340px) { .dgc-mp-seg:has(> :nth-child(6)) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@container dgc-mp-think (max-width: 230px) { .dgc-mp-seg:has(> :nth-child(4)) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container dgc-mp-think (max-width: 150px) { .dgc-mp-seg:has(> :nth-child(2)) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* The narrowest side bars (the picker under 240 px): a slimmer rail and card, so the models and the levels keep the room. */
+@container dgc-mp (max-width: 240px) {
+  .dgc-mp-side { width: 40px; } .dgc-mp-conn, .dgc-menu.dgc-mp .dgc-mp-side .dgc-mp-action { width: 30px; height: 30px; }
+  .dgc-mp-card { padding-inline: 2px; } .dgc-mp-think { padding-inline: 2px; }
+}
+/* A company's website icon, as a picture (modelpicker.js PROVIDER_IMAGES): the mark's size, never stretched. */
+.dgc-mp-mark > img { display: block; width: 20px; height: 20px; object-fit: contain; border-radius: 4px; }
+/* A short window: the levels on two lines at the most, so Thinking stays whole under the models. */
+@media (max-height: 420px) { .dgc-mp-seg:has(> :nth-child(5)) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

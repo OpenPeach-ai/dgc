@@ -118,11 +118,11 @@ sections.library = async () => {
   }
 };
 
-// W15: the thinking slider after three arrow keys, as DGC answers them (one "Thinking → x" line for each request it is sent).
+// W15: the picker's thinking levels after three arrow keys, as DGC answers them (one "Thinking → x" line for each request it is sent).
 sections.thinking = async () => {
   for (const theme of PAIR) for (const width of WIDTHS) {
     const x = await S.openThinking(browser, { theme, width, think: "low" });
-    await x.page.focus("#modelmenu .effort-slider");
+    await x.page.focus('.dgc-mp-level[aria-checked="true"]');
     for (let i = 0; i < 3; i++) { await x.page.keyboard.press("ArrowRight"); await x.page.waitForTimeout(150); }
     await shot(x.page, `thinking-keys-${theme}-${width}`);
     await x.page.waitForTimeout(900);

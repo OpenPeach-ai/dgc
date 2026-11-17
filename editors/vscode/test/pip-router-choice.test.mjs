@@ -4,6 +4,7 @@
 // Router (Settings -> Models -> Pips) says so; and the host refuses a Router choice below API 70.
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
+import {pickerDom} from './support/picker-dom.mjs';
 import {build} from 'esbuild';
 import {JSDOM} from 'jsdom';
 import {createRequire} from 'node:module';
@@ -37,26 +38,31 @@ function setup({api=55,job=pip(),kind='personal',catalog={default_model:'local-d
  const click=selector=>{const e=w.document.querySelector(selector);assert.ok(e,selector);e.click();};
  return{w,d:w.document,requests,drain,click,select:async()=>{await drain();click(`[data-job="${PIP}"]`);await drain();}};
 }
-const openList=async x=>{x.click('#chat-model');await x.drain();};
-const chooseProvider=(x,key)=>{x.click('#chat-model-providers');x.click(`[data-chat-provider="${key}"]`);};
+// The model picker (media/shared/modelpicker.js): its rail's connections and the shown one's rows.
+const P=x=>pickerDom(x.d);
+const openList=async x=>{if(!P(x).open())x.click('#chat-model');await x.drain();};
+const chooseProvider=(x,key)=>{const conn=P(x).conn(key);assert.ok(conn,key);conn.click();};
+const row=(x,value)=>P(x).rows().find(r=>r.dataset.value===value)||null;
+const pick=async(x,value)=>{assert.ok(row(x,value),value);row(x,value).click();await x.drain();};
 
 const ROUTER={enabled:true,systems:[{id:'nas',name:'NAS',online:true,models:[{name:'qwen3.5:9b',context_window:16384}]},
  {id:'gpu',name:'GPU box',online:false,models:[{name:'qwen3:8b',context_window:32768},{name:'hf.co/org/model:q4',context_window:8192}]}]};
 const catalog=(extra={})=>({default_model:'local-default',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:SUBS,router:ROUTER,...extra});
 
-test('the model menu offers DGC Router and each Pip system, and saves the choice as the API takes it',async()=>{
+test('the model picker offers DGC Router as a connection with each Pip system, and saves the choice as the API takes it',async()=>{
  const x=setup({api:70,catalog:catalog()});await x.select();await openList(x);
  chooseProvider(x,'router');
- const menu=x.d.querySelector('.composer-model-menu');
- assert.match(menu.textContent,/DGC Router/);
- assert.deepEqual([...x.d.querySelectorAll('[data-chat-model^="router"]')].map(b=>b.dataset.chatModel),['router','router:nas/qwen3.5:9b','router:gpu/qwen3:8b','router:gpu/hf.co/org/model:q4']);
- assert.match(x.d.querySelector('[data-chat-model="router:gpu/qwen3:8b"]').textContent,/GPU box · qwen3:8b \(offline\)/);
- x.click('[data-chat-model="router:gpu/hf.co/org/model:q4"]');await x.drain();
+ assert.equal(P(x).shown(),'DGC Router');
+ assert.equal(P(x).conn('router').querySelector('.dgc-mp-mark').dataset.mark,'dgc','DGC\'s own mark');
+ assert.deepEqual(P(x).rows().map(b=>b.dataset.value),['router','router:nas/qwen3.5:9b','router:gpu/qwen3:8b','router:gpu/hf.co/org/model:q4']);
+ assert.equal(row(x,'router').querySelector('.dgc-mp-desc').textContent,'Any computer with the Pips job');
+ assert.equal(row(x,'router:gpu/qwen3:8b').querySelector('.dgc-mp-name').textContent,'GPU box · qwen3:8b (offline)');
+ await pick(x,'router:gpu/hf.co/org/model:q4');
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'router',system:'gpu',model:'hf.co/org/model:q4'}});
  assert.match(x.d.querySelector('#chat-model').textContent,/GPU box · hf\.co\/org\/model:q4/,'the chip names the system and model');
  await openList(x);
- chooseProvider(x,'router');
- x.click('[data-chat-model="router"]');await x.drain();
+ assert.equal(P(x).conn('router').getAttribute('aria-selected'),'true','it opens on the Router');
+ await pick(x,'router');
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update').at(-1).request.changes)),{model_choice:{mode:'router'}});
  // Short enough for a side bar ("DGC Router (any Pip sy…" was cut there); the hover says the whole choice.
  assert.equal(x.d.querySelector('#chat-model .composer-model-name').textContent,'DGC Router');
@@ -66,9 +72,9 @@ test('the model menu offers DGC Router and each Pip system, and saves the choice
 test('with the Router off, or a backend before API 70, no Router choice is offered; the host refuses one below 70',async()=>{
  for(const [api,list] of [[70,catalog({router:undefined})],[69,catalog()]]){
   const x=setup({api,catalog:list});await x.select();await openList(x);
-  x.click('#chat-model-providers');
-  assert.equal(x.d.querySelector('[data-chat-model^="router"]'),null,`api ${api}`);
-  assert.equal(x.d.querySelector('[data-chat-provider="router"]'),null,`provider api ${api}`);
+  assert.ok(P(x).rows().length>0);
+  assert.equal(P(x).rows().some(r=>r.dataset.value.startsWith('router')),false,`api ${api}`);
+  assert.equal(P(x).conn('router'),null,`connection api ${api}`);
  }
  for(const api of [69,70]){
   const sent=[],posted=[];
@@ -82,7 +88,9 @@ test('with the Router off, or a backend before API 70, no Router choice is offer
 
 test('Default that runs on the Router says so',async()=>{
  const x=setup({api:70,catalog:catalog({router:{...ROUTER,pips_default:'router'}})});await x.select();await openList(x);
- assert.equal(x.d.querySelector('[data-chat-model="default"]').textContent,'Default (DGC Router · any Pip system)');
+ assert.equal(P(x).conn('router').getAttribute('aria-selected'),'true','it opens on the connection Default follows');
+ assert.equal(row(x,'default').querySelector('.dgc-mp-name').textContent,'Default (DGC Router · any Pip system)');
+ assert.deepEqual(P(x).chosen(),['Default (DGC Router · any Pip system)']);
 });
 
 test('the Router choices are checked, labelled and read back',()=>{

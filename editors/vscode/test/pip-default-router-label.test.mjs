@@ -3,6 +3,7 @@
 // and an open Pips page reads the model list again when Settings are saved or the Router's settings change.
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
+import {pickerDom} from './support/picker-dom.mjs';
 import {build} from 'esbuild';
 import {JSDOM} from 'jsdom';
 import {createRequire} from 'node:module';
@@ -37,14 +38,16 @@ function setup({api=55,job=pip(),kind='personal',messages=[],catalog={default_mo
  const click=selector=>{const e=w.document.querySelector(selector);assert.ok(e,selector);e.click();};
  return{w,d:w.document,requests,drain,click,message,setCatalog:value=>{cat=value;},select:async()=>{await drain();click(`[data-job="${PIP}"]`);await drain();}};
 }
-const openList=async x=>{x.click('#chat-model');await x.drain();};
+const P=x=>pickerDom(x.d);
+const openList=async x=>{if(!P(x).open())x.click('#chat-model');await x.drain();};
+const row=(x,value)=>P(x).rows().find(r=>r.dataset.value===value)||null;
 const ROUTER={enabled:true,systems:[{id:'nas',name:'NAS',online:true,models:[{name:'qwen3.5:9b',context_window:16384}]}]};
 const catalog=(extra={})=>({default_model:'deepseek-v4.1-flash:cloud',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:SUBS,router:ROUTER,...extra});
 
-test('Default names the Router: any Pip system, or the chosen system and model, in the menu and on the chip',async()=>{
+test('Default names the Router: any Pip system, or the chosen system and model, in the picker and on the chip',async()=>{
  for(const [pin,words] of [['router','DGC Router · any Pip system'],['router:nas/qwen3.5:9b','NAS · qwen3.5:9b']]){
   const x=setup({api:70,catalog:catalog({router:{...ROUTER,pips_default:pin}})});await x.select();await openList(x);
-  assert.equal(x.d.querySelector('[data-chat-model="default"]').textContent,`Default (${words})`,pin);
+  assert.equal(row(x,'default').querySelector('.dgc-mp-name').textContent,`Default (${words})`,pin);
   // The chip says Default as the menu row does (seen in testing: it read "NAS · qwen3.5:9b", the same as choosing it).
   assert.equal(x.d.querySelector('#chat-model .composer-model-name').textContent,`Default (${words})`,'the chip of a Pip on Default');
   assert.doesNotMatch(x.d.querySelector('#chat-model').textContent,/deepseek/);

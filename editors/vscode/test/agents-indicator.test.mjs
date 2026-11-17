@@ -218,11 +218,12 @@ test("a failure reason on a row's label drops a markdown heading marker", () => 
 test("opening the map closes the menus; a click inside keeps it, the backdrop closes it, Sub-agent settings leaves it", () => {
   const { $, dom, start, posted, mapOpen, errors } = view();
   start(sid(1));
-  $("btn-model").click();
-  assert.equal($("modelmenu").hidden, false);
+  $("btn-mode").click();
+  assert.equal($("modemenu").hidden, false);
   $("agents-pill").click();
   assert.equal(mapOpen(), true);
-  assert.equal($("modelmenu").hidden, true, "the model menu closed");
+  assert.equal($("modemenu").hidden, true, "the open menu closed");
+  // (The model picker is a dialog of its own, over the page: while it is open nothing under it can be pressed.)
   $("agent-map-subtitle").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
   assert.equal(mapOpen(), true, "a click inside the dialog keeps it open");
   $("agent-map").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));

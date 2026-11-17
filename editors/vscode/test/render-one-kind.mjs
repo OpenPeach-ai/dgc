@@ -85,7 +85,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 440, 300]) {
     await type(x, "/"); await x.page.waitForTimeout(300); await shot(x, `slash-menu-${tag}`);
     await x.close();
     x = await openOnePips(browser, opts); await x.openPip(GST); await x.page.waitForTimeout(500);
-    await attempt("model", async () => { await x.click("#chat-model"); await x.waitIn(".composer-model-menu", 3000); if (await x.inPips((r) => !r.querySelector("[data-chat-model]"))) { await x.click("#chat-model-summary"); await x.waitIn("[data-chat-model]", 3000); } await x.page.waitForTimeout(300); await shot(x, `model-menu-${tag}`); });
+    await attempt("model", async () => { await x.click("#chat-model"); await x.waitIn(".dgc-mp .dgc-mp-row", 3000); await x.page.waitForTimeout(300); await shot(x, `model-menu-${tag}`); });
     await x.close();
   }
   if (want("page")) {

@@ -34,7 +34,7 @@
 }
 /* The chosen menu row is the raised grey; on a light ground that grey is the page's own white, so it is a wash there. */
 body.vscode-light{color-scheme:light;--need:#A86A12;--need-text:#8F5600;--sel:color-mix(in srgb,var(--text) 8%,transparent)}
-*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:12px/1.5 var(--sans)}
+*{box-sizing:border-box}html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);font:12px/1.5 var(--sans)}
 [hidden]{display:none!important}button,input,select,textarea{font:inherit;color:inherit}
 :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible{outline:1px solid var(--focus);outline-offset:1px}
 button{cursor:pointer;border:0}button:disabled{opacity:.5;cursor:default}
@@ -327,9 +327,10 @@ body:is(.vscode-high-contrast,.vscode-high-contrast-light){--dev-error:var(--vsc
   .dev-warning{flex-wrap:wrap}.dev-warning-body{flex-basis:calc(100% - 30px)}.dev-warning .secondary{margin-left:30px}
   .dev-reset{flex-wrap:wrap}
 }
-/* A very narrow tab: VS Code's own 20px webview gutter goes, and rows with buttons wrap them under their words. */
+/* A very narrow tab: rows with buttons wrap them under their words. (VS Code's own 20px webview gutter is undone at
+   every width, on html,body above: 17 Nov, it showed as a band left of the menu in a wide tab.) */
 @media(max-width:480px){
-  body{padding:0}.card{padding-inline:10px}
+  .card{padding-inline:10px}
   .field:has(>.switch){flex-wrap:wrap}.field:has(>.switch)>.words{flex:1 1 150px}
   :where(.row){flex-wrap:wrap}:where(.row)>.copy:first-child,:where(.row)>.row-open{flex:1 1 150px}:where(.row)>:is(.logo,.mark)+.copy{flex:1 1 90px}
   .memory-edit input{flex-basis:100%}.page-heading .actions{flex-wrap:wrap}

@@ -196,10 +196,10 @@ test("a Pip with a folder: a model chosen in its box applies at once, as any Pip
   const x = await open();
   try {
     await x.openPip(GST); await x.page.waitForTimeout(300);
-    await x.click("#chat-model"); await x.waitIn("#chat-model-summary, .composer-model-menu"); 
-    if (await x.inPips((root) => !root.querySelector("[data-chat-model]"))) { await x.click("#chat-model-summary"); await x.waitIn("[data-chat-model]"); }
-    assert.equal(await x.inPips((root) => /confirm a new model/.test(root.querySelector(".composer-model-menu")?.textContent || "")), false, "no \"you'll confirm\" line");
-    await x.inPips((root) => [...root.querySelectorAll("[data-chat-model]")].find((b) => b.dataset.chatModel.includes("qwen3-coder:480b")).click()); await x.page.waitForTimeout(500);
+    await x.click("#chat-model"); await x.waitIn(".dgc-mp .dgc-mp-row");
+    assert.equal(await x.inPips((root) => /confirm a new model/.test(root.querySelector(".dgc-mp")?.textContent || "")), false, "no \"you'll confirm\" line");
+    await x.inPips((root) => [...root.querySelectorAll(".dgc-mp-row")].find((b) => b.dataset.value.includes("qwen3-coder:480b")).click()); await x.page.waitForTimeout(500);
+    assert.equal(await x.inPips((root) => !!root.querySelector(".dgc-mp-layer")), false, "the picker closes on the choice");
     assert.equal(await x.inPips((root) => !!root.querySelector("#review-root .dialog")), false, "no review card");
     assert.deepEqual((await asked(x, "propose_pip_update")).map((r) => r.changes), [{ model_choice: { mode: "model", model: "qwen3-coder:480b" } }]);
     assert.equal((await asked(x, "accept_pip_update")).length, 1, "accepted as it is chosen");

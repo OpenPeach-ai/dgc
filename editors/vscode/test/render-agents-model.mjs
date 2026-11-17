@@ -27,28 +27,27 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
   const name = (what) => `${out}/${what}-${theme.split("-")[0]}-${width}.png`;
   const scene = await openMapScene(browser, { width, height: 760, theme, open: false, capabilities: { agents_model: 1, model_fallback: 1 } });
   const { page, post } = scene;
-  // 1. The model menu, following Settings: the Agents row under the model and thinking.
+  // 1. The model picker, following Settings: its Sub-agents tab beside Main model.
   await page.click("#btn-model");
   await post(models(AGENTS()));
-  await page.waitForSelector("#modelmenu .model-tabs");
+  await page.waitForSelector(".dgc-mp .dgc-mp-tabs");
   await page.waitForTimeout(150);
   await page.screenshot({ path: name("1-menu-agents-row") });
   // 2. The agents list: Same as settings first, the providers, Claude Code and Codex greyed with the reason.
-  await page.click("#modelmenu [data-model-tab='agents']");
-  await page.waitForSelector("#modelmenu [data-agents-same]");
+  await page.click('.dgc-mp-tab[data-tab="agents"]');
+  await page.waitForSelector('.dgc-mp-conn[data-rail="agents:settings"]');
   await page.waitForTimeout(150);
   await page.screenshot({ path: name("2-agents-list") });
   // 2b. One provider's models, to choose for agents.
-  await page.click('#modelmenu [data-agents-provider="1"]');
+  await page.click(`.dgc-mp-conn[data-rail="${SPARE}"]`);
   await post({ type: "providerModels", id: SPARE, ids: ["gpt-oss:120b", "own-coder", "qwen3-coder:30b"] });
-  await page.waitForSelector("#modelmenu [data-agents-model]");
-  await page.click('#modelmenu [data-agents-model="1"]');
+  await page.waitForSelector(".dgc-mp .dgc-mp-row");
+  await page.click('.dgc-mp-row[data-value="own-coder"]');
   await post({ type: "agentsModel", ...OWN });
   await page.waitForTimeout(150);
   await page.screenshot({ path: name("2b-agents-provider-models") });
-  // 3. The menu after the session chose its own.
-  await page.click("#modelmenu [data-agents-providers]");
-  await page.click("#modelmenu [data-agents-back]");
+  // 3. The picker's Main tab after the session chose its own.
+  await page.click('.dgc-mp-tab[data-tab="main"]');
   await page.waitForTimeout(150);
   await page.screenshot({ path: name("3-menu-own") });
   await page.keyboard.press("Escape");

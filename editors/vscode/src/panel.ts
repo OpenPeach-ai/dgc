@@ -46,6 +46,7 @@ import { INSTANCE as STUCK_INSTANCE, heartbeatOf, isStuck, stuckHolder, type Stu
 import { whatsNewAnswered, whatsNewDue, whatsNewMessage } from "./whatsNew";
 import { NO_PIPS_MOVED, WELCOME_API, boxesOf, macNoteAnswered, macNoteDue, noteSession, pipsWelcomeAnswered, pipsWelcomeDue, pipsWelcomeMessage, pipsWelcomeOf, sessionNoteClosed, sessionNoteGone } from "./pipsWelcome";
 import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
+import modelPicker from "../media/shared/modelpicker.js";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, replaceKey, startingModel } from "./providerProfiles.js";
 import { connectOpenRouter, keyState, OPENROUTER, type KeyState } from "./providerConnect.js";
 
@@ -1368,17 +1369,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async chatdgcModels(providerId = ""): Promise<{ ids: string[]; current: string;
-      profiles: any[]; defaultId: string; providerId: string; noProvider?: boolean; listError?: string }> {
+      profiles: any[]; defaultId: string; providerId: string; noProvider?: boolean; listError?: string;
+      cli?: { versions: Record<string, string>; fixed: string[] }; host?: { name: string; mark: string; badge: string } }> {
     const saved = listProfiles(this.context);
     const defaultId = defaultProfileId(this.context);
+    // (mark, badge: which mark the model picker draws for it, decided here: no address reaches the page.)
     const profiles = saved.map(row => ({ id: row.id, name: row.name,
       kind: row.kind === "subscription" ? "subscription" : "native",
-      model: startingModel(this.context, row), ...(row.kind === "subscription" ? { engine: row.engine } : {}) }));
+      model: startingModel(this.context, row), ...(row.kind === "subscription" ? { engine: row.engine } : {}),
+      ...modelPicker.markOf(row.kind === "subscription" ? { engine: String(row.engine || "") } : { base_url: row.base_url, name: row.name }) }));
+    const hostLabel = Object.values(PROVIDERS).find(p => sameHost(p.url, this.state.baseUrl))?.label || "Custom host";
+    const host = { name: hostLabel, ...modelPicker.markOf({ base_url: this.state.baseUrl, name: hostLabel }) };
     const defaultProfile = saved.find(row => row.id === defaultId);
     // The default isn't a saved provider (an upgrade on a host with a key): it stays in the list, as in Work's menu.
     if (!defaultProfile && saved.length && !this.noProvider() && !this.routeState.subscriptionEngine) {
-      const label = Object.values(PROVIDERS).find(p => sameHost(p.url, this.state.baseUrl))?.label || "Custom host";
-      profiles.unshift({ id: "", name: `Current host · ${label}`, kind: "native", model: String(this.state.model || "") });
+      profiles.unshift({ id: "", name: `Current host · ${hostLabel}`, kind: "native", model: String(this.state.model || ""), mark: host.mark, badge: host.badge });
     }
     const current = defaultProfile
       ? defaultProfile.kind === "subscription"
@@ -1389,8 +1394,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // No provider: nothing to list and no model to claim. ChatDGC says so and points to Settings.
     if (!selected && this.noProvider()) return { ids: [], current: "", profiles, defaultId, providerId: "", noProvider: true };
     if (!selected) {
-      try { return { ids: await this.fetchModels(), current, profiles, defaultId, providerId: "" }; }
-      catch { return { ids: [current].filter(Boolean), current, profiles, defaultId, providerId: "" }; }
+      try { return { ids: await this.fetchModels(), current, profiles, defaultId, providerId: "", host }; }
+      catch { return { ids: [current].filter(Boolean), current, profiles, defaultId, providerId: "", host }; }
     }
     if (selected.kind === "subscription") {
       let engines = this.routeState.subscriptionEngines;
@@ -1404,7 +1409,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const found = engines.find((row: any) => row.key === selected.engine);
       const ids = [...new Set(["", selected.model,
         ...(Array.isArray(found?.model_hints) ? found.model_hints : [])].filter((id): id is string => typeof id === "string"))];
-      return { ids, current, profiles, defaultId, providerId: selected.id };
+      // Claude Code's rows in the picker: the version each nickname last ran as, and the versions that can be pinned.
+      const versions: Record<string, string> = {};
+      if (found?.model_versions && typeof found.model_versions === "object") {
+        for (const [nick, full] of Object.entries(found.model_versions)) if (typeof full === "string" && full.length <= 128) versions[nick.slice(0, 32)] = full;
+      }
+      const fixed = (Array.isArray(found?.fixed_models) ? found.fixed_models : []).filter((id: unknown): id is string => typeof id === "string" && !!id).slice(0, 64);
+      return { ids, current, profiles, defaultId, providerId: selected.id, cli: { versions, fixed } };
     }
     try {
       const { route, api_key } = await profileCredential(this.context, selected.id);
@@ -1609,8 +1620,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return found;
   }
 
-  /** Home's Token usage card: every day DGC has counted (for a period and the one before it) and the last thirty
-   *  days' models, read from the local ledger by this side bar's own DGC. Two reports, then one message to the card. */
+  /** Home's Token usage card: every day DGC has counted and the last 7 days' models (the card counts that one week,
+   *  17 Nov), read from the local ledger by this side bar's own DGC. Three reports, then one message to the card. */
   private homeUsage?: { all?: any; period?: any; today?: any; timer?: ReturnType<typeof setTimeout> };
   private askHomeUsage(): void {
     if (!this.home || !this.webviewReady) { return; }
@@ -1618,7 +1629,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.homeUsage?.timer) { return; }           // already asked: its answer is on its way
     const be = this.ensureBackend();
     // (And today's own report: its models are what today's column names.)
-    const asked = be.send({ type: "get_usage", request_id: "home-usage-all", range: "all" }) && be.send({ type: "get_usage", request_id: "home-usage-30d", range: "30d" }) && be.send({ type: "get_usage", request_id: "home-usage-today", range: "today" });
+    const asked = be.send({ type: "get_usage", request_id: "home-usage-all", range: "all" }) && be.send({ type: "get_usage", request_id: "home-usage-7d", range: "7d" }) && be.send({ type: "get_usage", request_id: "home-usage-today", range: "today" });
     if (!asked) { this.post({ type: "homeUsage", days: [], models: [], error: "DGC could not read token usage just now." }); return; }
     this.homeUsage = { timer: setTimeout(() => { const had = this.homeUsage; this.homeUsage = undefined; if (had?.all) this.post(usageForHome(had.all, had.period, had.today)); }, 20000) };
   }
@@ -6611,7 +6622,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.listModels();
         break;
       case "setSubscription":
-        await this.selectSubscription(String(msg.engine || ""), typeof msg.model === "string" ? msg.model.trim().slice(0, 256) : "");
+        await this.selectSubscription(String(msg.engine || ""), typeof msg.model === "string" ? msg.model.trim().slice(0, 256) : "", typeof msg.model === "string");
+        break;
+      case "subscriptionModelTyped":
+        // The picker's "Enter another model…" under a subscription app the session isn't on: its model by name.
+        if (typeof msg.id === "string" && /^[a-z0-9_]{1,64}$/.test(msg.id)) {
+          const typed = await vscode.window.showInputBox({ prompt: "Model name for this subscription app", placeHolder: "A model id or alias the app knows",
+            validateInput: (value) => (value.trim().length > 256 ? "Use up to 256 characters." : undefined) });
+          if (typed?.trim()) await this.selectSubscription(msg.id, typed.trim(), true);
+        }
         break;
       case "providerModelTyped":
         // A host that lists none: its model by name.
@@ -8810,13 +8829,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       && row.engine === this.routeState.subscriptionEngine);
     // allModels: choosing it lists what its host offers, and the session moves only once a model is chosen from them.
     // kind, base_url and model: where a row's Fallback word goes, and which rows can be one (D14).
-    const routes: { key: string; label: string; allModels?: boolean; kind?: string; base_url?: string; model?: string; engine?: string }[] = saved.map(row => ({ key: row.id, label: row.name,
-      kind: row.kind, ...(row.kind !== "subscription" ? { base_url: row.base_url, model: startingModel(this.context, row) } : { engine: String(row.engine || "") }),
+    // A subscription app's row carries what the picker lists for it: its model names, and for Claude Code the version
+    // each nickname last ran as and the versions that can be pinned (dgc/subscriptions.py status()).
+    const cliFacts = (engine: string) => {
+      const found: any = this.routeState.subscriptionEngines.find((row: any) => row?.key === engine);
+      const names = (list: unknown) => (Array.isArray(list) ? list.filter((id: unknown): id is string => typeof id === "string" && !!id).slice(0, 64) : []);
+      const versions: Record<string, string> = {};
+      if (found?.model_versions && typeof found.model_versions === "object") {
+        for (const [nick, full] of Object.entries(found.model_versions)) if (typeof full === "string" && full.length <= 128) versions[nick.slice(0, 32)] = full;
+      }
+      return { engine, hints: names(found?.model_hints), versions, fixed: names(found?.fixed_models),
+        cli_default_model: String(found?.cli_default_model || ""), cli_default_listed: found?.cli_default_listed !== false,
+        ...(found?.installed === false ? { installed: false } : {}), ...(typeof found?.auth_state === "string" ? { auth_state: found.auth_state } : {}) };
+    };
+    const routes: { key: string; label: string; allModels?: boolean; kind?: string; base_url?: string; model?: string; engine?: string; [more: string]: unknown }[] = saved.map(row => ({ key: row.id, label: row.name,
+      kind: row.kind, ...(row.kind !== "subscription" ? { base_url: row.base_url, model: startingModel(this.context, row) } : cliFacts(String(row.engine || ""))),
       ...(row.kind !== "subscription" && !startingModel(this.context, row) ? { allModels: true } : {}) }));
     if (!this.routeState.subscriptionEngine && !currentProfile) {
       routes.unshift({ key: "native", label: `Current host · ${nativeLabel}` });
     } else if (this.routeState.subscriptionEngine && !currentSubscription) {
-      routes.unshift({ key: this.routeState.subscriptionEngine, kind: "subscription", engine: this.routeState.subscriptionEngine,
+      routes.unshift({ key: this.routeState.subscriptionEngine, kind: "subscription", ...cliFacts(this.routeState.subscriptionEngine),
                       label: String(subscription?.label || this.routeState.subscriptionEngine) });
     }
     const currentRouteKey = currentSubscription?.id || this.routeState.subscriptionEngine || currentProfile?.id || "native";
@@ -8997,7 +9029,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } catch { return ""; }
   }
 
-  private async selectSubscription(engine: string, chosenModel = ""): Promise<void> {
+  /** `modelGiven`: the picker chose one of a subscription app's models with it ("" is the app's own default), so the
+   *  session moves to that app on that model in one step; without it the app keeps the model it last had. */
+  private async selectSubscription(engine: string, chosenModel = "", modelGiven = false): Promise<void> {
     try {
       if ((this.lastReadyEvent?.capabilities as any)?.session_model_route !== true) {
         throw new Error("Update DGC CLI to choose a provider for this Work session.");
@@ -9036,7 +9070,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       await this.verifySubscription(engine);
       await this.requestState(this.ensureBackend(), "subscription-route", {
-        type: "set_config", scope: "session", values: { subscription_engine: engine },
+        type: "set_config", scope: "session", values: { subscription_engine: engine, ...(modelGiven ? { subscription_model: chosenModel } : {}) },
       }, "config", 10000);
       await this.rememberSubscription(engine);
     } catch (err: any) {
@@ -9113,7 +9147,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.useReady(() => { void this.pipsBridgeReady(); });   // the Pips tab's welcome, once DGC can be asked
       this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
-      this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider());
+      this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider(), () => this.pipHostMark());
       // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
       this.pipsEditor.useArtifacts(() => this.artifacts);
       // Continue in Work on what a Pip changed in its copy of a project (Pips API 91).
@@ -9140,17 +9174,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
   /** The API providers saved in Settings, for a Pip's model menus, with their models as Work lists them. Names and
    *  model ids only: no address and no key reaches a Pip's page. */
-  private async pipSavedProviders(): Promise<{ id: string; name: string; default: boolean; models: string[] }[]> {
+  private async pipSavedProviders(): Promise<{ id: string; name: string; default: boolean; models: string[]; mark: string; badge: string }[]> {
     if (this.noProvider()) return [];
     if ((this.lastReadyEvent?.capabilities as any)?.saved_model_providers !== 1) return [];
     const defaultId = defaultProfileId(this.context);
     const saved = listProfiles(this.context).filter(row => row.kind !== "subscription");
     // One after another: the CLI lists one host at a time (modelsAtProvider).
-    const rows: { id: string; name: string; default: boolean; models: string[] }[] = [];
+    // (mark, badge: which mark the model picker draws for it, decided here: no address reaches the page.)
+    const rows: { id: string; name: string; default: boolean; models: string[]; mark: string; badge: string }[] = [];
     for (const row of saved) {
-      rows.push({ id: row.id, name: row.name, default: row.id === defaultId, models: (await this.chatdgcModels(row.id)).ids.filter(Boolean) });
+      rows.push({ id: row.id, name: row.name, default: row.id === defaultId, models: (await this.chatdgcModels(row.id)).ids.filter(Boolean),
+        ...modelPicker.markOf({ base_url: row.base_url, name: row.name }) });
     }
     return rows;
+  }
+  /** The host DGC itself is on, for a Pip's model picker when it isn't one of the saved providers: its name and mark. */
+  private pipHostMark(): { name: string; mark: string; badge: string } | undefined {
+    if (this.noProvider() || !this.state.baseUrl) return undefined;
+    const name = Object.values(PROVIDERS).find(p => sameHost(p.url, this.state.baseUrl))?.label || "Custom host";
+    return { name, ...modelPicker.markOf({ base_url: this.state.baseUrl, name }) };
   }
   /** A Pip was set to this provider. Its runs happen with no window, so its route and key go where DGC keeps keys. */
   private async savePipProvider(id: string, chosenModel = ""): Promise<void> {
@@ -9361,7 +9403,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }, true);
       this.pipsTab.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsTab.usePluginLogos(plugin => this.replyPluginLogo(plugin));
-      this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider());
+      this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider(), () => this.pipHostMark());
       // A Pip's reply in this tab: its links and "Settings → Models" go where the side bar's do.
       this.pipsTab.usePageActions((message) => { void this.onMessage(message); });
       this.pipsTab.useArtifacts(() => this.artifacts);
@@ -11284,8 +11326,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const folderPickJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "folderpick.js"));
     // How long ago a Work session is from, in the Work list's words (media/shared/age.js, window.DgcAge).
     const ageJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "age.js"));
-    // The thinking slider, the same in Work's model menu and a Pip's (media/shared/effort.js, window.DgcEffort).
-    const effortJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "effort.js"));
+    // The model picker, the one Work, ChatDGC and a Pip's chat share (media/shared/modelpicker.js, window.DgcModelPicker).
+    const modelPickerJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "modelpicker.js"));
     const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
@@ -11599,7 +11641,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <div class="picker">
         <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-zap model-icon" aria-hidden="true"></span><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
-        <div id="modelmenu" class="cmenu dgc-menu" role="menu" aria-label="Model" hidden></div>
       </div>
       <button type="button" id="queue-send" class="fbtn" title="Queue for the next turn — Alt+Enter" aria-label="Queue for next turn" hidden><span class="codicon codicon-list-ordered queue-icon" aria-hidden="true"></span><span class="queue-word">Queue</span></button>
       <button type="button" id="stop-run" class="fbtn" title="Stop generation" aria-label="Stop generation" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
@@ -11615,7 +11656,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${effortJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

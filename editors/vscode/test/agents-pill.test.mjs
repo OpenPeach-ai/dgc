@@ -28,7 +28,7 @@ before(async () => {
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] }); } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
   const css = readStylesheet(here + "/../media/main.css");
-  mainJs = readFileSync(here + "/../media/shared/effort.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/icons.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n"
+  mainJs = readFileSync(here + "/../media/shared/modelpicker.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/icons.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n"
     // The voice bar too, as the panel loads it: with it the footer has its microphone, as in real VS Code (the row
     // the live check measured 8px short at 300px had it; without it the test footer had room to spare).
     + readFileSync(here + "/../media/voicebar.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");

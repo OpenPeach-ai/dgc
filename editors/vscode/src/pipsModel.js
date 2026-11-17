@@ -226,8 +226,14 @@ export function providerModelChoice(m){return record(m)&&m.mode==='provider'&&Ob
 export function pipProviders(value){
   if(!Array.isArray(value))return[];
   return value.filter(p=>record(p)&&typeof p.id==='string'&&PROVIDER_ID.test(p.id)&&typeof p.name==='string'&&p.name&&Array.isArray(p.models)).slice(0,16)
-    .map(p=>({id:p.id,name:p.name,default:p.default===true,models:p.models.filter(id=>typeof id==='string'&&MODEL_ID.test(id)&&!id.includes('://')).slice(0,500)}));
+    .map(p=>({id:p.id,name:p.name,default:p.default===true,models:p.models.filter(id=>typeof id==='string'&&MODEL_ID.test(id)&&!id.includes('://')).slice(0,500),...pipMark(p)}));
 }
+// The mark the model picker draws for a connection, as the editor decided it (a short name and a badge, never an
+// address): kept only when both are the plain words the picker knows.
+const MARK=/^[a-z]{0,16}$/;
+export function pipMark(value){return record(value)&&typeof value.mark==='string'&&MARK.test(value.mark)&&typeof value.badge==='string'&&['','cli','key','cloud'].includes(value.badge)?{mark:value.mark,badge:value.badge}:{};}
+/** The host DGC itself is on (list_pip_models' `host`, added by the editor): its name and its mark, or null. */
+export function pipHost(value){return record(value)&&typeof value.name==='string'&&value.name&&value.name.length<=80&&'mark' in pipMark(value)?{name:value.name,...pipMark(value)}:null;}
 export function routerModelChoice(m){return record(m)&&m.mode==='router'&&(Object.keys(m).join()==='mode'||Object.keys(m).sort().join()==='mode,model,system'&&typeof m.system==='string'&&ROUTER_SYSTEM.test(m.system)&&typeof m.model==='string'&&MODEL_ID.test(m.model)&&!m.model.includes('://'));}
 export function pipRouter(value){
   if(value===undefined||value===null)return null;

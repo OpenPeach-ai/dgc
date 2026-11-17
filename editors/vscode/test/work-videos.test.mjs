@@ -27,7 +27,7 @@ before(async () => {
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] }); } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
   const css = readStylesheet(here + "/../media/main.css");
-  mainJs = readFileSync(here + "/../media/shared/effort.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/icons.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
+  mainJs = readFileSync(here + "/../media/shared/modelpicker.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/menu.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/icons.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/composer.js", "utf8") + "\n" + readFileSync(here + "/../media/shared/tray.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   playerJs = readFileSync(here + "/../media/videoPlayer.js", "utf8");
   markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;

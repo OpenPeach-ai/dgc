@@ -1,11 +1,12 @@
-// A Work session's fallback model (D14, 9 Nov; fallback on every surface, part C): the ⋯ beside a model in Work's
-// model menu (this session's route, a saved provider, or a model an All models provider lists), Main and Fallback at
-// the rows' right end, only from a CLI that offers it; Claude Code or Codex too (part E, on its own default model); and
-// the model button in olive while the fallback answers.
+// A Work session's fallback model (D14, 9 Nov; fallback on every surface, part C; in the one model picker since 17 Nov):
+// the ⋯ beside a model in Work's picker (a model of this session's route or of a saved provider), Main and Fallback at
+// the rows' right end, only from a CLI that offers it; Claude Code or Codex too (part E, on its own default model: its
+// "CLI default" row); and the model button in olive while the fallback answers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { makeDom } from "./support/webview-dom.mjs";
+import { pickerDom } from "./support/picker-dom.mjs";
 
 const SPARE = `provider_${"c".repeat(32)}`;
 const FB = (extra = {}) => ({ offered: true, model: "", base_url: "", route_base: "http://127.0.0.1:11434/v1", ...extra });
@@ -13,80 +14,94 @@ const ROUTES = [{ key: "native", label: "Ollama" },
   { key: SPARE, label: "Spare", kind: "native", base_url: "https://spare.example/v1", model: "gpt-oss:120b" },
   { key: "codex", label: "Codex", kind: "subscription" }];
 
+const last = (posted) => JSON.parse(JSON.stringify(posted.filter((m) => m.type === "setFallback").at(-1) ?? null));
+
 test("Work: the ⋯ beside a model sets this session's fallback; Main and Fallback at the right end", () => {
   const { doc, send, posted, errors } = makeDom();
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "glm-5.3:cloud"], current: "deepseek-v4.1-flash:cloud",
     routes: ROUTES, currentRouteKey: "native", fallback: FB() });
-  const menu = doc.getElementById("modelmenu");
-  assert.equal(menu.querySelectorAll(".dgc-menu-pill").length, 0, "no fallback yet: no words");
-  const dots = menu.querySelector('[data-fb-more="m:1"]');
+  const p = pickerDom(doc);
+  assert.deepEqual(p.pills(), [], "no fallback yet: no words");
+  const dots = p.more("glm-5.3:cloud");
   assert.ok(dots, "a model of this session's host has a ⋯");
   assert.equal(dots.getAttribute("aria-label"), "More for glm-5.3:cloud");
   dots.click();
-  assert.deepEqual([...menu.querySelectorAll(".dgc-menu-choices button")].map((b) => b.textContent), ["Use as main", "Use as fallback"]);
-  menu.querySelector('[data-fb-set="m:1"]').click();
-  assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "setFallback").at(-1))), { type: "setFallback", provider: "", model: "glm-5.3:cloud" });
-  const pill = (sel) => [...menu.querySelectorAll(`${sel} .dgc-menu-pill`)].map((p) => p.textContent);
-  assert.deepEqual(pill('[data-i="0"]'), ["Main"]);
-  assert.deepEqual(pill('[data-i="1"]'), ["Fallback"]);
-  // Providers: a saved provider can be the fallback (its own model), and so can Codex; Current host can't.
-  menu.querySelector("[data-provider-back]").click();
-  assert.ok(menu.querySelector('[data-fb-more="p:1"]'), "a saved provider has a ⋯");
-  assert.equal(menu.querySelector('[data-fb-more="p:0"]'), null, "Current host names no one model");
-  assert.ok(menu.querySelector('[data-fb-more="p:2"]'), "Codex can be a fallback");
-  menu.querySelector('[data-fb-more="p:1"]').click();
-  menu.querySelector('[data-fb-set="p:1"]').click();
-  assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "setFallback").at(-1))), { type: "setFallback", provider: SPARE, model: "gpt-oss:120b" });
-  assert.deepEqual(pill('[data-provider-i="1"]'), ["Fallback"]);
-  assert.deepEqual(pill('[data-provider-i="0"]'), ["Main"], "the main model's provider");
-  menu.querySelector('[data-fb-more="p:1"]').click();
-  assert.match(menu.querySelector('[data-fb-set="p:1"]').textContent, /Stop using as fallback/);
-  menu.querySelector('[data-fb-set="p:1"]').click();
-  assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "setFallback").at(-1))), { type: "setFallback", provider: "", model: "" });
+  assert.deepEqual(p.choices().map((b) => b.textContent), ["Use as main", "Use as fallback"]);
+  p.choices()[1].click();
+  assert.deepEqual(last(posted), { type: "setFallback", provider: "", model: "glm-5.3:cloud" });
+  assert.deepEqual(p.pills(), [["deepseek-v4.1-flash:cloud", "Main"], ["glm-5.3:cloud", "Fallback"]]);
+  assert.equal(p.open(), true, "the picker stays, and says it");
+  p.more("deepseek-v4.1-flash:cloud").click();
+  assert.deepEqual(p.choices().map((b) => [b.textContent, b.disabled]), [["Use as fallback", true]], "its main can't be its fallback too");
+  // A saved provider's models can be the fallback, and so can Codex, on its own default model.
+  p.conn(SPARE).click();
+  send({ type: "providerModels", id: SPARE, ids: ["gpt-oss:120b", "big:1"] });
+  p.more("gpt-oss:120b").click();
+  p.choices()[1].click();
+  assert.deepEqual(last(posted), { type: "setFallback", provider: SPARE, model: "gpt-oss:120b" });
+  assert.deepEqual(p.pills(), [["gpt-oss:120b", "Fallback"]]);
+  p.conn("native").click();
+  assert.deepEqual(p.pills(), [["deepseek-v4.1-flash:cloud", "Main"]], "only one fallback");
+  p.conn(SPARE).click();
+  p.more("gpt-oss:120b").click();
+  assert.match(p.choices()[1].textContent, /Stop using as fallback/);
+  p.choices()[1].click();
+  assert.deepEqual(last(posted), { type: "setFallback", provider: "", model: "" });
+  assert.deepEqual(p.pills(), []);
   // Codex as the fallback: named by its CLI, on its own default model.
-  menu.querySelector('[data-fb-more="p:2"]').click();
-  assert.deepEqual([...menu.querySelectorAll(".dgc-menu-choices button")].map((b) => b.textContent), ["Use as main", "Use as fallback"]);
-  menu.querySelector('[data-fb-set="p:2"]').click();
-  assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "setFallback").at(-1))), { type: "setFallback", provider: "codex", model: "" });
-  assert.deepEqual(pill('[data-provider-i="2"]'), ["Fallback"]);
-  assert.deepEqual(pill('[data-provider-i="0"]'), ["Main"]);
-  assert.deepEqual(pill('[data-provider-i="1"]'), [], "only one fallback");
+  p.conn("codex").click();
+  assert.deepEqual(p.names(), ["CLI default"]);
+  p.more("CLI default").click();
+  assert.deepEqual(p.choices().map((b) => b.textContent), ["Use as main", "Use as fallback"]);
+  p.choices()[1].click();
+  assert.deepEqual(last(posted), { type: "setFallback", provider: "codex", model: "" });
+  assert.deepEqual(p.pills(), [["CLI default", "Fallback"]]);
+  p.conn("native").click();
+  assert.deepEqual(p.pills(), [["deepseek-v4.1-flash:cloud", "Main"]]);
+  // Use as main is choosing it.
+  p.more("glm-5.3:cloud").click();
+  p.choices()[0].click();
+  assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "setModel").at(-1))), { type: "setModel", model: "glm-5.3:cloud" });
+  assert.equal(p.open(), false);
   assert.deepEqual(errors, []);
 });
 
 test("Work: a session's Claude Code or Codex fallback, told after a reload, shows on its row; its own CLI is Main", () => {
   const { doc, send, posted, errors } = makeDom();
   doc.getElementById("btn-model").click();
-  const routes = [{ key: "codex", label: "Codex", kind: "subscription", engine: "codex" },
-    { key: "subscription_claude", label: "Claude Code", kind: "subscription", engine: "claude" }];
+  const routes = [{ key: "codex", label: "Codex", kind: "subscription", engine: "codex", hints: ["gpt-5.6-sol"] },
+    { key: "subscription_claude", label: "Claude Code", kind: "subscription", engine: "claude", hints: ["opus"] }];
   send({ type: "models", ids: ["gpt-5.6-sol"], current: "gpt-5.6-sol", subscription: true, label: "Codex", routes,
     currentRouteKey: "codex", fallback: FB({ engine: "claude" }) });
-  const menu = doc.getElementById("modelmenu");
-  assert.equal(menu.querySelector("[data-fb-more]"), null, "a CLI's own models have no ⋯");
-  menu.querySelector("[data-provider-back]").click();
-  const pill = (sel) => [...menu.querySelectorAll(`${sel} .dgc-menu-pill`)].map((p) => p.textContent);
-  assert.deepEqual(pill('[data-provider-i="0"]'), ["Main"]);
-  assert.deepEqual(pill('[data-provider-i="1"]'), ["Fallback"]);
-  menu.querySelector('[data-fb-more="p:1"]').click();
-  assert.match(menu.querySelector('[data-fb-set="p:1"]').textContent, /Stop using as fallback/);
-  menu.querySelector('[data-fb-set="p:1"]').click();
-  assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "setFallback").at(-1))), { type: "setFallback", provider: "", model: "" });
-  assert.deepEqual(pill('[data-provider-i="1"]'), []);
-  menu.querySelector('[data-fb-more="p:0"]').click();
-  assert.ok(menu.querySelector('[data-fb-set="p:0"]').disabled, "its main can't be its fallback too");
+  const p = pickerDom(doc);
+  assert.equal(doc.querySelector(".dgc-mp-more"), null, "the session's own CLI can't be its own fallback: its models have no ⋯");
+  assert.deepEqual(p.pills(), [["gpt-5.6-sol", "Main"]]);
+  p.conn("subscription_claude").click();
+  assert.deepEqual(p.pills(), [["CLI default", "Fallback"]]);
+  assert.equal(doc.querySelectorAll(".dgc-mp-more").length, 1, "of a CLI's rows, only its own default can be the fallback");
+  p.more("CLI default").click();
+  assert.match(p.choices()[1].textContent, /Stop using as fallback/);
+  p.choices()[1].click();
+  assert.deepEqual(last(posted), { type: "setFallback", provider: "", model: "" });
+  assert.deepEqual(p.pills(), []);
   assert.deepEqual(errors, []);
 });
 
-test("Work: no ⋯ from an older CLI, none for a CLI's own models; the button in olive while the fallback answers", () => {
+test("Work: no ⋯ from an older CLI, none for the session's own CLI; the button in olive while the fallback answers", () => {
   const { doc, send, errors } = makeDom();
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud", routes: ROUTES,
     currentRouteKey: "native", fallback: { offered: false } });
-  assert.equal(doc.querySelector("#modelmenu [data-fb-more]"), null, "an older CLI: no ⋯");
+  const p = pickerDom(doc);
+  assert.deepEqual(p.names(), ["deepseek-v4.1-flash:cloud"]);
+  assert.equal(doc.querySelector(".dgc-mp-more"), null, "an older CLI: no ⋯");
+  p.conn("codex").click();
+  assert.equal(doc.querySelector(".dgc-mp-more"), null);
   send({ type: "models", ids: ["gpt-5.6-sol"], current: "", subscription: true, label: "Codex", routes: ROUTES,
     currentRouteKey: "codex", fallback: FB() });
-  assert.equal(doc.querySelector("#modelmenu [data-fb-more]"), null, "Codex's own models have no ⋯ (Codex is one, on its default)");
+  assert.deepEqual(p.names(), ["CLI default", "gpt-5.6-sol"]);
+  assert.equal(doc.querySelector(".dgc-mp-more"), null, "Codex's own models have no ⋯ while the session runs on Codex");
   send({ type: "fallbackActive", model: "glm-5.3:cloud" });
   const button = doc.getElementById("btn-model");
   assert.ok(button.classList.contains("on-fallback"));
@@ -110,37 +125,36 @@ test("Work: the model button's name, its fallback word and its reasoning share o
   assert.match(css, /#btn-model\.on-fallback \.model-chevron \{ color: var\(--err-text\); opacity: \.7; \}/, "its chevron in the olive too, as a Pip's and ChatDGC's");
 });
 
-test("Work: a long model or provider name stays on one line (its … at rest), slides while pointed at, and its whole name is its tooltip (9 Nov)", () => {
+test("Work: a long model name stays on one line (its … at rest), slides while pointed at, and its whole name is its tooltip (9 Nov)", () => {
   const { doc, send, errors } = makeDom();
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "glm-5.3:cloud"], current: "deepseek-v4.1-flash:cloud",
     routes: ROUTES, currentRouteKey: "native", fallback: FB({ model: "glm-5.3:cloud" }) });
-  const menu = doc.getElementById("modelmenu");
-  const label = menu.querySelector('[data-i="0"] .dgc-menu-label');
+  const p = pickerDom(doc);
+  const label = p.row("deepseek-v4.1-flash:cloud").querySelector(".dgc-menu-label");
   assert.ok(label, "a model row's name is one line, not two beside its Main word");
   assert.equal(label.textContent, "deepseek-v4.1-flash:cloud");
   assert.equal(label.getAttribute("title"), "deepseek-v4.1-flash:cloud");
-  assert.ok(menu.__dgcSlide, "the menu slides a long name while its row is pointed at or focused");
-  menu.querySelector("[data-provider-back]").click();
-  const provider = menu.querySelector('[data-provider-i="1"] .dgc-menu-label');
-  assert.ok(provider && provider.getAttribute("title") === "Spare", "a provider row's name too");
+  assert.ok(p.box().__dgcSlide, "the picker slides a long name while its row is pointed at or focused");
+  assert.equal(p.conn(SPARE).title, "Spare · your key", "a connection's name is its mark's label");
   assert.deepEqual(errors, []);
 });
 
-test("Work: a long name sliding in the model menu shows no tooltip over the row above; one at rest still does (9 Nov)", () => {
+test("Work: a long name sliding in the model picker shows no tooltip over the row above; one at rest still does (9 Nov)", () => {
   const { doc, send, advance, errors } = makeDom({ clock: true });
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "glm-5.3:cloud"], current: "deepseek-v4.1-flash:cloud",
     routes: ROUTES, currentRouteKey: "native", fallback: FB({ model: "glm-5.3:cloud" }) });
+  const p = pickerDom(doc);
   const tip = () => [...doc.querySelectorAll(".tip")].find((n) => !n.hidden) || null;
-  const rest = doc.querySelector('#modelmenu [data-i="1"] .dgc-menu-label');
+  const rest = p.row("glm-5.3:cloud").querySelector(".dgc-menu-label");
   rest.dispatchEvent(new doc.defaultView.Event("pointerover", { bubbles: true }));
   advance(1000);
   assert.ok(tip() && /glm-5\.3:cloud/.test(tip().textContent), "at rest: its tooltip");
   rest.dispatchEvent(new doc.defaultView.Event("pointerout", { bubbles: true }));
   doc.body.dispatchEvent(new doc.defaultView.Event("pointerover", { bubbles: true }));
   advance(1000);
-  const sliding = doc.querySelector('#modelmenu [data-i="0"] .dgc-menu-label');
+  const sliding = p.row("deepseek-v4.1-flash:cloud").querySelector(".dgc-menu-label");
   sliding.classList.add("is-sliding");          // what DgcMenu.slide does on its next frame
   sliding.dispatchEvent(new doc.defaultView.Event("pointerover", { bubbles: true }));
   advance(1000);

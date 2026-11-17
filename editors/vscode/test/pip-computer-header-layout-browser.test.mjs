@@ -123,6 +123,6 @@ test("at 900px the computer tab's header is unchanged: title and Stop computer s
     assert.equal(h.lines, 1);
     assert.ok(h.stop.left > h.words.right && h.stop.top < h.words.bottom && h.stop.bottom > h.words.top,
       `the button sits beside the title (${JSON.stringify(h.stop)} vs ${JSON.stringify(h.words)})`);
-    assert.equal(await p.evaluate(() => getComputedStyle(document.body).paddingLeft), "20px", "VS Code's own webview gutter");
+    assert.equal(await p.evaluate(() => getComputedStyle(document.body).paddingLeft), "0px", "VS Code's own 20px webview gutter is undone (17 Nov: it showed as a band down the side)");
   } finally { await close(); }
 });

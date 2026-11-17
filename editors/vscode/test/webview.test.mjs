@@ -6,6 +6,7 @@
 // and accessibility contract with zero JS errors.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { pickerDom } from "./support/picker-dom.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -2409,17 +2410,20 @@ test("delegated and older backends expose queue delivery without claiming live s
   }
 });
 
-test("IME confirmation does not submit and late model results cannot reopen a dismissed menu", () => {
+test("IME confirmation does not submit and late model results cannot reopen a dismissed picker", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   const input = doc.getElementById("input"); input.value = "检查代码";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
   assert.equal(posted.filter(message => message.type === "prompt").length, 0);
   doc.getElementById("btn-model").click();
-  const menu = doc.getElementById("modelmenu");
-  menu.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  assert.equal(menu.hidden, true);
+  const p = pickerDom(doc);
+  assert.equal(p.open(), true, "it opens at once, and says it is loading");
+  assert.equal(p.shown(), "Loading…");
+  p.box().dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(p.open(), false);
+  assert.equal(doc.getElementById("btn-model").getAttribute("aria-expanded"), "false");
   send({ type: "models", ids: ["delayed-model"], current: "delayed-model" });
-  assert.equal(menu.hidden, true);
+  assert.equal(p.open(), false);
   assert.deepEqual(errors, []);
   dom.window.close();
 });
@@ -2931,61 +2935,57 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   send({ type: "state", state: {
     model: "Codex default", mode: "default", think: "off", subscriptionEngine: "codex",
   } });
+  const p = pickerDom(doc);
 
   doc.getElementById("btn-model").click();
   assert.equal(posted.at(-1).type, "listModels");
   send({ type: "models", ids: [], current: "", subscription: true,
     label: "Codex (ChatGPT subscription)" });
-  const modelMenu = doc.getElementById("modelmenu");
-  assert.match(modelMenu.textContent, /CLI default/);
-  assert.match(modelMenu.textContent, /Enter another model/);
-  modelMenu.querySelector("[data-default]").click();
+  assert.deepEqual(p.names(), ["CLI default"]);
+  assert.ok(p.foot("typed"), "Enter another model…");
+  assert.equal(p.foot("typed").textContent, "Enter another model…");
+  p.row("CLI default").click();
   assert.equal(posted.at(-1).type, "setModel");
   assert.equal(posted.at(-1).model, "");
+  assert.equal(p.open(), false, "choosing a model closes the picker");
 
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: [], current: "", subscription: true, label: "Codex" });
-  modelMenu.querySelector("[data-custom]").click();
+  p.foot("typed").click();
   assert.equal(posted.at(-1).type, "pickModel");
 
   doc.getElementById("btn-model").click();
-  send({ type: "models", ids: ["opus", "sonnet"], current: "opus", subscription: true,
-    label: "Claude Code" });
-  assert.equal(modelMenu.querySelector('[data-i="0"]').getAttribute("aria-checked"), "true");
-  modelMenu.querySelector('[data-i="1"]').click();
+  send({ type: "models", ids: ["gpt-5.6-sol", "gpt-5.6-luna"], current: "gpt-5.6-sol", subscription: true,
+    label: "Codex" });
+  assert.deepEqual(p.chosen(), ["gpt-5.6-sol"]);
+  p.row("gpt-5.6-luna").click();
   assert.equal(posted.at(-1).type, "setModel");
-  assert.equal(posted.at(-1).model, "sonnet");
+  assert.equal(posted.at(-1).model, "gpt-5.6-luna");
 
   doc.getElementById("btn-model").click();
-  send({ type: "models", ids: ["opus", "sonnet"], current: "sonnet", subscription: true,
-    supportsEffort: true, label: "Claude Code" });
-  const high = modelMenu.querySelector(".effort-slider");
-  assert.ok(high.dataset.profiles.split(",").includes("xhigh"));
-  assert.ok(high.dataset.profiles.split(",").includes("ultra"));
-  assert.equal(high.dataset.profiles.split(",").includes("max"), false,
+  send({ type: "models", ids: ["gpt-5.6-sol", "gpt-5.6-luna"], current: "gpt-5.6-luna", subscription: true,
+    supportsEffort: true, label: "Codex" });
+  assert.ok(p.levels().includes("xhigh"));
+  assert.ok(p.levels().includes("ultra"));
+  assert.equal(p.levels().includes("max"), false,
     "Codex uses xhigh; its selector must not offer an unsupported max value");
-  high.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));      // a drag: its release closes the menu
-  high.value = String(high.dataset.profiles.split(",").indexOf("high"));
-  high.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  p.level("high").click();
   assert.equal(posted.at(-1).type, "setReasoningProfile");
   assert.equal(posted.at(-1).level, "high");
+  assert.equal(p.open(), true, "choosing a level keeps the picker open");
+  assert.equal(p.levelNow(), "high");
   // The button says the level chosen at once (W15, user test 15 Nov: it showed the level before for seconds), but a
   // rejected vendor effort must not leave that selection behind: DGC's refusal puts back what DGC last said.
   assert.equal(doc.getElementById("effortname").textContent, "High");
   send({ type: "event", event: { type: "command_rejected", command: "set_config", reason: "invalid_config_value", message: "Codex does not expose that effort" } });
-  doc.getElementById("btn-model").click();
-  send({ type: "models", ids: [], current: "", subscription: true,
-    supportsEffort: true, label: "Codex" });
-  assert.equal(modelMenu.querySelector(".effort-slider").value, "0");
-  assert.equal(modelMenu.querySelector(".effort-slider").getAttribute("aria-valuetext"), "Default");
-  assert.equal(modelMenu.querySelector(".model-options").hidden, false,
-    "the current provider's models open immediately");
-  assert.equal(modelMenu.querySelector(".effort-control").hidden, false,
-    "the thinking slider remains visible beside the current provider's models");
+  assert.equal(p.levelNow(), "off", "the open picker goes back too");
+  assert.equal(p.level("off").textContent, "Default");
+  assert.ok(p.names().length > 0 && p.level("off"), "the models and the thinking levels are both in sight");
 
+  p.box().dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   const modeButton = doc.getElementById("btn-mode");
   modeButton.click();
-  assert.equal(doc.getElementById("modemenu").querySelector("[data-profile], [data-think]"), null,
+  assert.equal(doc.getElementById("modemenu").querySelector("[data-profile], [data-think], [data-level]"), null,
     "permission control must not mix in reasoning settings");
 
   send({ type: "state", state: {
@@ -2996,10 +2996,9 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: [], current: "", subscription: true,
     supportsEffort: true, label: "Codex" });
-  assert.ok(modelMenu.querySelector(".reasoning-card.is-ultra"));
-  const off = modelMenu.querySelector(".effort-slider");
-  off.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));      // (a drag: its release is the choice)
-  off.value = "0"; off.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert.ok(doc.querySelector(".dgc-mp-think.is-ultra"));
+  assert.equal(p.levelNow(), "ultra");
+  p.level("off").click();
   assert.equal(posted.at(-1).type, "setReasoningProfile");
   assert.equal(posted.at(-1).level, "off");
   assert.deepEqual(errors, []);
@@ -3315,14 +3314,15 @@ test("workspace change counts remain text in the review surface", () => {
   assert.deepEqual(errors, []);
 });
 
-test("unknown model effort cannot become model menu markup", () => {
+test("unknown model effort cannot become model picker markup", () => {
   const { doc, send, errors } = makeDom();
   send({ type: "state", state: { model: "Example", mode: "default", think: '<img src=x onerror=alert(1)>' } });
   doc.getElementById("btn-model").click();
-  send({ type: "models", ids: ["Example"], current: "Example" });
-  const menu = doc.getElementById("modelmenu");
-  assert.equal(menu.querySelector("img"), null);
-  assert.match(menu.querySelector(".model-summary-label").textContent, /Off/);
+  send({ type: "models", ids: ["Example", '<img src=x onerror=alert(2)>'], current: "Example" });
+  const p = pickerDom(doc);
+  assert.equal(p.box().querySelector("img"), null);
+  assert.equal(p.levelNow(), "off");
+  assert.deepEqual(p.names(), ["Example", '<img src=x onerror=alert(2)>'], "a name is text");
   assert.deepEqual(errors, []);
 });
 
@@ -4797,27 +4797,25 @@ test("an answer offers Make this a Pip only when Pips can take it, and only draf
   assert.deepEqual(errors, []);
 });
 
-test("the model menu's note is three lines with Show more, and Show more opens it in place", () => {
+test("the model picker's thinking note is two lines with Show more, and Show more opens it in place", () => {
   // Reported 2026-10-07: Ollama's note ("Off turns thinking off. Low, Medium and High are sent as
   // Ollama's thinking levels…") took over the model selector.
   const { dom, errors, send, doc } = makeDom();
   send({ type: "event", event: { type: "ready", provider_capabilities: { reasoning_control: "ollama-levels" } } });
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud" });
-  const menu = doc.getElementById("modelmenu");
-  const note = menu.querySelector(".reasoning-note"), more = menu.querySelector(".reasoning-more");
-  assert.equal(menu.hidden, false);
-  assert.match(note.textContent, /^Off turns thinking off\./);
-  assert.ok(note.classList.contains("clamped"), "three lines at first");
-  assert.equal(more.hidden, false);
-  assert.equal(more.textContent, "Show more");
-  more.click();
-  assert.equal(note.classList.contains("clamped"), false, "the whole note, in place");
-  assert.equal(more.textContent, "Show less");
-  assert.equal(more.getAttribute("aria-expanded"), "true");
-  assert.equal(menu.hidden, false, "the menu stays open");
-  more.click();
-  assert.ok(note.classList.contains("clamped"));
+  const p = pickerDom(doc);
+  const note = () => doc.querySelector(".dgc-mp-think-note"), more = () => doc.querySelector(".dgc-mp-more-note");
+  assert.equal(p.open(), true);
+  assert.match(note().textContent, /^Off turns thinking off\./);
+  assert.ok(note().classList.contains("is-clamped"), "two lines at first");
+  assert.equal(more().textContent, "Show more");
+  more().click();
+  assert.equal(note().classList.contains("is-clamped"), false, "the whole note, in place");
+  assert.equal(more().textContent, "Show less");
+  assert.equal(p.open(), true, "the picker stays open");
+  more().click();
+  assert.ok(note().classList.contains("is-clamped"));
   assert.deepEqual(errors, []);
   dom.window.close();
 });
@@ -4826,45 +4824,39 @@ test("the Work model picker lists only configured routes supplied by the backend
   const { doc, send, errors } = makeDom();
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud",
-    routes: [{ key: "native", label: "Ollama" }, { key: "codex", label: "Codex" }] });
-  const menu = doc.getElementById("modelmenu");
-  const slider = menu.querySelector(".effort-slider");
-  const summary = menu.querySelector(".model-summary");
-  assert.ok(menu.querySelector("[data-provider-back]"), "the current provider's models open first");
-  menu.querySelector("[data-provider-back]").click();
-  assert.equal(menu.querySelector(".effort-slider"), slider,
-    "changing the lower list must keep the same thinking slider mounted");
-  assert.equal(menu.querySelector(".model-summary"), summary);
-  assert.equal(menu.querySelector(".effort-control").hidden, false);
-  assert.equal(menu.querySelectorAll("[data-provider-i]").length, 2);
-  assert.match(menu.textContent, /Ollama/);
-  assert.match(menu.textContent, /Codex/);
-  assert.doesNotMatch(menu.textContent, /Claude Code|Qwen Code|GitHub Copilot/);
+    routes: [{ key: "native", label: "Ollama" }, { key: "codex", label: "Codex", kind: "subscription", engine: "codex" }] });
+  const p = pickerDom(doc);
+  assert.equal(p.conn("native").getAttribute("aria-selected"), "true", "the current provider's models open first");
+  assert.deepEqual(p.names(), ["deepseek-v4.1-flash:cloud"]);
+  assert.deepEqual(p.connNames(), ["Ollama", "Codex · your subscription"]);
+  p.conn("codex").click();
+  assert.equal(p.shown(), "Codex");
+  assert.deepEqual(p.levels(), ["off", "low", "medium", "high", "xhigh", "ultra"], "looking at another connection keeps the session's thinking levels");
+  assert.doesNotMatch(p.box().textContent + p.connNames().join(" "), /Claude Code|Qwen Code|GitHub Copilot/);
   assert.deepEqual(errors, []);
 });
 
-test("Work's thinking slider: an arrow key steps it and the menu stays open; a drag's release closes it", () => {
+test("Work's thinking levels: an arrow key steps them and is told once it rests; a click is told at once; the picker stays open", () => {
   const { doc, send, posted, errors } = makeDom();
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud",
     routes: [{ key: "native", label: "Ollama" }] });
-  const menu = doc.getElementById("modelmenu"), slider = menu.querySelector(".effort-slider"), W = doc.defaultView;
-  const open = () => !menu.hidden;
-  const was = open();
-  assert.equal(was, true, "the menu is open");
-  slider.dispatchEvent(new W.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-  slider.value = String(Number(slider.value) + 1);
-  slider.dispatchEvent(new W.Event("input", { bubbles: true }));
-  slider.dispatchEvent(new W.Event("change", { bubbles: true }));
-  // (Keys are one choice when they rest, or when the slider is left: W15. uir2b-thinking-slider.test.mjs times it.)
+  const p = pickerDom(doc), W = doc.defaultView;
+  assert.equal(p.open(), true);
+  p.level("off").focus();
+  p.level("off").dispatchEvent(new W.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  assert.equal(p.levelNow(), "low", "the level follows the key at once");
+  assert.equal(doc.getElementById("effortname").textContent, "Low", "and so does the button");
+  // (Keys are one choice when they rest, or when the picker closes: W15. work-model-picker-browser.test.mjs times it.)
   assert.equal(posted.some((m) => m.type === "setReasoningProfile"), false, "a key's step isn't sent while more may follow");
-  assert.equal(open(), was, "and the menu stays open for the next one");
-  slider.dispatchEvent(new W.Event("blur"));
-  assert.ok(posted.some((m) => m.type === "setReasoningProfile"), "the step is chosen once the slider is left");
-  slider.dispatchEvent(new W.Event("pointerdown", { bubbles: true }));
-  slider.value = "0";
-  slider.dispatchEvent(new W.Event("change", { bubbles: true }));
-  assert.equal(open(), false, "a release after a drag closes it");
+  assert.equal(p.open(), true, "and the picker stays open for the next one");
+  p.box().dispatchEvent(new W.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.deepEqual(posted.filter((m) => m.type === "setReasoningProfile").map((m) => m.level), ["low"], "the step is chosen once the picker closes");
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud", routes: [{ key: "native", label: "Ollama" }] });
+  p.level("high").click();
+  assert.deepEqual(posted.filter((m) => m.type === "setReasoningProfile").map((m) => m.level), ["low", "high"], "a click is one request, at once");
+  assert.equal(p.open(), true);
   assert.deepEqual(errors, []);
 });
 
@@ -4874,11 +4866,14 @@ test("a Codex CLI default missing from its model list is labelled and cannot be 
   send({ type: "models", ids: ["gpt-5.6-terra", "gpt-5.6-luna"], current: "",
     subscription: true, label: "Codex", cliDefaultModel: "gpt-5.6-sol",
     cliDefaultListed: false, routes: [{ key: "codex", label: "Codex" }] });
-  const menu = doc.getElementById("modelmenu");
-  const fallback = menu.querySelector("[data-default]");
-  assert.match(fallback.textContent, /gpt-5\.6-sol \(not listed\)/);
-  assert.equal(fallback.disabled, true);
-  menu.querySelector('[data-i="0"]').click();
+  const p = pickerDom(doc);
+  const fallback = p.row("CLI default");
+  assert.equal(p.desc("CLI default"), "gpt-5.6-sol isn’t one of its models");
+  assert.equal(fallback.getAttribute("aria-disabled"), "true");
+  const before = posted.length;
+  fallback.click();
+  assert.equal(posted.length, before, "nothing is sent");
+  p.row("gpt-5.6-terra").click();
   assert.equal(posted.at(-1).type, "setModel");
   assert.equal(posted.at(-1).model, "gpt-5.6-terra");
   assert.deepEqual(errors, []);

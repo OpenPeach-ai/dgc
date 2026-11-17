@@ -9,6 +9,7 @@ import { openCards } from "./home-cards-scene.mjs";
 import { sample } from "./notes-sample.mjs";
 import { openRunningTurn, openChatDgc } from "./dgc-look-scene.mjs";
 import { openMapScene } from "./agent-map-scene.mjs";
+import { manyRoutes, PIP_CATALOG, PIP_MODELS } from "./model-menu-scene.mjs";
 import { openLibrary, ITEMS } from "./chat-scene.mjs";
 import { openOnePips, GST, LIME_DIR } from "./one-pips-scene.mjs";
 import { openChat as openPipChat } from "./pip-chat-scene.mjs";
@@ -162,20 +163,31 @@ export const SCENES = {
     x = await openRunningTurn(b, { width, height: 760, theme: modern(theme), approval: true });
     try { await visit("approval", x.page); } finally { await x.page.close(); }
   },
+  // The model picker (media/shared/modelpicker.js) as Work fills it: this session's connections and their models, Claude
+  // Code's rows, a search, twelve connections, and the Sub-agents tab.
   "work-model-menu": async (b, { width, theme }, visit) => {
     const SPARE = `provider_${"c".repeat(32)}`, OPEN = `provider_${"d".repeat(32)}`;
+    const CLAUDE = { key: "subscription_claude", label: "Claude Code", kind: "subscription", engine: "claude", hints: ["fable", "opus", "sonnet", "haiku"], versions: { opus: "claude-opus-5-5" },
+      fixed: ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], cli_default_model: "", cli_default_listed: true };
     const ROUTES = [{ key: `provider_${"a".repeat(32)}`, label: "Ollama", kind: "native", base_url: "http://127.0.0.1:11434/v1", model: "qwen3.8:27b" }, { key: SPARE, label: "Spare GPU box", kind: "native", base_url: "https://spare.example/v1", model: "gpt-oss:120b" },
-      { key: OPEN, label: "Ollama Cloud", kind: "native", base_url: "https://ollama.com", model: "", allModels: true }, { key: "subscription_claude", label: "Claude Code", kind: "subscription", engine: "claude" }, { key: "subscription_codex", label: "Codex", kind: "subscription", engine: "codex" }];
-    const AGENTS = { offered: true, own: false, model: "qwen3-coder", base_url: "", settings_model: "qwen3-coder", settings_base_url: "", router: false };
-    const models = { type: "models", ids: ["qwen3.8:27b", "qwen3-coder", "deepseek-v4.1-flash:cloud", "glm-5.3:cloud", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"], current: "qwen3.8:27b", routes: ROUTES, currentRouteKey: ROUTES[0].key, supportsEffort: true,
-      fallback: { offered: true, model: "", base_url: "", engine: "", route_base: "http://127.0.0.1:11434/v1" }, agents: AGENTS };
+      { key: OPEN, label: "Ollama Cloud", kind: "native", base_url: "https://ollama.com", model: "", allModels: true }, CLAUDE, { key: "subscription_codex", label: "Codex", kind: "subscription", engine: "codex", hints: ["gpt-5.6-sol"], versions: {}, fixed: [] }];
+    const AGENTS = { offered: true, own: false, model: "qwen3-coder", base_url: "", settings_model: "qwen3-coder", settings_base_url: "", router: false, thinking: "", thinking_settable: true, context_size: 0, context_settable: true };
+    const models = { type: "models", ids: ["qwen3.8:27b", "qwen3-coder", "deepseek-v4.1-flash:cloud", "glm-5.3:cloud", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"], current: "qwen3.8:27b", base: "http://127.0.0.1:11434/v1", routes: ROUTES, currentRouteKey: ROUTES[0].key, supportsEffort: true,
+      fallback: { offered: true, model: "glm-5.3:cloud", base_url: "", engine: "", route_base: "http://127.0.0.1:11434/v1" }, agents: AGENTS };
     const scene = await openMapScene(b, { width, height: 760, theme: modern(theme), open: false, capabilities: { agents_model: 1, model_fallback: 1 } });
     const { page, post } = scene;
+    const reopen = async (message) => { if (await page.locator(".dgc-mp-layer").count()) { await page.keyboard.press("Escape"); await page.keyboard.press("Escape"); await page.waitForTimeout(120); }
+      await page.click("#btn-model"); await post(message); await page.waitForSelector(".dgc-mp .dgc-mp-row"); await page.waitForTimeout(200); };
     try {
-      await page.click("#btn-model"); await post(models); await page.waitForSelector("#modelmenu .model-tabs"); await page.waitForTimeout(200); await visit("menu", page);
-      await page.click("#modelmenu [data-model-tab='agents']"); await page.waitForSelector("#modelmenu [data-agents-same]"); await page.waitForTimeout(200); await visit("sub-agents", page);
-      await page.click('#modelmenu [data-agents-provider="1"]'); await post({ type: "providerModels", id: SPARE, ids: ["gpt-oss:120b", "own-coder", "qwen3-coder:30b", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"] });
-      await page.waitForSelector("#modelmenu [data-agents-model]"); await page.waitForTimeout(200); await visit("sub-agents-models", page);
+      await reopen(models); await visit("menu", page);
+      await page.click('.dgc-mp-conn[data-rail="subscription_claude"]'); await page.waitForTimeout(200); await visit("menu-claude", page, { focus: false });
+      await page.click(".dgc-mp-q"); await page.keyboard.type("o"); await post({ type: "providerModels", id: SPARE, ids: ["gpt-oss:120b", "own-coder"] }); await post({ type: "providerModels", id: OPEN, ids: ["kimi-k3:cloud", "qwen3.8:480b-cloud"] });
+      await page.waitForTimeout(200); await visit("menu-search", page, { focus: false });
+      await reopen({ ...models, routes: manyRoutes(10) }); await visit("menu-many", page, { focus: false });
+      await reopen(models);
+      await page.click('.dgc-mp-tab[data-tab="agents"]'); await page.waitForSelector('.dgc-mp-conn[data-rail="agents:settings"]'); await page.waitForTimeout(200); await visit("sub-agents", page, { focus: false });
+      await page.click(`.dgc-mp-conn[data-rail="${SPARE}"]`); await post({ type: "providerModels", id: SPARE, ids: ["gpt-oss:120b", "own-coder", "qwen3-coder:30b", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"] });
+      await page.waitForSelector(".dgc-mp .dgc-mp-row"); await page.waitForTimeout(200); await visit("sub-agents-models", page, { focus: false });
       await page.keyboard.press("Escape"); await page.waitForTimeout(150); await page.keyboard.press("Escape");
       await page.click("#agents-pill"); await page.waitForTimeout(350); await visit("agent-map", page);
       const row = page.locator(".agent-row, [data-agent-id]").first(); if (await row.count()) { await row.click().catch(() => {}); await page.waitForTimeout(300); await visit("agent-map-opened", page, { focus: false }); }
@@ -185,7 +197,17 @@ export const SCENES = {
   "chatdgc": async (b, { width, theme }, visit) => {
     const x = await openChatDgc(b, { width, height: 760, theme: modern(theme) });
     try { await visit("a-chat", x.page);
-      for (const [name, sel] of [["model-menu", "#cd-model"], ["plus-menu", "#cd-plus, #cd-attach, .cd-plus"], ["more-menu", "#cd-more, .cd-more"]]) { const btn = x.page.locator(sel).first(); if (await btn.count() && await btn.isVisible()) { await btn.click().catch(() => {}); await x.page.waitForTimeout(300); await visit(name, x.page, { focus: false, hover: false }); await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(150); } }
+      // Its model picker: the saved connections, then Claude Code's rows once it says what it has.
+      { const A = `provider_${"a".repeat(32)}`, profiles = [{ id: A, name: "Ollama", kind: "native", model: "qwen3.8:27b", mark: "ollama", badge: "" }, { id: "subscription_claude", name: "Claude Code", kind: "subscription", engine: "claude", model: "", mark: "anthropic", badge: "cli" },
+          { id: `provider_${"b".repeat(32)}`, name: "Anthropic API", kind: "native", model: "claude-opus-5-5", mark: "anthropic", badge: "key" }];
+        await x.send({ type: "fallbackOffered", on: true });
+        await x.send({ type: "models", ids: ["qwen3.8:27b", "glm-5.3:cloud", "gemma3:27b", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0"], current: `provider:${A}:qwen3.8:27b`, profiles, defaultId: A, providerId: A });
+        await x.page.click("#cd-model-pill"); await x.page.waitForSelector(".dgc-mp .dgc-mp-row"); await x.page.waitForTimeout(250); await visit("model-picker", x.page, { focus: false, hover: false });
+        await x.page.click('.dgc-mp-conn[data-rail="subscription_claude"]');
+        await x.send({ type: "models", ids: ["", "fable", "opus", "sonnet", "haiku"], current: `provider:${A}:qwen3.8:27b`, profiles, providerId: "subscription_claude", cli: { versions: { opus: "claude-opus-5-5" }, fixed: ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] } });
+        await x.page.waitForTimeout(250); await visit("model-picker-claude", x.page, { focus: false, hover: false });
+        await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(150); }
+      for (const [name, sel] of [["plus-menu", "#cd-plus, #cd-attach, .cd-plus"], ["more-menu", "#cd-more, .cd-more"]]) { const btn = x.page.locator(sel).first(); if (await btn.count() && await btn.isVisible()) { await btn.click().catch(() => {}); await x.page.waitForTimeout(300); await visit(name, x.page, { focus: false, hover: false }); await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(150); } }
     } finally { await x.page.close(); }
     const l = await openLibrary(b, { width, height: 700, theme: modern(theme) });
     try { await l.send({ type: "library", files: [], total: 0, next: null, counts: {} }); await l.send({ type: "widgetsOffered", on: true }); await l.send({ type: "artifactsOffered", on: true }); await l.send({ type: "view", view: "artifacts" }); await l.send({ type: "artifacts", items: [...ITEMS] });
@@ -221,10 +243,12 @@ export const SCENES = {
       try { await x.openPip(GST); await x.waitIn(fix === "ask" ? ".pip-found-ask" : "[data-project-change]"); await x.page.waitForTimeout(200); await visit(`chat-${fix}`, x.page);
         if (fix === "ask") { await x.click("#chat-level"); await x.waitIn(".composer-level-menu"); await x.page.waitForTimeout(200); await visit("level-menu", x.page, { focus: false, hover: false }); }
       } finally { await x.close(); } }
-    // Its model menu with the two tabs (14 Nov): a DGC that runs sub-agents for a Pip (Pips API 97).
-    { const x = await openOnePips(b, { ...opts, api: 97, scene: { sub: true, waiting: false, fix: "none" } });
-      try { await x.openPip(GST); await x.page.waitForTimeout(300); await x.click("#chat-model"); await x.waitIn(".composer-model-menu .model-tabs"); await x.page.waitForTimeout(250); await visit("model-menu", x.page, { focus: false, hover: false });
-        await x.click('[data-model-tab="agents"]'); await x.waitIn(".composer-agents"); await x.page.waitForTimeout(200); await visit("model-menu-sub-agents", x.page, { focus: false, hover: false });
+    // Its model picker with the two tabs (14 Nov; the one picker since 17 Nov): a DGC that runs sub-agents for a Pip
+    // (Pips API 97), with saved providers, DGC Router, Claude Code and Codex to choose from.
+    { const x = await openOnePips(b, { ...opts, api: 97, scene: { sub: true, waiting: false, fix: "none", models: PIP_MODELS, catalog: PIP_CATALOG } });
+      try { await x.openPip(GST); await x.page.waitForTimeout(300); await x.click("#chat-model"); await x.waitIn(".dgc-mp .dgc-mp-row"); await x.page.waitForTimeout(250); await visit("model-menu", x.page, { focus: false, hover: false });
+        await x.click('.dgc-mp-conn[data-rail="subscription:claude"]'); await x.page.waitForTimeout(200); await visit("model-menu-claude", x.page, { focus: false, hover: false });
+        await x.click('.dgc-mp-tab[data-tab="agents"]'); await x.waitIn('.dgc-mp-conn[data-rail="pip"]'); await x.page.waitForTimeout(200); await visit("model-menu-sub-agents", x.page, { focus: false, hover: false });
       } finally { await x.close(); } }
     // Its page (every section with something in it), from the older scene that fills each; and the pages under it.
     for (const sub of ["", "schedule", "runs", "revisions"]) {

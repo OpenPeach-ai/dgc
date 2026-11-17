@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {JSDOM} from 'jsdom';
 import {createRequire} from 'node:module';
+import {pickerDom} from './support/picker-dom.mjs';
 const require=createRequire(import.meta.url),base=new URL('../src/',import.meta.url);
 const client=(await build({entryPoints:[new URL('pipsClient.js',base).pathname],bundle:true,write:false,format:'iife',loader:{'.css':'empty'}})).outputFiles[0].text;
 const markdownCode=(await build({entryPoints:[new URL('markdown.ts',base).pathname],bundle:true,write:false,platform:'node',format:'cjs'})).outputFiles[0].text;
@@ -37,68 +38,92 @@ function setup({api=55,job=pip(),kind='personal',catalog={default_model:'local-d
  const click=selector=>{const e=w.document.querySelector(selector);assert.ok(e,selector);e.click();};
  return{w,d:w.document,requests,drain,click,select:async()=>{await drain();click(`[data-job="${PIP}"]`);await drain();}};
 }
-const openList=async x=>{x.click('#chat-model');await x.drain();};
-const chooseProvider=(x,key)=>{x.click('#chat-model-providers');x.click(`[data-chat-provider="${key}"]`);};
+// The model picker (media/shared/modelpicker.js): its rail's connections, the shown one's rows, the line under them.
+const P=x=>pickerDom(x.d);
+const openList=async x=>{if(!P(x).open())x.click('#chat-model');await x.drain();};
+const chooseProvider=(x,key)=>{const conn=P(x).conn(key);assert.ok(conn,key);conn.click();};
+const row=(x,value)=>P(x).rows().find(r=>r.dataset.value===value)||null;
+const pick=async(x,value)=>{assert.ok(row(x,value),value);row(x,value).click();await x.drain();};
+const under=x=>[...x.d.querySelectorAll('.dgc-mp-under .dgc-mp-note')].map(n=>n.textContent);
 
-test('the menu opens on the models: CLI default, each model of the CLI, and any other by name, as in Work; the choice is saved with its model',async()=>{
+test('the picker opens on the models: CLI default, each model of the CLI, and any other by name, as in Work; the choice is saved with its model',async()=>{
  const x=setup({catalog:{default_model:'local-default',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:[{engine:'claude',name:'Claude Code',models:['opus','sonnet','haiku']},{engine:'codex',name:'Codex',models:[]}]}});await x.select();
  x.click('#chat-model');await x.drain();
- assert.equal(x.d.querySelector('#chat-model-summary').getAttribute('aria-expanded'),'true','open at once: no extra click');
- assert.ok(x.d.querySelector('[data-chat-model="model:model-a"]'),'the current provider\'s models show');
+ assert.ok(row(x,'model:model-a'),'the current connection\'s models show at once: no extra click');
  chooseProvider(x,'subscription:claude');
- assert.match(x.d.querySelector('.composer-list-title').textContent,/^Claude Code model$/);
- const rows=()=>[...x.d.querySelectorAll('.composer-model-options [data-chat-model]')].map(b=>b.textContent.trim());
- assert.deepEqual(rows(),['CLI default','opus','sonnet','haiku']);
- assert.ok(x.d.querySelector('[data-chat-model-custom]').textContent.includes('Enter another model…'));
- x.click('[data-chat-model="subscription:claude:sonnet"]');await x.drain();
+ assert.equal(x.d.querySelector('.dgc-mp-head').textContent,'Claude Codeyour subscription');
+ // (An older DGC says no versions and no fixed list: its nicknames then follow the newest, and say so.)
+ assert.deepEqual(P(x).names(),['CLI default','Opus (newest)','Sonnet (newest)','Haiku (newest)']);
+ assert.deepEqual(P(x).rows().map(r=>r.dataset.value),['subscription:claude','subscription:claude:opus','subscription:claude:sonnet','subscription:claude:haiku']);
+ assert.equal(P(x).foot('typed').textContent,'Enter another model…');
+ await pick(x,'subscription:claude:sonnet');
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'subscription',engine:'claude',model:'sonnet'}});
  assert.match(x.d.body.textContent,/Its replies and routines use your Claude Code plan’s usage\./,'the plan is the CLI\'s, with no model in its name');
  assert.match(x.d.querySelector('#chat-model').textContent,/Claude Code · sonnet/,'the chip names both');
  await openList(x);
- assert.equal(x.d.querySelector('[data-chat-model="subscription:claude:sonnet"]').getAttribute('aria-selected'),'true','the list opens on it');
- assert.equal(x.d.querySelector('[data-chat-model="subscription:claude"]').getAttribute('aria-selected'),'false');
+ assert.equal(P(x).conn('subscription:claude').getAttribute('aria-selected'),'true','it opens on its connection');
+ assert.equal(row(x,'subscription:claude:sonnet').getAttribute('aria-selected'),'true','and on it');
+ assert.equal(row(x,'subscription:claude').getAttribute('aria-selected'),'false');
+});
+test('Claude Code\'s rows: each nickname with the version it last ran as, then the fixed versions a Pip can stay on',async()=>{
+ const claude={engine:'claude',name:'Claude Code',models:['fable','opus','sonnet','haiku'],versions:{opus:'claude-opus-5-5'},fixed:['claude-fable-5-2','claude-opus-5-5','claude-sonnet-5-5','claude-haiku-5-5']};
+ const x=setup({catalog:{default_model:'local-default',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:[claude]}});await x.select();await openList(x);
+ chooseProvider(x,'subscription:claude');
+ assert.deepEqual(P(x).names(),['CLI default','Fable (newest)','Opus 5.5','Sonnet (newest)','Haiku (newest)','Fable 5.2','Opus 5.5','Sonnet 5.5','Haiku 5.5']);
+ assert.deepEqual(P(x).sections(),['Fixed versions']);
+ assert.equal(P(x).desc('Opus 5.5'),'Follows the newest Opus · now claude-opus-5-5');
+ assert.equal(row(x,'subscription:claude:claude-opus-5-5').querySelector('.dgc-mp-desc').textContent,'claude-opus-5-5 · stays on this version');
+ await pick(x,'subscription:claude:claude-opus-5-5');
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'subscription',engine:'claude',model:'claude-opus-5-5'}},'a fixed version is saved by its full name: the Pip never moves off it by itself');
+ await openList(x);
+ assert.deepEqual(P(x).chosen(),['Opus 5.5']);
+ assert.equal(row(x,'subscription:claude:claude-opus-5-5').getAttribute('aria-selected'),'true','the fixed one, not the nickname that runs as it today');
+ assert.equal(row(x,'subscription:claude:opus').getAttribute('aria-selected'),'false');
 });
 test('Enter another model takes a name, and a name outside the list stays offered once chosen',async()=>{
  const x=setup({catalog:{default_model:'local-default',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:[{engine:'codex',name:'Codex',models:[]}]}});await x.select();await openList(x);
  chooseProvider(x,'subscription:codex');
- assert.deepEqual([...x.d.querySelectorAll('.composer-model-options [data-chat-model]')].map(b=>b.textContent.trim()),['CLI default'],'a CLI that lists no models still offers its default');
- x.click('[data-chat-model-custom]');
- const box=x.d.querySelector('#chat-model-custom');assert.ok(box,'a box for the name');
+ assert.deepEqual(P(x).names(),['CLI default'],'a CLI that lists no models still offers its default');
+ P(x).foot('typed').click();
+ const box=x.d.querySelector('.dgc-mp-input');assert.ok(box,'a box for the name');
+ assert.equal(box.getAttribute('aria-label'),'Model name');
  box.value='gpt-5.5-codex';box.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await x.drain();
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'subscription',engine:'codex',model:'gpt-5.5-codex'}});
  await openList(x);
- assert.equal(x.d.querySelector('[data-chat-model="subscription:codex:gpt-5.5-codex"]').getAttribute('aria-selected'),'true');
+ assert.equal(row(x,'subscription:codex:gpt-5.5-codex').getAttribute('aria-selected'),'true');
 });
 test('a Personal Pip picks its own Codex, and is told once that its runs use that plan',async()=>{
  const x=setup();await x.select();await openList(x);
  chooseProvider(x,'subscription:codex');
- const menu=x.d.querySelector('.composer-model-menu');
- assert.match(menu.textContent,/Codex/);
- assert.ok(x.d.querySelector('[data-chat-model="subscription:codex"]'));
- assert.equal(x.d.querySelector('[data-usage-line]'),null,'no usage line until a subscription is chosen');
- x.click('[data-chat-model="subscription:codex"]');await x.drain();
+ assert.equal(P(x).shown(),'Codex');
+ assert.ok(row(x,'subscription:codex'));
+ assert.deepEqual(under(x),[],'no usage line until a subscription is chosen');
+ await pick(x,'subscription:codex');
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'subscription',engine:'codex'}});
  assert.equal(x.requests('accept_pip_update').length,1,'a Personal Pip saves its own choice at once');
  assert.match(x.d.body.textContent,/Tees now uses Codex\. Its replies and routines use your Codex plan’s usage\./);
  assert.match(x.d.querySelector('#chat-model').textContent,/Codex/,'the chip names it');
  await openList(x);
- assert.equal(x.d.querySelector('[data-chat-model="subscription:codex"]').getAttribute('aria-selected'),'true');
- assert.equal(x.d.querySelectorAll('[data-usage-line]').length,1,'said once, where it is chosen');
+ assert.equal(row(x,'subscription:codex').getAttribute('aria-selected'),'true');
+ assert.deepEqual(under(x),['Its replies and routines use your Codex plan’s usage.'],'said once, where it is chosen');
+ chooseProvider(x,'subscription:claude');
+ assert.deepEqual(under(x),[],'and not under a subscription it isn\'t on');
 });
 
 test('Default names the subscription DGC follows',async()=>{
  const x=setup({catalog:{default_model:'',models:[],connection:'configured',subscriptions:SUBS,default_engine:{engine:'codex',name:'Codex',available:true}}});
  await x.select();await openList(x);
- assert.equal(x.d.querySelector('[data-chat-model="default"]').textContent,'Default (Codex)');
- assert.match(x.d.querySelector('[data-usage-line]').textContent,/your Codex plan’s usage/);
+ assert.equal(P(x).conn('subscription:codex').getAttribute('aria-selected'),'true','it opens on the connection Default follows');
+ assert.equal(row(x,'default').querySelector('.dgc-mp-name').textContent,'Default (Codex)');
+ assert.deepEqual(P(x).chosen(),['Default (Codex)']);
+ assert.match(under(x)[0],/your Codex plan’s usage/);
 });
 
 test('a project Pip can choose a subscription, while an older backend cannot',async()=>{
  for(const [api,job,kind] of [[54,pip(),'personal'],[55,pip({source_policy:{mode:'committed_only'},pip_type:'rook'}),'project']]){
   const x=setup({api,job,kind});await x.select();await openList(x);
-  x.click('#chat-model-providers');
-  assert.equal(!!x.d.querySelector('[data-chat-provider="subscription:codex"]'),api>=55,`api ${api}`);
-  if(api<55)assert.doesNotMatch(x.d.querySelector('.composer-model-menu').textContent,/Codex/);
+  assert.equal(!!P(x).conn('subscription:codex'),api>=55,`api ${api}`);
+  if(api<55)assert.doesNotMatch(P(x).connNames().join(' ')+P(x).box().textContent,/Codex/);
  }
  for(const api of [54,55]){
   const sent=[],posted=[];
@@ -123,17 +148,18 @@ test('the model list is checked: only Claude Code or Codex, and a well-formed de
  assert.equal(model.modelValue({mode:'subscription',engine:'claude'}),'subscription:claude');
 });
 
-test('the Pip\'s model menu reads Default (the model it runs): the Pips default from Settings, else DGC\'s own',async()=>{
+test('the Pip\'s model picker reads Default (the model it runs): the Pips default from Settings, else DGC\'s own',async()=>{
  // list_pip_models' default_model is what Default runs: Settings -> Agents -> Model for Pips when set, DGC's model
  // otherwise. The menu used to read "Same as DGC", which a Pips default would have made untrue.
  const x=setup({catalog:{default_model:'glm-5.3:cloud',models:[{id:'glm-5.3:cloud',name:'glm-5.3:cloud'},{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:SUBS}});
  await x.select();
  assert.match(x.d.querySelector('#chat-model').textContent,/glm-5\.3:cloud/,'the chip names the model Default runs');
  await openList(x);
- const item=x.d.querySelector('[data-chat-model="default"]');
- assert.equal(item.textContent,'Default (glm-5.3:cloud)');
+ const item=row(x,'default');
+ assert.equal(item.querySelector('.dgc-mp-name').textContent,'Default (glm-5.3:cloud)');
  assert.equal(item.getAttribute('aria-selected'),'true','a Pip on Default');
- assert.doesNotMatch(x.d.querySelector('.composer-model-menu').textContent,/Same as DGC/);
+ assert.equal(P(x).rows()[0],item,'first in its connection\'s list');
+ assert.doesNotMatch(P(x).box().textContent,/Same as DGC/);
  assert.equal(model.modelLabel({mode:'default'}),'Default');
 });
 
@@ -141,37 +167,36 @@ test('the Pip\'s model menu reads Default (the model it runs): the Pips default 
 const SECOND='provider_'+'b'.repeat(32),HOME_HOST='provider_'+'a'.repeat(32);
 const savedCatalog=(extra={})=>({default_model:'local-default',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:SUBS,
  providers:[{id:HOME_HOST,name:'Home host',default:true,models:['model-a']},{id:SECOND,name:'Second host',default:false,models:['second-a','second-b']}],...extra});
-const providerRows=x=>[...x.d.querySelectorAll('[data-chat-provider]')].map(n=>n.textContent);
+const providerRows=x=>P(x).connNames();
 
 test('a Pip lists every saved provider by name, then its models, and keeps only its id and the model',async()=>{
  const x=setup({api:74,catalog:savedCatalog()});await x.select();await openList(x);
- x.click('#chat-model-providers');
- assert.deepEqual(providerRows(x),['Home host','Second host','Claude Code','Codex'],'by name; the default is not also "Current host"');
- x.click(`[data-chat-provider="provider:${SECOND}"]`);
- assert.deepEqual([...x.d.querySelectorAll('[data-chat-model]')].map(n=>n.textContent),['second-a','second-b']);
- x.click(`[data-chat-model="provider:${SECOND}:second-b"]`);await x.drain();
+ assert.deepEqual(providerRows(x),['Home host','Second host','Claude Code · your subscription','Codex · your subscription'],'by name; the default is not also "Current host"');
+ assert.deepEqual(P(x).rail().map(b=>b.textContent.trim()),['H','S','',''],'a provider with no mark of its own is a lettered tile; a subscription app wears its company\'s');
+ chooseProvider(x,`provider:${SECOND}`);
+ assert.deepEqual(P(x).names(),['second-a','second-b']);
+ await pick(x,`provider:${SECOND}:second-b`);
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'provider',provider:SECOND,model:'second-b'}});
  assert.equal(x.requests('accept_pip_update').length,1,'a Personal Pip saves its own choice at once');
  assert.match(x.d.body.textContent,/Tees now uses second-b on Second host\./);
  assert.match(x.d.querySelector('#chat-model').textContent,/second-b/,'the chip names the model');
  assert.match(x.d.querySelector('#chat-model').title,/second-b · Second host/,'its hover names the provider');
  await openList(x);
- assert.equal(x.d.querySelector(`[data-chat-model="provider:${SECOND}:second-b"]`).getAttribute('aria-selected'),'true','it opens on the chosen provider');
+ assert.equal(P(x).conn(`provider:${SECOND}`).getAttribute('aria-selected'),'true','it opens on the chosen provider');
+ assert.equal(row(x,`provider:${SECOND}:second-b`).getAttribute('aria-selected'),'true');
 });
 
 test('a provider chosen before reloads as chosen, and a project Pip is reviewed the same way',async()=>{
  const job=pip({model_choice:{mode:'provider',provider:SECOND,model:'second-a'}});
  const x=setup({api:74,job,catalog:savedCatalog()});await x.select();await openList(x);
- assert.equal(x.d.querySelector(`[data-chat-model="provider:${SECOND}:second-a"]`).getAttribute('aria-selected'),'true');
+ assert.equal(row(x,`provider:${SECOND}:second-a`).getAttribute('aria-selected'),'true');
  const y=setup({api:74,kind:'project',catalog:savedCatalog()});await y.select();await openList(y);
- y.click('#chat-model-providers');
- assert.ok(y.d.querySelector(`[data-chat-provider="provider:${SECOND}"]`),'a project Pip is offered it too');
+ assert.ok(P(y).conn(`provider:${SECOND}`),'a project Pip is offered it too');
 });
 
 test('with no default among them, the host stays "Current host", first',async()=>{
  const x=setup({api:74,catalog:savedCatalog({providers:[{id:SECOND,name:'Second host',default:false,models:['second-a']}]})});await x.select();await openList(x);
- x.click('#chat-model-providers');
- assert.deepEqual(providerRows(x),['Current host','Second host','Claude Code','Codex']);
+ assert.deepEqual(providerRows(x),['Current host','Second host','Claude Code · your subscription','Codex · your subscription']);
 });
 
 test('a provider removed from Settings says so in plain words, and is never silently replaced',async()=>{
@@ -185,8 +210,7 @@ test('a provider removed from Settings says so in plain words, and is never sile
 
 test('below API 74 a list from a newer host is not offered',async()=>{
  const x=setup({api:73,catalog:savedCatalog()});await x.select();await openList(x);
- x.click('#chat-model-providers');
- assert.deepEqual(providerRows(x),['Current host','Claude Code','Codex']);
+ assert.deepEqual(providerRows(x),['Current host','Claude Code · your subscription','Codex · your subscription']);
 });
 
 test('with no provider the host answers a Pip\'s hello itself, and queues it once one is saved',async()=>{

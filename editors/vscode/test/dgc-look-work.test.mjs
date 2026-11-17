@@ -2,7 +2,7 @@
 // editor's, and purple is left for Send and live marks. A sent prompt's bubble is a quiet raised grey with no light or
 // grain on it; the one main button on a card is a fill of the text colour; a running step's label is plain shimmering
 // text while the live verb beside it keeps the purple; the prompt box has the buttons' 6 px corner (14 Nov; it was 22 px) and its own soft edge; and
-// the model menu is a raised grey with a half-pixel ring. Dark and light, 700 and 300 px.
+// the model picker is a raised grey dialog. Dark and light, 700 and 300 px.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openRunningTurn, READY } from "./support/dgc-look-scene.mjs";
@@ -54,7 +54,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
   });
 }
 
-for (const theme of ["dark-modern", "light-modern"]) test(`the model menu is a raised grey with a half-pixel ring and a 15px corner (${theme})`, async (t) => {
+for (const theme of ["dark-modern", "light-modern"]) test(`the model picker is a raised grey dialog: the dialog's corner and lift, over a dimmed page (${theme})`, async (t) => {
   if (skipOrFail(t)) return;
   const x = await openWorkTab(browser, { theme, width: 700, height: 620 });
   try {
@@ -62,11 +62,21 @@ for (const theme of ["dark-modern", "light-modern"]) test(`the model menu is a r
     await x.page.evaluate(() => document.getElementById("modelname").closest("button").click());
     await x.send({ type: "models", ids: ["qwen3.8:27b", "deepseek-v4.1-flash:cloud"], current: "qwen3.8:27b" });
     await x.page.waitForTimeout(250);
-    const menu = await look(x.page, "#modelmenu"), token = await tokenColours(x.page, ["--surface2"]);
-    assert.equal(menu.corner, "15px");
-    assert.equal(menu.fill, token["--surface2"], "the raised grey");
-    assert.match(menu.shadow, /0px 0px 0px 0\.5px/, `a half-pixel ring: ${menu.shadow}`);
-    assert.match(menu.shadow, /0px 8px 16px -4px/, `and one low shadow: ${menu.shadow}`);
+    const dialog = await look(x.page, ".dgc-mp"), token = await tokenColours(x.page, ["--surface2"]);
+    assert.equal(dialog.corner, "20px", "the dialog's corner");
+    // His reference look (17 Nov): a two-tone dialog, the card of models in the raised grey on a frame a shade apart,
+    // a neutral grey (never purple).
+    const card = await look(x.page, ".dgc-mp-card");
+    assert.equal(card.fill, token["--surface2"], "the card: the raised grey");
+    assert.notEqual(dialog.fill, card.fill, "the frame is a shade apart from the card");
+    assert.equal(isPurple(dialog.fill), false, `the frame is a grey: ${dialog.fill}`);
+    assert.match(dialog.shadow, /0px 24px 48px -16px/, `the dialog's lift: ${dialog.shadow}`);
+    const scrim = await x.page.evaluate(() => { const s = getComputedStyle(document.querySelector(".dgc-mp-layer")); return [s.backgroundColor, s.backdropFilter || s.webkitBackdropFilter]; });
+    assert.match(scrim[0], /rgba\(0, 0, 0, 0\.\d+\)/, "the page is dimmed");
+    assert.match(scrim[1], /blur\(2px\)/, "with the shared scrim's blur");
+    // Purple is a mark here, never a fill: the check, the session's own connection, nothing larger.
+    const purple = await x.page.evaluate(() => [...document.querySelectorAll(".dgc-mp *")].filter((n) => n.checkVisibility()).map((n) => { const s = getComputedStyle(n), r = n.getBoundingClientRect(); return { n: n.className, c: s.backgroundColor, w: r.width, h: r.height }; }).filter((m) => m.w > 40 && m.h > 16));
+    assert.deepEqual(purple.filter((m) => isPurple(m.c)).map((m) => m.n), [], "no purple fill larger than a mark");
     assert.deepEqual(x.errors, []);
   } finally { await x.page.close(); }
 });

@@ -13,7 +13,7 @@
   --cv-flash: var(--vscode-editor-findMatchHighlightBackground, color-mix(in srgb, var(--accent) 22%, transparent));
 }
 html, body { height: 100%; }
-body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-text);
+body { margin: 0; padding: 0; background: var(--vscode-editor-background); color: var(--cv-text);
   font: 15px/1.7 var(--vscode-font-family, system-ui, sans-serif); display: flex; flex-direction: column; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 [hidden] { display: none !important; }

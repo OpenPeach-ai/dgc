@@ -347,6 +347,37 @@ def _write_top_bar(conf: Path) -> None:
     ]) + "\n")
 
 
+def _openbox_bindings() -> str:
+    """What a window's frame does with the pointer and a few keys. Openbox runs with DGC's config file alone
+    (--config-file), so none of its usual bindings exist unless they are here: without them a window's ×, – and □ did
+    nothing and its title bar didn't move it (his report, 17 Nov, on the image editor). These are Openbox's own usual
+    ones: a press brings a window forward, the title bar drags it (a double click maximises), the edges and corners
+    resize it, Alt and a drag moves it from anywhere, the buttons close, minimise (the top bar's taskbar brings it back)
+    and maximise it; on the desktop a right-click shows the apps."""
+    def bind(button, action, *names):
+        return f'<mousebind button="{button}" action="{action}">' + "".join(f'<action name="{n}"/>' for n in names) + "</mousebind>"
+    forward = bind("Left", "Press", "Focus", "Raise", "Unshade")
+    contexts = {
+        "Frame": [bind("A-Left", "Press", "Focus", "Raise"), bind("A-Left", "Drag", "Move"), bind("A-Right", "Drag", "Resize")],
+        "Titlebar": [forward, bind("Left", "Drag", "Move"), bind("Left", "DoubleClick", "ToggleMaximize")],
+        "Client": [bind("Left", "Press", "Focus", "Raise"), bind("Middle", "Press", "Focus", "Raise"), bind("Right", "Press", "Focus", "Raise")],
+        **{edge: [bind("Left", "Press", "Focus", "Raise", "Unshade"), bind("Left", "Drag", "Resize")]
+           for edge in ("Top", "Bottom", "Left", "Right", "TLCorner", "TRCorner", "BLCorner", "BRCorner")},
+        "Close": [forward, bind("Left", "Click", "Close")],
+        "Iconify": [forward, bind("Left", "Click", "Iconify")],
+        "Maximize": [forward, bind("Left", "Click", "ToggleMaximize")],
+        "Icon": [forward],
+        "Root": [bind("Right", "Press", "ShowMenu").replace('<action name="ShowMenu"/>', '<action name="ShowMenu"><menu>root-menu</menu></action>')],
+    }
+    mouse = "".join(f' <context name="{name}">' + "".join(binds) + "</context>\n" for name, binds in contexts.items())
+    keys = {"A-F4": ["Close"], "A-Tab": ["NextWindow"], "A-S-Tab": ["PreviousWindow"]}
+    keyboard = "".join(f' <keybind key="{key}">' + "".join(f'<action name="{n}"/>' for n in names) + "</keybind>\n" for key, names in keys.items())
+    return f" <mouse><dragThreshold>4</dragThreshold><doubleClickTime>400</doubleClickTime>\n{mouse} </mouse>\n <keyboard>\n{keyboard} </keyboard>\n"
+
+
+OPENBOX_BINDINGS = _openbox_bindings()
+
+
 def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), mac: bool = False) -> None:
     """The dock, its apps, the window manager's settings and the wallpaper in its day and night versions, with when to
     change between them (look_switches). ``apps_shown``: the image editor, document editor and PDF viewer this computer
@@ -399,8 +430,7 @@ def write_config(conf: Path, name: str, apps_shown=(), screen=(WIDTH, HEIGHT), m
  <desktops><number>1</number></desktops>
  <placement><policy>Smart</policy><center>yes</center></placement>
  <menu><file>/run/dgc/conf/menu.xml</file></menu>
- <mouse><context name="Root"><mousebind button="Right" action="Press"><action name="ShowMenu"><menu>root-menu</menu></action></mousebind></context></mouse>
- <applications><application class="*"><decor>yes</decor></application></applications>
+""" + OPENBOX_BINDINGS + """ <applications><application class="*"><decor>yes</decor></application></applications>
 </openbox_config>
 """)
     desktop = conf / "pcmanfm" / "dgc"
