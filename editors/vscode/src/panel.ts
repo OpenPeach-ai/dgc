@@ -43,7 +43,7 @@ import { folderLabel, folderRows, foldersOffered, fullFolder, homeAsTilde, keepP
 import { openCodePreview } from "./codePreview";
 import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, devToolsOffered, devToolsShown, type DevLimit } from "./devMode";
 import { INSTANCE as STUCK_INSTANCE, heartbeatOf, isStuck, stuckHolder, type StuckFacts } from "./stuckHolder";
-import { whatsNewAnswered, whatsNewDue, whatsNewMessage } from "./whatsNew";
+import { whatsNewAnswered, whatsNewDue, whatsNewGoMessage, whatsNewMessage } from "./whatsNew";
 import { NO_PIPS_MOVED, WELCOME_API, boxesOf, macNoteAnswered, macNoteDue, noteSession, pipsWelcomeAnswered, pipsWelcomeDue, pipsWelcomeMessage, pipsWelcomeOf, sessionNoteClosed, sessionNoteGone } from "./pipsWelcome";
 import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedAttr, rememberHomePagesDismissed, rememberHomeShow, rememberPipHomeDismissed } from "./pipHomeDismiss";
 import modelPicker from "../media/shared/modelpicker.js";
@@ -2996,7 +2996,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       });
   }
 
-  /** "What's new" by itself: once, when this release's side bar is first up, until Skip, Done or Esc (src/whatsNew.ts).
+  /** "What's new" by itself: once, when this release's side bar is first up, until ×, Done, Esc or a slide's action (src/whatsNew.ts).
    *  Only the side bar's own page, never a session's tab. */
   offerWhatsNew(): void {
     if (!this.home || this.tab || !whatsNewDue(this.context)) { return; }
@@ -6562,9 +6562,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.stopAndOpenHere();
         break;
       case "whatsNewSeen":
-        // Skip, Done or Esc in "What's new": never by itself again, in any window of this editor (src/whatsNew.ts).
+        // ×, Done or Esc in "What's new": never by itself again, in any window of this editor (src/whatsNew.ts).
         await whatsNewAnswered(this.context);
         break;
+      case "whatsNewGo": {
+        // A slide's own action (Open Pips, Arrange Home, Open Library, Open Work): an answer, as × and Done are, and the
+        // side bar goes there by its own navigation (the tab, as Home's buttons choose it; Home's Cards library).
+        await whatsNewAnswered(this.context);
+        const go = whatsNewGoMessage(msg.to);
+        if (go) this.post(go);                          // (the page that asked is the one in sight)
+        break;
+      }
       // The Pips tab's one-time welcome and the quiet note above an old Work session (src/pipsWelcome.ts).
       case "pipsTabOpened": this.pipsTabShown = true; await this.offerPipsWelcome(); await this.offerMacNote(); break;
       case "pipsMacNoteSeen": await macNoteAnswered(this.context); break;             // OK or Esc in the Mac dialog: never again

@@ -83,6 +83,10 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
     if (path === "/ext/dist/pips.js") return r.fulfill({ body: pipsJs, contentType: "text/javascript" });
     if (path === "/ext/dist/pips.css") return r.fulfill({ body: pipsCss, contentType: "text/css" });
     if (path === "/ext/media/pips/plush-bodies.webp") return r.fulfill({ body: sprite, contentType: "image/webp" });
+    // The extension's own pictures beside them, as the webview serves its media folder (a face's tint mask, a Pip
+    // computer's app icons in What's new): read from the tree, never from anywhere else.
+    const media = /^\/ext\/media\/([\w./-]+\.(png|webp|svg))$/.exec(path);
+    if (media && !media[1].includes("..")) { try { return r.fulfill({ body: readFileSync(`${srcRoot || here}/media/${media[1]}`), contentType: media[2] === "svg" ? "image/svg+xml" : `image/${media[2]}` }); } catch { return r.fulfill({ status: 404, body: "" }); } }
     return r.fulfill({ body: doc, contentType: "text/html" });
   });
   await page.goto("https://home.test/webview/index.html");
@@ -147,6 +151,9 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
   // are drawn as a list: `open: "needs"` (the default) for what needs you, `open: "recent"` for what is new, which is in
   // Recent only. x.card(id) goes from one to the other.)
   }, [mainJs, markdownJs, state, homeShow, tabs, api, [P, Q], { ...(saved || (tab === "chat" ? { sideTab: "chat", projectsOpen: [PROJECT] } : { sideTab: tab })), ...(grid ? {} : { homeCards: { open } }) }, pages]);
+  // The queued messages' row, as the panel loads it on every page (src/panel.ts: messagequeue.css and .js).
+  await page.addStyleTag({ content: readFileSync(`${srcRoot || here}/media/messagequeue.css`, "utf8") });
+  await page.addScriptTag({ content: readFileSync(`${srcRoot || here}/media/messagequeue.js`, "utf8") });
   const send = (data) => page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
   if (sessions) await send({ type: "sessions_list", items: sessions, error: "" });
   if (tabs) {

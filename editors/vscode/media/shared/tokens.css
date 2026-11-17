@@ -344,4 +344,7 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
   :root, body { --btn-danger: ButtonText; --btn-danger-hover: ButtonText; --btn-on-danger: ButtonFace; }
   .dgc-btn { border-color: CanvasText; }
   .dgc-btn.danger { forced-color-adjust: none; border-color: ButtonText; }
+  /* (The main button too: its words are ButtonFace on ButtonText, and the browser's own plate of Canvas behind words
+     would hide them.) */
+  .dgc-btn.primary { forced-color-adjust: none; border-color: ButtonText; }
 }

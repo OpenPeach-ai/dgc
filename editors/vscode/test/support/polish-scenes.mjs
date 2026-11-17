@@ -105,7 +105,7 @@ export const SCENES = {
     // What's new (the dialog the side bar shows once a release), each of its slides; and New session's dialog.
     x = await openDock(b, { tab: "work", width, height: 760, theme: modern(theme), touch });
     try { await x.send({ type: "whatsNew", auto: true, release: "0.52" }); await x.page.waitForSelector("#whats-new:not([hidden])"); await x.page.waitForTimeout(500);
-      for (let k = 0; k < 6; k++) { await visit(`whats-new-${k + 1}`, x.page, { scope: "#whats-new", hover: false, focus: k === 0 }); const next = x.page.locator("#whats-new button", { hasText: /^Next$/ }); if (!(await next.count())) break; await next.click(); await x.page.waitForTimeout(450); }
+      for (let k = 0; k < 7; k++) { await visit(`whats-new-${k + 1}`, x.page, { scope: "#whats-new", hover: false, focus: k === 0 }); const next = x.page.locator("#whats-new button", { hasText: /^Next$/ }); if (!(await next.count())) break; await next.click(); await x.page.waitForTimeout(450); }
     } finally { await x.close(); }
     x = await openDock(b, { tab: "work", width, height: 760, theme: modern(theme), touch });
     try { await x.send({ type: "sessions_list", items: DOCK_SESSIONS, error: "", folders: { choice: "", window: THIRTY_FOLDERS[0], rows: THIRTY_FOLDERS.slice(0, 6) } }); await x.settle();

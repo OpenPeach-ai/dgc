@@ -1,129 +1,207 @@
-/* "What's new in 0.52" (media/shared/whatsnew.js): a dialog over the side bar. A 16:9 picture on top, drawn here in the
-   page's own tokens (no image file), then the feature's name, its short text, the dots and Skip / Next.
+/* "What's new in 0.52" (media/shared/whatsnew.js): a dialog over the side bar, one slide at a time, each a card.
 
-   It fits the side bar: at 300 px the dialog is the side bar's width less its gutters, and wider it stops at 560 px.
-   The picture is its own container, and everything in it is sized in em from that container's width, so a scene keeps
-   its proportions from 276 px to 560 px and nothing in it is ever cut. The buttons are the one family (.dgc-btn: 6 px,
-   28 px). The lift, corner, scrim and arrival are the shared dialog's (media/shared/dialog.css). */
+   On top a 16:9 picture: a soft two-stop backdrop in the slide's own hue (deep and quiet in dark, pale in light; none in
+   high contrast or forced colours, where the reader's colours are kept), and on it, as a glass panel, a still of the
+   page the slide is about, made of DGC's own parts in their own stylesheets (Home's cards, the Library, the menus, the
+   marks, the Pips' faces, the file sheets, the queue's row), playing out its story; × at its top right (28 px, 6 px
+   corners, the shared close glyph) and the dots on its bottom edge. Under it a quiet eyebrow, the title (19 px,
+   semibold, balanced), and rows of an icon, a heading and a muted line. Then the footer under a hairline: the slide's
+   own action on the left, Next (Done) on the right; it never moves between slides.
+
+   It fits the side bar: from the narrowest (170 px) to 560 px wide, never taller than the window (what is above the
+   footer scrolls; the footer stays). The still is laid out at 640 × 360 and scaled to the picture, so it is the same
+   still at every width and nothing in it is ever cut. The buttons are the one family (.dgc-btn: 6 px, 28 px). The lift,
+   corner, scrim and arrival are the shared dialog's (media/shared/dialog.css). The story's motion is the script's (Web
+   Animations): this sheet draws each scene's last frame. */
 .wn-layer { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; box-sizing: border-box; padding: 12px; overflow: hidden; }
 .wn-layer[hidden] { display: none; }
-.wn-dialog { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; max-width: 560px; max-height: 100%; overflow: hidden; background: var(--surface); color: var(--text); }
-.wn-picture { flex: none; container-type: inline-size; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border-bottom: 1px solid var(--hair-strong);
-  background: color-mix(in srgb, var(--text) 5%, var(--surface)); }
-.wn-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px 18px 16px; }
-.wn-kicker { margin: 0 0 4px; color: var(--muted); font: var(--w-reg, 400) var(--t-xs, 12px)/1.4 var(--sans); }
-.wn-title { margin: 0 0 8px; color: var(--text-strong); font: 600 16px/1.3 var(--sans); letter-spacing: -.005em; }
-.wn-text { margin: 0; color: var(--text); font: var(--w-reg, 400) var(--t-sm, 13px)/1.55 var(--sans); overflow-wrap: anywhere; }
-.wn-more { display: block; margin-top: 8px; color: var(--muted); }
-.wn-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
-/* The dots: which slide, and a way to it. Small rounded squares (the current one longer), never a pill. */
-.wn-dots { display: flex; align-items: center; gap: 2px; margin-left: -4px; }
-.wn-dot { box-sizing: border-box; flex: none; width: 15px; height: 20px; margin: 0; padding: 7px 4px; border: 0; border-radius: var(--btn-r, 6px); background: transparent; cursor: pointer; }
-.wn-dot::before { content: ""; display: block; width: 100%; height: 100%; border-radius: 2px; background: color-mix(in srgb, var(--text) 28%, transparent); }
+.wn-dialog { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; max-width: 560px; max-height: 100%; overflow: hidden; background: var(--surface); color: var(--text);
+  container: wn / inline-size; }
+.wn-scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+
+/* ---- the picture ------------------------------------------------------------------------------------------------- */
+/* Each hue's pair: dark (deep, quiet) first, light (pale) below. The Pips' slides take Core's violet (a Pip's own tint,
+   src/pipProfile.js, mixed into the ground: never the brand's purple, which lives in tokens.css), the wall the "asks
+   you" amber, Home green, the Library azure (h213, the chart marks'), Work blue; "Also new" a quiet grey. */
+.wn-picture { --wn-a: #353a44; --wn-b: #22252b; --wn-core: #A07ABD;
+  --wn-glass: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.045)); --wn-glass-edge: rgba(255,255,255,.14);
+  --wn-glass-lift: 0 16px 34px -14px rgba(0,0,0,.62), inset 0 1px 0 rgba(255,255,255,.07);
+  position: relative; container: wn-pic / inline-size; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: linear-gradient(150deg, var(--wn-a), var(--wn-b)); }
+.wn-picture[data-hue="violet"] { --wn-a: color-mix(in srgb, var(--wn-core) 26%, #1d1a24); --wn-b: color-mix(in srgb, var(--wn-core) 12%, #17151d); }
+.wn-picture[data-hue="amber"] { --wn-a: #463722; --wn-b: #2a2117; }
+.wn-picture[data-hue="green"] { --wn-a: #243f32; --wn-b: #16261f; }
+.wn-picture[data-hue="azure"] { --wn-a: #1f3853; --wn-b: #152336; }
+.wn-picture[data-hue="blue"] { --wn-a: #29325d; --wn-b: #181d3b; }
+body.vscode-light .wn-picture { --wn-a: #f1f2f4; --wn-b: #dfe2e7;
+  --wn-glass: linear-gradient(180deg, rgba(255,255,255,.74), rgba(255,255,255,.52)); --wn-glass-edge: rgba(255,255,255,.92);
+  --wn-glass-lift: 0 16px 34px -14px rgba(0,0,0,.2), 0 0 0 1px rgba(0,0,0,.05); }
+body.vscode-light .wn-picture[data-hue="violet"] { --wn-a: color-mix(in srgb, var(--wn-core) 12%, #fff); --wn-b: color-mix(in srgb, var(--wn-core) 32%, #fff); }
+body.vscode-light .wn-picture[data-hue="amber"] { --wn-a: #fcf3df; --wn-b: #f4e0b9; }
+body.vscode-light .wn-picture[data-hue="green"] { --wn-a: #e6f5ea; --wn-b: #cde9d7; }
+body.vscode-light .wn-picture[data-hue="azure"] { --wn-a: #e3f0fc; --wn-b: #c9dff6; }
+body.vscode-light .wn-picture[data-hue="blue"] { --wn-a: #e6e9fc; --wn-b: #cdd4f5; }
+
+/* × on the picture's top right: the old Skip, the shared close glyph, readable on every backdrop. */
+.wn-close { position: absolute; top: 6px; right: 6px; z-index: 2; display: grid; place-items: center; box-sizing: border-box; width: 28px; height: 28px; margin: 0; padding: 0;
+  border: 0; border-radius: var(--btn-r, 6px); background: color-mix(in srgb, var(--surface) 46%, transparent); color: var(--text-strong); cursor: pointer;
+  transition: background-color var(--dur-hover, 120ms) var(--ease-out, ease-out); }
+.wn-close:hover { background: color-mix(in srgb, var(--surface) 78%, transparent); }
+.wn-close svg { display: block; }
+/* (A ring with a halo of the surface under it, so it shows on a deep backdrop and a pale one.) */
+.wn-close:focus-visible, .wn-dot:focus-visible { outline: 2px solid var(--vscode-focusBorder, var(--ring)); outline-offset: 0; box-shadow: 0 0 0 4px color-mix(in srgb, var(--surface) 82%, transparent); }
+
+/* The dots: which slide, and a way to it, on the picture's bottom edge. Small rounded squares (the current one longer), never a pill. */
+.wn-dots { position: absolute; left: 0; right: 0; bottom: 2px; z-index: 2; display: flex; justify-content: center; gap: 2px; pointer-events: none; }
+.wn-dot { box-sizing: border-box; flex: none; width: 15px; height: 20px; margin: 0; padding: 7px 4px; border: 0; border-radius: var(--btn-r, 6px); background: transparent; cursor: pointer; pointer-events: auto; }
+.wn-dot::before { content: ""; display: block; width: 100%; height: 100%; border-radius: 2px; background: color-mix(in srgb, var(--text-strong) 34%, transparent); }
 .wn-dot.on { width: 24px; }
 .wn-dot.on::before { background: var(--text-strong); }
-.wn-dot:hover::before { background: color-mix(in srgb, var(--text) 60%, transparent); }
+.wn-dot:hover::before { background: color-mix(in srgb, var(--text-strong) 62%, transparent); }
 .wn-dot.on:hover::before { background: var(--text-strong); }
-.wn-dot:focus-visible { outline: var(--btn-ring); outline-offset: 0; }
-.wn-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.wn-actions .dgc-btn { width: 84px; }
-.wn-actions [hidden] { display: none; }
-@media (max-width: 340px) { .wn-body { padding: 14px 14px 14px; } .wn-actions .dgc-btn { width: 76px; } }
+@container wn-pic (max-width: 240px) { .wn-dots { bottom: 0; } .wn-dot { height: 14px; padding: 4px 4px; } }
 
-/* ---- the pictures -------------------------------------------------------------------------------------------- */
-/* 1em is 3.1% of the picture's width: the frame is 32.2em by 18.1em at every size. */
-.wn-scene { box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 1.1em; width: 100%; height: 100%; padding: 1.3em 1.4em;
-  font: var(--w-reg, 400) clamp(7px, 3.1cqw, 18px)/1.3 var(--sans); color: var(--text); overflow: hidden; }
-.wn-scene * { box-sizing: border-box; min-width: 0; }
-.wn-panel { display: flex; flex-direction: column; gap: .55em; padding: .9em 1em; border: 1px solid var(--hair-strong); border-radius: .75em; background: var(--bg); }
-.wn-row { display: flex; align-items: center; gap: .6em; white-space: nowrap; }
-.wn-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-strong); }
-.wn-star { color: var(--muted); font-size: .9em; }
-.wn-line { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wn-line.strong { color: var(--text-strong); }
-.wn-cap { display: block; color: var(--muted); font-size: .82em; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wn-chip { flex: none; display: inline-block; padding: .22em .6em; border: 1px solid var(--hair-strong); border-radius: .45em; color: var(--text); font-size: .86em; line-height: 1.3; white-space: nowrap; }
-.wn-chip.on { border-color: transparent; background: var(--solid, var(--text-strong)); color: var(--on-solid, var(--bg)); }
-/* A Pip's face: a round mark with two eyes, in its own colour. */
-.wn-face { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: .16em; width: 1.45em; height: 1.45em; border-radius: 50%; background: var(--accent); }
-.wn-face i { display: block; width: .22em; height: .42em; border-radius: .11em; background: #fff; }
-.wn-face[data-tone="green"] { background: #4FA86E; } .wn-face[data-tone="rose"] { background: #D96C8E; } .wn-face[data-tone="blue"] { background: #5F8FE3; }
+/* ---- the words ---------------------------------------------------------------------------------------------------- */
+.wn-copy { box-sizing: border-box; padding: 16px 20px 18px; }
+.wn-kicker { margin: 0 0 4px; color: var(--muted); font: var(--w-reg, 400) var(--t-sm, 12px)/1.4 var(--sans); }
+.wn-title { margin: 0; color: var(--text-strong); font: 600 19px/1.3 var(--sans); letter-spacing: -.01em; text-wrap: balance; overflow-wrap: break-word; }
+.wn-rows { display: flex; flex-direction: column; gap: 14px; margin: 16px 0 0; padding: 0; list-style: none; }
+.wn-item { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 12px; align-items: start; }
+.wn-icon { display: block; width: 18px; height: 18px; margin-top: 1px; color: var(--text); }
+.wn-icon svg { display: block; width: 100%; height: 100%; }
+.wn-item-words { min-width: 0; }
+.wn-head { margin: 0; color: var(--text-strong); font: var(--w-med, 500) var(--t-base, 13px)/1.4 var(--sans); overflow-wrap: break-word; }
+.wn-say { margin: 2px 0 0; color: var(--muted); font: var(--w-reg, 400) var(--t-base, 13px)/1.5 var(--sans); overflow-wrap: break-word; }
 
-.wn-list { flex: 0 0 12.4em; }
-.wn-own { flex: 0 0 12.6em; }
-.wn-own .wn-name { font-weight: 600; }
-.wn-own .wn-line { white-space: normal; }
-/* The wall: a dashed line, in the colour DGC uses for "this asks you". */
-.wn-wall { flex: none; align-self: stretch; width: 0; margin: .4em 0; border-left: .16em dashed var(--need); }
+/* ---- the footer: the slide's action on the left, Next on the right, under a hairline ------------------------------ */
+.wn-foot { flex: none; display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 12px 20px 14px; border-top: 1px solid var(--hair-strong); }
+.wn-go { width: auto; min-width: 84px; padding: 0 12px; }
+.wn-go[hidden] { display: none; }
+.wn-next { width: 84px; margin-left: auto; }
 
-.wn-scene-wall { gap: .7em; }
-.wn-folder, .wn-boxed { flex: 0 0 11em; }
-.wn-boxed { border: .16em dashed var(--need); }
-.wn-file { display: flex; align-items: center; gap: .5em; white-space: nowrap; }
-.wn-file-mark { flex: none; width: .85em; height: 1.05em; border: 1px solid var(--muted); border-radius: .16em; }
-.wn-file-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
-.wn-cross { flex: 0 0 4.6em; display: flex; flex-direction: column; gap: 1.5em; }
-.wn-arrow { position: relative; display: block; padding-bottom: .5em; color: var(--muted); font-size: .82em; text-align: center; white-space: nowrap; }
-.wn-arrow::before { content: ""; position: absolute; left: 0; right: .3em; bottom: .12em; border-top: 1px solid var(--muted); }
-.wn-arrow::after { content: ""; position: absolute; right: .15em; bottom: -.18em; width: .55em; height: .55em; border-top: 1px solid var(--muted); border-right: 1px solid var(--muted); rotate: 45deg; }
+/* The narrowest side bar: the rows keep their icons, a little closer; the two buttons stack, Next first, each the
+   dialog's width, and the action's row stays when a slide has none (the footer never moves). */
+@container wn (max-width: 232px) {
+  .wn-copy { padding: 12px 12px 14px; }
+  .wn-title { font-size: 17px; }
+  .wn-rows { gap: 12px; margin-top: 12px; }
+  .wn-item { grid-template-columns: 16px minmax(0, 1fr); column-gap: 8px; }
+  .wn-icon { width: 16px; height: 16px; }
+  .wn-foot { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 28px 28px; padding: 10px 12px 12px; }
+  .wn-next { grid-row: 1; width: 100%; margin: 0; }
+  .wn-go { grid-row: 2; width: 100%; min-width: 0; }
+}
+@media (max-width: 230px) { .wn-layer { padding: 8px; } }
+
+/* ---- the scenes: a still of the page, laid out at 640 × 360 and scaled to the picture ------------------------------- */
+/* The parts are DGC's own, in their own stylesheets (Home's cards, the Library, the menus, the marks, the faces, the
+   sheets, the queue's row): this only places them on the glass and says each scene's last frame. --wn-k is the
+   picture's width over 640 (the script keeps it); the stage is its own container, so a part's container queries read
+   the still's own width at every size. Nothing in a picture answers the pointer. */
+.wn-stage { position: absolute; left: 0; top: 0; width: 640px; height: 360px; overflow: hidden; transform-origin: 0 0; scale: var(--wn-k, 1); pointer-events: none;
+  container-type: inline-size; color: var(--text); font: var(--w-reg, 400) var(--t-sm, 12px)/1.4 var(--sans); }
+.wn-glass { position: absolute; inset: 30px 40px 46px; box-sizing: border-box; display: flex; padding: 14px; overflow: hidden;
+  border: 1px solid var(--wn-glass-edge); border-radius: 16px; background: var(--wn-glass); box-shadow: var(--wn-glass-lift); }
+.wn-scene { flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 16px; }
+.wn-scene .hc-card { box-sizing: border-box; flex: none; min-width: 0; }
+.wn-stage .hc-li { position: relative; isolation: isolate; cursor: default; }
+.wn-sel { position: absolute; inset: 0; z-index: -1; border-radius: var(--btn-r, 6px); background: var(--wash); }
+.wn-app { display: block; width: 18px; height: 18px; object-fit: contain; }
+.wn-apps { flex: none; display: inline-flex; gap: 3px; }
+.wn-apps .wn-app { width: 16px; height: 16px; }
+/* Under reduced motion every part keeps still (its own stylesheet says so too); while the window is hidden, all of it waits. */
+@media (prefers-reduced-motion: reduce) { .wn-stage *, .wn-stage *::before, .wn-stage *::after { animation: none !important; transition: none !important; } }
+.wn-stage.wn-paused *, .wn-stage.wn-paused *::before, .wn-stage.wn-paused *::after { animation-play-state: paused !important; }
+
+/* One list of Pips, and what the chosen one has of its own. */
+.wn-scene-pips-list .hc-pips { width: 262px; }
+.wn-scene-pips-list .wn-own { width: 244px; }
+
+/* The wall: the Pip's computer inside a dashed line in the colour DGC uses for "this asks you". A file crosses it (the
+   copy), and what would leave it asks. --wn-cross: from your folder's row to the computer's. */
+.wn-scene-wall { gap: 14px; --wn-cross: 292px; }
+.wn-scene-wall .wn-folder { width: 190px; overflow: visible; z-index: 1; }   /* (the file crosses out of its card, over the wall) */
+.wn-scene-wall .wn-boxed { width: 206px; border: 2px dashed var(--need); }
+.wn-stage .hc-li.wn-travel { position: absolute; inset: 0; z-index: 1; opacity: 0; border: 1px solid var(--need); background: var(--surface); box-shadow: 0 6px 14px -6px rgba(0,0,0,.45); }
+.wn-cross { flex: 0 0 74px; display: flex; flex-direction: column; gap: 26px; }
+.wn-arrow { position: relative; isolation: isolate; display: block; padding-bottom: 7px; color: var(--muted); font-size: var(--t-xs, 11px); text-align: center; white-space: nowrap; }
+.wn-arrow::before { content: ""; position: absolute; left: 0; right: 4px; bottom: 2px; border-top: 1px solid var(--muted); }
+.wn-arrow::after { content: ""; position: absolute; right: 2px; bottom: -2px; width: 7px; height: 7px; border-top: 1px solid var(--muted); border-right: 1px solid var(--muted); rotate: 45deg; }
 .wn-arrow.back { color: var(--need-text); }
-.wn-arrow.back::before { left: .3em; right: 0; border-color: var(--need); }
-.wn-arrow.back::after { right: auto; left: .15em; border-color: var(--need); rotate: -135deg; }
+.wn-arrow.back::before { left: 4px; right: 0; border-color: var(--need); }
+.wn-arrow.back::after { right: auto; left: 2px; border-color: var(--need); rotate: -135deg; }
+.wn-glow { position: absolute; inset: -10px -8px -8px; z-index: -1; border-radius: 10px; background: radial-gradient(closest-side, color-mix(in srgb, var(--need) 42%, transparent), transparent); }
 
-.wn-scene-levels { flex-direction: column; gap: .9em; }
-.wn-levels { flex: none; display: flex; gap: .35em; padding: .3em; border: 1px solid var(--hair-strong); border-radius: .7em; background: var(--bg); }
-.wn-levels .wn-chip { border-color: transparent; }
-.wn-says { flex: none; width: 23em; gap: .4em; }
-.wn-says-foot { display: flex; align-items: center; gap: .5em; margin-top: .2em; }
-.wn-diff { margin-right: auto; color: var(--muted); font-family: var(--mono, ui-monospace, monospace); font-size: .86em; white-space: nowrap; }
+/* The level, in the menu's own look: the two menus are one place, the one before fades into the one after. */
+.wn-pick { flex: 0 0 226px; display: grid; }
+.wn-pick > .dgc-menu { grid-area: 1 / 1; position: relative; inset: auto; z-index: auto; width: auto; max-height: none; margin: 0; animation: none; }
+.wn-pick > .dgc-menu.was { opacity: 0; }
+.wn-scene-levels .hc-needs { width: 290px; }
+/* The answers' row (media/shared/iconactions.css) draws its look on button.dgc-ia-btn; in a picture its answers are
+   spans (nothing in a picture is pressed), so they take the same look here: the one filled, the other a hairline. */
+.wn-stage span.dgc-ia-btn { position: relative; z-index: 2; flex: none; display: grid; place-items: center; box-sizing: border-box; width: var(--ia-size); height: var(--ia-size);
+  border: 1px solid var(--btn-line); border-radius: var(--btn-r); color: var(--btn-text); font: var(--w-med) var(--t-xs)/1 var(--sans); }
+.wn-stage span.dgc-ia-btn.dgc-ia-main { border-color: transparent; background: var(--btn-fill); color: var(--btn-on-fill); }
 
-.wn-bento { display: grid; grid-template-columns: 1.5fr 1fr; gap: .7em; width: 27em; }
-.wn-card { gap: .35em; padding: .7em .85em; min-height: 5.4em; }
-.wn-run { display: flex; align-items: center; gap: .5em; }
-.wn-pulse { flex: none; width: .6em; height: .6em; border-radius: 50%; background: #4FA86E; }
-.wn-bars { flex: 1; display: flex; align-items: flex-end; gap: .3em; height: 2.6em; min-height: 2.6em; }
-.wn-bars i { flex: 1; display: block; border-radius: .12em .12em 0 0; background: color-mix(in srgb, var(--text) 42%, transparent); }
-.wn-bento .wn-card:nth-child(3) { order: 4; } .wn-bento .wn-card:nth-child(4) { order: 3; }
+/* Home's own cards in their bento. */
+/* (Home folds its grid to one column in a side bar under 200 px: the still keeps its own two, at every width.) */
+.wn-stage .hc-grid.wn-bento { flex: none; width: 532px; grid-template-columns: 1.1fr 1fr; grid-auto-rows: 120px; }
+.wn-bento > .hc-card { overflow: hidden; }
+.wn-bento .hc-chart { grid-template-columns: minmax(0, 1fr); }
+.wn-bento .hc-plot { height: 50px; }
+.wn-bento .hc-plot .hc-col { transform-origin: 50% 100%; }
+.wn-todo { display: flex; align-items: center; gap: 8px; min-height: 26px; color: var(--text); }
+.wn-check { position: relative; flex: none; display: grid; place-items: center; box-sizing: border-box; width: 14px; height: 14px; border: 1px solid var(--muted); border-radius: 3px; }
+.wn-check.on { border-color: var(--text-strong); background: var(--text-strong); color: var(--surface); }
+.wn-check.on:empty::after { content: ""; width: 3px; height: 7px; margin-top: -2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; rotate: 40deg; }
 
-.wn-scene-work { flex-direction: column; gap: .7em; }
-.wn-sessions { flex: none; width: 24em; gap: .45em; padding: .75em .9em; }
-.wn-session { display: flex; align-items: center; gap: .6em; white-space: nowrap; }
-.wn-session .wn-name { flex: 1; }
-.wn-session.quiet .wn-name { color: var(--muted); }
-.wn-voxel { flex: none; width: .95em; height: .95em; border-radius: .22em; background: #5F8FE3; }
-.wn-voxel.b { background: #D9A14A; } .wn-voxel.c { background: color-mix(in srgb, var(--text) 30%, transparent); }
-.wn-age { flex: none; color: var(--muted); font-size: .86em; }
-.wn-ask { flex: none; width: 24em; padding: .6em .9em; }
-.wn-typed { display: flex; align-items: center; gap: .45em; white-space: nowrap; }
-.wn-at { flex: none; padding: .1em .4em; border-radius: .35em; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text-strong); }
-.wn-typed-rest { color: var(--text); }
+/* The Library: the tabs before and after are one place, as are Kind's two values; three rows in sight, a fourth waits
+   under the list's edge until the filter makes room for it. */
+.wn-lib { flex: none; width: 504px; }
+.wn-lib .lib-search { display: flex; align-items: center; }
+.wn-ph { color: var(--muted); }
+.wn-tabs, .wn-kind { display: grid; }
+.wn-kind { display: inline-grid; }
+.wn-tabs > *, .wn-kind > * { grid-area: 1 / 1; }
+.wn-tabs > .was, .wn-kind > .was { opacity: 0; }
+.dgc-lib .wn-lib-rows { --wn-up: 0px -46px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(4, 46px); height: 138px; margin: 0; padding: 0; overflow: hidden; list-style: none; }
+.dgc-lib .wn-lib-rows > .lib-row { grid-column: 1; min-height: 46px; margin: 0; }
+.dgc-lib .wn-lib-rows > .lib-row:is(.was, .out) { opacity: 0; }
+.dgc-lib .wn-lib-rows > .lib-row.up { translate: var(--wn-up); }
 
-.wn-scene-settings { flex-direction: column; gap: .8em; }
-.wn-asked { flex: none; width: 24em; gap: .7em; }
-.wn-bubble { align-self: flex-end; max-width: 100%; padding: .4em .75em; border-radius: .7em; background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wn-change { display: flex; align-items: center; gap: .65em; }
-.wn-change-words { flex: 1; display: flex; flex-direction: column; gap: .1em; }
-.wn-tick { flex: none; position: relative; width: 1.25em; height: 1.25em; border-radius: 50%; background: color-mix(in srgb, #4FA86E 26%, transparent); }
-.wn-tick::after { content: ""; position: absolute; left: .42em; top: .2em; width: .32em; height: .62em; border-right: .14em solid #4FA86E; border-bottom: .14em solid #4FA86E; rotate: 40deg; }
-.wn-also { flex: none; display: flex; gap: .5em; }
+/* Work's sessions: one is archived, the list closes up (three in sight, the fourth waits under the edge); the message
+   waiting to go next, in its own row. */
+.wn-scene-work { flex-direction: column; gap: 10px; --wn-away: 70px 0px; --wn-up: 0px -36px; }
+.wn-scene-work .hc-work, .wn-scene-work .wn-queue { width: 460px; }
+.wn-slots { display: grid; grid-template-rows: repeat(4, 34px); row-gap: 2px; height: 106px; overflow: hidden; }
+.wn-slots > .hc-li.out { opacity: 0; translate: var(--wn-away); }
+.wn-slots > .hc-li.up { translate: var(--wn-up); }
+.wn-act { flex: none; }
+.wn-stage .hc-lnk.wn-counts { gap: 0; }
+.wn-n { display: inline-grid; }
+.wn-n > * { grid-area: 1 / 1; }
+.wn-count.was { opacity: 0; }
+.wn-queue { padding: 4px 6px; }
+.wn-queue-list { margin: 0; padding: 0; list-style: none; }
 
-/* High contrast and forced colours: every edge is the reader's own, and nothing leans on a tint. */
-body.vscode-high-contrast .wn-picture, body.vscode-high-contrast-light .wn-picture { background: var(--surface); }
+/* A setting changed by asking, in a Work chat. */
+.wn-scene-settings { flex-direction: column; gap: 12px; }
+.wn-chat { flex: none; display: flex; flex-direction: column; gap: 10px; width: 460px; }
+.wn-said { align-items: flex-end; margin: 0; }
+.wn-scene-settings .wn-also { width: 460px; }
+
+/* ---- high contrast and forced colours: no gradient, every edge the reader's own, nothing leans on a tint ------------- */
+body.vscode-high-contrast .wn-picture, body.vscode-high-contrast-light .wn-picture { --wn-glass: var(--surface); --wn-glass-edge: var(--vscode-contrastBorder, var(--text)); --wn-glass-lift: none;
+  background: var(--surface); }
+body.vscode-high-contrast .wn-close, body.vscode-high-contrast-light .wn-close { border: 1px solid var(--vscode-contrastBorder, var(--text)); background: var(--surface); }
 body.vscode-high-contrast .wn-dot::before, body.vscode-high-contrast-light .wn-dot::before { background: transparent; border: 1px solid var(--text); }
 body.vscode-high-contrast .wn-dot.on::before, body.vscode-high-contrast-light .wn-dot.on::before { background: var(--text); }
 @media (forced-colors: active) {
   .wn-picture { background: Canvas; }
+  .wn-glass { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  .wn-close { border: 1px solid ButtonText; background: ButtonFace; color: ButtonText; }
   .wn-dot::before { background: Canvas; border: 1px solid CanvasText; }
   .wn-dot.on::before { background: CanvasText; }
-  .wn-face, .wn-pulse, .wn-voxel, .wn-tick { forced-color-adjust: none; }
-  .wn-chip.on { background: Highlight; color: HighlightText; }
-  .wn-wall, .wn-boxed { border-color: CanvasText; }
-}
-/* The narrowest side bar (14 Nov): the two buttons share the dialog's width, under the dots; nothing runs off sideways. */
-@media (max-width: 230px) {
-  .wn-layer { padding: 8px; }
-  .wn-body { padding: 12px 10px; overflow-x: hidden; }
-  .wn-title { overflow-wrap: break-word; }
-  .wn-actions { flex: 1 1 100%; margin-left: 0; }
-  .wn-actions .dgc-btn { flex: 1 1 0; width: auto; min-width: 0; }
+  .wn-boxed, .wn-travel { border-color: CanvasText; }
+  .wn-sel { background: Highlight; opacity: .35; }
+  .wn-glow { display: none; }
 }

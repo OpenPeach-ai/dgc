@@ -1142,6 +1142,8 @@
       newNote() { if (!notesApp) return; if (!layout.order.includes("note")) keepOrder([...layout.order, "note"]); if (ui.arranging) arrange(false); notesApp.start(null); },
       open, close, opened: () => ui.open, arranging: () => ui.arranging, order: () => [...layout.order],
       closeLibrary: () => closeLibrary(false),
+      /** The Cards library, as Home's Cards button opens it (What's new's "Arrange Home"). */
+      openCards: () => openLibrary(),
       /** Home is in front again: what it reads is read again when it is old. */
       shown() { if (Date.now() - usageAt > 30000) usageStale = true; ask(); },
       /** DGC used tokens just now (a turn ended, here or in another tab): the card asks again soon, at most once in

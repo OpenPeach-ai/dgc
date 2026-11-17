@@ -13620,12 +13620,15 @@ function permissionChoices(ev) {
   window.DgcPictureFold?.setDefault(document.body.dataset.picturesFolded === "1");
   window.DgcPictureFold?.host((message) => vscode.postMessage(message));
   // "What's new" (media/shared/whatsnew.js): the dialog the side bar shows once per release, and again from the DGC
-  // view's menu. Skip, Done or Esc tells the host, which never shows it by itself again (src/whatsNew.ts).
+  // view's menu. ×, Done or Esc tells the host, which never shows it by itself again (src/whatsNew.ts). A slide's own
+  // action (Open Pips, Arrange Home, Open Library, Open Work) is an answer too: the host keeps it and says where to go
+  // ({type: "sideTab"}, below).
   let whatsNew = null;
   function openWhatsNew(msg) {
     const layer = $("whats-new");
     if (!layer || !window.DgcWhatsNew || chatPlace !== "home") return;
-    whatsNew = whatsNew || window.DgcWhatsNew.mount(layer, { onSeen: () => vscode.postMessage({ type: "whatsNewSeen" }) });
+    whatsNew = whatsNew || window.DgcWhatsNew.mount(layer, { onSeen: () => vscode.postMessage({ type: "whatsNewSeen" }),
+      onGo: (to) => vscode.postMessage({ type: "whatsNewGo", to }), icon: (name) => icon(name) });
     whatsNew.open({ release: msg?.release });
   }
   // "Your Pips moved into one list" (media/shared/pipswelcome.js): the pop-up the Pips tab shows once, and again from
@@ -13772,6 +13775,15 @@ function permissionChoices(ev) {
     if (msg.type === "homeNewNote") { showSideTab("home"); home?.newNote(); return; }
     if (msg.type === "sideLibrary") { libraryPage?.message(msg.message); return; }
     if (msg.type === "whatsNew") { openWhatsNew(msg); return; }
+    // The host's way to a tab of the side bar (What's new's slide actions, src/whatsNew.ts): the tab as Home's buttons
+    // choose it, with the keyboard on it; `open: "cards"` opens Home's Cards library, as its Cards button does.
+    if (msg.type === "sideTab") {
+      if (chatPlace !== "home") return;
+      const tab = String(msg.tab || "");
+      showSideTab(tab, msg.open !== "cards");
+      if (tab === "home" && msg.open === "cards") home?.openCards?.();
+      return;
+    }
     if (msg.type === "pipsWelcome") { openPipsWelcome(msg); return; }
     if (msg.type === "pipsMacNote") { openPipsMacNote(); return; }
     if (msg.type === "pipSessionNote") { sessionNoteShow(msg); return; }
