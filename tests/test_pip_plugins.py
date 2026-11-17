@@ -403,7 +403,7 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertFalse(runs("clear_table", self.session_for(unattended=True)), "nobody watching: every change waits")
         self.assertTrue(runs("list_records", self.session_for(unattended=True)), "a read still runs")
 
-    def test_at_do_it_all_a_change_runs_in_the_same_turn_and_is_listed_but_money_and_always_ask_still_ask(self):
+    def test_at_do_it_all_a_change_runs_in_the_same_turn_and_is_listed_and_money_and_always_ask_are_asked_in_the_chat(self):
         # 0.52 (Pips package 4): at Do it all a change runs now, a routine's too: no Allow card, no "card below", no
         # second turn after the reply. It is kept for "What it did on its own" and counted by the fuse.
         from dgc import pip_levels
@@ -421,8 +421,9 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertEqual([(r["what"], r["level"], r["kind"], r["unattended"]) for r in mine],
                          [("Ran create_record in Airtable", "full", "app", True)])
         self.assertEqual(len(pip_levels.outward(self.registry, self.pip["id"])), 1, "the fuse counts it")
-        # A plugin that can move money still asks at Do it all, and so does one set to Always ask.
-        self.assertIn("draft", self.use("call_plugin", session, plugin="aave", tool="create_record", arguments={}))
+        # A plugin that can move money still asks at Do it all, and so does one set to Always ask: in the chat, never a
+        # card (his rule, 17 Nov; dgc/pip_holds.py, tests/test_pip_holds.py).
+        self.assertIn("WAITING FOR THE USER", self.use("call_plugin", session, plugin="aave", tool="create_record", arguments={}))
         # Unless you let this Pip at Do it all pay: then it runs, and counts against its day (pip_payments; changed on
         # purpose 13 Nov: it was "today's three").
         from dgc import pip_payments
@@ -432,7 +433,8 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertIsInstance(paid, str, "it paid: no card")
         self.assertEqual(float(pip_payments.spent(self.registry, self.pip["id"])), 25.0)
         plugins.set_permission("airtable", "always_ask", money=False)
-        self.assertIn("draft", self.use("call_plugin", session, plugin="airtable", tool="create_record", arguments={"table": "T"}))
+        self.assertIn("WAITING FOR THE USER", self.use("call_plugin", session, plugin="airtable", tool="create_record",
+                                                       arguments={"table": "T"}))
         plugins.set_permission("airtable", "important", money=False)
         # The level is read at each call: back at Approve for me, the change asks again in the same run.
         level[0] = "approve"

@@ -233,6 +233,7 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                                       "path": {"type": "string", "maxLength": 2048},
                                       "command": {"type": "string", "maxLength": 4000},
                                       "background": {"type": "boolean"}, "job": {"type": "string"},
+                                      "confirm": {"type": "boolean", "description": "true: a held step, after the user's yes"},
                                       "site": {"type": "string", "maxLength": 2048},
                                       "submit": {"type": "boolean"}, "to": {"type": "string", "maxLength": 16},
                                       "seconds": {"type": "number"}, "gone": {"type": "boolean"},
@@ -638,7 +639,7 @@ class Host:
         self._say_at_work(run_id)
 
     def _begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=(),
-               level: str = "ask", unattended: bool = False, level_now=None, carry=None) -> None:
+               level: str = "ask", unattended: bool = False, level_now=None, carry=None, user_turn: bool = False) -> None:
         """`level` is the Pip's level as the run starts; `level_now` (pip_levels.follow) reads it again at each held step,
         so a change in its prompt box while the reply runs applies from the next step."""
         from .pip_levels import LEVELS
@@ -653,6 +654,7 @@ class Host:
             self.level = level if level in LEVELS else "ask"
             self._level_now = level_now if callable(level_now) else None
             self.unattended, self.target, self.upload_from_chat, self._level_pending = bool(unattended), "", None, []
+            self.user_turn = bool(user_turn) and not self.unattended   # the user's own message started it (pip_holds)
             self.browser.site_gate = self._site_ok if self.careful else None
             # The run's steps are numbered for its report and its timeline ("Recorded as step 3"); what changed is told
             # against the page the Pip last saw (seen); a page's confirm or prompt and its file picker wait for the Pip.
@@ -787,6 +789,15 @@ class Host:
                 if grant is not None:
                     Host._release_by_grant(self, held, summary, grant)
                     continue
+            if (self.run_id is not None and held.request_id in self.browser.held
+                    and summary.get("kind") not in CAREFUL_KINDS and Host._does_it_all(self)):
+                # Do it all never shows a card (his rule, 17 Nov): a payment it may not make on its own, a card number,
+                # or the fuse is held and asked in the chat; the user's next own message answers (pip_holds).
+                said = Host._in_chat(self, held, summary, fused)
+                if said is None:
+                    continue                                   # the user said yes in the chat: sent
+                self.card_note = said
+                continue
             frame = self._frame("Waiting for your approval")
             from datetime import timedelta
             from .pip_schedules import _instant, timestamp
@@ -813,6 +824,52 @@ class Host:
             made.append(action_id)
             self.waiting.append(action_id)
         return made
+
+    def _does_it_all(self) -> bool:
+        """The level the user chose is Do it all (the fuse aside: while it holds, Do it all asks in the chat too)."""
+        from .pip_levels import does_it_all
+        if Host._level_current(self) == pip_levels_full():
+            return True
+        return does_it_all(self.state_directory, self.pip_id) if getattr(self, "pip_id", None) else False
+
+    def _in_chat(self, held, summary, fused) -> str | None:
+        """Do it all: one held submit, asked in the chat instead of on a card. None when this step is the user's yes
+        (it was sent, and a payment counted against the day); else what the Pip is told, the request dropped."""
+        from . import pip_holds
+        from .pip_careful import site_of
+        from .pip_payments import read_payment
+        from .workspace_registry import WorkspaceRegistry
+        parts = urlsplit(held.url)
+        site = site_of(parts.hostname or "")
+        payment = read_payment(held.fields, site)
+        step = {"host": (parts.hostname or "").lower(), "method": str(held.method or "").upper(), "path": parts.path or "/",
+                "amount": str((payment or {}).get("amount") or ""), "currency": str((payment or {}).get("currency") or ""),
+                "card": bool(getattr(held, "payment", False))}
+        money = f" {payment['currency']} {payment['amount']}" if payment else ""
+        what = (f"paying{money} on {site}" if getattr(held, "asks_because", "") == "payment" or getattr(held, "payment", False)
+                else f"sending the form on {site}{parts.path or '/'}")
+        why = ("it sends a card number" if getattr(held, "payment", False)
+               else "it has done 25 things on its own in the last hour" if fused
+               else "it pays money, and this Pip may not pay this on its own (its daily limit, the same payment twice, "
+                    "or an amount DGC can't read)")
+        why_not = ""
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                if getattr(self, "_confirming", False):
+                    runs, why_not = pip_holds.release(registry, self.pip_id, "computer", step, run_id=self.run_id,
+                                                      user_turn=getattr(self, "user_turn", False),
+                                                      unattended=getattr(self, "unattended", False))
+                    if runs and Host._release_by_level(self, held, {"what": what[0].upper() + what[1:] + " (the user said yes in the chat)",
+                                                                    "verdict": "payment", "paid": payment is not None,
+                                                                    "payment": payment}):
+                        return None
+                said = pip_holds.hold(registry, self.pip_id, "computer", step, what=what, why=why, run_id=self.run_id)
+        except Exception:                                  # noqa: BLE001 - unreadable registry: nothing sent
+            said = pip_holds.line(what, why)
+        if held.request_id in self.browser.held:
+            self.browser.drop(held.request_id)
+        self._back_from_drop()
+        return (f"Not sent: {why_not}. " if why_not else "") + said
 
     def _may_pay(self, payment=None) -> bool:
         """Whether its level may pay this one (pip_levels.may_pay: its daily dollar limit and rules), read now."""
@@ -1105,7 +1162,12 @@ class Host:
         ({image: base64 JPEG, width, height}) the worker shows a model that can see. Never raises. Its text is
         scrubbed of every saved secret and of what sign_in typed here (pip_login_fill.Scrubber)."""
         held = _secret_hold_refusal(self, op)
-        reply = {"text": held} if held else Host._act(self, op, args)
+        # "confirm": true says the user's own next message said yes to a step held in the chat (pip_holds, Do it all).
+        self._confirming = isinstance(args, dict) and args.get("confirm") is True
+        try:
+            reply = {"text": held} if held else Host._act(self, op, args)
+        finally:
+            self._confirming = False
         scrubber = getattr(self, "secrets", None)
         if scrubber is not None and isinstance(reply.get("text"), str):
             reply = {**reply, "text": scrubber.scrub(reply["text"])}
@@ -1534,7 +1596,7 @@ class Host:
                 stopped = desk.stop_job(self.root, args.get("job"))
                 return f"{stopped['id']} is {stopped['state']}."
             if getattr(self, "run_id", None) is not None:
-                held = Host._floor(self, str(args.get("command") or ""))
+                held = Host._floor(self, str(args.get("command") or ""), confirm=args.get("confirm") is True)
                 if held:
                     return held
             careful = getattr(self, "careful", False) and self.run_id is not None
@@ -1559,9 +1621,10 @@ class Host:
         except Exception as error:                         # noqa: BLE001 - never into the worker
             return f"error: the computer failed ({type(error).__name__})"
 
-    def _floor(self, command: str) -> str | None:
+    def _floor(self, command: str, confirm: bool = False) -> str | None:
         """The safety floor (pip_levels.floor), at every level: a command that could wipe its Files waits for the
-        user's Allow, which lets exactly that command run once."""
+        user, who lets exactly that command run once: on its Allow card, or at Do it all with a yes in the chat
+        (pip_holds; his rule, 17 Nov: no card at Do it all, it asks in the chat)."""
         from . import pip_levels
         from .pip_careful import _digest as text_digest
         found = pip_levels.floor(command)
@@ -1575,6 +1638,19 @@ class Host:
                 from .pip_action_grants import computer_grant_for
                 if computer_grant_for(registry, self.pip_id, {"kind": "floor", "host": "Terminal", "method": "RUN", "path": "/"}):
                     return None                            # always allowed (his call 15 Nov)
+                if Host._does_it_all(self):
+                    from . import pip_holds
+                    step, why_not = {"command": text_digest(command)}, ""
+                    if confirm:
+                        runs, why_not = pip_holds.release(registry, self.pip_id, "floor", step, run_id=self.run_id,
+                                                          user_turn=getattr(self, "user_turn", False),
+                                                          unattended=getattr(self, "unattended", False))
+                        if runs:
+                            return None
+                    held = pip_holds.hold(registry, self.pip_id, "floor", step, run_id=self.run_id,
+                                          what=f"the Terminal command `{_preview(command)[:120]}`",
+                                          why=f"it {pip_levels.FLOOR_LINE}")
+                    return (f"Not run: {why_not}. " if why_not else "") + held
         except (OSError, RegistryError, sqlite3.Error):
             pass
         return self._careful_hold("floor", {"method": "RUN", "host": "Terminal", "path": "/",
@@ -1593,7 +1669,7 @@ class Host:
         if op == "desktop_look":
             return self._desk_look()
         if op == "desktop_type" and getattr(self, "run_id", None) is not None:
-            held = Host._floor(self, str(args.get("text") or ""))     # typed into its Terminal's window, it would run
+            held = Host._floor(self, str(args.get("text") or ""), confirm=args.get("confirm") is True)   # it would run
             if held:
                 return {"text": held}
         pointer, said = None, ""
@@ -3241,6 +3317,11 @@ def fill_code(registry, pip_id: str, action_id: str, expected_digest: str, code:
     said = _code_to_view(registry, pip_id, dict(row), code, actor)
     return {"ok": bool(said.get("ok")), **({"error": str(said.get("error"))[:300]} if not said.get("ok") else {}),
             **({"signed_in": True} if said.get("signed_in") else {}), "action": projection(_row(registry, action_id))}
+
+
+def pip_levels_full() -> str:
+    from .pip_levels import FULL
+    return FULL
 
 
 def _take_card_note(host) -> str | None:

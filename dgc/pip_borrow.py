@@ -61,6 +61,10 @@ KEEP = 20                              # cards kept per Pip, newest first
 CARD_SECONDS = 24 * 3600               # a card nobody answered stops asking after a day
 CLAIM_SECONDS = 30 * 60                # an Allow is used by the turn it starts, within this
 BORROW_SECONDS = 10 * 60               # the longest one borrow lasts
+# At Do it all the user says yes once, in the chat, for the session (his call, 17 Nov: "once for a session ... 'use my
+# browser for things'"); this long, then it asks again.
+CONSENT_KEY = "pip_borrow_ok:"
+CONSENT_SECONDS = 12 * 3600
 MINUTES = BORROW_SECONDS // 60
 WATCH_SECONDS = 0.5
 STATUSES = ("requested", "allowed", "declined", "replaced", "in_use", "returned", "expired")
@@ -244,6 +248,23 @@ def _get(registry, borrow_id, pip_id) -> dict:
 def _put(registry, value) -> None:
     registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
                         (_key(value["pip_id"], value["id"]), json.dumps(value, ensure_ascii=False, separators=(",", ":"))))
+
+
+def consented(registry, pip_id) -> bool:
+    """Whether the user said yes in this Pip's chat to it using their own Chrome, within CONSENT_SECONDS."""
+    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (CONSENT_KEY + str(pip_id),)).fetchone()
+    if row is None:
+        return False
+    try:
+        return time.time() - float(json.loads(row[0]).get("at") or 0) < CONSENT_SECONDS
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def _consent(registry, pip_id) -> None:
+    with registry.transaction():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                            (CONSENT_KEY + str(pip_id), json.dumps({"at": time.time()})))
 
 
 def _run_running(registry, run_id) -> bool:
@@ -945,13 +966,14 @@ class Session:
     reply; borrowed_chrome works only in the reply the user's Allow started, through a BorrowedTab."""
 
     def __init__(self, directory, config, pip_id, workspace_id, run_id, *, unattended=False, grant=None, level="ask",
-                 careful=True, taint=None, said="", folders=None, reach=None, refused="", level_now=None):
+                 careful=True, taint=None, said="", folders=None, reach=None, refused="", level_now=None, user_turn=False):
         self.directory, self.config, self.pip_id, self.workspace_id, self.run_id = directory, config, pip_id, workspace_id, run_id
         # Why borrowing can't happen here at all (a runner in server mode, pip_server.NO_CHROME): no card is saved and
         # no Chrome is looked for; both tools answer with it.
         self.refused = str(refused or "")
         self.unattended, self.level, self.careful, self.taint, self.said = unattended, level, careful, taint, said
-        self.folders, self.reach = folders, reach
+        self.folders, self.reach, self.level_now = folders, reach, level_now
+        self.user_turn = bool(user_turn) and not unattended   # the user's own chat message started this reply (pip_holds)
         self.grant = grant if isinstance(grant, dict) and grant.get("id") else None
         self.missed = grant.get("missed") if isinstance(grant, dict) and not self.grant else ""
         self.ended, self.told_end, self.chrome = "", "", ""
@@ -964,13 +986,75 @@ class Session:
         from .pip_careful import Taint
         self.own = Taint()                    # what it read in their Chrome this run: typing it back there is fine
         if self.grant is not None:
-            self.deadline = time.monotonic() + BORROW_SECONDS
-            self.tab = BorrowedTab(self.grant["sites"], folders=folders, level=level, level_now=level_now,
-                                   deny=lambda url: denied(self.config, url))
-            threading.Thread(target=self._connect, name=f"pip-borrow-{run_id[-8:]}", daemon=True).start()
-            threading.Thread(target=self._watch, name=f"pip-borrow-watch-{run_id[-8:]}", daemon=True).start()
+            self._lend()
         else:
             self._ready.set()
+
+    def _lend(self) -> None:
+        """Start the borrow in self.grant: its tab and the watch on its time."""
+        self._ready.clear()
+        self.deadline = time.monotonic() + BORROW_SECONDS
+        self.tab = BorrowedTab(self.grant["sites"], folders=self.folders, level=self.level, level_now=self.level_now,
+                               deny=lambda url: denied(self.config, url))
+        threading.Thread(target=self._connect, name=f"pip-borrow-{self.run_id[-8:]}", daemon=True).start()
+        threading.Thread(target=self._watch, name=f"pip-borrow-watch-{self.run_id[-8:]}", daemon=True).start()
+
+    def _does_it_all(self) -> bool:
+        """The level the user chose is Do it all (the fuse aside: while it holds, Do it all asks in the chat too)."""
+        level = self.level
+        if callable(self.level_now):
+            try:
+                level = self.level_now()
+            except Exception:                       # noqa: BLE001 - unreadable: the card, as below Do it all
+                return False
+        if level == "full":
+            return True
+        from .pip_levels import does_it_all
+        return does_it_all(self.directory, self.pip_id)
+
+    def _ask_in_chat(self, args: dict) -> str:
+        """Do it all: no card. The user is asked once, in the chat, for the session; after their yes it is lent in the
+        same reply (a routine's reply, with nobody there, never is)."""
+        from . import pip_holds
+        step = {"borrow": "the user's own signed-in Chrome"}
+        why_not = ""
+        with WorkspaceRegistry(self.directory) as registry:
+            yes = consented(registry, self.pip_id)
+            if not yes and args.get("confirm") is True:
+                yes, why_not = pip_holds.release(registry, self.pip_id, "borrow", step, run_id=self.run_id,
+                                                 user_turn=self.user_turn, unattended=self.unattended)
+                if yes:
+                    _consent(registry, self.pip_id)
+            if not yes:
+                held = pip_holds.hold(registry, self.pip_id, "borrow", step, run_id=self.run_id,
+                                      what="using your own signed-in Chrome for things, this session",
+                                      why="it is the user's own browser, signed in as them; asked once for the session")
+                return (f"Not lent: {why_not}. " if why_not else "") + held
+            if self.unattended:
+                return ("The user said yes to their Chrome in the chat, but nobody is here now (this is a routine): don't "
+                        "use it in this run. Say what you would do with it in your report, then do what you can without it.")
+            try:
+                card = request(registry, self.config, self.pip_id, self.workspace_id, self.run_id, args.get("sites"),
+                               args.get("why"), unattended=False, reach=self.reach)
+            except RegistryError as exc:
+                return f"error: {exc}"
+            if card.get("unreachable"):
+                with registry.transaction():
+                    _put(registry, {**card, "status": "declined", "decided_at": utc_now(), "decided_by": "said-in-chat"})
+                return ("The user said yes in the chat, but DGC can't reach their Chrome on this computer right now: "
+                        + card["unreachable"][:300] + " Tell them in one sentence, and carry on without it.")
+            now = utc_now()
+            with registry.transaction():
+                value = {**card, "status": "in_use", "allowed_at": now, "decided_at": now, "decided_by": "said-in-chat",
+                         "use_run_id": self.run_id, "claimed_at": now}
+                _put(registry, value)
+                registry.event(value["workspace_id"], "pip_borrow_started", pip_id=self.pip_id, run_id=self.run_id,
+                               payload={"borrow_id": value["id"], "said_in_chat": True})
+        self.grant = value
+        self._lend()
+        sites = ", ".join(shown(o) for o in value["sites"])
+        return (f"You have the user's own Chrome for {sites} now (they said yes in the chat for this session): use "
+                f"borrowed_chrome in this reply, for up to {MINUTES} minutes, and give it back with done when you finish.")
 
     def pin(self) -> dict | None:
         """What the worker is told: the sites it was lent and for how long, that its Allow was missed, or that
@@ -1104,6 +1188,8 @@ class Session:
             wanted = {card_origin(s, written) for s in (args.get("sites") if isinstance(args.get("sites"), list) else [args.get("sites")])}
             if wanted and wanted <= set(self.grant["sites"]):
                 return "You already have the user's Chrome for those sites in this reply: use borrowed_chrome."
+        if self._does_it_all():
+            return self._ask_in_chat(args)
         try:
             with WorkspaceRegistry(self.directory) as registry:
                 card = request(registry, self.config, self.pip_id, self.workspace_id, self.run_id, args.get("sites"),
@@ -1300,7 +1386,9 @@ ASK_SCHEMA = {"type": "function", "function": {"name": ASK, "description": (
         "sites": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_SITES,
                   "description": "The sites you need, as the user wrote them (https://portal.example.org, http://127.0.0.1:8123, "
                                  "or shop.example.com)."},
-        "why": {"type": "string", "description": "One short sentence the card shows: what you will do there."}},
+        "why": {"type": "string", "description": "One short sentence the card shows: what you will do there."},
+        "confirm": {"type": "boolean", "description": (
+            "Only after DGC said WAITING FOR THE USER for their Chrome and the user's own next message said yes: true.")}},
         "required": ["sites", "why"], "additionalProperties": False}}}
 
 USE_SCHEMA = {"type": "function", "function": {"name": USE, "description": (

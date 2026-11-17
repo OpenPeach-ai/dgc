@@ -1661,7 +1661,7 @@ def validate_steers(value, text: str) -> list:
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing", "artifacts"}:
+    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing", "artifacts", "undo_changes"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "artifacts" in result:
         from .pip_library import valid_reply_artifacts
@@ -1726,6 +1726,8 @@ def insert_reply(store, run, result, now):
     offer_core_day(store, run)
     from .pip_notes import commit as commit_notes            # notes it kept about you: on its page
     commit_notes(store, run, result)
+    from .pip_project_copies import undo_asked               # a change the user asked it to put back (Do it all)
+    undo_asked(store, run, result)
     text = validate_text(result.get("text"), reply=True)
     row = store.db.execute("SELECT workspace_id,pip_id,conversation_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
     if not row or (row["workspace_id"], row["pip_id"]) != (run["workspace_id"], run["pip_id"]):

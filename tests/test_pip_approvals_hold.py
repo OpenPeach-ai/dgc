@@ -415,7 +415,7 @@ class PaymentsAskEveryTime(Gate):
     def test_a_real_checkout_is_a_payment_at_every_level_and_its_card_offers_always_allow(self):
         # His call 15 Nov: Always allow on every card, payments included; a payment grant pays only inside the Pip's
         # daily dollar limit (an amount DGC can't read, or one past the limit, still asks).
-        for level in ("ask", "approve", "full"):
+        for level in ("ask", "approve"):
             with self.subTest(level=level):
                 pip, host = self.host(level)
                 self.assertEqual(len(self.hold(host, self.CHECKOUT)), 1, "it asks")
@@ -424,6 +424,11 @@ class PaymentsAskEveryTime(Gate):
                 pip_computer.approve_always(self.registry, card["id"], card["digest"], "editor-user")
                 [grant] = grants.list_grants(self.registry, pip["id"])
                 self.assertIn("payment", grant["label"])
+        # At Do it all it asks too, in the chat: no card (his rule, 17 Nov; dgc/pip_holds.py, tests/test_pip_holds.py).
+        pip, host = self.host("full")
+        self.assertEqual(self.hold(host, self.CHECKOUT), [], "no card")
+        self.assertEqual(self.waiting(pip), [])
+        self.assertTrue(str(host.card_note).startswith("WAITING FOR THE USER: paying"), host.card_note)
 
     def test_a_payment_grant_pays_only_inside_the_dollar_limit(self):
         from unittest import mock

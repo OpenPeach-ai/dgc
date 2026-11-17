@@ -405,6 +405,10 @@ class _FakeBrowser:
         self.released.append(request_id)
         self.held.pop(request_id)
 
+    def drop(self, request_id):
+        self.dropped = [*getattr(self, "dropped", []), request_id]
+        self.held.pop(request_id, None)
+
     def pump(self, seconds):
         pass
 
@@ -508,6 +512,23 @@ class SharedGateTests(Store):
         self.assertIn("app_socket.plugins.level_now = pip_levels.follow(registry.directory, row['pip_id'])", source,
                       "and its plugins")
 
+    def test_at_do_it_all_the_fuse_asks_in_the_chat_not_on_a_card(self):
+        # His rule, 17 Nov: Do it all never shows a card. The fuse still stops it after 25 things in an hour: the next
+        # one is asked in the chat, with the fuse's own reason (dgc/pip_holds.py).
+        pip, host = self.host("full")
+        levels.set_level(self.registry, pip["id"], "full", "editor-user")
+        host._level_now = levels.follow(self.registry.directory, pip["id"])
+        for n in range(levels.FUSE_ACTIONS):
+            host._queued.append(host.browser.hold(f"r{n}"))
+            self.assertEqual(host._record_held(), [], f"cart {n} goes by itself")
+        self.assertTrue(levels.fuse(self.registry, pip["id"]))
+        host._queued.append(host.browser.hold("r25"))
+        self.assertEqual(host._record_held(), [], "no card")
+        self.assertIn("25 things on its own in the last hour", str(host.card_note))
+        self.assertTrue(str(host.card_note).startswith("WAITING FOR THE USER"))
+        self.assertIn("r25", host.browser.dropped)
+        self.assertEqual([a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"], [])
+
     def test_the_fuse_stops_it_after_25_things_on_its_own_in_an_hour(self):
         pip, host = self.host("approve")
         levels.set_level(self.registry, pip["id"], "approve", "editor-user")
@@ -547,31 +568,34 @@ class SharedGateTests(Store):
         host._level_now = levels.follow(self.registry.directory, pip["id"])
         host.target = "Pay 500"
         pay = dict(url="https://shop.example/checkout/pay", fields=[("card_token", "tok_1"), ("amount", "20.00"), ("currency", "USD")])
-        host._queued.append(host.browser.hold("p-off", **pay))
-        [made] = host._record_held()
-        self.assertEqual(next(a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["id"] == made)["summary"]["asks_because"],
-                         "payment", "its rule is Ask by default: a payment asks at Do it all")
+
+        def asks(request_id, **kw):
+            # At Do it all "it asks" is in the chat, never a card (his rule, 17 Nov; dgc/pip_holds.py): nothing made,
+            # the request dropped, and the Pip told WAITING FOR THE USER.
+            host._queued.append(host.browser.hold(request_id, **kw))
+            made = host._record_held()
+            note, host.card_note = getattr(host, "card_note", None), None
+            return made == [] and str(note or "").startswith("WAITING FOR THE USER") and request_id in host.browser.dropped
+
+        self.assertTrue(asks("p-off", **pay), "its rule is Ask by default: a payment asks at Do it all")
         levels.set_paying(self.registry, pip["id"], "allow", "editor-user")
-        host._queued.append(host.browser.hold("p-nolimit", **pay))
-        self.assertEqual(len(host._record_held()), 1, "allowed, but no daily limit set yet: it asks")
+        self.assertTrue(asks("p-nolimit", **pay), "allowed, but no daily limit set yet: it asks")
         pip_payments.set_limits(self.registry, pip["id"], {"usd_per_day": 45}, "editor-user")
-        host._queued.append(host.browser.hold("p-card", payment=True, **pay))
-        self.assertEqual(len(host._record_held()), 1, "a card number in it asks, allowed or not")
+        self.assertTrue(asks("p-card", payment=True, **pay), "a card number in it asks, allowed or not")
         host._queued.append(host.browser.hold("p0", **pay))
         self.assertEqual(host._record_held(), [], "$20 of $45 goes")
-        host._queued.append(host.browser.hold("p1", **pay))
-        self.assertEqual(len(host._record_held()), 1, "the same site and amount twice in a day asks")
+        self.assertTrue(asks("p1", **pay), "the same site and amount twice in a day asks")
         other = dict(pay, fields=[("amount", "20.50"), ("currency", "USD")])
         host._queued.append(host.browser.hold("p2", **other))
         self.assertEqual(host._record_held(), [], "$40.50 of $45 goes")
-        host._queued.append(host.browser.hold("p3", **dict(pay, fields=[("amount", "5.00"), ("currency", "USD")])))
-        self.assertEqual(len(host._record_held()), 1, "$45.50 would pass the limit: it asks")
+        self.assertTrue(asks("p3", **dict(pay, fields=[("amount", "5.00"), ("currency", "USD")])), "$45.50 would pass the limit: it asks")
+        self.assertEqual([a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"], [],
+                         "no card at Do it all")
         self.assertEqual(host.browser.released, ["p0", "p2"])
         self.assertEqual(float(pip_payments.spent(self.registry, pip["id"])), 40.5)
         sent = [a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "sent"]
         self.assertTrue(all(a["summary"].get("paid") is True and a["resolved_by"] == "pip-level:full" for a in sent))
-        host._queued.append(host.browser.hold("p4", **dict(pay, fields=[("amount", "1.00")])))
-        self.assertEqual(len(host._record_held()), 1, "no currency DGC can read: it asks")
+        self.assertTrue(asks("p4", **dict(pay, fields=[("amount", "1.00")])), "no currency DGC can read: it asks")
 
     def test_at_ask_the_shared_gate_is_as_before(self):
         pip, host = self.host("ask")
@@ -643,10 +667,10 @@ class RealBrowserTests(Store):
         self.addCleanup(host.end)
         return pip, host, queued
 
-    def press(self, host, name):
+    def press(self, host, name, **more):
         page = host.call("read", {})
         ref = re.search(r'button "' + re.escape(name) + r'" \[(e\d+)\]', page).group(1)
-        return host.call("click", {"ref": ref})
+        return host.call("click", {"ref": ref, **more})
 
     def reset(self, host):
         host.waiting = []
@@ -696,18 +720,45 @@ class RealBrowserTests(Store):
         for name in ("Pay 500", "Use saved card", "Place order"):
             self.reset(host)
             with self.subTest(name=name):
-                self.assertTrue(self.press(host, name).startswith("Held:"), f"{name} is a payment: it asks at Do it all")
+                said = self.press(host, name)
+                # A payment still asks at Do it all: in the chat, never a card (his rule, 17 Nov; dgc/pip_holds.py).
+                self.assertTrue(said.startswith("WAITING FOR THE USER:"), f"{name} is a payment: it asks in the chat: {said}")
         self.assertEqual([p for p, _ in self.received], ["/comments", "/step"])
-        held = {a["summary"]["path"]: a["summary"] for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"}
-        self.assertTrue(held["/pay"]["payment"], "a card number: its card says it sends card details")
-        self.assertEqual((held["/pay-saved"].get("payment"), held["/pay-saved"]["asks_because"]), (None, "payment"),
-                         "a saved card sends a token: its card says it looks like a payment")
+        self.assertEqual([a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"], [],
+                         "no card")
+        from dgc import pip_holds
+        whats = [h["what"] for h in pip_holds.waiting(self.registry, pip["id"])]
+        self.assertEqual(len(whats), 3, whats)
+        self.assertTrue(all(w.startswith("paying") for w in whats), whats)
         labels = [f["label"] for f in pip_computer.frames(self.registry.directory, queued["id"])]
         self.assertTrue(any("Approved by its level: Do it all" in l and "nobody at the keyboard" in l for l in labels), labels)
 
-    def test_the_floor_holds_a_wipe_at_every_level_and_allow_lets_that_command_run_once(self):
-        from dgc import pip_computer_files as desk
+    def test_at_do_it_all_the_users_yes_in_the_chat_sends_that_payment_once(self):
+        from dgc import pip_holds
         pip, host, _ = self.host("full")
+        host.call("open", {"url": self.url})
+        self.assertTrue(self.press(host, "Place order").startswith("WAITING FOR THE USER:"))
+        self.reset(host)
+        self.assertIn("Not sent", self.press(host, "Place order", confirm=True), "the run that asked can't answer")
+        self.assertNotIn("/order", [p for p, _ in self.received])
+        host.end()
+        later = self.store.enqueue(pip["id"], "levels-yes-" + str(time.monotonic_ns()), "local-console", self.cfg)
+        self.store.claim_next()
+        host.begin(later["id"], self.registry.directory / "runs" / later["id"] / "artifacts" / "computer", careful=True,
+                   sites=pip_careful.known(self.registry, pip["id"]), level="full", user_turn=True)
+        self.reset(host)
+        said = self.press(host, "Place order", confirm=True)
+        self.assertNotIn("WAITING", said)
+        self.assertEqual([p for p, _ in self.received].count("/order"), 1, "sent once, on the user's yes")
+        self.assertEqual(pip_holds.waiting(self.registry, pip["id"]), [])
+        self.reset(host)
+        self.assertTrue(self.press(host, "Place order", confirm=True).startswith(("WAITING", "Not sent")), "once means once")
+        self.assertEqual([p for p, _ in self.received].count("/order"), 1)
+
+    def test_the_floor_holds_a_wipe_at_every_level_and_allow_lets_that_command_run_once(self):
+        # (Below Do it all: the card. At Do it all it is asked in the chat instead: the next test.)
+        from dgc import pip_computer_files as desk
+        pip, host, _ = self.host("approve")
         files = desk.files_root(host.root)
         (files / "keep.txt").write_text("mine")
         said = host.call("run", {"command": "rm -rf ~/*"})
@@ -736,6 +787,36 @@ class RealBrowserTests(Store):
         # (Until 18 Nov this said "once means once", from before his 15 Nov call; skipped in runs without Chromium's path,
         # it was never seen failing.) Always allow means every time.
         self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*"}), "always allowed: it keeps running")
+
+    def test_at_do_it_all_the_floor_is_asked_in_the_chat_with_no_card(self):
+        # His rule, 17 Nov: Do it all never shows a card; DGC still holds the command until the user answers in the chat
+        # (dgc/pip_holds.py). The user's next own message lets exactly that command run once.
+        from dgc import pip_computer_files as desk, pip_holds
+        pip, host, _ = self.host("full")
+        files = desk.files_root(host.root)
+        (files / "keep.txt").write_text("mine")
+        said = host.call("run", {"command": "rm -rf ~/*"})
+        self.assertTrue(said.startswith("WAITING FOR THE USER: the Terminal command"), said)
+        self.assertIn("could delete everything in its Files", said)
+        self.assertTrue((files / "keep.txt").exists(), "nothing ran")
+        self.assertEqual([a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"], [],
+                         "no card")
+        self.assertIn("WAITING", host.call("run", {"command": "rm -rf ~/*", "confirm": True}), "the run that asked can't answer")
+        self.assertTrue((files / "keep.txt").exists())
+        host.end()
+        later = self.store.enqueue(pip["id"], "levels-next-" + str(time.monotonic_ns()), "local-console", self.cfg)
+        self.store.claim_next()
+        host.begin(later["id"], self.registry.directory / "runs" / later["id"] / "artifacts" / "computer", careful=True,
+                   sites=pip_careful.known(self.registry, pip["id"]), level="full", unattended=True, user_turn=True)
+        self.assertIn("WAITING", host.call("run", {"command": "rm -rf ~/*", "confirm": True}), "a routine can't answer")
+        host.end()
+        host.begin(later["id"] + "x", self.registry.directory / "runs" / later["id"] / "artifacts" / "computer2",
+                   careful=True, sites=pip_careful.known(self.registry, pip["id"]), level="full", user_turn=True)
+        self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*", "confirm": True}))
+        self.assertFalse((files / "keep.txt").exists(), "the user's yes in the chat let it run")
+        self.assertEqual(pip_holds.waiting(self.registry, pip["id"]), [])
+        (files / "keep.txt").write_text("mine")
+        self.assertIn("WAITING", host.call("run", {"command": "rm -rf ~/*", "confirm": True}), "once means once")
 
 
 if __name__ == "__main__":

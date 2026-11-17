@@ -1133,8 +1133,9 @@ class PipAlwaysAsk(_Fixture):
         pip_levels.set_level(self.registry, self.pip["id"], "full", "editor-user")
         self.plugin_mod.set_permission("apps-example", "always_ask", money=False)
         run, said = self.turn("What time is it on the example's server?", "ask-1")
-        self.assertIn("draft", said)
-        self.assertEqual(len(self.pending()), 1)
+        # Asked in the chat, never a card, at Do it all (his rule, 17 Nov; dgc/pip_holds.py): nothing runs or waits.
+        self.assertIn("WAITING FOR THE USER", said)
+        self.assertEqual(len(self.pending()), 0)
         self.assertEqual(self.calls(), 0)
 
 

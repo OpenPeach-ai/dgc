@@ -194,8 +194,11 @@ class WordingTests(unittest.TestCase):
         # and the Terminal's no-limit wording (a long command carries on in the background).
         # 2026-11-16: +192 (about 50 tokens a request) for send_to_chat: a Pip sends what it made in its chat, as a
         # person does (his ask, 15 Nov; Pips API 101), and is told to, so it never only says where a file is.
+        # 2026-11-18: +82 (about 20 tokens a request) for `confirm`: at Do it all a step that needs the user (a payment past
+        # its limit, a command that could wipe its Files) is held and asked in the chat, never a card (his rule, 17 Nov),
+        # and runs once on their yes in the next turn (dgc/pip_holds.py). The description cut to fit.
         size = len(json.dumps(pip_computer.schema(None))) + len(pip_computer.NOTICE)
-        self.assertLessEqual(size, 5910, size)
+        self.assertLessEqual(size, 5992, size)
 
 
 @unittest.skipUnless(REAL_CHROME and box.capability().get("available"), "needs Linux, bubblewrap and a Chromium build")
