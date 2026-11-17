@@ -93,6 +93,54 @@
   const PLUS = shared("add", 12), CROSS = shared("close", 12), BACK = shared("back", 14), TICK = svg('<path d="M5 12l5 5L20 7"/>', 11, 3);
   // The Library's mark: his Iris books (media/icons/library-iris/library.css), exactly as he made them, beside the word.
   const LIBRARY_ICON = '<span class="library-iris" aria-hidden="true"><i></i><i></i><i></i></span>';
+  // GitHub, Docs, DGC-SDK and Settings after Library and Cards (his call, 17 Nov), each its own coloured mark at the same
+  // visible size as theirs (the sheet he approved): GitHub's own mark; Docs a page stack with a bookmark; DGC-SDK the
+  // website's tilted tile with DGC's three strokes (its SDK page's own); Settings a graphite gear. Drawn here, so a
+  // gradient's id is the mark's own.
+  let markN = 0;
+  const GITHUB_MARK = '<svg class="hc-mark-svg hc-mark-gh" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>';
+  function docsMark() {
+    const id = `hcm${++markN}`, h = 199, page = "M10 7 H24.5 L33 15.5 V40 a3.2 3.2 0 0 1 -3.2 3.2 H10 a3.2 3.2 0 0 1 -3.2 -3.2 V10.2 A3.2 3.2 0 0 1 10 7 Z";
+    return `<svg class="hc-mark-svg hc-mark-docs" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><defs>`
+      + `<linearGradient id="${id}a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${h} 90% 86%)"/><stop offset=".5" stop-color="hsl(${h} 80% 66%)"/><stop offset="1" stop-color="hsl(${h} 80% 44%)"/></linearGradient>`
+      + `<linearGradient id="${id}b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${h} 84% 74%)"/><stop offset=".45" stop-color="hsl(${h} 84% 46%)"/><stop offset="1" stop-color="hsl(${h} 84% 27%)"/></linearGradient>`
+      + `<linearGradient id="${id}c" x1="0" y1="0" x2=".6" y2="1"><stop offset="0" stop-color="hsl(${h} 90% 88%)" stop-opacity=".85"/><stop offset=".63" stop-color="hsl(${h} 85% 60%)" stop-opacity=".08"/><stop offset="1" stop-color="hsl(${h} 90% 35%)" stop-opacity=".4"/></linearGradient>`
+      + `<linearGradient id="${id}d" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${h} 95% 93%)"/><stop offset=".6" stop-color="hsl(${h} 85% 72%)"/><stop offset="1" stop-color="hsl(${h} 80% 54%)"/></linearGradient>`
+      + `<linearGradient id="${id}e" x1="0" y1="0" x2=".4" y2="1"><stop offset="0" stop-color="hsl(36 96% 74%)"/><stop offset=".55" stop-color="hsl(30 92% 54%)"/><stop offset="1" stop-color="hsl(22 88% 40%)"/></linearGradient>`
+      + `<clipPath id="${id}f"><rect x="17" y="3.5" width="25" height="34" rx="3.2"/></clipPath><clipPath id="${id}g"><path d="${page}"/></clipPath></defs>`
+      + `<g transform="rotate(10 30 22)"><rect x="17" y="3.5" width="25" height="34" rx="3.2" fill="url(#${id}a)"/><g clip-path="url(#${id}f)"><ellipse cx="22" cy="6" rx="13" ry="7" fill="hsl(${h} 95% 92%)" fill-opacity=".45" transform="rotate(-24 22 6)"/></g></g>`
+      + `<g transform="rotate(-5 20 26)"><path d="${page}" fill="url(#${id}b)"/><g clip-path="url(#${id}g)"><ellipse cx="10" cy="9" rx="17" ry="9" fill="url(#${id}c)" transform="rotate(-28 10 9)"/></g>`
+      + `<path d="M24.5 7 V13.3 A2.2 2.2 0 0 0 26.7 15.5 H33 Z" fill="url(#${id}d)"/>`
+      + `<g stroke="#fff" stroke-linecap="round" stroke-width="2.3"><line x1="12.5" y1="22" x2="27" y2="22" stroke-opacity=".95"/><line x1="12.5" y1="27.5" x2="27" y2="27.5" stroke-opacity=".88"/><line x1="12.5" y1="33" x2="27" y2="33" stroke-opacity=".8"/><line x1="12.5" y1="38.5" x2="21" y2="38.5" stroke-opacity=".72"/></g>`
+      + `<path d="M13.5 4.5 h4.6 v13 l-2.3 -2.1 l-2.3 2.1 Z" fill="url(#${id}e)"/></g></svg>`;
+  }
+  // (The website's SDK tile, site/assets/sdk.css .sdk-art-core: its corner, its -8 degree turn, its inner ring, and DGC's
+  // mark at 84% with its strokes at 1, .83 and .62.)
+  const SDK_MARK = '<span class="hc-sdk-tile" aria-hidden="true"><svg viewBox="0 0 90 90" focusable="false"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg></span>';
+  function gearMark() {
+    const id = `hcm${++markN}`, n = 8, R = 21.5, r = 17, pts = [];
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2, w = (Math.PI / n) * 0.55, s = (Math.PI / n) * 0.95;
+      for (const [ang, rad] of [[a - s, r], [a - w, R], [a + w, R], [a + s, r]]) pts.push(`${(24 + Math.cos(ang) * rad).toFixed(2)},${(24 + Math.sin(ang) * rad).toFixed(2)}`);
+    }
+    const top = "hsl(215 12% 84%)", mid = "hsl(215 12% 58%)", low = "hsl(215 12% 36%)";
+    return `<svg class="hc-mark-svg hc-mark-gear" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><defs>`
+      + `<linearGradient id="${id}a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${top}"/><stop offset=".5" stop-color="${mid}"/><stop offset="1" stop-color="${low}"/></linearGradient>`
+      + `<linearGradient id="${id}b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${low}"/><stop offset="1" stop-color="${top}"/></linearGradient>`
+      + `<radialGradient id="${id}c" cx=".35" cy=".25" r=".7"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>`
+      + `<g transform="rotate(-8 24 24)"><polygon points="${pts.join(" ")}" fill="url(#${id}a)"/><circle cx="24" cy="24" r="17.2" fill="url(#${id}a)"/><circle cx="24" cy="24" r="17.2" fill="url(#${id}c)"/>`
+      + `<circle cx="24" cy="24" r="7" fill="url(#${id}b)"/><circle cx="24" cy="24" r="7" fill="none" stroke="#000" stroke-opacity=".12" stroke-width="1"/></g></svg>`;
+  }
+  const HEAD_LINKS = [
+    { id: "github", word: "GitHub", title: "DGC on GitHub", url: "https://github.com/OpenPeach-ai/dgc", mark: () => GITHUB_MARK },
+    { id: "docs", word: "Docs", title: "DGC's docs", url: "https://docs.vibedgc.com/", mark: docsMark },
+    { id: "sdk", word: "DGC-SDK", title: "DGC-SDK: build on DGC", url: "https://vibedgc.com/sdk/", mark: () => SDK_MARK },
+    { id: "settings", word: "Settings", title: "DGC's Settings", mark: gearMark },
+  ];
+  // Each mark drawn once for each place it shows (the row, the ⋯ menu): the row's markup stays the same from one draw to
+  // the next, so it isn't written again (and the focus isn't lost), and no two marks share a gradient's id.
+  const markCache = {};
+  const markOf = (link, where) => (markCache[`${link.id}:${where}`] ??= link.mark());
   const GRIP = '<svg class="hc-grip" width="12" height="16" viewBox="0 0 12 16" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="3" r="1.4"/><circle cx="9" cy="3" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="9" cy="8" r="1.4"/><circle cx="3" cy="13" r="1.4"/><circle cx="9" cy="13" r="1.4"/></g></svg>';
   const plural = (n, word, many) => `${n} ${n === 1 ? word : many || word + "s"}`;
   // The Clock: Here and at most this many added time zones (the host's own bound, src/homeCards.ts).
@@ -180,7 +228,7 @@
     let usage = null, usageAt = 0, usageStale = false, usageTimer = 0, weather = null, weatherAt = 0, weatherAsked = 0, weatherWait = 30 * 60000, weatherRetried = "";
     // What the Library lists, for the Widgets and Artifacts cards: null until the host has said; when each was asked.
     const made = { widgets: null, artifacts: null }, madeAt = { widgets: 0, artifacts: 0 };
-    const ui = { open: TYPES.includes(kept?.()?.open) ? kept().open : "", arranging: false, lifted: "", token: { metric: "tokens", hot: "" }, weatherEdit: false };
+    const ui = { open: TYPES.includes(kept?.()?.open) ? kept().open : "", arranging: false, lifted: "", links: false, token: { metric: "tokens", hot: "" }, weatherEdit: false };
     let filling = false, library = null, libraryAdding = "", pending = 0, drag = null, liftedFrom = null, focusNext = "";
     host.classList.add("dgc-home");
     host.innerHTML = '<div class="hc-head"></div><div class="hc-notes"></div><div class="hc-grid" data-form="s"></div><div class="hc-open" hidden></div><div class="hc-pantry" hidden></div><p class="hc-live" role="status" aria-live="polite"></p>';
@@ -488,10 +536,16 @@
       if (ui.open && !order.includes(ui.open)) ui.open = "";
       if (ui.arranging && !order.length) ui.arranging = false;
       // The head: Cards at the top right; while Home is arranged, what to do and Done.
-      const headHtml = `${ui.arranging ? `<span class="hc-arr-title">Arrange Home</span><span class="hc-cap hc-arr-cap">drag to move · × to remove</span><span class="hc-sp"></span><button type="button" class="hc-btn hc-solid hc-done">Done</button>` : ui.open ? `<button type="button" class="hc-btn hc-back" title="Back to Home (Escape)">${BACK}Home</button><span class="hc-sp"></span>` : '<span class="hc-sp"></span>'}`
+      const headHtml = `${ui.arranging ? `<span class="hc-arr-title">Arrange Home</span><span class="hc-cap hc-arr-cap">drag to move · × to remove</span><span class="hc-sp"></span><button type="button" class="hc-btn hc-solid hc-done">Done</button>` : ui.open ? `<button type="button" class="hc-btn hc-back" title="Back to Home (Escape)" aria-label="Back to Home">${BACK}<span class="hc-btn-word">Home</span></button><span class="hc-sp"></span>` : '<span class="hc-sp"></span>'}`
         // Library, beside Cards and of its shape (his call, 15 Nov): it opens the side bar's Library tab. Not while Home is arranged.
         + (ui.arranging ? "" : `<button type="button" class="hc-btn hc-library-btn" title="Library: everything DGC made for you, and who made it" aria-label="Library">${LIBRARY_ICON}<span class="hc-btn-word">Library</span></button>`)
-        + `<button type="button" class="hc-btn hc-cards-btn" aria-haspopup="dialog" title="Cards: add, remove and arrange what is on Home" aria-label="Cards">${mosaic("ember", 16)}<span class="hc-btn-word">Cards</span></button>`;
+        + `<button type="button" class="hc-btn hc-cards-btn" aria-haspopup="dialog" title="Cards: add, remove and arrange what is on Home" aria-label="Cards">${mosaic("ember", 16)}<span class="hc-btn-word">Cards</span></button>`
+        // GitHub, Docs, DGC-SDK and Settings (17 Nov). Not while Home is arranged.
+        + (ui.arranging ? "" : HEAD_LINKS.map((l) => `<button type="button" class="hc-btn hc-link-btn" data-head-link="${l.id}" title="${esc(l.title)}" aria-label="${esc(l.word)}"><span class="hc-mark">${markOf(l, "row")}</span><span class="hc-btn-word">${esc(l.word)}</span></button>`).join("")
+          // Where the four don't fit (the narrowest side bar, or a card open beside its Back), they are one ⋯ and its menu.
+          + `<button type="button" class="hc-btn hc-links-more" aria-haspopup="menu" aria-expanded="${ui.links ? "true" : "false"}" title="GitHub, Docs, DGC-SDK and Settings" aria-label="More: GitHub, Docs, DGC-SDK and Settings">${shared("more", 16)}</button>`
+          + (ui.links ? `<div class="hc-links-menu dgc-menu" role="menu" aria-label="More">${HEAD_LINKS.map((l) => `<button type="button" role="menuitem" class="dgc-menu-row hc-links-row" data-head-link="${l.id}" tabindex="-1"><span class="hc-mark">${markOf(l, "menu")}</span><span class="dgc-menu-label">${esc(l.word)}</span></button>`).join("")}</div>` : ""));
+      head.classList.toggle("hc-head-open", !!ui.open);
       if (head.__html !== headHtml) { const had = doc.activeElement && head.contains(doc.activeElement) ? doc.activeElement.className : ""; head.__html = headHtml; head.innerHTML = headHtml; if (had) head.querySelector(`.${had.trim().split(/\s+/).join(".")}`)?.focus({ preventScroll: true }); }
       const notesHtml = (d.notes || []).map((n) => `<p class="dgc-hub-note" role="status">${esc(n.text)}${n.retry ? ' <button type="button" class="dgc-hub-link dgc-hub-retry" title="Ask DGC again">Retry</button>' : ""}</p>`).join("");
       if (notes.__html !== notesHtml) { notes.__html = notesHtml; notes.innerHTML = notesHtml; }
@@ -893,6 +947,20 @@
     // ---- what is pressed ----------------------------------------------------------------------------------------------------
     host.addEventListener("click", (e) => {
       const t = e.target, card = t.closest(".hc-card"), id = card?.dataset.card;
+      if (t.closest(".hc-links-more")) {
+        ui.links = !ui.links; cancelAnimationFrame(pending); drawNow();
+        if (ui.links) head.querySelector(".hc-links-row")?.focus({ preventScroll: true });
+        return;
+      }
+      if (ui.links && !t.closest(".hc-links-menu")) { ui.links = false; cancelAnimationFrame(pending); drawNow(); }
+      const headLink = t.closest("[data-head-link]");
+      if (headLink) {
+        if (ui.links) { ui.links = false; cancelAnimationFrame(pending); drawNow(); head.querySelector(".hc-links-more")?.focus({ preventScroll: true }); }
+        const link = HEAD_LINKS.find((l) => l.id === headLink.dataset.headLink);
+        if (link?.url) post?.({ type: "openExternal", url: link.url });
+        else if (link) post?.({ type: "openSettings" });
+        return;
+      }
       if (t.closest(".hc-cards-btn")) { openLibrary(); return; }
       if (t.closest(".hc-library-btn")) { act?.("tab", "library"); return; }
       if (t.closest(".hc-done")) { arrange(false); return; }
@@ -967,8 +1035,19 @@
     host.addEventListener("pointercancel", (e) => dragEnd(e, false));
     host.addEventListener("pointerout", (e) => { const plot = e.target.closest?.(".hc-plot"); if (plot && !plot.contains(e.relatedTarget) && doc.activeElement !== plot) hot(""); });
     host.addEventListener("focusout", (e) => { if (!filling && e.target.matches?.(".hc-plot") && !e.target.matches(":hover")) hot(""); });
+    // A press anywhere else closes the ⋯ menu of GitHub, Docs, DGC-SDK and Settings (outside Home too).
+    doc.addEventListener("pointerdown", (e) => {
+      if (!ui.links || e.target.closest?.(".hc-links-menu, .hc-links-more")) return;
+      ui.links = false; cancelAnimationFrame(pending); drawNow();
+    }, true);
     host.addEventListener("keydown", (e) => {
       const t = e.target, card = t.closest?.(".hc-card"), id = card?.dataset.card;
+      // The ⋯ menu of GitHub, Docs, DGC-SDK and Settings: the arrows move in it, Escape closes it to its ⋯.
+      if (ui.links && t.closest?.(".hc-links-menu, .hc-links-more")) {
+        const rows = [...head.querySelectorAll(".hc-links-row")], at = rows.indexOf(t);
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); ui.links = false; cancelAnimationFrame(pending); drawNow(); head.querySelector(".hc-links-more")?.focus({ preventScroll: true }); return; }
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); rows[(at + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length]?.focus({ preventScroll: true }); return; }
+      }
       // Widgets and Artifacts: Left and Right turn the page, from the stack or its arrows.
       if ((id === "widgets" || id === "artifacts") && (e.key === "ArrowLeft" || e.key === "ArrowRight") && t.closest(".hc-stack, .hc-pager") && card.dataset.form !== "full") {
         e.preventDefault(); turn(id, card.dataset.form, e.key === "ArrowLeft" ? "prev" : "next");
