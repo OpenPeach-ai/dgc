@@ -296,6 +296,9 @@ class Unchanged(Case):
         harness.agent._refresh_system()
         system = harness.agent.messages[0]["content"]
         self.assertIn("safety check", system)
+        # Live check, 18 Nov: a model said the check had stopped a delete that ran. The line says a step whose result
+        # doesn't say BLOCKED ran.
+        self.assertIn("a step whose result doesn't say BLOCKED ran", system)
 
 
 class RunTurnKeepsTheWords(Case):

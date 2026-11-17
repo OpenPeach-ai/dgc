@@ -5826,9 +5826,9 @@ class Agent(GoalLifecycle):
                     "\"user_said_yes\": true when their message in this turn already said yes). The user's own "
                     "signed-in Chrome is asked about once for the whole session. DGC's safety check stops a few risky "
                     "kinds of step before they run (writing outside the project, reading keys and passwords, deleting "
-                    "work, sending files out, changing the computer, publishing): a stopped step says BLOCKED and why. "
-                    "Carry on with other work, look for a safer way, or ask the user in one plain sentence; their own "
-                    "yes lets it run.",
+                    "work, sending files out, changing the computer, publishing): a stopped step's result says BLOCKED "
+                    "and why, and a step whose result doesn't say BLOCKED ran. Carry on with other work, look for a "
+                    "safer way, or ask the user in one plain sentence; their own yes lets it run.",
                 ]
             if not self.config.get("ultra_mode", False):
                 parts += [
