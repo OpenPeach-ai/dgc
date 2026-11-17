@@ -294,9 +294,9 @@ export async function pipsBundle() {
 
 /** The Pips view in real Chromium, on the stand-in DGC. `where`: "side" (the side bar's real page, the view in its
  *  shadow root) or "tab" (the view as an editor tab). `scene`: makeBackend's options. `api`: the Pips API it says. */
-export async function openOnePips(browser, { width = 300, height = 760, theme = "dark-modern", where = "side", scene = {}, api = 96, scale = 1, saved = undefined, touch = false, faces = false } = {}) {
+export async function openOnePips(browser, { width = 300, height = 760, theme = "dark-modern", where = "side", scene = {}, api = 96, scale = 1, saved = undefined, touch = false, faces = false, motion = "reduce" } = {}) {
   const { html, mainJs, markdownJs } = panelHtml(), pips = await pipsBundle();
-  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce", deviceScaleFactor: scale, ...(touch ? { hasTouch: true } : {}) });
+  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, deviceScaleFactor: scale, ...(touch ? { hasTouch: true } : {}) });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));

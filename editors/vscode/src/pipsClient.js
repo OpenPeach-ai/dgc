@@ -5695,8 +5695,13 @@ function render() {
   // so a redraw never asks the icon service for it again. media/mentions.js, settleFavicons.)
   const next=owner.createElement('template');next.innerHTML=markup;
   globalThis.DgcMentions?.settleFavicons(next.content);
+  // A menu open before this redraw is the same menu after it: it doesn't open again (its fade-in replayed on every
+  // redraw, and a Pip whose computer or run sends news kept it faded out, still taking clicks: seen live 17 Nov).
+  const menuKey=(m)=>m.id||m.closest('[data-details]')?.dataset.details||'';
+  const openMenus=new Set([...$('app').querySelectorAll('.dgc-menu')].filter(m=>m.checkVisibility?.()).map(menuKey).filter(Boolean));
   if(chatView&&oldLog&&oldPipId===S.selected)patchChildren($('app'),next.content);
   else $('app').replaceChildren(next.content);
+  if(openMenus.size)for(const m of $('app').querySelectorAll('.dgc-menu'))if(openMenus.has(menuKey(m)))m.style.animation='none';
   keepAttentionAllScroll(allAnchor);
   tellInsidePip();   // with the draw itself, so the side bar's dock and tab bar go and come in the same frame
   // The keyed chat patch above retains message nodes and their selection, and leaves the box in place. The other
