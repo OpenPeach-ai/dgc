@@ -1,5 +1,5 @@
-"""Auto mode's safety check in the session (dgc/auto_guard.py, Agent._auto_guard; his call, 17 Nov: "let's copy the
-exact style ... what Claude Code does").
+"""Auto mode's safety check in the session (dgc/auto_guard.py, Agent._auto_guard; his call, 17 Nov: risky steps stopped
+before they run, ONE card after 3 in a row).
 
 - A risky step is stopped before it runs, with no card: the model gets one line (the kind, the reason) and carries on.
 - After 3 stops in a row, or 20 in a session, DGC shows ONE Allow/Deny card for the step. Allow runs that one step,

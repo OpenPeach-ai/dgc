@@ -1,4 +1,4 @@
-"""Auto mode's safety check (0.52; his call, 17 Nov: "let's copy the exact style ... what Claude Code does").
+"""Auto mode's safety check (0.52; his call, 17 Nov: risky steps stopped before they run, ONE card after 3 in a row).
 
 In Work's auto mode, in DGC's own editor, a routine step runs with no card and no question. A step of six kinds is stopped
 before it runs, and the model is told why in one line:
