@@ -333,20 +333,30 @@ def _make_copy(store, pip_id, job_id):
 
 
 # ---- start a job ----------------------------------------------------------------------------------------------------
-def start(store, config, pip_id, *, kind, title, brief, fix_id=None) -> dict:
-    """A sub-agent job: its own copy, then its first run. A Pip whose slots are full queues it (its run waits)."""
+def start(store, config, pip_id, *, kind, title, brief, fix_id=None, words=None) -> dict:
+    """A sub-agent job: its own copy, then its first run. A Pip whose slots are full queues it (its run waits).
+    kind "work" (pip_work_agents): no copy, a real Work run in the Pip's folder itself, on its Sub-agents model (never
+    a subscription CLI or DGC Router: refused before anything starts); `words` are the user's own words it carries."""
     registry, db = store.registry, store.db
     ensure(db)
     job_id = "pipagent_" + secrets.token_hex(16)
     workspace_id = db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()[0]
-    folder, rel, base = _make_copy(store, pip_id, job_id)
+    if kind == "work":
+        from . import pip_work_agents as work
+        root = work.folder_of(store, pip_id)
+        work.route_check(store, config, pip_id)
+        folder, rel, base = str(root), None, {}
+    else:
+        folder, rel, base = _make_copy(store, pip_id, job_id)
     now = _now(registry)
     with registry.transaction():
         db.execute("INSERT INTO pip_agent_jobs(id,pip_id,workspace_id,kind,fix_id,title,brief,folder,copy,base,tries,state,"
                    "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,'queued',?,?)",
                    (job_id, pip_id, workspace_id, kind, fix_id, title[:200], brief, folder, rel, json.dumps(base), now, now))
+        if kind == "work":
+            work.save_state(registry, job_id, words=work.words_of(words or []))
     try:
-        _run(store, config, job_id, brief)
+        _run(store, config, job_id, _first_text(store, _row(db, job_id)))
     except RegistryError as exc:
         # Its run was refused (its sub-agents' provider was removed, say): it ends here in those words, never left
         # queued with no run. The caller says why.
@@ -358,6 +368,31 @@ def start(store, config, pip_id, *, kind, title, brief, fix_id=None) -> dict:
     return view(db, _row(db, job_id))
 
 
+def _first_text(store, row) -> str:
+    """What its first try is sent: the brief; for a work job, DGC's framing with the user's own words quoted as theirs."""
+    if row["kind"] != "work":
+        return row["brief"]
+    from . import pip_work_agents as work
+    return work.first_prompt(store, row, work.words_of(work.state(store.db, row["id"]).get("words")))
+
+
+def insert_queued(store, pip_id, *, kind, title, brief, fix_id=None, folder=None, words=None) -> str:
+    """A job kept now and started on the supervisor's next tick (send_due): what a Pip's reply asked for, kept inside
+    that reply's own transaction, where no run can be queued yet. Returns its id."""
+    registry, db = store.registry, store.db
+    ensure(db)
+    job_id = "pipagent_" + secrets.token_hex(16)
+    workspace_id = db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()[0]
+    now = _now(registry)
+    db.execute("INSERT INTO pip_agent_jobs(id,pip_id,workspace_id,kind,fix_id,title,brief,folder,copy,base,tries,state,"
+               "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,NULL,'{}',0,'queued',?,?)",
+               (job_id, pip_id, workspace_id, kind, fix_id, title[:200], brief, folder, now, now))
+    if kind == "work":
+        from . import pip_work_agents as work
+        work.save_state(registry, job_id, words=work.words_of(words or []))
+    return job_id
+
+
 def _run(store, config, job_id, text, *, counted=True):
     """Its next try: a conversation run with no chat rows, marked as this job's. `counted` False: a held step's carry-on,
     which isn't one of its three tries."""
@@ -367,7 +402,8 @@ def _run(store, config, job_id, text, *, counted=True):
     from .pip_routines import ACTOR as UNATTENDED_ACTOR
     key = f"{AGENT_KEY}{short(job_id)}_{tries}" + ("" if counted else f"_more{secrets.token_hex(3)}")
     request = {"text": text, "request_key": key,
-               "agent": {"job_id": job_id, "folder": row["folder"], "copy": row["copy"], "try": tries}}
+               "agent": {"job_id": job_id, "folder": row["folder"], "copy": row["copy"], "try": tries,
+                         **({"work": True} if row["kind"] == "work" else {})}}
     run = store.enqueue(row["pip_id"], key, UNATTENDED_ACTOR, config, conversation_request=request)
     with registry.transaction():
         db.execute("UPDATE pip_agent_jobs SET run_id=?,tries=?,state='working',updated_at=? WHERE id=?",
@@ -397,7 +433,11 @@ def job_of_run(db, run_id):
 
 
 def change(registry, row) -> list[dict]:
-    """What the sub-agent changed in its copy since the job started: each file, added/changed/removed, with its diff."""
+    """What the sub-agent changed in its copy since the job started: each file, added/changed/removed, with its diff.
+    A work job's is what it changed in the folder itself (its session's checkpoints, pip_work_agents.changes)."""
+    if row["kind"] == "work":
+        from . import pip_work_agents as work
+        return work.changes(registry, row)
     root = copy_root(registry, row["pip_id"], row["copy"])
     base, now = json.loads(row["base"] or "{}"), _tree(root)
     files = []
@@ -414,6 +454,9 @@ def change(registry, row) -> list[dict]:
 
 def diff_text(registry, row, files) -> str:
     """The change as a unified diff against the Pip's copy, clipped for the check."""
+    if row["kind"] == "work":
+        from . import pip_work_agents as work
+        return work.diff_text(registry, row, files)
     root, pip_root = copy_root(registry, row["pip_id"], row["copy"]), _files_root(registry, row["pip_id"]) / row["folder"]
     parts, used = [], 0
     for f in files:
@@ -520,11 +563,30 @@ def send_due(registry, config) -> int:
     from . import pip_chat
     from .pip_routines import ACTOR as UNATTENDED_ACTOR
     store, sent = PipStore(registry), 0
+    _settle_lost(store)
+    for row in db.execute("SELECT * FROM pip_agent_jobs WHERE state='queued' AND run_id IS NULL ORDER BY created_at "
+                          "LIMIT 20").fetchall():
+        # Kept by a Pip's reply (insert_queued), started now: its first try, in a slot of the Pip's sub-agents.
+        try:
+            if row["kind"] == "work":
+                from . import pip_work_agents as work
+                work.folder_of(store, row["pip_id"])
+                work.route_check(store, config, row["pip_id"])
+            _run(store, config, row["id"], _first_text(store, row))
+        except RegistryError as exc:
+            if exc.code in ("runner_stopped", "limit"):
+                continue
+            with registry.transaction():
+                db.execute("UPDATE pip_agent_jobs SET state='failed',said=?,ended_at=?,updated_at=? WHERE id=?",
+                           (str(exc)[:1000], _now(registry), _now(registry), row["id"]))
+            _job_ended(store, _row(db, row["id"]))
+            continue
+        sent += 1
     for row in db.execute("SELECT * FROM pip_agent_jobs WHERE state IN ('check_due','retry_due') ORDER BY updated_at LIMIT 20").fetchall():
         if row["state"] == "retry_due":
             carry = db.execute("SELECT value FROM metadata WHERE key=?", (CARRY_KEY + row["id"],)).fetchone()
             try:
-                _run(store, config, row["id"], _retry_text(row, carry=carry is not None), counted=carry is None)
+                _run(store, config, row["id"], _retry_text(row, carry=carry is not None, store=store), counted=carry is None)
             except RegistryError as exc:
                 if exc.code in ("runner_stopped", "limit"):
                     continue                                # Pips are paused or the queue is full: the next tick
@@ -542,7 +604,12 @@ def send_due(registry, config) -> int:
             continue
         files = change(registry, row)
         findings = _findings(db, row)
-        text = CHECK_TEXT.format(try_=row["tries"], most=MAX_TRIES, title=row["title"],
+        if row["kind"] == "work":
+            from . import pip_work_agents as work
+            template = work.CHECK_TEXT                   # its change is in the real folder already
+        else:
+            template = CHECK_TEXT
+        text = template.format(try_=row["tries"], most=MAX_TRIES, title=row["title"],
                                  findings="\n".join(f"FINDING {n}: {f.get('title', '')} — {f.get('path', '')}:{f.get('line', '')}"
                                                     for n, f in enumerate(findings, 1)),
                                  said=row["said"] or "(nothing)", count=len(files),
@@ -568,7 +635,50 @@ def send_due(registry, config) -> int:
     return sent
 
 
-def _retry_text(row, *, carry=False) -> str:
+def _settle_lost(store) -> None:
+    """A job whose try's run ended with nobody to say so (the runner stopped or restarted while it ran: recover() ends
+    such a run, and a Work run is never run again by itself) never stays working: stopped, in those words."""
+    registry, db = store.registry, store.db
+    rows = db.execute("SELECT j.id, r.status AS run_status, r.error AS run_error, r.finished_at FROM pip_agent_jobs j "
+                      "JOIN pip_runs r ON r.id=j.run_id WHERE j.state='working' AND r.status IN ('failed','cancelled') "
+                      "LIMIT 50").fetchall()
+    from datetime import timedelta
+    from .pip_fixes import _instant
+    now = _instant(_now(registry))
+    for found in rows:
+        try:
+            code = str((json.loads(found["run_error"] or "{}") or {}).get("code") or "")
+        except (TypeError, ValueError, AttributeError):
+            code = ""
+        restarted = code.startswith(("interrupted", "restart"))
+        ended = _instant(found["finished_at"])
+        if not restarted and (now is None or ended is None or now - ended < timedelta(seconds=60)):
+            continue                                     # (its own runner says how it ended, a moment from now)
+        row = _row(db, found["id"])
+        if row["kind"] == "work":
+            from . import pip_work_agents as work
+            said = work.RESTARTED if restarted else ("It was stopped. What it changed stays in your folder; Undo puts it back."
+                                                     if found["run_status"] == "cancelled" else
+                                                     "Its run ended with an error. What it changed stays in your folder; "
+                                                     "Undo puts it back.")
+            try:
+                work.remember_changes(registry, row)
+            except Exception:                            # noqa: BLE001 -- its card says what it can
+                pass
+        else:
+            said = ("DGC's Pips restarted while it worked, so it was stopped." if restarted else
+                    "It was stopped." if found["run_status"] == "cancelled" else "Its run ended with an error.")
+        with registry.transaction():
+            db.execute("UPDATE pip_agent_jobs SET state=?,said=?,updated_at=? WHERE id=? AND state='working'",
+                       ("stopped" if restarted or found["run_status"] == "cancelled" else "failed", said[:1000],
+                        _now(registry), row["id"]))
+        _job_ended(store, _row(db, row["id"]))
+
+
+def _retry_text(row, *, carry=False, store=None) -> str:
+    if row["kind"] == "work" and store is not None:
+        from . import pip_work_agents as work
+        return work.retry_prompt(store, row, carry=carry)
     if carry:                                             # a held step was allowed: not a try the Pip sent back
         return (f"{row['notes']} What you did so far is still in your copy. Finish the job: {row['title']}.\n\n{row['brief']}")
     return (f"Try {row['tries'] + 1} of {MAX_TRIES}. Your Pip checked your last try and sent it back: {row['notes'] or 'it was not right yet'}. "
@@ -604,14 +714,22 @@ def after_check_turn(store, run, status, result) -> None:
             _job_ended(store, _row(db, row["id"]))
         return
     with registry.transaction():
-        db.execute("UPDATE pip_agent_jobs SET verdict=?,updated_at=? WHERE id=?", (text[-4000:], _now(registry), row["id"]))
+        # (A work job's PASS keeps the Pip's own words too: its chat shows them with its Undo, fix or no fix.)
+        db.execute("UPDATE pip_agent_jobs SET verdict=?,reason=CASE WHEN kind='work' THEN ? ELSE reason END,updated_at=? "
+                   "WHERE id=?", (text[-4000:], reason_of(text), _now(registry), row["id"]))
     merge(store, _row(db, row["id"]))
 
 
 def merge(store, row) -> None:
-    """PASS: its change into the Pip's copy, three-way. A file the Pip's copy changed since the job began is held."""
+    """PASS: its change into the Pip's copy, three-way. A file the Pip's copy changed since the job began is held.
+    A work job's change is in the folder already: it ends done, with Undo (pip_work_agents.undo)."""
     import shutil
     registry, db = store.registry, store.db
+    if row["kind"] == "work":
+        with registry.transaction():
+            db.execute("UPDATE pip_agent_jobs SET state='merged',updated_at=? WHERE id=?", (_now(registry), row["id"]))
+        _job_ended(store, _row(db, row["id"]))
+        return
     pip_root = _files_root(registry, row["pip_id"]) / row["folder"]
     mine, base = copy_root(registry, row["pip_id"], row["copy"]), json.loads(row["base"] or "{}")
     files, held = change(registry, row), []
@@ -674,12 +792,19 @@ def view(db, row) -> dict:
             model = str((json.loads(run["manifest"]) or {}).get("model") or "")
         except ValueError:
             model = ""
-    return {"id": row["id"], "pip_id": row["pip_id"], "kind": row["kind"], "fix_id": row["fix_id"], "title": row["title"],
-            "state": row["state"], "try": row["tries"], "tries": MAX_TRIES, "run_id": row["run_id"],
-            "run_status": run["status"] if run else None, "started_at": run["started_at"] if run else None,
-            "model": model, "held": json.loads(row["held"]) if row["held"] else [], "notes": row["notes"] or "",
-            "said": row["reason"] or "", "check_run_id": row["check_run_id"], "ended_at": row["ended_at"],
-            "created_at": row["created_at"], "updated_at": row["updated_at"]}
+    out = {"id": row["id"], "pip_id": row["pip_id"], "kind": row["kind"], "fix_id": row["fix_id"], "title": row["title"],
+           "state": row["state"], "try": row["tries"], "tries": MAX_TRIES, "run_id": row["run_id"],
+           "run_status": run["status"] if run else None, "started_at": run["started_at"] if run else None,
+           "model": model, "held": json.loads(row["held"]) if row["held"] else [], "notes": row["notes"] or "",
+           "said": row["reason"] or "", "check_run_id": row["check_run_id"], "ended_at": row["ended_at"],
+           "created_at": row["created_at"], "updated_at": row["updated_at"]}
+    if row["kind"] == "work":
+        # A sub-agent with Work tools (Pips API 109): what it changed in the folder itself, and its Undo.
+        from . import pip_work_agents as work
+        out.update(work.view_fields(db, row))
+        if not out["said"] and row["state"] in ("stopped", "failed"):
+            out["said"] = str(row["said"] or "")[:600]
+    return out
 
 
 def listing(store, pip_id) -> dict:
@@ -702,7 +827,7 @@ def stop(store, pip_id, job_id, actor) -> dict:
         return view(db, row)
     if row["run_id"] and row["state"] == "working":
         try:
-            store.cancel(row["run_id"], actor)
+            store.cancel(row["run_id"], actor)       # a work job's runner ends its child and all it started
         except RegistryError:
             pass
     with registry.transaction():

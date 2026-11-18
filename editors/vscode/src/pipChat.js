@@ -14,11 +14,11 @@
 // This file draws what DGC says and never decides anything. Words are the Pip's and the user's: text only.
 import '../media/shared/icons.js';
 import {esc as escape} from './pipsModel.js';
-import {took, AGENT_API, AGENT_LIVE, FIX_LIVE, agentsPage} from './pipFlow.js';
+import {took, AGENT_API, AGENT_LIVE, FIX_LIVE, HELPER_SUB, agentsPage} from './pipFlow.js';
 
 export {agentsPage};
 export const CHAT_API = AGENT_API;
-export const AGENT_COMMANDS = ['list_pip_agents', 'stop_pip_agent', 'set_pip_agents', 'retry_pip_fix'];
+export const AGENT_COMMANDS = ['list_pip_agents', 'stop_pip_agent', 'set_pip_agents', 'retry_pip_fix', 'undo_pip_agent_job'];
 const plural = (n, word) => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
 const where = f => f.path ? `${f.path.split('/').pop()}${f.line ? `:${f.line}` : ''}` : '';
 const VERDICT_WORDS = {fixed: 'fixed', already_fixed: 'already fixed', not_a_defect: 'not a problem', needs_you: 'your call'};
@@ -28,7 +28,12 @@ const ICON = {
   close: globalThis.DgcIcons.html('close', {size: 14}),        // Close and Back: the one glyph each has everywhere (media/shared/icons.js)
   back: globalThis.DgcIcons.html('back', {size: 14}),
   chevron: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg>',
+  // More: the same three dots Work's changed-files card has (src/pipProjects.js), one action, one icon.
+  more: '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="12.5" cy="8" r="1.1"/></svg>',
 };
+/** "Work tools": the tag beside a sub-agent with Work tools, in its row, the agent map and its card. */
+export const WORK_TAG = 'Work tools';
+const workTag = (a, esc, cls = 'pip-agent-tag') => a.kind === 'work' ? `<span class="${cls}">${esc(WORK_TAG)}</span>` : '';
 
 /** "Fix 3 things in lime_tiles": what the Pip asks to do, on its card, its answered line and its sub-agent's row. */
 export const fixWhat = (fix, folder = '') => `Fix ${plural(fix.count, 'thing')}${folder ? ` in ${folder}` : ''}`;
@@ -51,14 +56,18 @@ export function foundListMarkup({runId, findings, total = findings.length}, {esc
 export const saidMarkup = (words, {esc = escape, of = ''} = {}) => words ? said(`<p>${esc(words)}</p>`, of ? ` data-said-of="${esc(of)}"` : '') : '';
 
 /** Work's permission card, in the Pip's words: what it would do, the note, and Not now · Allow (Work's order: the
- *  filled answer last). `busy`: "allow" | "no" on its way. */
-export function askCardMarkup(fix, {esc = escape, folder = '', off = false, busy = '', error = ''} = {}) {
+ *  filled answer last). `busy`: "allow" | "no" | "helper" on its way. `helper` (Pips API 109, WORK_API): More (its
+ *  three dots) opens one more way, "Start a sub-agent with Work tools" on the real folder; `menu`: it is open. */
+export function askCardMarkup(fix, {esc = escape, folder = '', off = false, busy = '', error = '', helper = false, menu = false} = {}) {
   const id = esc(fix.id), hold = off || busy ? ' disabled' : '', what = fixWhat(fix, folder);
   return `<section class="pip-ask-card" data-flow-fix="${id}" data-state="ask" role="group" aria-label="${esc(what)}">`
     + `<div class="pip-ask-head"><span class="pip-ask-icon" aria-hidden="true">${ICON.shield}</span><strong class="pip-ask-title">${esc(what)}</strong>`
-    + `<div class="pip-ask-btns"><button type="button" class="dgc-btn" data-flow-no="${id}"${hold}>${busy === 'no' ? 'Not now…' : 'Not now'}</button>`
-    + `<button type="button" class="dgc-btn primary" data-flow-allow="${id}"${hold}>${busy === 'allow' ? 'Allowing…' : 'Allow'}</button></div></div>`
-    + '<p class="pip-ask-note">It works in its own copy. Nothing in your folder changes until you apply it.</p>'
+    + `<div class="pip-ask-btns">${helper ? `<button type="button" class="pip-ask-more" id="pip-found-menu-${id}" data-flow-menu="${id}" aria-haspopup="menu" aria-expanded="${menu}" aria-label="More ways to fix this" title="More ways to fix this"${hold}>${ICON.more}</button>` : ''}`
+    + `<button type="button" class="dgc-btn" data-flow-no="${id}"${hold}>${busy === 'no' ? 'Not now…' : 'Not now'}</button>`
+    + `<button type="button" class="dgc-btn primary" data-flow-allow="${id}"${hold}>${busy === 'allow' ? 'Allowing…' : 'Allow'}</button></div>`
+    + (helper && menu ? `<div class="dgc-menu pip-found-menu pip-ask-menu" role="menu" aria-label="More ways to fix this"><button type="button" role="menuitem" class="dgc-menu-row" data-flow-helper="${id}"${hold}>`
+      + `<span class="dgc-menu-words"><span class="dgc-menu-label">${busy === 'helper' ? 'Starting…' : 'Start a sub-agent with Work tools'}</span><span class="dgc-menu-sub">${esc(HELPER_SUB)}</span></span></button></div>` : '')
+    + '</div><p class="pip-ask-note">It works in its own copy. Nothing in your folder changes until you apply it.</p>'
     + (error ? `<p class="dgc-card-error" role="alert">${esc(error)}</p>` : '') + '</section>';
 }
 
@@ -80,12 +89,14 @@ export function handedMarkup(fix, {esc = escape, waits = false} = {}) {
   if (!a) return FIX_LIVE.includes(fix.state) ? saidMarkup(waits ? `I’ll hand ${these} to a sub-agent as soon as your Pips are running.` : `I’m handing ${these} to a sub-agent.`, {esc}) : '';
   const back = a.try > 1 && !['asked', 'left'].includes(a.state)
     ? saidMarkup(`The ${ORDINAL[a.try - 1] || 'last'} try wasn’t right yet. I’ve sent it back${a.notes ? `: ${a.notes.replace(/\s+/g, ' ').slice(0, 300)}` : '.'}`, {esc}) : '';
-  return saidMarkup(`I’ve handed ${these} to a sub-agent. I’ll check its work and tell you.`, {esc}) + back;
+  const said = a.kind === 'work' ? `I’ve handed ${these} to a sub-agent with Work tools. It works on your real folder; I’ll check its work and tell you.`
+    : `I’ve handed ${these} to a sub-agent. I’ll check its work and tell you.`;
+  return saidMarkup(said, {esc}) + back;
 }
 
 /** What a sub-agent is doing, in the row's and the map's words. `doing`: from its run's activity; `pip`: its Pip's name. */
 export function agentWords(a, {doing = '', pip = 'Its Pip', tries = true} = {}) {
-  const word = a.state === 'queued' ? 'Waiting to start' : a.state === 'working' ? [a.kind === 'fix' || !a.kind ? 'Fixing' : 'Working', doing].filter(Boolean).join(' · ')
+  const word = a.state === 'queued' ? 'Waiting to start' : a.state === 'working' ? [a.kind === 'fix' || !a.kind || (a.kind === 'work' && a.fix_id) ? 'Fixing' : 'Working', doing].filter(Boolean).join(' · ')
     : a.state === 'check_due' || a.state === 'checking' ? `${pip} is checking its work` : a.state === 'retry_due' ? 'Going back in'
     : a.state === 'failed' ? 'Failed' : a.state === 'stopped' ? 'Stopped' : a.state === 'asked' || a.state === 'left' ? 'Not right yet' : a.state === 'held' ? 'Finished · held back' : 'Finished';
   return [word, tries && a.try > 1 ? `try ${a.try} of ${a.tries}` : ''].filter(Boolean).join(' · ');
@@ -115,7 +126,7 @@ export function agentRowMarkup(a, {esc = escape, face = '', doing = '', pip = 'I
   const acts = live ? `<div class="pip-agent-actions">${stepsBtn}${canWatch ? `<button type="button" class="pip-agent-act" data-flow-watch="${esc(watchOf || a.id)}">Watch its computer</button>` : ''}`
     + `<button type="button" class="pip-agent-act" data-agent-stop="${id}"${off || stopping ? ' disabled' : ''}>${stopping ? 'Stopping…' : 'Stop'}</button></div>` : '';
   return `<div class="pip-agent-row" data-agent="${id}" data-state="${esc(a.state)}" role="group" aria-label="${esc(`Sub-agent: ${a.title}, ${text}${clock ? `, ${clock}` : ''}`)}"${live ? ' aria-busy="true"' : ''}>`
-    + `<div class="pip-agent-line">${bwFace(face, {live: a.state === 'working' || a.state === 'queued'})}<span class="pip-agent-name">${esc(a.title)}</span><span class="pip-agent-text">${esc(text)}</span>`
+    + `<div class="pip-agent-line">${bwFace(face, {live: a.state === 'working' || a.state === 'queued'})}<span class="pip-agent-name">${esc(a.title)}</span>${workTag(a, esc)}<span class="pip-agent-text">${esc(text)}</span>`
     + `<span class="pip-agent-time"${liveSince(a)}>${esc(clock)}</span>${live ? '' : stepsBtn}</div>${acts}`
     + stepsMarkup(steps, {esc, attrs: ` data-steps-of="${id}" aria-label="Its steps"`}) + '</div>';
 }
@@ -155,8 +166,8 @@ export const mapMeta = (a, {doing = '', pip = 'Its Pip', now = Date.now()} = {})
 export const cardMeta = (a, {doing = '', pip = 'Its Pip', now = Date.now()} = {}) => [agentWords(a, {doing, pip, tries: false}), agentTook(a, now)].filter(Boolean).join(' · ');
 function mapRow(a, {esc, face, doing, pip, now, tab}) {
   const id = esc(a.id), meta = mapMeta(a, {doing, pip, now});
-  return `<li class="am-node"><div class="am-self"><button type="button" class="am-row am-agent" data-agent="${id}" data-agent-card="${id}" data-state="${agentDot(a)}" tabindex="${tab ? 0 : -1}" aria-label="${esc([a.title, ...meta].join(', '))}" title="${esc(a.title)}">`
-    + `<span class="agent-dot" data-state="${agentDot(a)}" aria-hidden="true"></span>${bwFace(face, {cls: 'am-pip-face'})}<span class="am-text"><span class="am-desc">${esc(a.title)}</span>`
+  return `<li class="am-node"><div class="am-self"><button type="button" class="am-row am-agent" data-agent="${id}" data-agent-card="${id}" data-state="${agentDot(a)}" tabindex="${tab ? 0 : -1}" aria-label="${esc([a.title, a.kind === 'work' ? WORK_TAG : '', ...meta].filter(Boolean).join(', '))}" title="${esc(a.title)}">`
+    + `<span class="agent-dot" data-state="${agentDot(a)}" aria-hidden="true"></span>${bwFace(face, {cls: 'am-pip-face'})}<span class="am-text"><span class="am-desc-line"><span class="am-desc">${esc(a.title)}</span>${workTag(a, esc, 'am-tag')}</span>`
     + `<span class="am-meta"${liveSince(a) ? ` data-agent-meta="${id}"` : ''}>${esc(meta.join(' · '))}</span></span></button></div></li>`;
 }
 /** The agent map for this Pip, Work's map: the Pip at the root in colour (its folder and model), its sub-agents under
@@ -182,18 +193,61 @@ export function agentMapMarkup(agents, {esc = escape, pip, face = '', doingOf = 
  *  with, its steps, and Stop while it works. */
 export function agentCardMarkup(a, {esc = escape, pip, doing = '', now = Date.now(), steps = null, stopping = false, off = false, still = false} = {}) {
   const id = esc(a.id), live = AGENT_LIVE.includes(a.state), meta = cardMeta(a, {doing, pip: pip.name, now});
-  const facts = [['Model', a.model], ['Try', `${a.try} of ${a.tries}`]].filter(([, v]) => v).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+  const facts = [['Model', a.model], ['Tools', a.kind === 'work' ? WORK_TAG : ''], ['Try', `${a.try} of ${a.tries}`]].filter(([, v]) => v).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+  const where = a.kind === 'work'
+    ? `Started by ${esc(pip.name)}. It works on your real folder${pip.folder ? `, ${esc(pip.folder)},` : ''} with a Work session’s tools: what it changes is there at once, and Undo puts it back.`
+    : `Started by ${esc(pip.name)}. It works in its own copy${pip.folder ? ` of ${esc(pip.folder)}` : ''}. Nothing reaches ${esc(pip.name)}’s copy until it has checked the work.`;
   return `<div class="pip-agent-card modal-layer dgc-scrim agent-map-layer am-card-layer${still ? ' dgc-still' : ''}" role="dialog" aria-modal="true" aria-labelledby="pip-agent-card-title" aria-describedby="pip-agent-card-meta" data-agent-card-layer="${id}">`
     + '<div class="agent-map dgc-dialog am-window am-card-window" data-kind="agent" tabindex="-1">'
     + `<div class="agent-map-head"><button type="button" class="agent-map-btn agent-map-back" data-agent-card-back title="Back to the agent map" aria-label="Back to the agent map">${ICON.back}</button>`
     + `<span class="agent-dot agent-map-head-dot" data-state="${agentDot(a)}" aria-hidden="true"></span><div class="agent-map-titles"><h2 id="pip-agent-card-title">${esc(a.title)}</h2>`
     + `<p id="pip-agent-card-meta" class="agent-map-subtitle"${liveSince(a) ? ` data-agent-card-meta="${id}"` : ''}>${esc(meta)}</p></div></div>`
     + '<div class="agent-map-body am-card">'
-    + `<p class="am-card-line am-quiet">Started by ${esc(pip.name)}. It works in its own copy${pip.folder ? ` of ${esc(pip.folder)}` : ''}. Nothing reaches ${esc(pip.name)}’s copy until it has checked the work.</p>`
+    + `<p class="am-card-line am-quiet">${where}</p>`
     + `<dl class="am-facts">${facts}</dl>`
     + (a.try > 1 && a.notes ? `<p class="am-card-line">Sent back with: ${esc(a.notes)}</p>` : '')
     + (a.held.length ? `<p class="am-card-line">Held back, because your copy changed meanwhile: ${esc(a.held.slice(0, 8).join(', '))}${a.held.length > 8 ? ' and more' : ''}</p>` : '')
     + (a.run_id ? `<details class="am-fold" open><summary>Steps</summary>${stepsMarkup(steps || {lines: [], loading: true}, {esc, cls: 'am-calls'})}</details>` : '')
     + (live ? `<div class="am-actions"><button type="button" class="dgc-btn" data-agent-stop="${id}"${off || stopping ? ' disabled' : ''}>${stopping ? 'Stopping…' : 'Stop'}</button></div>` : '')
     + '</div></div></div>';
+}
+
+// ---- What a sub-agent with Work tools changed in your folder, and its Undo (Pips API 109) ----
+const STATUS_WORDS = {new: 'new', deleted: 'removed', modified: ''};
+const workFile = (f, esc) => {
+  const kind = [STATUS_WORDS[f.status], f.command ? 'by a command' : ''].filter(Boolean).join(', ');
+  const stats = f.counted ? `<span class="diff-stat add-stat">+${f.additions.toLocaleString('en-US')}</span><span class="diff-stat del-stat">−${f.deletions.toLocaleString('en-US')}</span>` : '';
+  return `<li class="diff pip-project-file" data-work-path="${esc(f.path)}"><div class="dhead"><span class="diff-toggle is-still">`
+    + `${pathOf(f.path, esc)}${kind ? `<span class="pip-project-kind">${esc(kind)}</span>` : ''}${stats}</span></div></li>`;
+};
+/** A path as Work's changed-files card shows it: its folder quiet, its name plain. */
+const pathOf = (path, esc) => { const at = path.lastIndexOf('/');
+  return `<span class="f" title="${esc(path)}">${at >= 0 ? `<span class="fd">${esc(path.slice(0, at + 1))}</span>` : ''}<span class="fn">${esc(path.slice(at + 1))}</span></span>`; };
+/** Its done message's card, Work's changed-files card: "Changed in your folder" +a −b, its files, and Undo (as a fix
+ *  applied at Do it all has). Undone: what was put back, and what was left because you changed it since. `busy`:
+ *  "undo" on its way. '' when it changed nothing. */
+export function workDoneMarkup(a, {esc = escape, folder = '', off = false, busy = '', error = ''} = {}) {
+  if (a.kind !== 'work') return '';
+  const id = esc(a.id), hold = off || busy ? ' disabled' : '', name = folder || 'your folder';
+  const list = (label, items) => items.length ? `<p class="pip-project-label">${esc(label)}</p><ul class="pip-project-held" aria-label="${esc(label)}">`
+    + items.map(l => `<li>${pathOf(l.path, esc)}${l.why ? `<span class="pip-project-why">${esc(l.why)}</span>` : ''}</li>`).join('') + '</ul>' : '';
+  const wrong = error ? `<p class="dgc-card-error" role="alert">${esc(error)}</p>` : '';
+  if (a.undo) {
+    const back = a.undo.restored.length, left = a.undo.left;
+    return `<section class="pip-project-card pip-change" data-work-done="${id}" data-state="undone" role="group" aria-label="${esc(`Undone in ${name}`)}">`
+      + `<div class="pip-change-head"><div class="pip-change-heading"><strong class="pip-change-title">Undone</strong></div></div>`
+      + `<p class="pip-change-says">${esc(back ? `${plural(back, 'file')} put back in ${name}` : `Nothing was put back in ${name}`)}${a.undo.merged.length ? esc(` · your later edits kept in ${plural(a.undo.merged.length, 'file')}`) : ''}</p>`
+      + list(left.length === 1 ? '1 file was left as it is' : `${left.length} files were left as they are`, left) + wrong + '</section>';
+  }
+  const files = a.changed || [];
+  if (!files.length) return '';
+  const plus = files.reduce((n, f) => n + (f.counted ? f.additions : 0), 0), minus = files.reduce((n, f) => n + (f.counted ? f.deletions : 0), 0);
+  const total = files.length + (a.changed_more || 0);
+  const undo = a.can_undo ? `<button type="button" class="dgc-btn" data-agent-undo="${id}"${hold} title="Put back what it changed, where you haven’t changed it since">${busy === 'undo' ? 'Undoing…' : 'Undo'}</button>` : '';
+  return `<section class="pip-project-card pip-change" data-work-done="${id}" data-state="applied" role="group" aria-label="${esc(`Changed in ${name}`)}">`
+    + `<div class="pip-change-head"><div class="pip-change-heading"><strong class="pip-change-title">Changed in your folder</strong>`
+    + (plus || minus ? `<span class="pip-change-totals"><span class="add-stat">+${plus.toLocaleString('en-US')}</span> <span class="del-stat">−${minus.toLocaleString('en-US')}</span></span>` : '') + '</div>'
+    + `<div class="pip-change-actions">${undo}</div></div>`
+    + `<ul class="pip-project-files" aria-label="Files changed">${files.map(f => workFile(f, esc)).join('')}${a.changed_more ? `<li class="pip-project-more">and ${esc(plural(a.changed_more, 'more file'))}.</li>` : ''}</ul>`
+    + `<p class="pip-change-says">${esc([plural(total, 'file'), 'by a sub-agent with Work tools', 'already in your folder'].join(' · '))}</p>${wrong}</section>`;
 }

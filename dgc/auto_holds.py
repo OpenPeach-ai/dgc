@@ -9,7 +9,13 @@ named itself (the editor_app command) holds this process's wire, and only then.
 """
 from __future__ import annotations
 
+import os
+
 _editor_on_wire = False
+# A run DGC itself starts in auto mode for the user (a Pip's sub-agent with Work tools, dgc/pip_work_agents.py) has no
+# editor on its wire, and still has the safety check: its runner says so in this variable. Only the check, never the
+# rest of the chat-first rules (no card in the chat, priced pictures without a card): nobody reads that chat.
+GUARD_ENV = "DGC_AUTO_GUARD"
 
 
 def set_editor(on: bool) -> None:
@@ -21,3 +27,9 @@ def set_editor(on: bool) -> None:
 def wanted() -> bool:
     """True while DGC's own editor is the client: auto mode asks in the chat instead of with a card."""
     return _editor_on_wire
+
+
+def guard_wanted() -> bool:
+    """Auto mode's safety check (dgc/auto_guard.py) runs: in DGC's own editor, and in a run its runner started with
+    the check on (GUARD_ENV)."""
+    return _editor_on_wire or os.environ.get(GUARD_ENV) == "1"

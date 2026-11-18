@@ -101,8 +101,8 @@ import {levelPage,levelMarkup,levelNotice,levelMenuMarkup} from './pipLevels.js'
 import {ONE_API,ALL as ONE_ALL,PERSONAL as ONE_PERSONAL,savedFilter,listRequest,attentionRequest,attentionFor,underFilter,orderPips,heldOrder,placeOf,newPipFolder} from './pipsOne.js';
 import {payLimits,payDraft,payRequest,payNotice,payingNotice,payLimitsMarkup,payTotalMarkup,readUsd,dollars} from './pipPay.js';
 import {sentPage,sentMarkup} from './pipSent.js';
-import {CHAT_API,agentsPage,foundListMarkup,saidMarkup,askCardMarkup,answeredMarkup,handedMarkup,agentRowMarkup,retryAskMarkup,pillMarkup,agentMapMarkup,agentCardMarkup,mapMeta,cardMeta} from './pipChat.js';
-import {AGENT_LIVE,agentsOwnOf} from './pipFlow.js';
+import {CHAT_API,agentsPage,foundListMarkup,saidMarkup,askCardMarkup,answeredMarkup,handedMarkup,agentRowMarkup,retryAskMarkup,pillMarkup,agentMapMarkup,agentCardMarkup,mapMeta,cardMeta,workDoneMarkup} from './pipChat.js';
+import {AGENT_LIVE,WORK_API,agentsOwnOf} from './pipFlow.js';
 import {FLOW_API,took,fixesPage,fixAnswer,FIX_LIVE,findingsCardMarkup,fixAskMarkup,fixDecidedLine,fixingMarkup,fixEndedLine,waitingLineMarkup,waitingCardMarkup,reportRow,reportsTableMarkup} from './pipFlow.js';
 import {infoTip,wireInfoTips} from './pipInfoTip.js';
 import {watchButtons} from './buttonFit.js';
@@ -5036,9 +5036,9 @@ function agentCheckReply(m){
 // Focus the map moves by itself after a click is quiet (no ring); the keyboard's always shows.
 let agentsByPointer=false;
 const amFocus=el=>{if(!el)return;el.classList.toggle('quiet-focus',agentsByPointer);el.focus({preventScroll:true});};
-const agentsUi={pip:'',list:[],slots:1,own:null,seq:0,doing:new Map(),steps:new Map(),stepsOpen:new Set(),map:false,card:'',earlier:false,stopping:'',timer:0,drawn:''};
+const agentsUi={pip:'',list:[],slots:1,own:null,seq:0,doing:new Map(),steps:new Map(),stepsOpen:new Set(),map:false,card:'',earlier:false,stopping:'',timer:0,drawn:'',undoing:'',undoErrors:new Map()};
 const changeUi={folded:new Set(),menu:''};const askedWords=new Map();
-function resetAgents(){window.clearTimeout(agentsUi.timer);Object.assign(agentsUi,{pip:'',list:[],slots:1,own:null,seq:agentsUi.seq+1,map:false,card:'',earlier:false,stopping:'',timer:0});agentsUi.doing.clear();agentsUi.steps.clear();agentsUi.stepsOpen.clear();changeUi.folded.clear();changeUi.menu='';renderAgentMap();}
+function resetAgents(){window.clearTimeout(agentsUi.timer);Object.assign(agentsUi,{pip:'',list:[],slots:1,own:null,seq:agentsUi.seq+1,map:false,card:'',earlier:false,stopping:'',timer:0,undoing:''});agentsUi.undoErrors.clear();agentsUi.doing.clear();agentsUi.steps.clear();agentsUi.stepsOpen.clear();changeUi.folded.clear();changeUi.menu='';renderAgentMap();}
 const agentsNow=()=>convOn()&&agentsUi.pip===S.selected?agentsUi.list:[];
 const fixAgents=()=>convOn()?(flowNow()?.fixes||[]).map(f=>f.agent).filter(Boolean):[];
 const agentOf=id=>agentsNow().find(a=>a.id===id)||fixAgents().find(a=>a.id===id)||null;
@@ -5219,6 +5219,7 @@ document.addEventListener('click',event=>{
  if((n=at('#chat-agents'))){if(agentsUi.map)closeAgentMap();else openAgentMap();return;}
  if((n=at('[data-agent-steps]'))){toggleAgentSteps(n.dataset.agentSteps);return;}
  if((n=at('[data-agent-stop]'))){void stopAgent(n.dataset.agentStop);return;}
+ if((n=at('[data-agent-undo]'))){void undoAgentJob(n.dataset.agentUndo);return;}
  if((n=at('[data-retry-again]'))){void retryFix(n.dataset.retryAgain,true);return;}
  if((n=at('[data-retry-leave]'))){void retryFix(n.dataset.retryLeave,false);return;}
  if((n=at('[data-change-fold]'))){const id=n.dataset.changeFold;if(changeUi.folded.has(id))changeUi.folded.delete(id);else changeUi.folded.add(id);render();document.querySelector(`[data-change-fold="${id}"]`)?.focus({preventScroll:true});return;}
@@ -5283,7 +5284,7 @@ const ENDED_SAYS={unchanged:'I looked and found nothing to change.',failed:'The 
 function convFixMarkup(fix){
  const folder=pipFolderName(),off=archived()||!usable(),busy=flow.busy?.id===fix.id?flow.busy.what:'',error=flow.errors.get(fix.id)||'',hold=off||!!flow.busy&&!busy;
  // (Its question stays above the answered line while this view remembers it: DGC says it only while it asks.)
- if(fix.state==='ask'){if(fix.message)askedWords.set(fix.id,fix.message);return saidMarkup(fix.message,{esc})+askCardMarkup(fix,{esc,folder,off:hold,busy,error});}
+ if(fix.state==='ask'){if(fix.message)askedWords.set(fix.id,fix.message);return saidMarkup(fix.message,{esc})+askCardMarkup(fix,{esc,folder,off:hold,busy,error,helper:workHelper(),menu:flow.menu===fix.id})+flowNote(fix);}
  const answered=(fix.by.startsWith('pip-level:')?'':saidMarkup(askedWords.get(fix.id)||'',{esc}))+answeredMarkup(fix,{esc,folder,clock:t=>new Date(t).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})});
  if(fix.state==='declined')return answered+(error?`<p class="dgc-card-error" role="alert">${esc(error)}</p>`:'');
  const a=fix.agent,type=pipType(S.pip,S.types)||characterType(S.pip.pip_type);
@@ -5292,17 +5293,43 @@ function convFixMarkup(fix){
  const handed=handedMarkup(fix,{esc,waits:!S.runner?.online||!!S.runner?.paused});
  if(FIX_LIVE.includes(fix.state))return answered+handed+row;
  const words=saidMarkup(fix.message||ENDED_SAYS[fix.state]||'',{esc,of:fix.id});
- const change=['ready','applied','held'].includes(fix.state)?flowChangeCard(fix)||(fix.state==='ready'?'<p class="pip-answered-line" role="status">Its change is ready. Reading it…</p>':''):'';
+ // A sub-agent with Work tools (Pips API 109) worked in the folder itself: what it changed there and its Undo, whatever
+ // became of it (done, stopped, failed, after its last try), as a fix applied at Do it all shows its change.
+ const change=a?.kind==='work'?workCard(a):['ready','applied','held'].includes(fix.state)?flowChangeCard(fix)||(fix.state==='ready'?'<p class="pip-answered-line" role="status">Its change is ready. Reading it…</p>':''):'';
  const asks=a?.state==='asked'?retryAskMarkup(fix,{esc,off:hold,busy,error}):'';
  const again=!asks&&['failed','stopped','interrupted'].includes(fix.state)?`<p class="pip-answered-line"><button type="button" class="pip-link pip-quiet-link" data-flow-allow="${esc(fix.id)}"${hold?' disabled':''}>Allow it again</button></p>`:'';
  return answered+handed+row+words+change+asks+again+(error&&!asks?`<p class="dgc-card-error" role="alert">${esc(error)}</p>`:'');
+}
+// "Start a sub-agent with Work tools" (Pips API 109): offered only by a DGC that runs one.
+function workHelper(){return S.apiVersion>=WORK_API&&!archived();}
+function flowNote(fix){const note=flow.notes.get(fix.id)||'';return note?`<p class="pip-answered-line" role="status">${esc(note)}</p>`:'';}
+function workCard(a){
+ const off=archived()||!usable();
+ return workDoneMarkup(a,{esc,folder:pipFolderName(),off:off||!!agentsUi.undoing&&agentsUi.undoing!==a.id,busy:agentsUi.undoing===a.id?'undo':'',error:agentsUi.undoErrors.get(a.id)||''});
+}
+// A sub-agent with Work tools the Pip started by itself at Do it all, for no fix: at the chat's end, its row while it
+// works, then the Pip's own words from its check and what it changed, with Undo. Recent ones only (a day), or one whose
+// Undo still waits.
+function soloWorkMarkup(){
+ if(!convOn())return '';
+ const now=Date.now(),type=pipType(S.pip,S.types)||characterType(S.pip.pip_type),off=archived()||!usable();
+ return agentsNow().filter(a=>a.kind==='work'&&!a.fix_id&&(AGENT_LIVE.includes(a.state)||a.can_undo||now-Date.parse(a.updated_at||a.created_at)<86400000)).slice(0,4).reverse().map(a=>{
+  const row=agentRowMarkup(a,{esc,face:pipAvatar(S.pip,'idle',`agent-${a.id}`,type),doing:agentsUi.doing.get(a.id)||'',pip:S.pip.name,canWatch:false,stopping:agentsUi.stopping===a.id,off,steps:agentsUi.stepsOpen.has(a.id)?agentSteps(a):null});
+  return `<div class="pip-work-solo" data-work-solo="${esc(a.id)}">${row}${AGENT_LIVE.includes(a.state)?'':saidMarkup(a.said,{esc})+workCard(a)}</div>`;}).join('');
+}
+async function undoAgentJob(id){
+ const a=agentOf(id);if(!a||agentsUi.undoing||!usable()||archived())return;
+ const token=scope(),pip=S.selected;agentsUi.undoing=id;agentsUi.undoErrors.delete(id);render();
+ try{await send('undo_pip_agent_job',{pip_id:pip,job_id:id});}
+ catch(error){if(token===scope())agentsUi.undoErrors.set(id,errorText(error));}
+ finally{if(agentsUi.undoing===id)agentsUi.undoing='';if(token===scope()){render();await loadFlow();}}
 }
 function flowFixMarkup(fix){
  if(convOn())return convFixMarkup(fix);
  const folder=pipFolderName(),off=archived()||!usable(),busy=flow.busy?.id===fix.id?flow.busy.what:'',error=flow.errors.get(fix.id)||'',note=flow.notes.get(fix.id)||'';
  const said=note?`<p class="pip-found-line" role="status">${esc(note)}</p>`:'';
  if(fix.state==='ask')return (fix.message?`<article class="pip-message assistant dgc pip-found-says"><div class="answer split"><div class="message-body text reply-part"><p>${esc(fix.message)}</p></div></div></article>`:'')
-  +fixAskMarkup(fix,{esc,folder,off:off||!!flow.busy&&!busy,busy,menu:flow.menu===fix.id,error})+said;
+  +fixAskMarkup(fix,{esc,folder,off:off||!!flow.busy&&!busy,busy,menu:flow.menu===fix.id,error,helper:workHelper()})+said;
  const decided=fixDecidedLine(fix,{esc,folder,clock:t=>new Date(t).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})});
  if(fix.state==='declined')return decided+said;
  if(FIX_LIVE.includes(fix.state))return decided+fixingMarkup(fix,{esc,off,stopping:flow.stopping===fix.fix_run_id,canWatch:computerState.pip===S.selected&&!!computerState.value?.granted})+said;
@@ -5311,10 +5338,10 @@ function flowFixMarkup(fix){
 }
 // A fix whose check is not among the runs drawn (an older one, or another conversation) still shows, at the chat's end.
 function flowTailMarkup(){
- const page=flowNow();if(!page)return '';
+ const page=flowNow();if(!page)return soloWorkMarkup();
  const drawn=new Set(chatPosts()?S.posts.map(p=>p.run_id):[]);
  return page.fixes.filter(f=>!f.run_id||!drawn.has(f.run_id)).filter(f=>!['discarded','undone','unchanged','declined'].includes(f.state)).map(flowFixMarkup).join('')
-  +(flow.error?`<p class="app-link-note" role="alert">${esc(flow.error)}</p>`:'');
+  +soloWorkMarkup()+(flow.error?`<p class="app-link-note" role="alert">${esc(flow.error)}</p>`:'');
 }
 // What only you can do: one line at the top of its chat, and its cards under it when shown.
 function flowPinnedMarkup(){
@@ -5334,15 +5361,16 @@ async function flowDecide(id,allow){
  catch(error){if(token===scope())flow.errors.set(id,errorText(error));}
  finally{if(flow.busy?.id===id)flow.busy=null;if(token===scope()){render();void loadFlow();}}
 }
-// "Start a helper with Work tools": a helper with a Work session's tools on the real folder, shown in this chat. DGC
-// asks first (an Allow card) at Ask me first and Approve for me; it says which in its answer.
+// "Start a sub-agent with Work tools" (Pips API 109): a sub-agent with a Work session's tools on the real folder, shown in
+// this chat and its agent map, never in Work's sessions. The press is the yes at every level: it starts at once.
 async function flowHelper(id){
  const fix=flowNow()?.fixes.find(f=>f.id===id);if(!fix||flow.busy||!usable()||archived())return;
- const token=scope(),pip=S.selected;flow.busy={id,what:'helper'};flow.errors.delete(id);flow.menu='';render();
+ const token=scope(),pip=S.selected;flow.busy={id,what:'helper'};flow.errors.delete(id);render();
  try{const answer=await send('start_pip_work_helper',{pip_id:pip,fix_id:id});if(token!==scope())return;
-  flow.notes.set(id,answer?.asks===true?'It asks before it starts a helper on your real files. Its card is below.':'A helper with Work tools is starting on your real files.');}
+  try{const now=fixAnswer(answer,id);flow.value={...flow.value,fixes:flow.value.fixes.map(f=>f.id===id?now:f)};}catch{/* read again below */}
+  flow.notes.set(id,'A sub-agent with Work tools is starting on your real folder. What it changes is there at once, with Undo.');}
  catch(error){if(token===scope())flow.errors.set(id,errorText(error));}
- finally{if(flow.busy?.id===id)flow.busy=null;if(token===scope()){render();void loadFlow();void refreshComputer();}}
+ finally{if(flow.busy?.id===id)flow.busy=null;flow.menu='';if(token===scope()){render();void loadFlow();void loadAgents();}}
 }
 async function flowStop(runId){
  if(flow.stopping||!usable())return;const token=scope();flow.stopping=runId;render();
@@ -5416,7 +5444,7 @@ function folderPartsMarkup(p){
   +`<button type="button" class="pip-page-row" data-tab="revisions"><span class="row-words"><strong>Version history and approvals</strong><small class="row-preview">Every change to it, and who approved it</small></span>${chev}</button></section>`;
 }
 // Choosing Do it all says what it means first (his call, like Work's auto mode). Continue sets it; Cancel leaves it.
-const FULL_WARNING='A Pip on Do it all acts without asking. It can send anything it sees, including your code, to the web. It applies its fixes to your folder, and it can start a helper with full Work tools on your real files, including ones Git ignores such as .env. Payments follow the limit you set.';
+const FULL_WARNING='A Pip on Do it all acts without asking. It can send anything it sees, including your code, to the web. It applies its fixes to your folder, and it can start a sub-agent with full Work tools on your real files, including ones Git ignores such as .env. Payments follow the limit you set.';
 function chooseLevel(level,how={}){
  if(levelState.pip===S.selected&&levelState.value?.level===level)return;
  if(level==='full'&&onePips()){

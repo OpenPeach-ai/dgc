@@ -46,13 +46,15 @@ test('what a check found is one card under the Pip\'s own words: each finding, i
  assert.equal(x.$('.simple-content').dataset.view,'runs','Open report is its report');
 });
 
-test('at Ask me first it asks with the ordinary Allow card: Allow, Not now, and a menu',async()=>{
+test('at Ask me first it asks with the ordinary Allow card: Allow, Not now',async()=>{
+ // Changed on purpose (18 Nov): its menu's one row, "Start a sub-agent with Work tools", is offered only by a DGC that
+ // runs one (Pips API 109; test/pip-work-subagent.test.mjs). This DGC (96) said "isn't ready yet" to it.
  const x=await chat({fix:'ask'});
  const card=x.$(`.pip-found-ask[data-flow-fix="${FIX}"]`);
  assert.ok(card,'the Allow card');
  assert.equal(card.querySelector('.dgc-card-title').textContent,'Fix 3 things in lime_tiles');
  assert.equal(card.querySelector('.dgc-card-sub').textContent,'It works in its own copy. Nothing in your folder changes until you apply it.');
- assert.deepEqual([...card.querySelectorAll('.pip-found-actions > button')].map(b=>b.textContent.trim()),['Allow','Not now','⋯']);
+ assert.deepEqual([...card.querySelectorAll('.pip-found-actions > button')].map(b=>b.textContent.trim()),['Allow','Not now']);
  assert.match(x.text('.pip-found-says'),/Want me to fix these three\?/,'its question is its own message, above the card');
  card.querySelector('[data-flow-allow]').click();await x.drain();
  assert.deepEqual(x.requests('decide_pip_fix').at(-1),{type:'decide_pip_fix',pip_id:GST,fix_id:FIX,expected_digest:'d1-ask',allow:true},'Allow answers the fix its card showed');
@@ -69,18 +71,12 @@ test('Not now leaves one quiet line, with a way to allow it after all',async()=>
  assert.ok(line.querySelector('[data-flow-allow]'));assert.equal(x.$('.pip-found-ask'),null);
 });
 
-test('the Allow card\'s menu offers "Start a helper with Work tools"',async()=>{
+test('a DGC before Pips API 109 is never offered "Start a sub-agent with Work tools"',async()=>{
+ // Changed on purpose (18 Nov): it offered "Start a helper with Work tools", which this DGC refused as not ready.
  const x=await chat({fix:'ask'});
- assert.equal(x.$('.pip-found-menu'),null,'closed until asked for');
- x.$('[data-flow-menu]').click();await x.drain();
- const item=x.$('.pip-found-menu [data-flow-helper]');
- assert.equal(item.querySelector('.dgc-menu-label').textContent,'Start a helper with Work tools');
- assert.match(item.textContent,/your real files/);
- assert.equal(x.$('[data-flow-menu]').getAttribute('aria-expanded'),'true');
- item.click();await x.drain();
- assert.deepEqual(x.requests('start_pip_work_helper').at(-1),{type:'start_pip_work_helper',pip_id:GST,fix_id:FIX});
- assert.match(x.text(),/It asks before it starts a helper on your real files\./,'at Ask me first DGC asks first, and the chat says so');
- assert.equal(x.$('.pip-found-menu'),null);
+ assert.equal(x.$('[data-flow-menu]'),null,'no menu for a row it would refuse');
+ assert.equal(x.$('[data-flow-helper]'),null);
+ assert.doesNotMatch(x.text(),/Work tools/);
 });
 
 test('while it fixes: one live card with what it is doing, how long, its helpers; Steps, Watch its computer and Stop',async()=>{
@@ -293,7 +289,8 @@ test('the host passes the flow\'s commands only to a DGC that has them, and only
  assert.match(pipFlowRefusal({type:'decide_pip_fix',pip_id:GST,fix_id:'../x',expected_digest:'d',allow:true},96),/Allow, or Not now/);
  assert.equal(pipFlowRefusal({type:'answer_pip_waiting',pip_id:GST,waiting_id:WAIT,answer:'later'},96),'');
  assert.match(pipFlowRefusal({type:'answer_pip_waiting',pip_id:GST,waiting_id:WAIT,answer:'whatever'},96),/I’ve done it/);
- assert.equal(pipFlowRefusal({type:'start_pip_work_helper',pip_id:GST,fix_id:FIX},96),'');
+ assert.match(pipFlowRefusal({type:'start_pip_work_helper',pip_id:GST,fix_id:FIX},108),/Update DGC/,'only a DGC that runs one (109)');
+ assert.equal(pipFlowRefusal({type:'start_pip_work_helper',pip_id:GST,fix_id:FIX},109),'');
  assert.equal(pipFlowRefusal({type:'commit_pip_project_change',pip_id:GST,change_id:CHANGE},96),'');
  assert.match(pipFlowRefusal({type:'commit_pip_project_change',pip_id:'x',change_id:CHANGE},96),/Choose a Pip/);
 });

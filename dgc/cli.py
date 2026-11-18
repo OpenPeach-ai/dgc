@@ -3346,8 +3346,11 @@ def main(argv: list[str] | None = None) -> int | None:
                         help="model name (interactive: saved as your default; with -p: this run only)")
     parser.add_argument("--engine", metavar="NAME", default=None,
                         help="with -p, run the one-shot turn through a subscription CLI "
-                             "(claude|codex|qwen|kimi|copilot) via your own login, without changing config")
+                             "(claude|codex|qwen|kimi|copilot) via your own login, without changing config; "
+                             "native: DGC's own model loop for this run, whatever route is saved")
     parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (interactive: saved; with -p: this run only)")
+    parser.add_argument("--api-mode", choices=("auto", "ollama", "anthropic", "chat_completions", "responses"),
+                        default=None, help="with -p: the endpoint's API for this run only (default: as saved)")
     parser.add_argument("--api-key-env", metavar="NAME",
                         help="read the endpoint API key from environment variable NAME without persisting it")
     parser.add_argument("--trust", action="store_true",
@@ -3388,6 +3391,16 @@ def main(argv: list[str] | None = None) -> int | None:
         print(f"warning: {warning}", file=sys.stderr)
     if args.engine is not None and args.prompt is None:
         parser.error("--engine is available only with -p/--prompt")
+    if args.api_mode is not None and args.prompt is None:
+        parser.error("--api-mode is available only with -p/--prompt")
+    native = args.engine is not None and args.engine.strip().lower() == "native"
+    if native:
+        # DGC's own model loop for this run (a Pip's sub-agent with Work tools runs on the model its runner names):
+        # never the subscription CLI the saved route may name. For this process only.
+        args.engine = ""
+        if str(config.get("subscription_engine", "") or "").strip():
+            config.data["subscription_engine"] = ""
+            config.mark_ephemeral("subscription_engine")
     for flag, given in (("--output-format json", args.output_format == "json"),
                         ("--output", args.output is not None),
                         ("--print-session-id", args.print_session_id)):
@@ -3429,6 +3442,9 @@ def main(argv: list[str] | None = None) -> int | None:
             # persist=False only skips the save at THIS moment. save() diffs against the load-time
             # baseline, so the next save from anywhere in the process writes it anyway.
             config.mark_ephemeral("base_url")
+    if args.api_mode is not None:
+        config.set("api_mode", args.api_mode, persist=False)
+        config.mark_ephemeral("api_mode")
     if args.api_key_env:
         if args.api_key_env not in os.environ:
             parser.error(f"environment variable {args.api_key_env!r} is not set")
@@ -3476,9 +3492,11 @@ def main(argv: list[str] | None = None) -> int | None:
         config.mark_ephemeral("subscription_model")   # the one --model branch that bypassed set()
 
     if args.prompt is not None:
-        from .trust import is_trusted, mark_trusted
+        from .trust import is_trusted, mark_trusted, trust_for_this_run
         if args.trust:
             mark_trusted(config, config.project_root)
+        elif os.environ.get("DGC_TRUST_THIS_RUN") == "1":
+            trust_for_this_run(config, config.project_root)   # (a Pip's Work-tools sub-agent: this run only, never saved)
         elif config.data.get("mode") in ("acceptEdits", "auto") and not is_trusted(config, config.project_root):
             parser.error("non-interactive acceptEdits/auto requires a trusted workspace; review it, then add --trust")
 

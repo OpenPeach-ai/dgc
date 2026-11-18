@@ -70,7 +70,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_project_choices", "list_pip_project_changes", "get_pip_project_change", "apply_pip_project_change",
     "discard_pip_project_change", "undo_pip_project_change",
     "list_pip_fixes", "decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting", "commit_pip_project_change",
-    "list_pip_agents", "stop_pip_agent", "set_pip_agents", "retry_pip_fix",
+    "list_pip_agents", "stop_pip_agent", "set_pip_agents", "retry_pip_fix", "undo_pip_agent_job",
     "set_pip_goal", "get_pip_goal", "stop_pip_goal",
     "list_project_folders", "add_project_folder",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
@@ -250,6 +250,8 @@ _COMMAND_ARGS = {
     "list_pip_agents": {"pip_id"}, "stop_pip_agent": {"pip_id", "agent_id"},
     "set_pip_agents": {"pip_id", "slots", "model_choice", "thinking", "context_size", "fallback"},
     "retry_pip_fix": {"pip_id", "fix_id", "again"},
+    # API 109: what a sub-agent with Work tools changed in the folder itself, put back (pip_work_agents.undo).
+    "undo_pip_agent_job": {"pip_id", "job_id"},
     "start_pip_work_helper": {"pip_id", "fix_id"}, "answer_pip_waiting": {"pip_id", "waiting_id", "answer"},
     "commit_pip_project_change": {"pip_id", "change_id"},
     # A goal for a Personal Pip's conversation (pip_goals, API 92): keep going until done, needs you or blocked.
@@ -1453,6 +1455,8 @@ class PipStore:
                 if actor not in _UNATTENDED or not isinstance(agent.get("job_id"), str) or not re.fullmatch(r"pipagent_[0-9a-f]{32}", agent["job_id"]):
                     raise RegistryError("invalid_request", "Only DGC starts a Pip's sub-agent.")
                 conversation_request["agent"] = {key: agent.get(key) for key in ("job_id", "folder", "copy", "try")}
+                if agent.get("work") is True:
+                    conversation_request["agent"]["work"] = True    # a sub-agent with Work tools (pip_work_agents)
             if quoted is not None:
                 # The Pip's own message it replies to (pip_replies): its words are read from the store again here.
                 from .pip_replies import check as checked_reply
@@ -3250,6 +3254,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     undo_candidates = []               # changes the user asked it to put back (pip_project_copies.undo_asked)
     answer_candidates = []             # the user's answers to what it asked in the chat (pip_holds.apply_answers)
     helper_model = {}                  # its helpers' model by the user's words (pip_agents.commit_model)
+    from . import pip_work_agents
+    work_pin = manifest.get(pip_work_agents.PIN) if conversation is not None else None
+    work_candidates = []               # sub-agents with Work tools it starts at Do it all (pip_work_agents.commit)
     helper_connections = ([c for c in manifest.get('helper_connections') or [] if isinstance(c, dict)
                            and isinstance(c.get('id'), str) and isinstance(c.get('name'), str)][:20]
                           if conversation is not None and manifest.get('user_turn') is True else [])
@@ -3656,7 +3663,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             # One kind of Pip (16 Nov): every Pip's chat has the Personal chat's tools; a Pip with a folder has its
             # project reads (the Agent's own, below) besides. A run that isn't a chat (an audit, a draft, a reviewed
             # execution) pins none of these, so it has only its reviewed tools.
-            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.PIP_SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_questions.schema()] if conversation is not None and conversation.get('questions') is True and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.PIP_SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_questions.schema()] if conversation is not None and conversation.get('questions') is True and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_work_agents.schema()] if isinstance(work_pin, dict) else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             if personal:
                 return own
             schemas = [*super()._tool_schemas(*args, **kwargs), *own]
@@ -4014,6 +4021,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 update, told = pip_goals.tool_result(call.arguments if isinstance(call.arguments, dict) else {})
                 if update is not None:
                     goal_candidate = update
+                return told
+            if isinstance(work_pin, dict) and call.name == pip_work_agents.TOOL:
+                candidate, told = pip_work_agents.tool_result(call.arguments, len(work_candidates))
+                if candidate is not None:
+                    work_candidates.append(candidate)
                 return told
             if helper_connections and call.name == pip_agents.MODEL_TOOL:
                 choice, told = pip_agents.model_tool_result(helper_connections, call.arguments)
@@ -4738,6 +4750,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 result['answers'] = answer_candidates
             if helper_model:
                 result['helper_model'] = helper_model['choice']
+            if work_candidates:
+                result['work_subagents'] = work_candidates
             if goal_candidate is not None:
                 result['goal_update'] = goal_candidate
             if working_notes is not None and working_notes.ops:
@@ -5152,6 +5166,11 @@ def _execute_run(registry, row, config):
     from .pip_models import run_view
     frozen_config = run_view(frozen_config, manifest["model_settings"])
     run_dir = registry.directory / "runs" / row["id"]
+    if isinstance(manifest.get("agent"), dict) and manifest["agent"].get("work") is True:
+        # A Pip's sub-agent with Work tools (pip_work_agents): a real Work run in the folder itself, never the Pip's
+        # worker or its box. Its key comes from this run's view of its connection, as every run's does.
+        from . import pip_work_agents
+        return pip_work_agents.execute(registry, row, manifest, config, frozen_config)
     current_tree = source['source_policy']['mode'] == 'current_tree'
     personal = source["source_policy"]["mode"] == "personal"
     if personal != (registry.get(row["workspace_id"])["kind"] == "personal"):
@@ -5474,6 +5493,8 @@ def _execute_run(registry, row, config):
     manifest = pip_holds.runtime(registry, row, manifest)     # what it still holds for the user, in a turn of theirs
     from . import pip_agents
     manifest = pip_agents.runtime(config, row, manifest)      # their saved connections, by name, for its helpers' model
+    from . import pip_work_agents
+    manifest = pip_work_agents.runtime(registry, row, manifest)   # at Do it all: start_work_subagent (Pips API 109)
     brain_pin = manifest["model_settings"].get("brain") if isinstance(manifest.get("model_settings"), dict) else None
     if brain_pin is not None:
         # API 55: the user's own Claude Code or Codex is this run's model (pip_brain). The worker gets where the CLI
@@ -7036,7 +7057,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 result = welcome(registry)
             elif command in ("list_pip_fixes", "decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting",
                              "list_pip_agents", "stop_pip_agent", "set_pip_agents", "retry_pip_fix",
-                             "commit_pip_project_change"):
+                             "undo_pip_agent_job", "commit_pip_project_change"):
                 # Pips API 96 (pips-flow-design, 14 Nov): what a check found and what became of it, by the Pip's level;
                 # what only you can do. Every answer is the user's own click, on this computer.
                 from . import pip_fixes

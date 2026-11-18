@@ -624,7 +624,16 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # keep?} (M, local only) answers {in_library, kept, title}: whether the picture is in the Library already (a generated one
 # is; one kept before is, found by its bytes) and, with keep, keeps it there kept by you (image_keep), never twice. A
 # Pip's keep_image also takes a picture in its Files or one it sent in its chat.
-PIPS_API_VERSION = 108
+# API 109 (0.52, a Pip's sub-agent with Work tools, pip_work_agents): for a fix
+# its copy can't do (a file Git ignores, a service to run), a sub-agent that is a real Work run on the REAL folder, on the
+# Pip's Sub-agents model, auto mode with its safety check on, its session in the job's own folder (never in Work's
+# list). start_pip_work_helper {pip_id, fix_id} starts one (the user's press is the yes at every level; R: fix);
+# list_pip_agents rows of kind "work" carry changed [{path, status, additions, deletions, counted, command}],
+# changed_more, can_undo and, once undone, undo {restored, merged, left [{path, why}], at}; undo_pip_agent_job {pip_id,
+# job_id} (M) puts back what it changed (Work's rule: a file the user changed since is merged or named and left; R:
+# agent, undo). A fix it came from reads applied (then undone). At Do it all a folder Pip's own chat turn has the tool
+# start_work_subagent; a reply that used it carries `work_subagents`. Local only.
+PIPS_API_VERSION = 109
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}

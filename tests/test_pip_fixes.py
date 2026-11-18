@@ -311,11 +311,12 @@ class TheCommands(FixWorld, unittest.TestCase):
         with self.assertRaises(RegistryError):
             self.control("list_pip_fixes", pip_id=self.helper["id"], extra=1)
 
-    def test_start_pip_work_helper_says_plainly_it_is_not_ready(self):
+    def test_start_pip_work_helper_starts_a_sub_agent_with_work_tools(self):
+        # Changed on purpose (18 Nov, Pips API 106): it said "isn't ready yet" until the sub-agent with Work tools was
+        # built (tests/test_pip_work_agents.py runs one end to end). The press starts it, at any level.
         self.check([TOTAL])
-        with self.assertRaises(RegistryError) as raised:
-            self.control("start_pip_work_helper", pip_id=self.helper["id"], fix_id=self.one()["id"])
-        self.assertEqual(raised.exception.code, "unsupported_command")
+        answer = self.control("start_pip_work_helper", pip_id=self.helper["id"], fix_id=self.one()["id"])
+        self.assertEqual((answer["fix"]["state"], answer["fix"]["agent"]["kind"]), ("running", "work"))
 
 
 def fixes_commands():

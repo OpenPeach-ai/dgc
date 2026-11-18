@@ -42,6 +42,21 @@
 .pip-ask-note{margin:var(--sp-3) 0 0;color:var(--text);font:var(--w-reg) var(--t-chat)/1.62 var(--sans)}
 .pip-ask-card .dgc-card-error{margin:var(--sp-2) 0 0}
 @container (max-width:340px){.pip-ask-btns{flex:1 1 100%;margin-left:0}.pip-ask-btns>.dgc-btn{flex:1 1 0;width:auto}}
+/* More (Pips API 106): Work's three dots, then one more way to fix it, "Start a sub-agent with Work tools", under the
+   head at its right. One action, one icon; Work's button corner. */
+.pip-ask-more{flex:none;display:inline-grid;place-items:center;width:var(--btn-h);height:var(--btn-h);min-height:0;padding:0;border:0;border-radius:var(--btn-r);background:transparent;color:var(--muted);cursor:pointer}
+.pip-ask-more:hover:not(:disabled),.pip-ask-more[aria-expanded="true"]{background:var(--surface2);color:var(--text)}
+.pip-ask-more:focus-visible{outline:var(--btn-ring);outline-offset:1px}
+.pip-ask-more:disabled{cursor:default;opacity:.55}
+.pip-ask-head>.pip-ask-menu{flex:1 1 100%;order:3;margin:0 0 0 auto;max-width:min(380px,100%)}
+.pip-ask-menu.dgc-menu .dgc-menu-row{min-height:0;padding:6px 10px;align-items:flex-start}
+.pip-ask-menu.dgc-menu .dgc-menu-label{white-space:normal;overflow:visible;overflow-wrap:anywhere}
+.pip-ask-menu.dgc-menu .dgc-menu-sub{color:var(--muted);font:var(--w-reg) var(--t-xs)/1.4 var(--sans);white-space:normal}
+/* "Work tools": beside a sub-agent with a Work session's tools, in its row, the agent map and its card. A label, not a
+   button: quiet, Work's corner. */
+.pip-agent-tag,.am-tag{flex:none;display:inline-block;padding:0 5px;border:1px solid var(--border);border-radius:var(--btn-r);color:var(--muted);font:var(--w-reg) var(--t-xs)/16px var(--sans);white-space:nowrap}
+.am-desc-line{display:flex;align-items:center;gap:6px;min-width:0}
+.am-desc-line>.am-desc{flex:0 1 auto}
 /* Answered: Work's folded line. */
 .pip-answered{margin-top:var(--sp-2);padding:0 0 0 var(--sp-2);color:var(--muted);font:var(--w-reg) var(--t-sm)/1.45 var(--sans);min-width:0}
 .pip-answered>summary{cursor:pointer;overflow-wrap:anywhere}.pip-answered>summary:hover{color:var(--text)}

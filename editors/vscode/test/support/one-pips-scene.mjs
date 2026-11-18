@@ -34,6 +34,10 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *             findings; `fix` also takes "checking" (the Pip checks its work), "retry" (sent back, try 2 of 3),
  *             "held", "asked" (after the last try), "failed" and "stopped"; fixes carry `agent`; list_pip_agents,
  *             stop_pip_agent and retry_pip_fix answer; `earlier`: that many finished sub-agents from before
+ *    work     Pips API 109: its sub-agent has Work tools (kind "work", on the real folder): it carries what it changed
+ *             and can_undo; start_pip_work_helper starts one; undo_pip_agent_job puts it back (`left`: files it
+ *             leaves because you changed them since). solo: "working" | "merged", one the Pip started by itself
+ *             at Do it all, for no fix
  *    chat     {[pip id]: {messages, active_run, waiting}}: that Pip's chat as given (each message needs only its id,
  *             role, text, run_id and status); kept in state.chat, so a test changes it as the reply goes on. A message
  *             sent while its `active_run` runs joins it as one sent mid-reply (steered, not read yet)
@@ -67,7 +71,8 @@ export function makeBackend(o = {}) {
     total: { usd_per_day: null, spent_today: 0, ...(o.total || {}) }, knows: {}, notes: (o.notes || []).slice(),
     chat: JSON.parse(JSON.stringify(o.chat || {})), activity: JSON.parse(JSON.stringify(o.activity || {})), sent: [],
     names: Array.from({ length: o.computers || 0 }, (_, i) => ({ number: i + 1, name: ["Juniper", "Poppy", "Fennel", "Clover", "Sorrel"][i % 5], named: false, state: "closed" })),
-    apps: JSON.parse(JSON.stringify(o.apps || [])), skills: JSON.parse(JSON.stringify(o.skills || [])), convs: [] };
+    apps: JSON.parse(JSON.stringify(o.apps || [])), skills: JSON.parse(JSON.stringify(o.skills || [])), convs: [],
+    work: o.work === true, undone: false, solo: o.solo || "", soloUndone: false };
   const COMPUTER_NAMES = ["Juniper", "Poppy", "Fennel", "Clover", "Sorrel"];
   const said = () => o.limits === false ? {} : { pay_limits: { ...state.limits }, spent_today: state.spent };
   const types = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].map((id, character_index) => ({ id, character_index, name: id[0].toUpperCase() + id.slice(1),
@@ -111,10 +116,21 @@ export function makeBackend(o = {}) {
     const st = state.fix === "asked" && state.left ? "left" : AGENT_STATE[state.fix];
     if (!st) return null;
     const tries = state.fix === "asked" ? 3 : state.fix === "retry" || o.tries === 2 ? 2 : 1, live = ["working", "checking"].includes(st);
-    return { id: AGENT, pip_id: GST, kind: "fix", fix_id: FIX, title: "Fix 3 things in lime_tiles", state: st, try: tries, tries: 3, run_id: FIXRUN, run_status: st === "working" ? "running" : st === "failed" ? "failed" : st === "stopped" ? "cancelled" : "succeeded",
+    return { id: AGENT, pip_id: GST, kind: state.work ? "work" : "fix", fix_id: FIX, title: "Fix 3 things in lime_tiles", state: st, try: tries, tries: 3, run_id: FIXRUN, run_status: st === "working" ? "running" : st === "failed" ? "failed" : st === "stopped" ? "cancelled" : "succeeded",
       started_at: new Date(now - 42000).toISOString(), model: "qwen3-coder:480b", held: st === "held" ? ["cart.py"] : [], notes: tries > 1 ? NOTES : "",
-      created_at: new Date(now - (live ? 42000 : 132000)).toISOString(), updated_at: new Date(now - (live ? 1000 : 0)).toISOString() };
+      created_at: new Date(now - (live ? 42000 : 132000)).toISOString(), updated_at: new Date(now - (live ? 1000 : 0)).toISOString(),
+      ...(state.work ? workFields(!live, state.undone) : {}) };
   };
+  // Pips API 109: what a sub-agent with Work tools changed in the folder itself, and its Undo.
+  const WORK_CHANGED = [{ path: "totals.py", status: "modified", additions: 6, deletions: 2, counted: true }, { path: "config/.env.example", status: "new", additions: 0, deletions: 0, counted: false }, { path: "cart.py", status: "modified", additions: 9, deletions: 3, counted: true }];
+  const workFields = (ended, undone) => ({ changed: WORK_CHANGED, changed_more: 0, can_undo: ended && !undone,
+    ...(undone ? { undo: { restored: ["totals.py", "config/.env.example"], merged: [], left: (o.left || ["cart.py"]).map((path) => ({ path, why: "you changed it since" })), at: ago(0) } } : {}) });
+  const SOLO = "pipagent_" + hex("9");
+  const soloAgent = () => !state.solo ? null : { id: SOLO, pip_id: GST, kind: "work", fix_id: null, title: "Load settings from .env", state: state.solo, try: 1, tries: 3, run_id: "run_" + hex("9"),
+    run_status: state.solo === "working" ? "running" : "succeeded", started_at: new Date(now - 65000).toISOString(), model: "qwen3-coder:480b", held: [], notes: "",
+    said: state.solo === "working" ? "" : "Settings load from the real .env now, and the shop starts. I checked the change: it reads the keys by name and never prints them.",
+    created_at: new Date(now - 65000).toISOString(), updated_at: new Date(now - (state.solo === "working" ? 1000 : 0)).toISOString(), from_run_id: "run_" + hex("8"),
+    ...(state.solo === "working" ? { changed: [], changed_more: 0, can_undo: false } : { ...workFields(true, state.soloUndone), changed: [{ path: "settings.py", status: "modified", additions: 4, deletions: 1, counted: true }] }) };
   const earlierAgents = () => Array.from({ length: o.earlier || 0 }, (_, i) => ({ id: "pipagent_" + String(i + 2).repeat(32).slice(0, 32), pip_id: GST, kind: "fix", fix_id: "pipfix_" + String(i + 2).repeat(32).slice(0, 32),
     title: i ? "Fix 1 thing in lime_tiles" : "Fix the stock count in lime_tiles", state: "merged", try: 1, tries: 3, run_id: "run_" + String(i + 5).repeat(32).slice(0, 32), run_status: "succeeded", started_at: ago(1500 + i * 60),
     model: "qwen3-coder:480b", held: [], notes: "", created_at: ago(1500 + i * 60), updated_at: ago(1498 + i * 60) }));
@@ -129,7 +145,7 @@ export function makeBackend(o = {}) {
       ...(state.fix === "ask" ? { message: "Want me to fix these three?" } : { decided_at: ago(7) }), by: o.level === "full" ? "pip-level:full" : o.level === "approve" ? "pip-level:approve" : "you",
       ...(agent ? { fix_run_id: FIXRUN, started_at: agent.started_at, agent } : {}), helpers: live ? 1 : 0, steps: [],
       ...(SUB_SAID[state.fix] ? { message: SUB_SAID[state.fix] } : {}),
-      ...(done ? { change_id: CHANGE, tests: "passed", findings: [{ ...findings[0], verdict: "fixed" }, { ...findings[1], verdict: "not_a_defect", why: "Your tests expect one decimal." }, { ...findings[2], verdict: "fixed" }] } : {}) }];
+      ...(done ? { ...(state.work ? {} : { change_id: CHANGE }), tests: "passed", findings: [{ ...findings[0], verdict: "fixed" }, { ...findings[1], verdict: "not_a_defect", why: "Your tests expect one decimal." }, { ...findings[2], verdict: "fixed" }] } : {}) }];
   };
   const fixNow = () => {
     if (sub) return subFix();
@@ -244,19 +260,21 @@ export function makeBackend(o = {}) {
     get_pip_working_notes: (r) => ({ pip_id: r.pip_id, lines: [], text: "", max_lines: 60, max_bytes: 6000, bytes: 0, revision: "r0", updated_at: null }),
     list_pip_daily_log: (r) => ({ pip_id: r.pip_id, days: [], next_before: null }),
     list_pip_apps: () => ({ apps: [] }), list_apps: () => ({ apps: [] }),
-    list_pip_project_changes: (r) => ({ pip_id: r.pip_id, changes: r.pip_id === GST && ["ready", "applied"].includes(state.fix) ? [change()] : [] }),
+    list_pip_project_changes: (r) => ({ pip_id: r.pip_id, changes: r.pip_id === GST && ["ready", "applied"].includes(state.fix) && !state.work ? [change()] : [] }),
     get_pip_project_change: (r) => ({ id: r.change_id, path: r.path, diff: "@@ -210,3 +210,4 @@\n def make_bill(order):\n-    bill = Bill(order)\n+    bill = Bill(order)\n+    bill.transporter_id = order.transporter_id\n     return bill\n" }),
     apply_pip_project_change: () => { state.change = "applied"; return change(); }, discard_pip_project_change: () => { state.change = "discarded"; return change(); },
     undo_pip_project_change: () => { state.change = "undone"; return change(); }, commit_pip_project_change: () => { state.committed = true; return change(); },
     // ---- the flow's own commands (Pips API 96), as the editor expects them ----
     list_pip_fixes: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, folder: r.pip_id === GST ? "lime_tiles" : "", fixes: r.pip_id === GST ? fixNow() : [], waiting: r.pip_id === GST ? waitingNow() : [] }),
     decide_pip_fix: (r) => { state.fix = r.allow ? "running" : "declined"; return { fix: fixNow()[0] }; },
-    start_pip_work_helper: () => { state.helper++; return { asks: state.level !== "full" }; },
+    start_pip_work_helper: () => { state.helper++; if (!sub) return { asks: state.level !== "full" }; state.work = true; state.fix = "running"; return { fix: fixNow()[0] }; },
+    undo_pip_agent_job: (r) => { if (r.job_id === SOLO) state.soloUndone = true; else state.undone = true;
+      const agent = r.job_id === SOLO ? soloAgent() : agentNow(); return { agent, undo: agent.undo }; },
     answer_pip_waiting: (r) => { state.waiting = { done: "done", later: "later", not_a_problem: "dismissed", undo: "waiting" }[r.answer]; return { waiting: waitingNow() }; },
     // ---- its sub-agents (Pips API 97), and the one command still to come from DGC (retry_pip_fix) ----
     // Pips API 104: a Pip's sub-agents' own model, thinking, window and fallback ride along (an older DGC sends only slots;
     // the editor reads them only from 104).
-    list_pip_agents: (r) => ({ agents: r.pip_id === GST && sub ? [agentNow(), ...earlierAgents()].filter(Boolean) : [], slots: state.slots, ...state.agentsOwn }),
+    list_pip_agents: (r) => ({ agents: r.pip_id === GST && sub ? [soloAgent(), agentNow(), ...earlierAgents()].filter(Boolean) : [], slots: state.slots, ...state.agentsOwn }),
     set_pip_agents: (r) => { if ("slots" in r) state.slots = r.slots;
       if (r.model_choice?.mode === "subscription") return { error: { code: "invalid_model_choice", message: "It runs its own tools, so it can’t run DGC’s sub-agents." } };
       for (const k of ["model_choice", "thinking", "context_size", "fallback"]) if (k in r) state.agentsOwn[k] = r[k];

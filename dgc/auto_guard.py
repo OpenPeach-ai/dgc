@@ -66,6 +66,29 @@ USER_AUTHORITY = (
 )
 
 
+# A prompt DGC wrote for the user (a Pip's sub-agent with Work tools, dgc/pip_work_agents.py) is DGC's words, not theirs:
+# its runner hands over the user's own words, the ones it quoted in that prompt, in this variable (a JSON list of
+# strings), and only those are what the user asked for. Set by DGC's own runner; whoever starts a process already
+# writes its whole prompt, so this only ever narrows what counts as the user's.
+USER_WORDS_ENV = "DGC_USER_WORDS"
+
+
+def launcher_user_words() -> list[str] | None:
+    """The user's own words a prompt DGC wrote carries (USER_WORDS_ENV), or None when the prompt is the user's own. A
+    value that can't be read is no words at all: DGC's framing never becomes theirs."""
+    raw = os.environ.get(USER_WORDS_ENV)
+    if raw is None:
+        return None
+    try:
+        import json
+        value = json.loads(raw)
+    except ValueError:
+        return []
+    if not isinstance(value, list):
+        return []
+    return [v[:4000] for v in value if isinstance(v, str) and v.strip()][:12]
+
+
 def line(block: Block) -> str:
     """The one line the model gets for a stopped step."""
     head = f"BLOCKED by DGC's safety check ({block.kind}): {block.reason}. Nothing ran."

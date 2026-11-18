@@ -4052,14 +4052,18 @@ class Agent(GoalLifecycle):
 
     def _note_user_words(self, text) -> None:
         """What the user typed in a turn their own message started: the only words the safety check asks about.
-        Kept to the last few, a bounded size; a goal's cycle, a wake-up or a monitor's event adds nothing."""
+        Kept to the last few, a bounded size; a goal's cycle, a wake-up or a monitor's event adds nothing. A turn whose
+        prompt DGC wrote for the user (a Pip's sub-agent with Work tools: its runner sets USER_WORDS_ENV) counts only
+        the words DGC quoted as theirs, never its own framing."""
         if self.depth != 0 or not getattr(self, "_turn_is_user", False):
             return
         words = self.__dict__.setdefault("_user_words", [])
-        text = str(text or "").strip()
-        if not text:
-            return
-        words.append(text[:4000])
+        from .auto_guard import launcher_user_words
+        quoted = launcher_user_words()
+        for item in ([str(text or "")] if quoted is None else quoted):
+            item = item.strip()
+            if item and (quoted is None or item[:4000] not in words):
+                words.append(item[:4000])
         while len(words) > 1 and (len(words) > 30 or sum(len(w) for w in words) > 20000):
             words.pop(0)
 
@@ -11364,9 +11368,10 @@ class Agent(GoalLifecycle):
                 decision, reason, mod_asked = ASK, f"{said['mod']} asks first: {said['reason']}", True
                 self.ui.info(redact_text(f"{said['mod']} asks you first: {said['reason']}", secrets))
         # Auto mode's safety check (17 Nov, dgc/auto_guard.py): a step that runs only because auto mode runs everything
-        # is checked; one the user's own allow rule lets through is theirs. In DGC's own editor only (auto_holds.py).
+        # is checked; one the user's own allow rule lets through is theirs. In DGC's own editor, and in a run DGC's
+        # runner started with the check on (a Pip's sub-agent with Work tools: auto_holds.guard_wanted).
         guard_card = None
-        if decision == ALLOW and reason == "auto mode" and self.mode == "auto" and auto_holds.wanted():
+        if decision == ALLOW and reason == "auto mode" and self.mode == "auto" and auto_holds.guard_wanted():
             stopped = self._auto_guard(name, args, call_id, display_args, secrets)
             if isinstance(stopped, str):
                 return stopped

@@ -21,7 +21,17 @@ from pathlib import Path
 from .config import USER_HOME
 from .scheduler import named_process_lock
 
-SESSIONS_DIR = USER_HOME / "sessions"
+def _sessions_root() -> Path:
+    """Where Work's sessions live: ~/.dgc/sessions, or DGC_SESSIONS_DIR (read once, at import). A Pip's sub-agent with
+    Work tools runs as a real Work session in a folder of its own (pip_work_agents), so it never shows in the user's
+    Work sessions list; every module that lists or writes sessions reads this one value (sessions.SESSIONS_DIR)."""
+    chosen = (os.environ.get("DGC_SESSIONS_DIR") or "").strip()
+    if chosen and os.path.isabs(chosen):
+        return Path(chosen)
+    return USER_HOME / "sessions"
+
+
+SESSIONS_DIR = _sessions_root()
 SCHEMA_VERSION = 8
 METRICS_SCHEMA_VERSION = 3
 WORKSPACE_SCHEMA_VERSION = 1

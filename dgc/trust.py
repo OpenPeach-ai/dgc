@@ -129,6 +129,20 @@ def handle_trust_command(config, project_root, rest: str) -> str:
     return "Usage: `/trust` lists trusted folders · `/trust revoke N|PATH|here` forgets one."
 
 
+def trust_for_this_run(config, path) -> None:
+    """Trust a folder for THIS process only, never saved: a Pip's sub-agent with Work tools (dgc/pip_work_agents.py),
+    started by the person's own press or at Do it all, works in their folder without making it trusted for their own
+    Work afterwards. Its project rules load as trust loads them."""
+    p = os.path.realpath(str(path))
+    lst = list(config.data.get("trusted_dirs", []) or [])
+    if p not in lst:
+        config.data["trusted_dirs"] = [*lst, p]
+    config.mark_ephemeral("trusted_dirs")
+    apply = getattr(config, "apply_project_permissions", None)
+    if callable(apply) and is_trusted(config, config.project_root):
+        apply()
+
+
 def mark_trusted(config, path) -> None:
     p = os.path.realpath(str(path))
     lst = config.data.setdefault("trusted_dirs", [])

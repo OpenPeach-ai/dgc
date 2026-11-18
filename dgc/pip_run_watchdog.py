@@ -135,6 +135,8 @@ def may_run_again(manifest) -> bool:
         return False
     if manifest.get("run_kind", "audit") not in ("conversation", "personal_task", "audit", "draft"):
         return False
+    if isinstance(manifest.get("agent"), dict) and manifest["agent"].get("work") is True:
+        return False                        # a sub-agent with Work tools changed real files: never again by itself
     try:
         from .pip_pulse_plans import validate_manifest as standalone_pulse
         return standalone_pulse(manifest) is None

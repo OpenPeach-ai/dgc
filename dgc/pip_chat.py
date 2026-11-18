@@ -1766,7 +1766,7 @@ def validate_steers(value, text: str) -> list:
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing", "artifacts", "undo_changes", "answers", "helper_model", "questions"}:
+    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing", "artifacts", "undo_changes", "answers", "helper_model", "work_subagents", "questions"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "questions" in result:
         # Work's question card under the reply (API 106, pip_questions): its own questions, exactly; a reply asks with
@@ -1844,6 +1844,8 @@ def insert_reply(store, run, result, now):
     keep_answers(store, run, result)                          # what the user answered: done after the run
     from .pip_agents import commit_model                     # its helpers' model, by the user's words
     commit_model(store, run, result)
+    from .pip_work_agents import commit as commit_work       # a sub-agent with Work tools it started at Do it all
+    commit_work(store, run, result)
     held = made_in(store.registry, run["pip_id"], run["id"])
     if held:
         result = {**result, "text": (str(result.get("text") or "").rstrip() + "\n\n" + reply_line(held)).strip()}

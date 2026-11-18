@@ -209,6 +209,11 @@ def view(db, row) -> dict:
             state = "running"                                # its sub-agent works, or its Pip checks the work
         elif job["state"] in ("held", "stopped", "asked", "left", "failed"):
             state = job["state"]                             # asked: after its last try (Try again · Leave it)
+        elif job["kind"] == "work" and job["state"] == "merged":
+            # A sub-agent with Work tools: its change is in the folder already, as a fix applied at Do it all is, with
+            # its Undo (pip_work_agents.undo); undone once that ran.
+            from . import pip_work_agents
+            state = "undone" if pip_work_agents.state(db, job["id"]).get("undo") else "applied"
     out = {"id": row["id"], "run_id": row["run_id"], "state": state, "count": row["count"], "digest": digest(row),
            "asked_at": row["asked_at"], "decided_at": row["decided_at"], "by": row["by"] or "",
            "fix_run_id": run["id"] if run is not None else None,
@@ -478,8 +483,9 @@ def send_due(registry, config, *, only=None) -> int:
     """Send each queued fix's turn whose chat is free (the supervisor's tick, and at once from Allow). A chat that is
     busy keeps it for a later tick; a Pip that is gone or archived ends it."""
     db = registry.db
+    from . import pip_agents
     if not _has(db):
-        return 0
+        return pip_agents.send_due(registry, config)   # its sub-agents' jobs need no fix (a Pip's own, pip_work_agents)
     from .pips import PipStore
     from . import pip_chat
     store, sent = PipStore(registry), 0
@@ -601,7 +607,20 @@ def after_agent_job(store, job) -> None:
                             "LIMIT 1", (row["pip_id"], job["created_at"])).fetchone()
         change_id = change[0] if change else None
     files = _load(job["held"], []) if held else []
-    message = {"merged": _first_words(job["verdict"] or ""),
+    if job["kind"] == "work":
+        # A sub-agent with Work tools worked in the folder itself: what it changed is there whatever became of it,
+        # and Undo puts it back (pip_work_agents.undo).
+        from . import pip_work_agents
+        changed = bool(pip_work_agents.state(db, job["id"]).get("changed"))
+        kept = " What it changed stays in your folder; Undo puts it back." if changed else " Nothing in your folder changed."
+        message = {"merged": _first_words(job["verdict"] or "") or "Its change is in your folder.",
+                   "asked": f"It tried {job['tries']} times and it isn't right yet: " + (job["notes"] or "see its last check.") + (kept if changed else ""),
+                   "failed": "Its sub-agent stopped with an error: " + _clip(job["said"] or "", 300) + kept,
+                   "stopped": ("DGC's Pips restarted while its sub-agent worked, so it was stopped." if "restarted" in str(job["said"] or "")
+                               else "Its sub-agent was stopped.") + kept}.get(job["state"], "")
+    else:
+        message = None
+    message = message if message is not None else {"merged": _first_words(job["verdict"] or ""),
                "held": "Your copy of " + ", ".join(files[:5]) + (" and more" if len(files) > 5 else "")
                        + " changed while its sub-agent worked, so it didn't overwrite them.",
                "asked": f"It tried {job['tries']} times and it isn't right yet: " + (job["notes"] or "see its last check."),
@@ -761,6 +780,9 @@ def control(store, command, request, actor, config) -> dict:
         return answer_waiting(store, pip_id, request.get("waiting_id"), request.get("answer"), actor)
     if command == "start_pip_work_helper":
         return start_work_helper(store, pip_id, request.get("fix_id"), actor, config)
+    if command == "undo_pip_agent_job":
+        from . import pip_work_agents                   # Pips API 109: what a sub-agent with Work tools changed, put back
+        return pip_work_agents.undo(store, pip_id, request.get("job_id"), actor)
     if command == "retry_pip_fix":
         return retry(store, pip_id, request.get("fix_id"), request.get("again"), actor, config)
     if command in ("list_pip_agents", "stop_pip_agent", "set_pip_agents"):
@@ -797,6 +819,8 @@ def retry(store, pip_id, fix_id, again, actor, config) -> dict:
     job = _agent(db, row)
     if row["state"] != "ended" or job is None or job["state"] not in RETRIABLE:
         raise RegistryError("invalid_state", "This fix isn't waiting on you. Open the chat again.")
+    if again and job["kind"] == "work":
+        return start_work_helper(store, pip_id, fix_id, actor, config)     # Try again: Work tools again, on the folder
     if not again:
         pip_agents.leave(store, job)
         with registry.transaction():
@@ -827,6 +851,39 @@ def retry(store, pip_id, fix_id, again, actor, config) -> dict:
 
 
 def start_work_helper(store, pip_id, fix_id, actor, config) -> dict:
-    """start_pip_work_helper: "Start a helper with Work tools" for a fix its copy can't do (a file Git ignores, a
-    service to run). Not built yet in this step: it says so instead of pretending."""
-    raise RegistryError("unsupported_command", "Starting a helper with Work tools isn't ready yet in this build.")
+    """start_pip_work_helper (Pips API 109): "Start a sub-agent with Work tools" on a fix's menu, for a fix its copy
+    can't do (a file Git ignores, a service to run): a sub-agent with a Work session's tools on the real folder
+    (pip_work_agents), shown in the Pip's chat. The user's press is the yes at every level: on a fix that asks it is the
+    answer to its Allow card; on one that ended (asked, held, failed, stopped, unchanged) it is a new go. Answers the fix."""
+    if actor not in LOCAL:
+        raise RegistryError("forbidden", "Only you start a sub-agent with Work tools, from the Pip's chat.")
+    from . import pip_agents, pip_work_agents
+    registry, db = store.registry, store.db
+    pip = store._job(pip_id)
+    with registry.transaction():
+        ensure(db)
+    row = _fix(db, pip_id, fix_id)
+    job = _agent(db, row)
+    if job is not None and job["state"] in pip_agents.LIVE:
+        raise RegistryError("invalid_state", "Its sub-agent is still working. Stop it first, or wait for it.")
+    if row["state"] == "declined":
+        raise RegistryError("invalid_state", "You said Not now to this fix. Allow it first.")
+    findings = _load(row["findings"], [])
+    open_ = [f for f in findings if f.get("verdict") not in ("fixed", "already_fixed", "not_a_defect")] or findings
+    folder = db.execute("SELECT name FROM workspaces WHERE id=?", (row["workspace_id"],)).fetchone()
+    folder = folder[0] if folder else ""
+    name = " ".join(str(pip.get("name") or "the Pip").split())[:80]
+    brief = pip_work_agents.fix_brief(name, folder, open_)
+    if job is not None and job["notes"]:
+        brief += "\n\nWhat the Pip's last check said, so do it differently this time: " + _clip(job["notes"], 1500)
+    started = pip_agents.start(store, config, pip_id, kind=pip_work_agents.KIND,
+                               title=f"Fix {len(open_)} thing{'s' if len(open_) != 1 else ''} in {folder or 'its folder'}",
+                               brief=brief, fix_id=row["id"], words=pip_work_agents.pressed_words(open_))
+    now = _now(registry)
+    with registry.transaction():
+        db.execute("UPDATE pip_fixes SET state='queued',decided_at=COALESCE(decided_at,?),by='you',fix_run_id=?,"
+                   "started_at=?,message=NULL,note=NULL,change_id=NULL,revision=revision+1,updated_at=? WHERE id=?",
+                   (now, started["run_id"], now, now, row["id"]))
+        registry.event(row["workspace_id"], "pip_fix_allowed", pip_id=pip_id, run_id=row["run_id"],
+                       payload={"fix_id": row["id"], "by": actor, "work": True})
+    return {"fix": view(db, _fix(db, pip_id, fix_id))}

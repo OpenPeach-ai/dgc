@@ -279,7 +279,8 @@ def _cleanup(registry, pip_id, run_ids, copies=()):
         pip_computer.stop_host(pip_id)
         for path in (root / 'computers' / pip_id, root / 'chat_images' / pip_id,
                      root / 'chat_files' / pip_id, root / 'daily-log' / pip_id,
-                     root / 'working-notes' / f'{pip_id}.md', root / 'careful' / f'{pip_id}.json'):
+                     root / 'working-notes' / f'{pip_id}.md', root / 'careful' / f'{pip_id}.json',
+                     root / 'pips' / pip_id):             # its sub-agents with Work tools: their own sessions (pip_work_agents)
             _remove_private(path, root)
         for run_id in run_ids:
             _remove_private(root / 'runs' / run_id, root)

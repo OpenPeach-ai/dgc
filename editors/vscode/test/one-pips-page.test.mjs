@@ -13,7 +13,7 @@ import {GST,ERP,MORNINGS,LIME_DIR,CHANGE} from './support/one-pips-scene.mjs';
 
 const windows=[];after(()=>windows.forEach(w=>w.close()));
 const setup=options=>{const x=open(options);windows.push(x.w);return x;};
-const WARNING='A Pip on Do it all acts without asking. It can send anything it sees, including your code, to the web. It applies its fixes to your folder, and it can start a helper with full Work tools on your real files, including ones Git ignores such as .env. Payments follow the limit you set.';
+const WARNING='A Pip on Do it all acts without asking. It can send anything it sees, including your code, to the web. It applies its fixes to your folder, and it can start a sub-agent with full Work tools on your real files, including ones Git ignores such as .env. Payments follow the limit you set.';
 
 test('a Pip with a folder has the Personal Pip\'s header: back, its name, its folder, one menu; Run now is in the menu',async()=>{
  const x=setup({api:95});await x.drain();await x.openPip(GST);

@@ -50,6 +50,21 @@ function finding(f) {
  *  is the Pip's now · held: the Pip's copy changed the same files · asked: after the last try, the Pip asks · left:
  *  you said leave it · failed · stopped. */
 export const AGENT_API = 97;
+/** A Pip's sub-agent with Work tools (Pips API 109; dgc/pip_work_agents.py): a
+ *  real Work run on the real folder. Its row (kind "work") carries what it changed there and its Undo. */
+export const WORK_API = 109;
+const CHANGE_STATUS = ['new', 'modified', 'deleted'];
+function changedOf(list) {
+  return (Array.isArray(list) ? list : []).filter(f => record(f) && words(f.path, 4096) && CHANGE_STATUS.includes(f.status)).slice(0, 50)
+    .map(f => ({path: f.path, status: f.status, additions: count(f.additions) ? f.additions : 0, deletions: count(f.deletions) ? f.deletions : 0,
+      counted: f.counted === true, command: f.command === true}));
+}
+function undoOf(u) {
+  if (!record(u)) return null;
+  const paths = v => (Array.isArray(v) ? v : []).filter(p => words(p, 4096)).slice(0, 50);
+  return {restored: paths(u.restored), merged: paths(u.merged), at: time(u.at) ? u.at : '',
+    left: (Array.isArray(u.left) ? u.left : []).filter(l => record(l) && words(l.path, 4096)).slice(0, 50).map(l => ({path: l.path, why: text(l.why, 200) ? l.why : ''}))};
+}
 export const AGENT_STATES = ['queued', 'working', 'check_due', 'checking', 'retry_due', 'merged', 'held', 'asked', 'left', 'failed', 'stopped'];
 export const AGENT_LIVE = ['queued', 'working', 'check_due', 'checking', 'retry_due'];
 const AGENT = /^pipagent_[a-f0-9]{32}$/, PIP = /^pip_[a-f0-9]{32}$/;
@@ -62,7 +77,11 @@ export function agentView(a, pip = '') {
   return {id: a.id, kind: text(a.kind, 40) ? a.kind : '', fix_id: a.fix_id || '', title: a.title.trim(), state: a.state, try: Math.max(1, n(a.try)), tries: Math.max(1, n(a.tries) || 3),
     run_id: a.run_id || '', started_at: time(a.started_at) ? a.started_at : '', created_at: time(a.created_at) ? a.created_at : '', updated_at: time(a.updated_at) ? a.updated_at : '',
     model: text(a.model, 200) ? a.model : '', notes: text(a.notes, 2000) ? a.notes.trim() : '',
-    held: Array.isArray(a.held) ? a.held.filter(h => words(h, 4096)).slice(0, 50) : []};
+    held: Array.isArray(a.held) ? a.held.filter(h => words(h, 4096)).slice(0, 50) : [],
+    said: text(a.said, 600) ? a.said.trim() : '', check_run_id: RUN.test(String(a.check_run_id || '')) ? a.check_run_id : '',
+    // A sub-agent with Work tools (kind "work", WORK_API): what it changed in the folder itself, and its Undo.
+    ...(a.kind === 'work' ? {changed: changedOf(a.changed), changed_more: count(a.changed_more) ? a.changed_more : 0, can_undo: a.can_undo === true,
+      undo: undoOf(a.undo), from_run_id: RUN.test(String(a.from_run_id || '')) ? a.from_run_id : ''} : {})};
 }
 /** list_pip_agents, checked: {agents (newest first), slots}, and from Pips API 104 `own`: what its sub-agents run on. */
 export function agentsPage(value, pip) {
@@ -151,8 +170,9 @@ export function findingsCardMarkup({runId, findings, total = findings.length, co
 }
 
 /** The Allow card (Ask me first): the same card as any other thing a Pip asks for, never a special "Fix it" card.
- *  Allow · Not now, and in its menu "Start a helper with Work tools" (a fix that needs what the Pip's copy doesn't
- *  have, such as a file Git ignores). `menu`: the menu is open; `busy`: "allow" | "no" | "helper" on its way. */
+ *  Allow · Not now, and in its menu "Start a sub-agent with Work tools" (a fix that needs what the Pip's copy doesn't
+ *  have, such as a file Git ignores; from WORK_API: `helper` false hides it for an older DGC). `menu`: the menu is
+ *  open; `busy`: "allow" | "no" | "helper" on its way. */
 export function fixAskMarkup(fix, {esc = escape, folder = '', off = false, busy = '', menu = false, error = '', helper = true} = {}) {
   const id = esc(fix.id), hold = off || busy ? ' disabled' : '', what = `Fix ${plural(fix.count, 'thing')}${folder ? ` in ${folder}` : ''}`;
   return `<section class="dgc-card pip-found-card pip-found-ask" data-flow-fix="${id}" data-state="ask" role="group" aria-label="${esc(what)}">`
@@ -162,10 +182,13 @@ export function fixAskMarkup(fix, {esc = escape, folder = '', off = false, busy 
     + `<button type="button" class="dgc-btn" data-flow-no="${id}"${hold}>${busy === 'no' ? 'Not now…' : 'Not now'}</button><span class="pip-found-gap"></span>`
     + (helper ? `<button type="button" class="dgc-btn pip-found-more-btn" id="pip-found-menu-${id}" data-flow-menu="${id}" aria-haspopup="menu" aria-expanded="${menu}" aria-label="More ways to fix this" title="More"${hold}><span aria-hidden="true">⋯</span></button>` : '')
     + '</div>'
-    + (menu && helper ? `<div class="dgc-menu pip-found-menu" role="menu" aria-label="More ways to fix this"><button type="button" role="menuitem" class="dgc-menu-row" data-flow-helper="${id}"${hold}><span class="dgc-menu-words"><span class="dgc-menu-label">Start a helper with Work tools</span>`
-      + `<span class="dgc-menu-sub">It works on your real files, not the copy, with everything a Work session has.</span></span></button></div>` : '')
+    + (menu && helper ? `<div class="dgc-menu pip-found-menu" role="menu" aria-label="More ways to fix this"><button type="button" role="menuitem" class="dgc-menu-row" data-flow-helper="${id}"${hold}><span class="dgc-menu-words"><span class="dgc-menu-label">${busy === 'helper' ? 'Starting…' : 'Start a sub-agent with Work tools'}</span>`
+      + `<span class="dgc-menu-sub">${esc(HELPER_SUB)}</span></span></button></div>` : '')
     + '</section>';
 }
+
+/** The menu row's note: what really happens (dgc/pip_work_agents.py). */
+export const HELPER_SUB = 'A sub-agent works on your real files, not the copy, with everything a Work session has, including files Git ignores such as .env. What it changes is there at once, with Undo.';
 
 /** "You allowed: Fix 3 things in lime_tiles · 8:06 PM", or what Not now left. One quiet line. */
 export function fixDecidedLine(fix, {esc = escape, folder = '', clock = () => ''} = {}) {

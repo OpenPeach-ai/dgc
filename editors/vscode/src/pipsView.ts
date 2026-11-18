@@ -62,8 +62,8 @@ export const RELATED_API = 96;
 export interface RelatedPip { id: string; name: string; pip_type: string; why: Array<'asked' | 'set_up' | 'folder'>; running: boolean; needs_you: number }
 /** What a Pip found and its fix, in its own chat (the Pips flow design of 14 Nov; Pips API 96; src/pipFlow.js):
  *  list_pip_fixes {pip_id} reads its fixes and what only the user can do, decide_pip_fix {pip_id, fix_id,
- *  expected_digest, allow} is the Allow card's answer, start_pip_work_helper {pip_id, fix_id} starts a helper with Work
- *  tools on the real folder, answer_pip_waiting {pip_id, waiting_id, answer} answers what only the user can do, and
+ *  expected_digest, allow} is the Allow card's answer, start_pip_work_helper {pip_id, fix_id} starts a sub-agent with
+ *  Work tools on the real folder (from Pips API 109: WORK_AGENTS_API), answer_pip_waiting {pip_id, waiting_id, answer} answers what only the user can do, and
  *  commit_pip_project_change {pip_id, change_id} commits the files a fix put in the folder. Why a request is refused,
  *  or '' when it may go: an older DGC is never sent any of them, and each must name its Pip and what it answers. */
 const FLOW_COMMANDS = ['list_pip_fixes', 'decide_pip_fix', 'start_pip_work_helper', 'answer_pip_waiting', 'commit_pip_project_change'];
@@ -74,7 +74,8 @@ export function pipFlowRefusal(request: any, apiVersion: number): string {
   const id = (v: unknown, re: RegExp) => typeof v === 'string' && re.test(v);
   if (!id(request.pip_id, /^pip_[a-f0-9]{32}$/)) return 'Choose a Pip first.';
   if (request.type === 'decide_pip_fix' && !(id(request.fix_id, /^pipfix_[a-f0-9]{32}$/) && typeof request.expected_digest === 'string' && request.expected_digest.length <= 128 && typeof request.allow === 'boolean')) return 'Answer the fix its card shows: Allow, or Not now.';
-  if (request.type === 'start_pip_work_helper' && !id(request.fix_id, /^pipfix_[a-f0-9]{32}$/)) return 'Choose the fix the helper is for.';
+  if (request.type === 'start_pip_work_helper' && apiVersion < WORK_AGENTS_API) return 'Update DGC to start a sub-agent with Work tools.';
+  if (request.type === 'start_pip_work_helper' && !id(request.fix_id, /^pipfix_[a-f0-9]{32}$/)) return 'Choose the fix the sub-agent is for.';
   if (request.type === 'answer_pip_waiting' && !(id(request.waiting_id, /^pipwait_[a-f0-9]{32}$/) && ['done', 'later', 'not_a_problem', 'undo'].includes(request.answer))) return 'Choose I’ve done it, Remind me later or Not a problem.';
   if (request.type === 'commit_pip_project_change' && !id(request.change_id, /^pchange_[0-9a-f]{32}$/)) return 'Choose the change to commit.';
   return '';
@@ -85,9 +86,13 @@ export function pipFlowRefusal(request: any, apiVersion: number): string {
  *  From Pips API 104 set_pip_agents also takes what they run on (its picker's Sub-agents tab): model_choice ("This
  *  Pip's model" is mode default; a model on DGC's own connection, or a saved provider's; never a subscription app or
  *  DGC Router), thinking, context_size and fallback ({provider, model}, model "" for none). */
-const AGENT_COMMANDS = ['list_pip_agents', 'stop_pip_agent', 'set_pip_agents', 'retry_pip_fix'];
+const AGENT_COMMANDS = ['list_pip_agents', 'stop_pip_agent', 'set_pip_agents', 'retry_pip_fix', 'undo_pip_agent_job'];
 export const AGENTS_API = 97;
 export const AGENTS_OWN_API = 104;
+/** A Pip's sub-agent with Work tools (Pips API 109; dgc/pip_work_agents.py):
+ *  start_pip_work_helper starts one on the real folder (the user's press is the yes at every level), and
+ *  undo_pip_agent_job {pip_id, job_id} puts back what it changed there. An older DGC is sent neither. */
+export const WORK_AGENTS_API = 109;
 const OWN_FIELDS = ['model_choice', 'thinking', 'context_size', 'fallback'];
 const OWN_PROVIDER = /^provider_[a-f0-9]{32}$/;
 const ownModelId = (v: unknown) => typeof v === 'string' && v.length >= 1 && v.length <= 256;
@@ -129,6 +134,10 @@ export function pipAgentsRefusal(request: any, apiVersion: number): string {
     if (problem) return problem;
   }
   if (request.type === 'retry_pip_fix' && !(id(request.fix_id, /^pipfix_[a-f0-9]{32}$/) && typeof request.again === 'boolean')) return 'Answer the Pip: Try again, or Leave it.';
+  if (request.type === 'undo_pip_agent_job') {
+    if (apiVersion < WORK_AGENTS_API) return 'Update DGC to undo what a sub-agent with Work tools changed.';
+    if (!id(request.job_id, /^pipagent_[a-f0-9]{32}$/)) return 'Choose the sub-agent whose change to undo.';
+  }
   return '';
 }
 const OWNER_COMMANDS = ['get_pip_owner', 'set_pip_owner', 'list_session_pips'];

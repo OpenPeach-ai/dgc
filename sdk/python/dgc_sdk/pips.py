@@ -530,6 +530,11 @@ MUTATION_COMMANDS |= API107_MUTATIONS
 # Local only.
 API108_MUTATIONS = frozenset({'library_pip_message_image'})
 MUTATION_COMMANDS |= API108_MUTATIONS
+# API 109: a Pip's sub-agent with Work tools, on the real folder, for a fix
+# its copy can't do. start_pip_work_helper starts one (the user's press is the yes at every level); list_pip_agents
+# rows of kind "work" carry changed, can_undo and undo; undo_pip_agent_job puts back what it changed. Local only.
+API109_MUTATIONS = frozenset({'undo_pip_agent_job'})
+MUTATION_COMMANDS |= API109_MUTATIONS
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -693,6 +698,7 @@ COMMAND_FIELDS = {
     'stop_pip_agent': frozenset({'pip_id', 'agent_id'}),
     'set_pip_agents': frozenset({'pip_id', 'slots', 'model_choice', 'thinking', 'context_size', 'fallback'}),
     'retry_pip_fix': frozenset({'pip_id', 'fix_id', 'again'}),
+    'undo_pip_agent_job': frozenset({'pip_id', 'job_id'}),
     'fill_pip_code': frozenset({'pip_id', 'action_id', 'expected_digest', 'code'}),
     'get_your_browser': frozenset(),
     'set_your_browser_site': frozenset({'site', 'mode', 'pips'}),
@@ -1028,7 +1034,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API108_MUTATIONS:
+        if command in API109_MUTATIONS:
+            minimum = 109
+        elif command in API108_MUTATIONS:
             minimum = 108
         elif command in API107_READS | API107_MUTATIONS:
             minimum = 107
