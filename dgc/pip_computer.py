@@ -639,9 +639,11 @@ class Host:
         self._say_at_work(run_id)
 
     def _begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=(),
-               level: str = "ask", unattended: bool = False, level_now=None, carry=None, user_turn: bool = False) -> None:
+               level: str = "ask", unattended: bool = False, level_now=None, carry=None, user_turn: bool = False,
+               config=None) -> None:
         """`level` is the Pip's level as the run starts; `level_now` (pip_levels.follow) reads it again at each held step,
-        so a change in its prompt box while the reply runs applies from the next step."""
+        so a change in its prompt box while the reply runs applies from the next step. `config`: today's settings, for
+        the safety check's one question about the user's own words (_user_asked)."""
         from .pip_levels import LEVELS
         with self.lock:
             self.run_id, self.frames_dir, self.frames, self.waiting = run_id, Path(frames_dir), 0, []
@@ -655,6 +657,7 @@ class Host:
             self._level_now = level_now if callable(level_now) else None
             self.unattended, self.target, self.upload_from_chat, self._level_pending = bool(unattended), "", None, []
             self.user_turn = bool(user_turn) and not self.unattended   # the user's own message started it (pip_holds)
+            self.config, self._guard_questions = config, 0
             self.browser.site_gate = self._site_ok if self.careful else None
             # The run's steps are numbered for its report and its timeline ("Recorded as step 3"); what changed is told
             # against the page the Pip last saw (seen); a page's confirm or prompt and its file picker wait for the Pip.
@@ -1702,6 +1705,8 @@ class Host:
         if not block.intent:
             return (f"Not run: DGC's safety check never runs this ({said}: {block.reason}), at any level. If it is truly "
                     "needed, tell the user in one plain sentence what it would do; carry on with the rest.")
+        if Host._user_asked(self, command, block):
+            return None                                    # "push it": their own words asked for it (his call, 18 Nov)
         from .workspace_registry import WorkspaceRegistry
         try:
             with WorkspaceRegistry(self.state_directory) as registry:
@@ -1719,6 +1724,45 @@ class Host:
                 return (f"Not run: {why_not}. " if why_not else "") + held
         except (OSError, RegistryError, sqlite3.Error):
             return f"Not run: DGC's safety check stopped it ({said}: {block.reason}) and couldn't ask the user now."
+
+    def _user_asked(self, command: str, block) -> bool:
+        """Work's question, for a Pip's own Terminal: did the user's own messages (this turn's, and up to two before it)
+        ask for exactly this step? One short call to the run's own model, which sees only their words and the step. Yes:
+        it runs, with no question in the chat. No, unsure, no answer in 45 seconds, a routine's run, a turn DGC started,
+        a model DGC can't call this way (a signed-in CLI, DGC Router) or past five questions a run: it is asked in the
+        chat, as before."""
+        if not getattr(self, "user_turn", False) or getattr(self, "unattended", False) or getattr(self, "config", None) is None:
+            return False
+        if getattr(self, "_guard_questions", 0) >= GUARD_QUESTIONS:
+            return False
+        from . import auto_guard, pip_second_look
+        from .workspace_registry import WorkspaceRegistry
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                words = pip_second_look.own_words(registry, self.pip_id, self.run_id)
+                client = pip_second_look._client(registry, self.config, self.run_id) if words else None
+        except Exception:                                  # noqa: BLE001 - no question: it asks in the chat
+            return False
+        if client is None:
+            return False
+        self._guard_questions = getattr(self, "_guard_questions", 0) + 1
+        client.max_tokens = 24                             # YES or NO, as Work's question
+        box, cancel = {}, threading.Event()
+
+        def call():
+            try:
+                reply = client.chat(auto_guard.intent_messages(words, block, auto_guard.step_text("bash", {"command": command})),
+                                    tools=None, reasoning_effort="off", cancel=cancel)
+                box["text"] = str(getattr(reply, "content", "") or "")
+            except Exception:                              # noqa: BLE001 - no answer is a no
+                box["text"] = ""
+        worker = threading.Thread(target=call, name="dgc-pip-guard-question", daemon=True)
+        worker.start()
+        worker.join(GUARD_SECONDS)
+        if worker.is_alive():
+            cancel.set()
+            return False
+        return auto_guard.said_yes(box.get("text", ""))
 
     # -- the whole desktop ---------------------------------------------------------------------
 
@@ -3092,6 +3136,8 @@ SIGN_IN_NO_PAGE = ("Open {site}'s sign-in page first (the page with its username
 SECRET_ON_PAGE = ("A saved password or code was just typed into this page, so that step waits: it could copy it from "
                   "there. Send the form (sign_in does) or open another page first; read and look work as usual.")
 HOLD_REFUSED = ("drag", "desktop_drag", "desktop_key", "desktop_type")
+GUARD_QUESTIONS = 5               # the safety check's questions about the user's words, per run
+GUARD_SECONDS = 45                # each, from asking to the answer
 # The safety check's six kinds (auto_guard), as a Pip says them about its own computer.
 GUARD_WORDS = {"Outside the project": "it writes outside my Files", "Credentials": "it reads saved passwords or keys",
                "Destructive": "it can't be undone", "Sending data out": "it sends data out",

@@ -317,5 +317,59 @@ class RunTurnKeepsTheWords(Case):
         self.assertEqual(agent._user_words[-1][:6], "ask 39")
 
 
+
+class TheUsersOwnWords(Case):
+    """His call, 18 Nov ("copy that same style"): what the user allowed stays allowed, no warnings for hypothetical
+    risks, and a secret never shows. Every Work session's own prompt says so."""
+
+    def test_the_session_prompt_says_the_three_rules(self):
+        from dgc import auto_guard
+        harness = self.harness()
+        prompt = harness.agent.messages[0]["content"]
+        for rule in auto_guard.USER_AUTHORITY:
+            self.assertIn(rule, prompt)
+
+
+class YourSudoPasswordInEnv(Case):
+    """His call, 18 Nov: "the sudo password is in .env, use it" is his to decide; the model must be able to do it. DGC
+    still hides the value from the model (it never reaches the model's provider), and says once how to use it by name.
+    A stand-in sudo checks the password it is given: nothing here runs as root."""
+
+    def project(self):
+        harness = self.harness(words=["The sudo password is in .env as SUDO_PASSWORD, use it to install the package"])
+        (harness.root / ".env").write_text("SUDO_PASSWORD=Tr0ub4dor-and-3\nPORT=3000\n")
+        from dgc import leak_guard
+        leak_guard.forget()
+        tools = Path(tempfile.mkdtemp(prefix="dgc-fake-sudo-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(tools, ignore_errors=True))
+        fake = tools / "sudo"
+        fake.write_text("#!/bin/sh\nread pw\n[ \"$pw\" = 'Tr0ub4dor-and-3' ] && shift 3 && \"$@\" || echo 'sudo: wrong password'\n")
+        fake.chmod(0o755)
+        path = patch.dict(os.environ, {"PATH": f"{tools}:{os.environ.get('PATH', '')}"})
+        path.start()
+        self.addCleanup(path.stop)
+        return harness
+
+    def read(self, harness, call_id):
+        return harness.agent._handle_call(ToolCall(call_id, "read_file", {"path": ".env"}))
+
+    def test_the_value_stays_hidden_and_the_model_is_told_once_how_to_use_it(self):
+        harness = self.project()
+        first = self.read(harness, "r1")
+        self.assertNotIn("Tr0ub4dor-and-3", first)
+        self.assertIn("[REDACTED]", first)
+        self.assertIn("use it from the shell by its name", first)
+        self.assertNotIn("use it from the shell by its name", self.read(harness, "r2"), "once a session")
+
+    def test_used_by_name_it_works_when_your_own_words_asked(self):
+        harness = self.project()
+        self.model.answer = "YES"                              # the safety check's question: you asked for it
+        out = self.call(harness, "set -a; . ./.env; set +a; printf '%s\\n' \"$SUDO_PASSWORD\" | sudo -S -p '' echo installed")
+        self.assertIn("installed", out)
+        self.assertNotIn("Tr0ub4dor-and-3", out)
+        self.assertEqual(len(self.model.asked), 1, "sudo is a system change: one question about your words")
+        self.assertIn("SUDO_PASSWORD", self.model.asked[0][1]["content"])
+        self.assertNotIn("Tr0ub4dor-and-3", self.model.asked[0][1]["content"])
+
 if __name__ == "__main__":
     unittest.main()

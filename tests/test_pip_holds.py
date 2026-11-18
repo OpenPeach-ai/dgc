@@ -326,6 +326,64 @@ class TheSafetyCheckOnItsTerminal(unittest.TestCase):
         self.assertTrue(said.startswith(WAITING), said)
 
 
+class TheTerminalCheckReadsYourOwnWords(TheSafetyCheckOnItsTerminal):
+    """His call, 18 Nov: "push it" in your own message is the yes, as in Work: one short question to the run's model
+    about your own words, then it runs with no second question in the chat."""
+
+    def said(self, words, answer, *, unattended=False):
+        from types import SimpleNamespace
+        from dgc import pip_chat
+        run = pip_chat.send(self.store, self.pip["id"], words, f"k-{len(words)}-{unattended}", "editor-user", self.cfg)["run"]
+        host = self.host(run["id"], unattended=unattended)
+        host.config, host._guard_questions = self.cfg, 0
+        asked = []
+
+        class Client:
+            max_tokens = 8
+
+            def chat(self, messages, **kwargs):
+                asked.append(messages)
+                return SimpleNamespace(content=answer)
+        with patch("dgc.pip_second_look._client", return_value=Client()):
+            out = self.guard(host, "cd site && git push origin main")
+        return out, asked
+
+    def test_your_own_push_it_runs_with_no_question(self):
+        out, asked = self.said("Publish the site: push it to GitHub", "YES")
+        self.assertIsNone(out)
+        self.assertEqual(len(asked), 1)
+        self.assertIn("Publish the site: push it to GitHub", asked[0][1]["content"], "your words, and only them")
+        self.assertIn("git push origin main", asked[0][1]["content"])
+        self.assertEqual(pip_holds.waiting(self.registry, self.pip["id"]), [])
+
+    def test_words_that_didnt_ask_still_ask_in_the_chat(self):
+        out, asked = self.said("Tidy the site's folder", "NO")
+        self.assertTrue(out and out.startswith(WAITING), out)
+        self.assertEqual(len(asked), 1)
+
+    def test_a_routine_never_asks_the_question(self):
+        out, asked = self.said("Publish the site: push it", "YES", unattended=True)
+        self.assertTrue(out and out.startswith(WAITING), out)
+        self.assertEqual(asked, [], "no words of the user's own in a routine's run")
+
+    def test_at_most_five_questions_a_run(self):
+        from types import SimpleNamespace
+        from dgc import pip_chat, pip_computer
+        run = pip_chat.send(self.store, self.pip["id"], "Push it", "k-five", "editor-user", self.cfg)["run"]
+        host = self.host(run["id"])
+        host.config, host._guard_questions = self.cfg, 0
+        client = SimpleNamespace(max_tokens=8, chat=lambda messages, **kw: SimpleNamespace(content="NO"))
+        with patch("dgc.pip_second_look._client", return_value=client), \
+                patch("dgc.pip_levels.does_it_all", return_value=True):
+            for _ in range(7):
+                pip_computer.Host._guard(host, "git push origin main")
+        self.assertEqual(host._guard_questions, pip_computer.GUARD_QUESTIONS)
+
+
+for _name in [n for n in vars(TheSafetyCheckOnItsTerminal) if n.startswith("test_")]:
+    setattr(TheTerminalCheckReadsYourOwnWords, _name, None)     # its fixtures only
+
+
 def pip_computer_cards(test):
     from dgc import pip_computer
     return [a for a in pip_computer.list_actions(test.registry, test.pip["id"]) if a["status"] == "pending"]

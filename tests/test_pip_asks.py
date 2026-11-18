@@ -221,6 +221,7 @@ class PersonalPipAsks(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertEqual(pip_holds.ANSWER_TOOL in seen["tools"], carried)
                 self.assertEqual(asked["id"] in seen["prompt"], carried)
+                self.assertIn("stays allowed", seen["prompt"], "the user's own words (18 Nov): every Pip that can act")
                 self.assertEqual(result.get("answers"), [{"id": asked["id"], "answer": "yes"}] if carried else None)
             self.store.claim_next()
             self.store.finish(sent["id"], result=result)

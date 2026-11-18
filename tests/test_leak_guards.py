@@ -71,6 +71,20 @@ class TheProjectsEnvValuesAreHidden(Project):
         for value in ("3000", "production", "https://shop.example.com"):
             self.assertNotIn(value, known, f"{value} is a setting, not a secret: hiding it would blind the model")
 
+    def test_a_sudo_password_by_the_names_people_give_it(self):
+        # His DGC_SUDO (18 Nov): neither the general rule's names nor a secret's shape (short, one word) caught it.
+        (self.root / ".env").write_text(ENV + "DGC_SUDO=Wombat-Lake-71\nSUDO_PASS=kettle9drum\nDB_PW=Blue#Heron22\n"
+                                              "BYPASS_CACHE=true\nCOMPASS_URL=https://maps.example.com\n")
+        leak_guard.forget()
+        known = self.secrets()
+        for value in ("Wombat-Lake-71", "kettle9drum", "Blue#Heron22"):
+            self.assertIn(value, known, value)
+        for value in ("true", "https://maps.example.com"):
+            self.assertNotIn(value, known, value)
+        shown = self.run_tool("read_file", path=".env")
+        self.assertIn("DGC_SUDO=" + redaction.REDACTED, shown)
+        self.assertNotIn("Wombat-Lake-71", shown)
+
     def test_what_the_model_reads_never_holds_them(self):
         shown = self.run_tool("read_file", path="settings.py")
         self.assertNotIn("hunter2hunter2", shown)

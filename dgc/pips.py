@@ -3692,7 +3692,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 """The user's apps, plugins and borrowing their Chrome, said to a Pip whose run has them (a Personal Pip,
                 or a folder Pip's chat with its box: step 2b)."""
                 from .leak_guard import INSTRUCTION as LEAK_WORDS
+                from .auto_guard import USER_AUTHORITY
                 said = '\n' + LEAK_WORDS                 # leak guard 3 (0.52): every Pip with a world hears it
+                said += ''.join('\n' + rule for rule in USER_AUTHORITY)     # the user's own words (18 Nov)
                 if apps_pin is not None and conversation is not None and not (lent or {}).get('refused'):
                     # Borrowing the user's own Chrome (pip_borrow): how to ask, and, in the reply it was lent to, how to use it.
                     said += '\n' + pip_borrow.NOTICE
@@ -5354,7 +5356,7 @@ def _execute_run(registry, row, config):
                             level=pip_levels.level(registry, row['pip_id']),
                             level_now=pip_levels.follow(registry.directory, row['pip_id']),
                             unattended=row['requested_by'] in pip_careful.UNATTENDED,
-                            user_turn=manifest.get('user_turn') is True)
+                            user_turn=manifest.get('user_turn') is True, config=config)
         computer_socket = pip_computer.RunSocket(computer_host, row['id'])
         from . import pip_desktop_eyes, pip_screen
         try:
