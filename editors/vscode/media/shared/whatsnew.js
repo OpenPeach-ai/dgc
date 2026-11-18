@@ -183,7 +183,7 @@
       const was = levels("Ask me first"), now = levels("Approve for me"); was.classList.add("was");
       const pick = box("wn-pick", was, now);
       const title = el("strong", "dgc-card-title"); "March totals round down".split(" ").forEach((w, i) => { if (i) title.append(" "); title.append(span("wn-word", w)); });
-      const chips = el("ul", "dgc-card-chips"); for (const c of ["Why: each line is rounded first", "+4 −2"]) { const li = el("li", "dgc-chip"); li.append(span("", c)); chips.append(li); }
+      const chips = el("ul", "dgc-card-chips"); for (const c of ["Why: rounding", "+4 −2"]) { const li = el("li", "dgc-chip"); li.append(span("", c)); chips.append(li); }
       const answers = part("div", "dgc-card-actions", root.DgcIconActions?.html?.([{ label: "Review", primary: true }, { label: "Apply" }]) || "");
       const hub = el("section", "dgc-card dgc-card-thin dgc-hub-card"); hub.dataset.source = "personal"; hub.dataset.group = "needs";
       hub.append(box("dgc-card-head", part("span", "dgc-card-icon dgc-card-face", face("lens", "waiting_approval")), box("dgc-card-words", title, span("dgc-card-sub", "Lens · Pip · now"))), chips, answers);
