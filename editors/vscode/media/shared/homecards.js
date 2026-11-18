@@ -21,6 +21,12 @@
 // card in a wide side bar. Adding Weather always asks for the place (the saved one is in the field); Change place is on
 // every size (a card with no room for the field opens whole at it); a weather that could not be read offers Try again
 // and is asked again after a minute.
+// Browser (his call, 17 Nov): a search field, and under it the last two or three links visited in Your Browser (the
+// person's own tabs, never a Pip's); what is typed (a search or an address) opens Your Browser with it. Only where DGC has
+// Your Browser (Pips API 107): an older DGC lists no such card and Home leaves it out. Where Google Chrome is needed (his
+// call, 18 Nov) the card offers ONE button, Install Google Chrome (a small dialog first, then the computer's own password
+// prompt), says it is installing, and where no prompt can open (Remote-SSH) or it was closed, shows the one terminal line
+// with Copy; once Chrome is there it is the field and the links again, by itself.
 // Token usage names the models with their provider and share, and links to Settings. Notes is many notes: a list, a
 // note open beside it or over it, search, pins, tick boxes, Undo. Widgets and Artifacts page through what the Library lists.
 //
@@ -51,6 +57,7 @@
     clock: { name: "Clock", line: "The time here, and in up to three more cities", group: "Everyday" },
     weather: { name: "Weather", line: "Now and the next hours, for a place you choose", group: "Everyday" },
     note: { name: "Notes", line: "Your notes, kept on this computer", group: "Everyday", large: true },
+    browser: { name: "Browser", line: "Search or type an address, and your last visited links", group: "Everyday" },
   };
   const TYPES = Object.keys(CARDS);
   // Every time zone there is (IANA), for the Clock's added cities: the engine's own list where it has one, else this one,
@@ -247,6 +254,8 @@
     // (A Clock of three or four is a Large card where there are Large cards: two rows of two, nothing cut.)
     const large = (id) => (id === "clock" ? zonesNow().length >= 2 : !!CARDS[id].large);
     const formOf = (id, g) => (g === "l" ? (large(id) ? "l" : "m") : g);
+    /** Whether this DGC has what a card shows: Browser only with Your Browser (Pips API 107). */
+    const offered = (id, d) => id !== "browser" || d.browser?.offered === true;
 
     // ---- what each card draws -----------------------------------------------------------------------------------------
     const li = (r, more = "") => `<button type="button" class="hc-li${r.fresh ? " hc-new" : ""}" data-open="${esc(r.key)}" title="${esc(r.title || `Open ${r.name}`)}"><span class="hc-ico">${r.icon || ""}</span><span class="hc-tx"><span class="hc-nm">${esc(r.name)}${r.star ? ' <span class="hc-star" title="Core, your main Pip">★</span>' : ""}</span>${r.meta ? `<span class="hc-meta">${esc(r.meta)}</span>` : ""}</span>${more || (r.fresh ? '<span class="hc-newmark">New</span>' : r.live ? '<span class="hc-livedot" title="Running"></span>' : r.count ? `<span class="hc-cnt">${r.count}</span>` : r.age ? `<span class="hc-age">${esc(r.age)}</span>` : "")}</button>`;
@@ -341,6 +350,41 @@
       if (form === "s") { const r = rows[0]; return `<span class="hc-lbl">Running now${rows.length ? '<span class="hc-livedot"></span>' : ""}</span><span class="hc-big">${rows.length}</span><span class="hc-grow"></span>${r ? `<span class="hc-mid">${esc(r.name)}</span><span class="hc-sub hc-cut">${esc(r.meta || "")}</span>` : '<span class="hc-sub">Nothing running</span>'}`; }
       const shown = rows.slice(0, form === "full" ? 30 : tight ? 2 : 4);
       return `${headOf("Running now", rows.length ? '<span class="hc-livedot"></span>' : "")}${shown.length ? `<div class="hc-list">${shown.map((r) => li(r, '<span class="hc-btn hc-open-word">Open</span>')).join("")}</div>${rows.length > shown.length ? `<span class="hc-more-n">${rows.length - shown.length} more</span>` : ""}` : '<p class="hc-quiet">Nothing running. A session at work, or a chat answering, shows here.</p>'}`;
+    }
+    // Browser: the field, then the last links (Small two, Medium three, two where a wide side bar's row is short). A field at
+    // every size, as Notes is: a Small card never opens on a click. Where Your Browser can't run here it says why: with
+    // Install Google Chrome where it is needed (b.install), and the terminal line with Copy where no password prompt can
+    // open or the last one was closed.
+    const HALO = '<span class="halo hc-halo" aria-hidden="true"><i></i><i></i><i></i></span>';
+    function installBlock(form, b) {
+      const i = b.install, small = form === "s";
+      if (i.state === "running") return `<p class="hc-quiet hc-browse-why hc-installing" role="status">${small ? "Installing Google Chrome…" : "Installing Google Chrome. Your computer asks for your password."}</p>`;
+      const terminal = i.how === "terminal", failed = i.state === "failed";
+      const words = small ? (failed ? "Didn't install" : "Needs Google Chrome")
+        : failed ? `${i.error || "Google Chrome wasn't installed."} You can run this line in a terminal instead:`
+        : terminal ? `${b.reason} Run this line in a terminal on the computer DGC runs on (the editor's own terminal is one); it asks for your password there.`
+        : b.reason;
+      const line = (terminal || failed) && !small ? `<code class="hc-cmd" title="${esc(i.line)}">${esc(i.line)}</code>` : "";
+      const copy = terminal || failed ? `<button type="button" class="hc-btn hc-copy-line" title="Copy the line: ${esc(i.line)}">${shared("copy", 14)}<span>${small ? "Copy line" : "Copy"}</span></button>` : "";
+      const install = i.how === "password" ? `<button type="button" class="hc-btn hc-install" title="Install Google Chrome from Google's own package source">${shared("save", 14)}<span>${small ? "Install" : "Install Google Chrome"}</span></button>` : "";
+      const why = failed && small ? ` title="${esc(i.error || "Google Chrome wasn't installed.")}"` : "";
+      return `<p class="hc-quiet hc-browse-why"${failed ? ' role="status"' : ""}${why}>${esc(words)}</p>${line}<div class="hc-install-row">${install}${copy}</div>`;
+    }
+    function browserCard(form, d, tight) {
+      const b = d.browser || {}, links = Array.isArray(b.links) ? b.links.slice(0, form === "s" || tight ? 2 : 3) : [];
+      const head = form === "s" ? `<span class="hc-lbl">${HALO}Browser</span>`
+        : headOf("Browser", "", b.reason ? "" : `<button type="button" class="hc-lnk hc-browse-open" title="${b.view === "tab" ? "Open Your Browser in a tab here" : "Open Your Browser beside the editor"}">Open</button>`);
+      if (b.install) return `${head}${installBlock(form, b)}`;
+      const field = b.reason ? "" : `<form class="hc-browse" role="search" data-fk="browse-form"><input class="hc-url hc-field" type="text" data-fk="browse" enterkeyhint="go" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2000"`
+        + ` placeholder="${form === "s" ? "Search or address" : "Search Google or type an address"}" aria-label="Search Google or type an address, then Enter: it opens in Your Browser">`
+        + (form === "s" ? "" : '<button type="submit" class="hc-btn hc-go" title="Open in Your Browser (Enter)">Go</button>') + "</form>";
+      const why = b.reason ? (form === "s" ? `<span class="hc-sub hc-browse-why" title="${esc(b.reason)}">Not available here</span>` : `<p class="hc-quiet hc-browse-why">${esc(b.reason)}</p>`) : "";
+      const said = b.error ? `<p class="hc-quiet hc-browse-why" role="status">${esc(b.error)}</p>` : "";
+      const glyph = shared("globe", 14);
+      const rows = b.reason ? "" : links.map((l) => `<button type="button" class="hc-li hc-link" data-browse="${esc(l.url)}" title="${esc(`Open ${l.url} in Your Browser`)}"><span class="hc-ico hc-globe">${glyph}</span>`
+        + `<span class="hc-tx"><span class="hc-nm">${esc(l.title || l.host || l.url)}</span>${form === "s" || tight ? "" : `<span class="hc-meta">${esc(l.host || "")}</span>`}</span></button>`).join("");
+      const none = !links.length && !b.reason ? `<p class="hc-quiet hc-browse-none">${form === "s" ? "Your last links show here" : "The last sites you visit in Your Browser show here."}</p>` : "";
+      return `${head}${field}${why}${said}${rows ? `<div class="hc-links">${rows}</div>` : none}`;
     }
     function quickCard(form, d) {
       const q = d.quick || {}, items = [["work", "Work", "New work", q.work], ["chat", "Chat", "New chat", q.chat], ["pip", "Pip", "New Pip", q.pip]];
@@ -459,13 +503,13 @@
       return (form === "s" ? `<span class="hc-lbl">${name}<span class="hc-cnt">${rows.length}${said.more ? "+" : ""}</span></span>` : headOf(name, "", link)) + stack + pager;
     }
     const render = (id, form, d, tight) => (id === "token" ? tokenCard(form) : id === "recent" ? recentCard(form, d, tight) : id === "needs" ? needsCard(form, d) : id === "running" ? runningCard(form, d, tight)
-      : id === "quick" ? quickCard(form, d) : id === "folders" ? foldersCard(form, d) : id === "clock" ? clockCard(form) : id === "weather" ? weatherCard(form, tight) : id === "note" ? ""
+      : id === "quick" ? quickCard(form, d) : id === "browser" ? browserCard(form, d, tight) : id === "folders" ? foldersCard(form, d) : id === "clock" ? clockCard(form) : id === "weather" ? weatherCard(form, tight) : id === "note" ? ""
       : id === "widgets" || id === "artifacts" ? stackCard(id, form, d) : listCard(id, form, d, tight));
     /** A card's one line while Home is arranged, and its small preview in the library. */
     function caption(id, d) {
       return id === "needs" ? (d.needs?.count ? `${d.needs.count} waiting` : "Nothing waiting") : id === "running" ? ((d.running || []).length ? `${d.running.length} running` : "Nothing running") : id === "recent" ? "Work, chats and Pips"
         : id === "token" ? "Tokens, requests, cache" : id === "quick" ? "New work · chat · Pip" : id === "work" ? plural(d.work?.total || 0, "session") : id === "chats" ? plural(d.chats?.total || 0, "chat") : id === "pips" ? plural(d.pips?.total || 0, "Pip")
-        : id === "folders" ? plural((d.folders?.rows || []).length, "folder") : id === "clock" ? "The time here" : id === "weather" ? placeOf()?.name || "A place you choose"
+        : id === "folders" ? plural((d.folders?.rows || []).length, "folder") : id === "browser" ? (d.browser?.install ? "Needs Google Chrome" : (d.browser?.links || []).length ? plural(d.browser.links.length, "last link") : "Search or type an address") : id === "clock" ? "The time here" : id === "weather" ? placeOf()?.name || "A place you choose"
         : id === "widgets" ? (made.widgets ? plural(rowsOf("widgets").length, "widget") : "The widgets made for you") : id === "artifacts" ? (made.artifacts ? plural(rowsOf("artifacts").length, "artifact") : "What was made for you") : plural(notesApp?.count() || 0, "note");
     }
     function preview(id, d) {
@@ -476,6 +520,7 @@
       if (id === "recent") return marks([...(d.news || []), ...(d.recent || [])]);
       if (id === "work" || id === "chats" || id === "pips") return marks(d[id]?.rows);
       if (id === "quick") return `${d.quick?.work || ""}${d.quick?.chat || ""}${d.quick?.pip || ""}`;
+      if (id === "browser") return `${HALO}<span class="hc-pvw">Search or type an address</span>`;
       if (id === "folders") return (d.folders?.rows || []).slice(0, 3).map((r) => (d.folders.mark ? d.folders.mark(r.folder, 28, "") : "")).join("") || `<span class="hc-sub">No folders yet</span>`;
       if (id === "clock") return `<span class="hc-pvt">${new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date())}</span>`;
       if (id === "weather") return weather?.ok && placeOf() ? `${wx(weather.now.code, weather.now.day, 20)}<span class="hc-pvt">${Math.round(layout.settings.weather.unit === "f" ? (weather.now.temp * 9) / 5 + 32 : weather.now.temp)}°</span>` : `${wx(1, true, 20)}<span class="hc-pvw">A place you choose</span>`;
@@ -490,7 +535,7 @@
     function fill(section, id, form, d, tight) {
       const arranging = ui.arranging && section.parentNode === grid;
       const html = arranging ? `${GRIP}<span class="hc-tx"><span class="hc-ct">${esc(CARDS[id].name)}</span><span class="hc-cap">${esc(ui.lifted === id ? "Being moved · Space drops it here" : caption(id, d))}</span></span><button type="button" class="hc-x" aria-label="Remove ${esc(CARDS[id].name)}" title="Take ${esc(CARDS[id].name)} off Home">${CROSS}</button>` : render(id, form, d, tight);
-      const small = form === "s" && !arranging && id !== "quick" && id !== "note";      // (Notes is a field at every size)
+      const small = form === "s" && !arranging && id !== "quick" && id !== "note" && id !== "browser";      // (Notes and Browser are a field at every size)
       section.dataset.form = form;
       section.classList.toggle("hc-lifted", arranging && ui.lifted === id);
       if (small || arranging) { section.tabIndex = 0; section.setAttribute("role", arranging ? "listitem" : "button"); } else { section.removeAttribute("tabindex"); section.setAttribute("role", "group"); }
@@ -504,7 +549,7 @@
       const moved = [...section.querySelectorAll("[data-slot] > *")], inSlot = moved.some((node) => node.contains(doc.activeElement)) ? doc.activeElement : null;
       const key = inSlot ? null : focusKey(section);
       // A field being typed in (a note, a search, a city) keeps its words, its caret and the keyboard across the draw.
-      const typed = !inSlot && doc.activeElement?.matches?.("input.hc-city, input.hc-zone") && section.contains(doc.activeElement) ? doc.activeElement : null;
+      const typed = !inSlot && doc.activeElement?.matches?.("input.hc-city, input.hc-zone, input.hc-url") && section.contains(doc.activeElement) ? doc.activeElement : null;
       const held = typed ? { fk: typed.dataset.fk, value: typed.value, from: typed.selectionStart, to: typed.selectionEnd, top: typed.scrollTop, place: typed.__place || null } : null;
       for (const node of moved) pantry.append(node);
       filling = true; section.__html = html; section.innerHTML = html; filling = false;
@@ -532,7 +577,7 @@
     function section(id) { const s = doc.createElement("section"); s.className = `hc-card hc-${id}`; s.dataset.card = id; return s; }
     function drawNow() {
       pending = 0;
-      const d = data?.() || {}, g = gridForm(), order = layout.order.filter((id) => CARDS[id]);
+      const d = data?.() || {}, g = gridForm(), order = layout.order.filter((id) => CARDS[id] && offered(id, d));
       if (ui.open && !order.includes(ui.open)) ui.open = "";
       if (ui.arranging && !order.length) ui.arranging = false;
       // The head: Cards at the top right; while Home is arranged, what to do and Done.
@@ -869,8 +914,9 @@
     // ---- the card library, a pop-up -----------------------------------------------------------------------------------------
     function drawLibrary(d) {
       if (!library) return;
-      const groups = [...new Set(TYPES.map((id) => CARDS[id].group))], list = library.querySelector(".hc-lib-list");
-      if (!list.childElementCount) list.innerHTML = groups.map((g) => `<div class="hc-lib-grp">${esc(g)}</div><div class="hc-lib-grid">${TYPES.filter((id) => CARDS[id].group === g).map((id) => `<div class="hc-lib-item" data-card="${id}"></div>`).join("")}</div>`).join("");
+      const types = TYPES.filter((id) => offered(id, d)), groups = [...new Set(types.map((id) => CARDS[id].group))], list = library.querySelector(".hc-lib-list");
+      // (Drawn again when what this DGC offers changes: Browser comes with a DGC that has Your Browser.)
+      if (!list.childElementCount || list.__types !== types.join()) { list.__types = types.join(); list.innerHTML = groups.map((g) => `<div class="hc-lib-grp">${esc(g)}</div><div class="hc-lib-grid">${types.filter((id) => CARDS[id].group === g).map((id) => `<div class="hc-lib-item" data-card="${id}"></div>`).join("")}</div>`).join(""); }
       for (const item of list.querySelectorAll(".hc-lib-item")) {
         const id = item.dataset.card, on = layout.order.includes(id), adding = libraryAdding === id && !on;
         // Its preview, its name whole on a line of its own, its one line, then (level across a row of cards) whether it is
@@ -992,6 +1038,11 @@
         return;
       }
       if (t.closest(".hc-clear")) { act?.("clear"); return; }
+      const link = t.closest("[data-browse]");
+      if (link) { act?.("browse", link.dataset.browse); return; }
+      if (t.closest(".hc-browse-open")) { act?.("browse", ""); return; }
+      if (t.closest(".hc-install")) { act?.("install"); return; }               // its small dialog first (the page's own)
+      if (t.closest(".hc-copy-line")) { act?.("copy-line"); return; }
       if (t.closest(".hc-usage-link")) { act?.("usage"); return; }
       if (t.closest("[data-pin-folder]")) { act?.("pin", t.closest("[data-pin-folder]").dataset.pinFolder); return; }
       if (id === "widgets" || id === "artifacts") {
@@ -1010,9 +1061,20 @@
       if (row) { act?.("open", row.dataset.open); return; }
       if (tab) { act?.("tab", tab.dataset.tab); return; }
       // A Small card opens to its full form (a press on one of its own buttons, or in a hub's card, is that button's).
-      if (card.dataset.form === "s" && card.parentNode === grid && id !== "quick" && !t.closest("button, a, input, select, textarea, .dgc-hub-card")) open(id);
+      if (card.dataset.form === "s" && card.parentNode === grid && id !== "quick" && id !== "browser" && !t.closest("button, a, input, select, textarea, .dgc-hub-card, form")) open(id);
     });
     host.addEventListener("submit", (e) => {
+      // Browser: what was typed (a search or an address) opens Your Browser with it; the field is emptied for the next.
+      const browse = e.target.closest(".hc-browse");
+      if (browse) {
+        e.preventDefault();
+        const field = browse.querySelector(".hc-url"), text = String(field?.value || "").trim();
+        if (!text) { field?.focus(); return; }
+        act?.("browse", text);
+        if (field) field.value = "";
+        say(`Opening “${text.slice(0, 80)}” in Your Browser.`);
+        return;
+      }
       const form = e.target.closest(".hc-cityform"); if (!form) return;
       e.preventDefault();
       // Only a place taken from the list is saved: never whatever was typed.

@@ -17,7 +17,7 @@ import { Notes, notesOf } from "./notes";
 
 const KEY = "dgc.homeCards.v1";
 /** Every card there is, in the library's order. */
-export const HOME_CARD_TYPES = ["needs", "running", "recent", "work", "chats", "pips", "widgets", "artifacts", "token", "quick", "folders", "clock", "weather", "note"] as const;
+export const HOME_CARD_TYPES = ["needs", "running", "recent", "work", "chats", "pips", "widgets", "artifacts", "token", "quick", "folders", "clock", "weather", "note", "browser"] as const;
 export type HomeCardType = typeof HOME_CARD_TYPES[number];
 /** Home for someone new. */
 export const HOME_DEFAULT: HomeCardType[] = ["needs", "recent", "running", "token", "quick"];

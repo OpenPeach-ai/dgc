@@ -121,8 +121,18 @@ def sanitize_event(event: dict, secrets) -> dict:
         secrets = catalog_secrets(secrets, names)
     binary = {key: event[key] for key in _BINARY_EVENT_FIELDS.get(event.get("type"), ())
               if _only_bytes(event.get(key))}
+    # A streamed tab's picture (use_your_browser_view, Pips API 107: a Pip's tab, or your own where there is no screen)
+    # is bytes too, inside the result: up to thirty a second, each would otherwise be a broken picture now and then.
+    picture = None
+    result = event.get("result")
+    if event.get("type") == "pips_result" and event.get("command") == "use_your_browser_view" and isinstance(result, dict) \
+            and _only_bytes(result.get("image")) and str(result.get("image")).startswith("data:image/jpeg;base64,"):
+        picture = result["image"]
+        event = {**event, "result": {key: value for key, value in result.items() if key != "image"}}
     out = redact_value({key: value for key, value in event.items() if key not in binary}, secrets)
     out.update(binary)
+    if picture is not None and isinstance(out.get("result"), dict):
+        out["result"]["image"] = picture
     return out
 
 
@@ -594,7 +604,21 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # answered | dismissed | closed), answers}. answer_pip_questions {pip_id, message_id, idempotency_key, answers |
 # dismissed, chat_options?} (M) sends the answers as the user's own next message there (R: questions, run, message), or
 # closes the card with nothing sent (R: questions); only while its reply is the conversation's last message.
-PIPS_API_VERSION = 106
+# API 107 (0.52, Your Browser's window; 106 is the question card in a Pip's chat, another 0.52 feature): open_your_browser {url, pip_id, editor_bounds} (M) opens its window (or brings
+# it forward) through the Pips runner, to the right of the editor (editor_bounds {x, y, width, height, screen?} as the
+# editor measured them), at what was typed (an address, else a Google search) or at a Pip's own tab; it answers {ok, kind,
+# weaker, url, open}, `unavailable` with the reason where it can't run here, `runner_required` without the runner.
+# use_your_browser_view {op, pip_id, ...} streams one Pip's lane: op `frame` (new) answers {ok, pip_id, url, title,
+# width, height, image, lanes}; the person's own tabs are never streamed (pip_id is required). get_your_browser_recent {}
+# (R): {links [{url, title, host, at}] (the newest three of the person's own tabs, never a lane), open, available,
+# reason, lanes [{pip_id, name, title, url}]}. get_your_browser's `yours` gains `error`, and `yours.tabs` / `lanes` [{pip_id, name, title, url}] are filled
+# while it runs. All local only. Also in 107 (his calls 18 Nov): where Google Chrome is needed, get_your_browser(_recent)
+# carry `install` {how password|terminal, state, error, line} and install_google_chrome {} (M) installs it through the
+# system's own password prompt (pkexec), one root step; `view` "window"|"tab" says how it opens here; with no screen
+# (Remote-SSH) Chrome runs headless and use_your_browser_view {own: true, op frame|input|go|back|forward|reload|new_tab|
+# tab|close_tab|size|close, seq, events, tab, width, height} streams the person's own tab to the editor, for the editor's
+# own actor only.
+PIPS_API_VERSION = 107
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}
@@ -7896,6 +7920,9 @@ class Backend:
         except RegistryError as exc:
             self._pips_failure(cmd, exc.code, str(exc))
             return
+        if detached.get("type") == "pips_control" and detached["request"].get("type") == "use_your_browser_view":
+            self._your_browser_view(detached)
+            return
         # Separate from chat's foreground worker: jobs never mutate its Agent.
         lock = self.__dict__.setdefault("_pips_command_lock", threading.Lock())
         with lock:
@@ -7917,6 +7944,31 @@ class Backend:
                 self._pips_control_thread = None
                 pending.pop()
                 self._pips_failure(detached, "runner_error", "The local Pip control worker could not start.")
+
+    def _your_browser_view(self, cmd):
+        """use_your_browser_view on threads of its own (Pips API 107): a streamed tab asks for up to thirty pictures a
+        second and sends the person's own clicks and keys, so it never waits behind the other Pip controls, and none of
+        them waits behind it. At most four at once (a picture waited for, an input, and room)."""
+        gate = self.__dict__.setdefault("_your_browser_gate", threading.BoundedSemaphore(4))
+        if not gate.acquire(blocking=False):
+            self._pips_failure(cmd, "busy", "Still waiting for the last picture.")
+            return
+
+        def run():
+            try:
+                self._perform_pips_command(cmd)
+            except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
+                self._pips_failure(cmd, getattr(exc, "code", "runner_error"), str(exc))
+            except Exception:
+                self._pips_failure(cmd, "runner_error", "Your Browser's tab didn't answer; try again.")
+            finally:
+                gate.release()
+
+        try:
+            threading.Thread(target=run, daemon=True, name="dgc-your-browser-view").start()
+        except Exception:
+            gate.release()
+            self._pips_failure(cmd, "runner_error", "Your Browser's tab couldn't start; try again.")
 
     def _drain_pips_commands(self):
         finished = False

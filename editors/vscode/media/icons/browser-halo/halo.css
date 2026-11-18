@@ -1,0 +1,17 @@
+/* Halo / Azure. Markup: span.halo > i + i + i. */
+.halo{--size:52px;--h:213;--sat:91%;--light:57%;--cycle:8s;--phase:0s;position:relative;display:inline-block;width:var(--size);height:var(--size);flex:none;isolation:isolate;vertical-align:middle}
+.halo::before,.halo::after,.halo i{content:"";display:block;position:absolute;box-sizing:border-box;animation-duration:var(--cycle);animation-delay:var(--phase);animation-iteration-count:infinite;animation-timing-function:ease-in-out;animation-play-state:var(--halo-play,running)}
+.halo::before{inset:10% 9% 9% 10%;border-radius:42% 58% 62% 38% / 45% 39% 61% 55%;background:linear-gradient(145deg,hsl(var(--h) var(--sat) 72%) 0%,hsl(var(--h) var(--sat) var(--light)) 40%,hsl(var(--h) var(--sat) 28%) 100%);box-shadow:inset 0 1px 1px #ffffff45,inset -1px -2px 2px #00000018;animation-name:halo-breathe}
+.halo i:nth-child(1){inset:4% 14% 22% 25%;border-radius:48% 52% 30% 70% / 43% 43% 57% 57%;background:linear-gradient(160deg,hsl(var(--h) 90% 83% / .8),hsl(var(--h) 85% 60% / .1) 63%,hsl(var(--h) 90% 35% / .7));transform:rotate(-28deg);animation-name:halo-fold}
+.halo i:nth-child(2){inset:29% 5% 13% 13%;border-radius:64% 36% 54% 46% / 46% 37% 63% 54%;background:linear-gradient(150deg,hsl(var(--h) 90% 77% / .58),hsl(var(--h) 85% 45% / .36) 56%,hsl(var(--h) 85% 24% / .8));box-shadow:inset 0 1px 0 hsl(var(--h) 90% 87% / .24);transform:rotate(22deg);animation-name:halo-drift}
+.halo i:nth-child(3){inset:36% 28% 18% 32%;border-radius:56% 44% 63% 37% / 47% 38% 62% 53%;background:linear-gradient(145deg,hsl(var(--h) 95% 85% / .68),hsl(var(--h) 90% 55% / .06));transform:rotate(-15deg);animation-name:halo-heart}
+.halo::after{inset:12% 26% 64% 23%;border-radius:50%;background:radial-gradient(ellipse at 50% 0%,#ffffff78,transparent 75%);transform:rotate(-27deg);opacity:.6;animation-name:halo-gleam}
+@keyframes halo-breathe{0%,100%{border-radius:42% 58% 62% 38% / 45% 39% 61% 55%;transform:rotate(-8deg) scale(.97,1)}33%{border-radius:60% 40% 44% 56% / 38% 60% 40% 62%;transform:rotate(7deg) scale(1,.96)}66%{border-radius:39% 61% 54% 46% / 60% 42% 58% 40%;transform:rotate(-3deg) scale(.97,1.02)}}
+@keyframes halo-fold{0%,100%{transform:rotate(-28deg) translate(0,0)}50%{transform:rotate(16deg) translate(-5%,5%) scale(.93,1.03)}}
+@keyframes halo-drift{0%,100%{transform:rotate(22deg) translate(0,0)}50%{transform:rotate(-12deg) translate(1%,-7%) scale(.98,1.06)}}
+@keyframes halo-heart{0%,100%{transform:rotate(-15deg) scale(.94)}50%{transform:rotate(26deg) translate(7%,-5%) scale(1.06)}}
+@keyframes halo-gleam{0%,100%{transform:rotate(-27deg);opacity:.6}50%{transform:rotate(-10deg) translate(12%,18%);opacity:.4}}
+@media(prefers-reduced-motion:reduce){.halo::before,.halo::after,.halo i{animation:none!important}}
+
+.halo{mask:radial-gradient(circle at 50% 50%,transparent 0 21%,#000 22%);-webkit-mask:radial-gradient(circle at 50% 50%,transparent 0 21%,#000 22%)}
+.halo--static::before,.halo--static::after,.halo--static i{animation:none!important}

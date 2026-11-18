@@ -1,0 +1,54 @@
+/* A Pip's tab in Your Browser, streamed into an editor tab (src/yourBrowserTab.js). One slim bar: the Pips' tabs, then
+   Back, Forward, Reload, DGC's own address bar and "show it in the window"; under it the picture of the Pip's tab, fitted
+   to the editor tab and never stretched. One design language: 6 px corners, the buttons' heights, never a pill. */
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg, var(--vscode-editor-background)); color: var(--text, var(--vscode-foreground)); font: var(--w-reg, 400) var(--t-sm, 12px)/1.3 var(--sans, system-ui, sans-serif); }
+#app { display: flex; flex-direction: column; height: 100%; min-width: 0; }
+.yb-bar { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--hair, rgba(128, 128, 128, .25)); min-width: 0; }
+.yb-tabs { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.yb-tabs:empty { display: none; }
+.yb-tab { appearance: none; flex: 0 1 200px; display: flex; align-items: baseline; gap: 6px; min-width: 0; height: var(--btn-h, 26px); padding: 0 10px; border: 1px solid var(--hair, rgba(128, 128, 128, .25));
+  border-radius: var(--btn-r, 6px); background: transparent; color: var(--text-2, inherit); font: inherit; cursor: pointer; }
+.yb-tab[aria-selected="true"] { background: var(--wash, rgba(128, 128, 128, .12)); border-color: var(--hair-strong, rgba(128, 128, 128, .4)); color: var(--text-strong, inherit); }
+.yb-tab-name { flex: none; font-weight: var(--w-semi, 600); line-height: var(--btn-h, 26px); }
+.yb-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint, inherit); }
+.yb-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.yb-btn { appearance: none; flex: none; display: grid; place-items: center; width: var(--btn-h, 26px); height: var(--btn-h, 26px); margin: 0; padding: 0; border: 1px solid transparent;
+  border-radius: var(--btn-r, 6px); background: transparent; color: var(--text-2, inherit); cursor: pointer; }
+.yb-btn:hover:not(:disabled) { background: var(--wash, rgba(128, 128, 128, .12)); color: var(--text-strong, inherit); }
+.yb-btn:disabled { opacity: .45; cursor: default; }
+.yb-btn[hidden] { display: none; }
+.yb-address { flex: 1 1 auto; min-width: 0; margin: 0 2px; }
+.yb-url { box-sizing: border-box; width: 100%; height: var(--btn-h, 26px); margin: 0; padding: 0 10px; border: 1px solid var(--hair-strong, rgba(128, 128, 128, .4)); border-radius: var(--btn-r, 6px);
+  background: var(--surface2, transparent); color: var(--text, inherit); font: inherit; }
+.yb-btn:focus-visible, .yb-tab:focus-visible, .yb-url:focus-visible, .yb-frame:focus-visible { outline: 1.5px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.yb-stage { position: relative; flex: 1 1 auto; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; min-height: 0; padding: 10px; overflow: hidden; }
+.yb-frame { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid var(--hair, rgba(128, 128, 128, .25)); border-radius: var(--btn-r, 6px); cursor: default; background: #fff; }
+.yb-frame[hidden] { display: none; }
+.yb-note { margin: 0; max-width: 60ch; color: var(--faint, inherit); text-align: center; overflow-wrap: anywhere; }
+.yb-frame:not([hidden]) ~ .yb-note { position: absolute; left: 50%; bottom: 18px; translate: -50% 0; max-width: calc(100% - 40px); padding: 6px 10px; border: 1px solid var(--hair, rgba(128, 128, 128, .25));
+  border-radius: var(--btn-r, 6px); background: var(--surface2, var(--vscode-editorWidget-background)); color: var(--text, inherit); box-shadow: var(--lift-1, none); }
+.yb-note[hidden] { display: none; }
+/* Your own tab, where the computer DGC runs on has no screen (18 Nov): your tabs in the row, each with its Close, then New
+   tab; Back, Forward, Reload and the address bar; one quiet line; your page, one to one. What you type lands in an unseen
+   field over nothing, so the keyboard, a composition and a paste all reach your tab. */
+.yb-own { flex: 0 1 200px; display: flex; align-items: center; min-width: 0; height: var(--btn-h, 26px); box-sizing: border-box; border: 1px solid var(--hair, rgba(128, 128, 128, .25));
+  border-radius: var(--btn-r, 6px); }
+.yb-own.yb-on { background: var(--wash, rgba(128, 128, 128, .12)); border-color: var(--hair-strong, rgba(128, 128, 128, .4)); }
+.yb-own .yb-tab { flex: 1 1 auto; height: calc(var(--btn-h, 26px) - 2px); border: 0; padding: 0 4px 0 10px; background: transparent; }
+.yb-own .yb-tab[aria-selected="true"] { background: transparent; }
+.yb-own.yb-on .yb-tab-title { color: var(--text-strong, inherit); }
+.yb-x { appearance: none; flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin: 0 2px 0 0; padding: 0; border: 0; border-radius: var(--btn-r, 6px);
+  background: transparent; color: var(--faint, inherit); cursor: pointer; }
+.yb-x svg { width: 12px; height: 12px; }
+.yb-x:hover { background: var(--wash, rgba(128, 128, 128, .12)); color: var(--text-strong, inherit); }
+.yb-x:focus-visible { outline: 1.5px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.yb-new { margin-left: 2px; }
+.yb-line { flex: none; margin: 0; padding: 4px 10px 5px; border-bottom: 1px solid var(--hair, rgba(128, 128, 128, .25)); color: var(--faint, inherit); font-size: var(--t-xs, 11px); line-height: 1.35;
+  overflow-wrap: anywhere; }
+.yb-line[hidden] { display: none; }
+.yb-own-mode .yb-bar { border-bottom: 0; padding-bottom: 6px; }
+.yb-own-mode .yb-stage { padding: 8px; }
+.yb-own-mode .yb-frame { cursor: default; user-select: none; -webkit-user-select: none; }
+.yb-keys { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; margin: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; }
+.yb-keys[hidden] { display: none; }

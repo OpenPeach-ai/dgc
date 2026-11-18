@@ -386,6 +386,36 @@ export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', mark
 export function computerDocument(scriptUri = '', styleUri = '', cspSource = '', title = 'Computer'): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>${attr(title)}</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><script type="module" src="${attr(scriptUri)}"></script></body></html>`;
 }
+/** A Pip's tab in Your Browser, streamed into an editor tab (Pips API 107; his call, 17 Nov: a VS Code tab beside the
+ *  chat shows a Pip's tab live, with DGC's own address bar). Its page may ask for its own Pip's lane and nothing else: a
+ *  frame, the person's own hand in it, and bringing that tab forward in the window. Never the person's own tabs. */
+export const YOUR_BROWSER_API = 107;
+const YOUR_BROWSER_OPS = new Set(['frame', 'click', 'type', 'key', 'scroll', 'go', 'back', 'forward', 'reload', 'close']);
+const YOUR_BROWSER_VIEW_FIELDS = new Set(['type', 'pip_id', 'op', 'x', 'y', 'text', 'key', 'dy', 'url']);
+export function yourBrowserTabRefusal(request: any, pipId: string): string {
+  const refused = 'This tab only shows this Pip\'s own tab in Your Browser.';
+  if (!request || typeof request !== 'object' || request.pip_id !== pipId) return refused;
+  if (request.type === 'use_your_browser_view') return YOUR_BROWSER_OPS.has(request.op) && Object.keys(request).every((key) => YOUR_BROWSER_VIEW_FIELDS.has(key)) ? '' : refused;
+  if (request.type === 'open_your_browser') return Object.keys(request).every((key) => key === 'type' || key === 'pip_id') ? '' : refused;
+  return refused;
+}
+/** Your own tabs in Your Browser, streamed into an editor tab where the computer DGC runs on has no screen (Remote-SSH;
+ *  his call, 18 Nov). Its page may ask for your own tab and nothing else (a frame, your own hand in it, the address bar,
+ *  your tabs, its size), and no other page may ask for your own tab at all. */
+const YOUR_OWN_OPS = new Set(['frame', 'input', 'go', 'back', 'forward', 'reload', 'new_tab', 'tab', 'close_tab', 'size', 'close']);
+const YOUR_OWN_FIELDS = new Set(['type', 'own', 'op', 'seq', 'events', 'tab', 'width', 'height', 'url']);
+export function yourOwnTabRefusal(request: any): string {
+  const refused = 'This tab only shows your own tabs in Your Browser.';
+  if (!request || typeof request !== 'object' || request.type !== 'use_your_browser_view' || request.own !== true) return refused;
+  return YOUR_OWN_OPS.has(request.op) && Object.keys(request).every((key) => YOUR_OWN_FIELDS.has(key)) ? '' : refused;
+}
+/** Whether a page other than Your Browser's own tab asks for your own tab: never let through. */
+export function asksForYourOwnTab(request: any): boolean {
+  return !!request && typeof request === 'object' && request.type === 'use_your_browser_view' && Object.prototype.hasOwnProperty.call(request, 'own');
+}
+export function yourBrowserDocument(scriptUri = '', styleUri = '', cspSource = '', title = 'Your Browser'): string {
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>${attr(title)}</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><script src="${attr(scriptUri)}"></script></body></html>`;
+}
 /** "Open in editor" for a Pip's chat: the Pip and the conversation a page names, each checked here. */
 export type ChatPip = { id: string; name: string; pip_type: string; body?: string };
 export type ChatConversation = { id: string; title?: string };
@@ -549,6 +579,9 @@ export class PipsEditor implements vscode.Disposable {
    *  Pip's first conversation: "pip_x#"). Each is the Pips page itself, pinned to that chat and talking to DGC through
    *  this bridge as the Pips tab does: the same chat, never a copy. Closing one asks DGC nothing. */
   private chats = new Map<string, { panel: vscode.WebviewPanel; pip: ChatPip; conversation: string; face?: string }>();
+  /** A Pip's streamed tab of Your Browser, one per Pip (Pips API 107); and (key "own") your own tab, streamed where the
+   *  computer DGC runs on has no screen, one per window. */
+  private browserTabs = new Map<string, { panel: vscode.WebviewPanel; pip: { id: string; name: string } | null }>();
   /** The character each Pip wears, as DGC last said it in this window (get_pip, set_pip_profile): '' for its type's own. */
   private static faces = new Map<string, string>();
   /** Every bridge of this window (the side bar's, the Pips tab's): what is typed in one page of a chat is told to
@@ -755,6 +788,7 @@ export class PipsEditor implements vscode.Disposable {
   }
   private post(message: any, surface = 'main'): void {
     if (surface.startsWith('computer:')) { void this.computers.get(surface.slice(9))?.panel.webview.postMessage(message); return; }
+    if (surface.startsWith('browser:')) { void this.browserTabs.get(surface.slice(8))?.panel.webview.postMessage(message); return; }
     if (surface.startsWith('chat:')) { void this.chats.get(surface.slice(5))?.panel.webview.postMessage(message); return; }
     if (this.embeddedPost) this.embeddedPost(message);
     else this.panel?.webview.postMessage(message);
@@ -906,6 +940,60 @@ export class PipsEditor implements vscode.Disposable {
     panel.webview.onDidReceiveMessage(message => this.receive(message, surface));
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
     panel.webview.html = computerDocument(asset('pipComputer.js'), asset('pipComputer.css'), panel.webview.cspSource, title);
+  }
+  /** A Pip's tab in Your Browser as an editor tab beside the chat ("Ava · Your Browser"), or its tab brought forward.
+   *  With no Pip (null): your own tab, streamed where the computer DGC runs on has no screen ("Your Browser"). */
+  openYourBrowserTab(pip: { id: string; name: string } | null): void {
+    const key = pip ? pip.id : 'own';
+    const open = this.browserTabs.get(key);
+    if (open) { open.panel.reveal(pip ? vscode.ViewColumn.Beside : open.panel.viewColumn); return; }
+    const title = pip ? `${pip.name} · Your Browser` : 'Your Browser';
+    const panel = vscode.window.createWebviewPanel('dgc.yourBrowser', title, pip ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active, {
+      enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [this.extensionUri],
+    });
+    try { panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'icons', 'browser-halo', 'halo-64.png'); } catch { /* the plain tab */ }
+    const surface = 'browser:' + key;
+    this.browserTabs.set(key, { panel, pip });
+    panel.onDidDispose(() => {
+      this.browserTabs.delete(key);
+      for (const [id, item] of this.pending) if (item.surface === surface) this.pending.delete(id);
+      // Your own tab closed: DGC stops its stream and forgets its last picture.
+      if (!pip && this.state.connected && this.apiVersion >= YOUR_BROWSER_API) {
+        this.send({ type: 'pips_control', request: { type: 'use_your_browser_view', own: true, op: 'close', request_id: 'pips-browser-' + randomBytes(12).toString('hex') } }, this.backendIdentity);
+      }
+    });
+    panel.webview.onDidReceiveMessage(message => this.receive(message, surface));
+    const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
+    panel.webview.html = yourBrowserDocument(asset('yourBrowserTab.js'), asset('yourBrowserTab.css'), panel.webview.cspSource, title);
+  }
+  /** What a Pip's streamed tab asks: its own Pip's lane only (yourBrowserTabRefusal), sent as the Pips page's are. Your
+   *  own tab's: your own tab only (yourOwnTabRefusal). */
+  private receiveBrowserTab(message: any, surface: string): void {
+    const tab = this.browserTabs.get(surface.slice(8));
+    if (!tab) return;
+    if (message?.type === 'pipsReady' || message?.type === 'pipsReconnect') {
+      this.post(tab.pip ? { type: 'yourBrowserInit', pip: tab.pip } : { type: 'yourBrowserInit', own: true }, surface);
+      this.post({ type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, ...this.state }, surface);
+      return;
+    }
+    if (message?.type === 'pipsOpenYourBrowser') {
+      // Another Pip's tab, from this tab's row of Pips: its own editor tab.
+      const pip = chatPip(message.pip, false);
+      if (pip && this.apiVersion >= YOUR_BROWSER_API) this.openYourBrowserTab({ id: pip.id, name: pip.name });
+      return;
+    }
+    if (message?.type !== 'pipsRequest' || typeof message.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(message.id)) return;
+    const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } }, surface);
+    const refused = tab.pip ? yourBrowserTabRefusal(message.request, tab.pip.id) : yourOwnTabRefusal(message.request);
+    if (refused) { fail(refused); return; }
+    if (!this.state.connected || !this.state.supported || !this.state.enabled) { fail('Pips aren’t available. Update DGC, then reconnect.'); return; }
+    if (this.apiVersion < YOUR_BROWSER_API) { fail(tab.pip ? 'Update DGC to watch a Pip’s tab in Your Browser.' : 'Update DGC to use Your Browser here.'); return; }
+    for (const [id, item] of this.pending) if (Date.now() - item.at > 60000) this.pending.delete(id);
+    // (Your own tab: a frame waited for, your input in order, and its size.)
+    if ([...this.pending.values()].filter((item) => item.surface === surface).length >= (tab.pip ? 4 : 6)) { fail('Still waiting for the last picture.'); return; }
+    const requestId = 'pips-browser-' + randomBytes(12).toString('hex');
+    this.pending.set(requestId, { client: message.id, command: message.request.type, at: Date.now(), surface });
+    if (!this.send({ type: 'pips_control', request: { ...message.request, request_id: requestId } }, this.backendIdentity)) { this.pending.delete(requestId); fail('DGC is not connected.'); }
   }
   /** A computer's own name, when its Pip has more than one and the tab is one of them. */
   private computerName(pipId: string, number?: number): string {
@@ -1095,6 +1183,7 @@ export class PipsEditor implements vscode.Disposable {
     const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, displayMentions:this.displayMentions, ...(folder === undefined ? {} : { folder }), ...folders, ...(this.connectFailed ? { failed: true } : {}), ...this.state };
     this.postPages(connection);
     for (const id of this.computers.keys()) this.post(connection, 'computer:' + id);
+    for (const id of this.browserTabs.keys()) this.post(connection, 'browser:' + id);
   }
   /** One host-owned read through the same channel: only the digest, only on an API 41 backend. */
   hostRead(type: 'get_pip_digest' | 'list_pip_attention', fields: Record<string, unknown> = {}): Promise<any> {
@@ -1644,6 +1733,7 @@ export class PipsEditor implements vscode.Disposable {
     } catch { this.post({ type: 'pipsFileData', requestId, error: 'That file is no longer available.' }, surface); }
   }
   receive(message: any, surface = 'main'): void {
+    if (surface.startsWith('browser:')) { this.receiveBrowserTab(message, surface); return; }
     const computer = surface.startsWith('computer:') ? this.computers.get(surface.slice(9)) : undefined;
     // (A chat's own tab is the Pips page on another surface: what the Pips page may ask, it may, answered to it.)
     const chat = surface.startsWith('chat:') ? this.chats.get(surface.slice(5)) : undefined;
@@ -1676,6 +1766,15 @@ export class PipsEditor implements vscode.Disposable {
     // (Copy too: a Pip tab's Copy puts its text on the clipboard as the side bar's does.)
     if (!computer && ['openFile', 'openExternal', 'openSettings', 'copy', 'codePreview'].includes(String(message?.type))) { this.pageActions?.(message); return; }
     if (message?.type === 'pipsSignIn' && !computer) { openEngineSignIn(String(message.engine || '')); return; }
+    if (message?.type === 'pipsOpenYourBrowser' && !computer && !chat) {
+      // A Pip's tab in Your Browser, watched in an editor tab beside the chat (Pips API 107; the dock's Browser menu); or
+      // (own) your own tab, where the computer DGC runs on has no screen: what open_your_browser answered (view "tab").
+      if (this.apiVersion < YOUR_BROWSER_API) return;
+      if (message.own === true) { this.openYourBrowserTab(null); return; }
+      const pip = chatPip(message.pip, false);
+      if (pip) this.openYourBrowserTab({ id: pip.id, name: pip.name });
+      return;
+    }
     if (message?.type === 'pipsOpenComputer' && !computer) {
       const pip = message.pip;
       if (this.apiVersion >= 43 && pip && typeof pip.id === 'string' && /^pip_[A-Za-z0-9]{1,64}$/.test(pip.id) && typeof pip.name === 'string'
@@ -1796,6 +1895,8 @@ export class PipsEditor implements vscode.Disposable {
     if (message?.type !== 'pipsRequest' || typeof message.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(message.id)) return;
     const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } }, surface);
     { const refused = projectFoldersRefusal(message.request, this.apiVersion, (folder) => this.pickedFolders.has(folder) || this.listedFolders.has(folder)); if (refused) { fail(refused); return; } }
+    // Your own tab in Your Browser: only its own editor tab asks for it (receiveBrowserTab), never this page.
+    if (asksForYourOwnTab(message.request)) { fail('Only Your Browser’s own tab shows your tabs.'); return; }
     // The copy commands carry a path on this computer: no page sends one, whichever page it is.
     if (COMPUTER_COPY_COMMANDS.has(message.request?.type)) { fail(this.apiVersion < COMPUTER_COPY_API ? 'Update DGC to copy files over 2 MB.' : 'Use Add file… or Save to this computer… in the computer’s Files.'); return; }
     // A computer tab is pinned to its own Pip and to the computer's commands.

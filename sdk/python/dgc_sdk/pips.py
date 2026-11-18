@@ -499,8 +499,8 @@ READ_COMMANDS |= API101_READS
 API104_FIELDS = {'set_pip_agents': frozenset({'model_choice', 'thinking', 'context_size', 'fallback'})}
 # API 105: Your Browser, the one shared browser you sign in to, each Pip in its own tab of it on the sites you let it
 # use. get_your_browser (kind host_profile, weaker, the sites with their Pips); set_your_browser_site (all, or the Pips
-# chosen) and sign_out_your_browser_site; open_your_browser and use_your_browser_view answer not_ready until its
-# window exists. Local only.
+# chosen) and sign_out_your_browser_site; open_your_browser and use_your_browser_view (its window and a Pip's streamed
+# tab since API 107). Local only.
 API105_READS = frozenset({'get_your_browser'})
 API105_MUTATIONS = frozenset({'set_your_browser_site', 'sign_out_your_browser_site', 'open_your_browser',
                               'use_your_browser_view'})
@@ -513,6 +513,18 @@ API106_MUTATIONS = frozenset({'answer_pip_questions'})
 API106_FIELDS = {'send_pip_message': frozenset({'questions'})}
 MUTATION_COMMANDS |= API106_MUTATIONS
 PIP_MESSAGE_ID = re.compile(r"message_[0-9a-f]{32}\Z")
+# API 107: Your Browser's window. get_your_browser_recent (the newest three links of your own tabs there, never a Pip's);
+# open_your_browser takes editor_bounds (its window opens to the right of the editor) and use_your_browser_view takes op
+# frame (a picture of one Pip's tab; your own tabs are never streamed). Local only.
+# Also 107 (18 Nov): install_google_chrome (through the system's own password prompt, or the one terminal line) and
+# use_your_browser_view's own tab where the computer has no screen (own, seq, events, tab, width, height; the editor's
+# own actor only).
+API107_READS = frozenset({'get_your_browser_recent'})
+API107_MUTATIONS = frozenset({'install_google_chrome'})
+API107_FIELDS = {'open_your_browser': frozenset({'editor_bounds'}),
+                 'use_your_browser_view': frozenset({'own', 'seq', 'events', 'tab', 'width', 'height'})}
+READ_COMMANDS |= API107_READS
+MUTATION_COMMANDS |= API107_MUTATIONS
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -680,8 +692,11 @@ COMMAND_FIELDS = {
     'get_your_browser': frozenset(),
     'set_your_browser_site': frozenset({'site', 'mode', 'pips'}),
     'sign_out_your_browser_site': frozenset({'site'}),
-    'open_your_browser': frozenset({'url', 'pip_id'}),
-    'use_your_browser_view': frozenset({'op', 'x', 'y', 'text', 'key', 'dy', 'url', 'pip_id'}),
+    'open_your_browser': frozenset({'url', 'pip_id', 'editor_bounds'}),
+    'get_your_browser_recent': frozenset(),
+    'use_your_browser_view': frozenset({'op', 'x', 'y', 'text', 'key', 'dy', 'url', 'pip_id', 'own', 'seq', 'events', 'tab',
+                                        'width', 'height'}),
+    'install_google_chrome': frozenset(),
     'commit_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'set_pip_goal': frozenset({'pip_id', 'objective', 'conversation_id'}),
     'get_pip_goal': frozenset({'pip_id', 'conversation_id'}),
@@ -1007,7 +1022,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API106_MUTATIONS:
+        if command in API107_READS | API107_MUTATIONS:
+            minimum = 107
+        elif command in API106_MUTATIONS:
             minimum = 106
         elif command in API105_READS | API105_MUTATIONS:
             minimum = 105
@@ -1343,6 +1360,11 @@ class Pips:
             if 'answers' in values and (not isinstance(values['answers'], dict) or not values['answers']
                                         or not isinstance(values.get('idempotency_key'), str)):
                 raise DGCConfigError("answers is {question id: {selected: [indices], other: text}}, with an idempotency_key")
+        if ((API107_FIELDS.get(command, frozenset()) & set(values))
+                or (command == 'use_your_browser_view' and values.get('op') == 'frame')) and version < 107:
+            raise DGCUnsupportedError("Your Browser's window beside the editor (editor_bounds), a Pip's streamed tab "
+                                      "(op frame) and your own tab streamed (own) require a runtime advertising Pips API "
+                                      "107 or newer")
         if API104_FIELDS.get(command, frozenset()) & set(values) and version < 104:
             raise DGCUnsupportedError("A Pip's own sub-agents model (model_choice, thinking, context_size, fallback) "
                                       "requires a runtime advertising Pips API 104 or newer")

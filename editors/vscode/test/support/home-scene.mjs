@@ -124,6 +124,11 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
       accept_pip_update: (r) => { waitsNoMore(r.proposal_id); return { pip: { id: r.pip_id } }; },
       reject_pip_update: (r) => { waitsNoMore(r.proposal_id); return { pip: { id: r.pip_id } }; },
       mark_pip_news_seen: (r) => { S().digest = (S().digest || []).filter((p) => !r.pip_ids.includes(p.pip_id)); return { seen: r.pip_ids.map((pip_id) => ({ pip_id, seen_until: r.until })) }; },
+      // Your Browser (Pips API 107): the last links from the state's `browser.recent`, and an open the state may refuse.
+      get_your_browser_recent: () => ({ links: [], open: false, available: true, reason: "", ...(S().browser?.recent || {}) }),
+      open_your_browser: (r) => (S().browser?.refuse ? { __error: S().browser.refuse } : { ok: true, kind: "host_profile", weaker: true, url: r.url || "", open: true, view: S().browser?.recent?.view || "window" }),
+      // Install Google Chrome (18 Nov): it starts (the card says so), unless the state answers otherwise.
+      install_google_chrome: () => S().browser?.installAnswer || { available: false, install: { ...(S().browser?.recent?.install || {}), state: "running", error: "" } },
     };
     function waitsNoMore(card) { const a = S().attention; if (!a) return;
       for (const list of ["items", "reviews"]) { const at = (a[list] || []).findIndex((i) => i.card === card); if (at < 0) continue;
@@ -137,7 +142,7 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
       window.__posted.push(JSON.parse(JSON.stringify(m)));
       if (m?.type === "pipsReady") { setTimeout(connect, 1); return; }
       // A scene that opens the Pips view on this page answers its requests itself (dock-scene.mjs); the home's own keep theirs.
-      if (window.__pipsApp && m?.type === "pipsRequest" && !String(m.id).startsWith("home-pips-")) { window.__pipsApp(m); return; }
+      if (window.__pipsApp && m?.type === "pipsRequest" && !/^(home-pips|your-browser)-/.test(String(m.id))) { window.__pipsApp(m); return; }
       const make = m?.type === "pipsRequest" && answers[m.request.type];
       if (m?.type === "pipsRequest") window.__requests.push(JSON.parse(JSON.stringify(m.request)));
       // (What the home asked and has had answered is noted, so a test can wait for a whole poll.)

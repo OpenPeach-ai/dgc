@@ -4,7 +4,7 @@ One shared browser on this computer where the person signs in once; each Pip wor
 the sites the person lets that Pip use. Sites are noticed from the person's own sign-ins; a new bank or payment site
 starts at "Ask me which Pips" (chosen, no Pips), every other at All Pips. get_your_browser says what it is here
 (host_profile, weaker: true), set_your_browser_site and sign_out_your_browser_site change a site, open_your_browser and
-use_your_browser_view are declared and answer not_ready until the window exists. Every command is local only, and a Pip
+use_your_browser_view are its window and its streamed tab (phase 3, tests/test_your_browser_window.py). Every command is local only, and a Pip
 deleted for good takes its rows with it."""
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ class Commands(Base):
         self.assertIn(got["chrome"], ("installed", "dgc_copy", ""))
         self.assertIsInstance(got["available"], bool)
         self.assertEqual(got["available"], got["reason"] == "", got)
-        self.assertEqual(got["yours"], {"open": False, "tabs": []})
+        self.assertEqual(got["yours"], {"open": False, "tabs": [], "error": ""})
         self.assertEqual(got["lanes"], [])
         by_site = {s["site"]: s for s in got["sites"]}
         self.assertEqual(set(by_site), {"example-mail.com", "paypal.com"})
@@ -146,13 +146,8 @@ class Commands(Base):
         your_browser.notice_site(self.registry, "app.example-notes.com")
         self.assertEqual(self.ok("get_your_browser")["signing_out"], [])
 
-    def test_the_window_commands_are_declared_and_answer_not_ready(self):
-        for command, fields in (("open_your_browser", {}), ("open_your_browser", {"url": "example.com"}),
-                                ("use_your_browser_view", {"op": "click", "x": 10, "y": 20})):
-            with self.subTest(command=command):
-                out = self.control(command, **fields)
-                self.assertFalse(out["ok"])
-                self.assertEqual(out["error"]["code"], "not_ready", out)
+    def test_the_window_commands_check_what_they_are_given(self):
+        # (Phase 3 made them real: tests/test_your_browser_window.py.)
         self.assertEqual(self.control("use_your_browser_view", op="explode")["error"]["code"], "invalid_request")
         self.assertEqual(self.control("open_your_browser", path="/etc")["error"]["code"], "invalid_request",
                          "fields outside the command's own are refused, as every Pip command's are")
@@ -258,8 +253,10 @@ class Api105(unittest.TestCase):
                 self.assertRegex(row, r"`" + re.escape(command) + r"[` ]")
 
     def test_the_code_never_copies_another_browsers_cookies_or_passwords(self):
-        source = (REPO / "dgc" / "your_browser.py").read_text(encoding="utf-8")
-        for word in ("Login Data", "Cookies\"", "Local State", "os_crypt", "Safe Storage", "keyring", "secretstorage"):
+        # (apt's own folder for a package source's signing key, where Install Google Chrome keeps Google's: not a password
+        # store.)
+        source = (REPO / "dgc" / "your_browser.py").read_text(encoding="utf-8").replace("/etc/apt/keyrings/", "/etc/apt/")
+        for word in ("Login Data", "\"Cookies\"", "Local State", "os_crypt", "Safe Storage", "keyring", "secretstorage"):
             with self.subTest(word=word):
                 self.assertNotIn(word, source)
 

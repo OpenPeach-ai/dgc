@@ -6227,6 +6227,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsReconnect":
       case "pipsRequest":
       case "pipsOpenComputer":
+      case "pipsOpenYourBrowser":     // a Pip's tab in Your Browser, streamed into an editor tab (Pips API 107)
       // Open in editor on a Pip's chat, and what is typed in its box, told to the chat's other pages (15 Nov).
       case "pipsOpenChat":
       case "pipsChatDraft":

@@ -61,6 +61,7 @@ export type PipReadParams = {
   get_pip_message_image: { pip_id: string; message_id: string; index: number; as_file?: boolean };
   get_pip_message_file: { pip_id: string; message_id: string; index: number };
   get_your_browser: { [key: string]: never };
+  get_your_browser_recent: { [key: string]: never };
   list_pip_computer_frames: { run_id: string; pointers?: boolean };
   list_pip_action_grants: { pip_id: string };
   list_pip_feedback: { pip_id: string };
@@ -235,9 +236,16 @@ export type PipMutationParams = {
   fill_pip_code: { pip_id: string; action_id: string; expected_digest: string; code: string };
   set_your_browser_site: { site: string; mode: "all" | "chosen"; pips?: string[] };
   sign_out_your_browser_site: { site: string };
-  open_your_browser: { url?: string; pip_id?: string };
-  use_your_browser_view: { op: "click" | "move" | "type" | "key" | "scroll" | "go" | "back" | "forward" | "reload" | "close";
-    x?: number; y?: number; text?: string; key?: string; dy?: number; url?: string; pip_id?: string };
+  open_your_browser: { url?: string; pip_id?: string;
+    editor_bounds?: { x: number; y: number; width: number; height: number; screen?: { x: number; y: number; width: number; height: number } } };
+  use_your_browser_view: { op: "frame" | "click" | "move" | "type" | "key" | "scroll" | "go" | "back" | "forward" | "reload" | "close"
+      | "input" | "new_tab" | "tab" | "close_tab" | "size";
+    x?: number; y?: number; text?: string; key?: string; dy?: number; url?: string; pip_id?: string;
+    /** API 107: your own tab, where the computer has no screen (the editor's own actor only). */
+    own?: true; seq?: number; tab?: string; width?: number; height?: number;
+    events?: { t: "down" | "up" | "move" | "wheel" | "key" | "text"; x?: number; y?: number; button?: "left" | "middle" | "right" | "none";
+      buttons?: number; clicks?: number; dx?: number; dy?: number; key?: string; code?: string; text?: string; mods?: number }[] };
+  install_google_chrome: { [key: string]: never };
   commit_pip_project_change: { pip_id: string; change_id: string };
   set_pip_goal: { pip_id: string; objective: string; conversation_id?: string };
   get_pip_goal: { pip_id: string; conversation_id?: string };
@@ -463,8 +471,10 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   get_your_browser: [],
   set_your_browser_site: ["site", "mode", "pips"],
   sign_out_your_browser_site: ["site"],
-  open_your_browser: ["url", "pip_id"],
-  use_your_browser_view: ["op", "x", "y", "text", "key", "dy", "url", "pip_id"],
+  open_your_browser: ["url", "pip_id", "editor_bounds"],
+  get_your_browser_recent: [],
+  use_your_browser_view: ["op", "x", "y", "text", "key", "dy", "url", "pip_id", "own", "seq", "events", "tab", "width", "height"],
+  install_google_chrome: [],
   commit_pip_project_change: ["pip_id", "change_id"],
   set_pip_goal: ["pip_id", "objective", "conversation_id"],
   get_pip_goal: ["pip_id", "conversation_id"],
@@ -1061,8 +1071,8 @@ for (const command of API101_READS) READS.add(command);
 const API104_FIELDS: Record<string, readonly string[]> = { set_pip_agents: ["model_choice", "thinking", "context_size", "fallback"] };
 // API 105: Your Browser, the one shared browser you sign in to, each Pip in its own tab of it on the sites you let it
 // use. get_your_browser (kind host_profile, weaker, the sites with their Pips); set_your_browser_site (all, or the Pips
-// chosen) and sign_out_your_browser_site; open_your_browser and use_your_browser_view answer not_ready until its
-// window exists. Local only.
+// chosen) and sign_out_your_browser_site; open_your_browser and use_your_browser_view (its window and a Pip's streamed
+// tab since API 107). Local only.
 const API105_READS = new Set(["get_your_browser"]);
 const API105_MUTATIONS = new Set(["set_your_browser_site", "sign_out_your_browser_site", "open_your_browser", "use_your_browser_view"]);
 for (const command of API105_READS) READS.add(command);
@@ -1072,6 +1082,18 @@ for (const command of API105_MUTATIONS) MUTATIONS.add(command);
 // answer_pip_questions sends the answers as the user's next message, or closes the card (dismissed: true).
 const API106_MUTATIONS = new Set(["answer_pip_questions"]);
 for (const command of API106_MUTATIONS) MUTATIONS.add(command);
+// API 107: Your Browser's window. get_your_browser_recent (the newest three links of your own tabs there, never a
+// Pip's); open_your_browser takes editor_bounds (its window opens to the right of the editor) and use_your_browser_view
+// takes op frame (a picture of one Pip's tab; your own tabs are never streamed). Local only.
+// Also 107 (18 Nov): install_google_chrome (through the system's own password prompt, or the one terminal line) and
+// use_your_browser_view's own tab where the computer has no screen (own, seq, events, tab, width, height; the editor's
+// own actor only).
+const API107_READS = new Set(["get_your_browser_recent"]);
+const API107_MUTATIONS = new Set(["install_google_chrome"]);
+const API107_FIELDS: Record<string, readonly string[]> = { open_your_browser: ["editor_bounds"],
+  use_your_browser_view: ["own", "seq", "events", "tab", "width", "height"] };
+for (const command of API107_READS) READS.add(command);
+for (const command of API107_MUTATIONS) MUTATIONS.add(command);
 /** What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list) and
  *  use_pip_computer_view's op close (its tab closed). start_pip_app_link's another is older (0.51). */
 function api88Field(command: string, values: Record<string, unknown>): boolean {
@@ -1230,7 +1252,7 @@ export class Pips {
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
     if (appEvent && this.plan) throw new DGCUnsupportedError("Sending your app's events to Pips is unavailable in plan mode");
-    const minimum = API106_MUTATIONS.has(command) ? 106 : API105_READS.has(command) || API105_MUTATIONS.has(command) ? 105 : API101_READS.has(command) ? 101 : API98_MUTATIONS.has(command) ? 98 : API97_READS.has(command) || API97_MUTATIONS.has(command) ? 97 : API96_READS.has(command) || API96_MUTATIONS.has(command) ? 96 : API93_READS.has(command) || API93_MUTATIONS.has(command) ? 93 : API92_READS.has(command) || API92_MUTATIONS.has(command) ? 92 : API91_READS.has(command) || API91_MUTATIONS.has(command) ? 91 : API90_READS.has(command) || API90_MUTATIONS.has(command) ? 90 : API88_READS.has(command) || API88_MUTATIONS.has(command) ? 88 : API87_MUTATIONS.has(command) ? 87 : API86_MUTATIONS.has(command) ? 86 : API82_READS.has(command) || API82_MUTATIONS.has(command) ? 82 : API79_READS.has(command) || API79_MUTATIONS.has(command) ? 79 : API77_MUTATIONS.has(command) ? 77 : API76_READS.has(command) || API76_MUTATIONS.has(command) ? 76 : API75_READS.has(command) || API75_MUTATIONS.has(command) ? 75 : API72_READS.has(command) || API72_MUTATIONS.has(command) ? 72 : API69_READS.has(command) || API69_MUTATIONS.has(command) ? 69 : API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API107_READS.has(command) || API107_MUTATIONS.has(command) ? 107 : API106_MUTATIONS.has(command) ? 106 : API105_READS.has(command) || API105_MUTATIONS.has(command) ? 105 : API101_READS.has(command) ? 101 : API98_MUTATIONS.has(command) ? 98 : API97_READS.has(command) || API97_MUTATIONS.has(command) ? 97 : API96_READS.has(command) || API96_MUTATIONS.has(command) ? 96 : API93_READS.has(command) || API93_MUTATIONS.has(command) ? 93 : API92_READS.has(command) || API92_MUTATIONS.has(command) ? 92 : API91_READS.has(command) || API91_MUTATIONS.has(command) ? 91 : API90_READS.has(command) || API90_MUTATIONS.has(command) ? 90 : API88_READS.has(command) || API88_MUTATIONS.has(command) ? 88 : API87_MUTATIONS.has(command) ? 87 : API86_MUTATIONS.has(command) ? 86 : API82_READS.has(command) || API82_MUTATIONS.has(command) ? 82 : API79_READS.has(command) || API79_MUTATIONS.has(command) ? 79 : API77_MUTATIONS.has(command) ? 77 : API76_READS.has(command) || API76_MUTATIONS.has(command) ? 76 : API75_READS.has(command) || API75_MUTATIONS.has(command) ? 75 : API72_READS.has(command) || API72_MUTATIONS.has(command) ? 72 : API69_READS.has(command) || API69_MUTATIONS.has(command) ? 69 : API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -1445,6 +1467,10 @@ export class Pips {
           || !Object.keys(values.answers as object).length || typeof values.idempotency_key !== "string")) {
         throw new DGCConfigError("answers is {question id: {selected: [indices], other: text}}, with an idempotency_key");
       }
+    }
+    if (((API107_FIELDS[command] ?? []).some((field) => Object.hasOwn(values, field))
+        || (command === "use_your_browser_view" && values.op === "frame")) && (this.caps.pips_api_version as number) < 107) {
+      throw new DGCUnsupportedError("Your Browser's window beside the editor (editor_bounds), a Pip's streamed tab (op frame) and your own tab streamed (own) require a runtime advertising Pips API 107 or newer");
     }
     if ((API104_FIELDS[command] ?? []).some((field) => Object.hasOwn(values, field))
         && (this.caps.pips_api_version as number) < 104) {

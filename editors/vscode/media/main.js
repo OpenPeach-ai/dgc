@@ -1313,7 +1313,7 @@
     // A pinned session with no palette yet: the pinned ones are its neighbours.
     for (const kind of ["work", "chat", "widget", "project"]) wearMarks(kind, dockState.pins.filter((pin) => pin.kind === kind).map((pin) => ({ id: pin.id, born: bornOf(kind, pin.id) })));
     wearMarks("folder", dockState.pins.filter((pin) => pin.kind === "folder").map((pin) => ({ id: pin.id })));
-    dock.update({ items: dockItems(), show: dockState.show, size: dockState.size, offers: { chat: chatsAvailable, pip: !!window.DgcPips?.mount } });
+    dock.update({ items: dockItems(), fixed: dockFixed(), show: dockState.show, size: dockState.size, offers: { chat: chatsAvailable, pip: !!window.DgcPips?.mount } });
   }
   function onDock(msg) {
     const first = !dockSaid;
@@ -1350,6 +1350,176 @@
     if (page) page.scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? page.clientHeight : 1);
   }
   if (chatPlace === "home") $("side-tabs")?.addEventListener("wheel", glassWheel, { passive: true });
+  // ---- Your Browser (Pips API 107; his calls, 17 Nov): pinned to the dock for good, just before "+", and Home's Browser
+  // card (a search field and the last links visited there). Either opens Your Browser's window, Google Chrome with
+  // DGC's own profile, to the right of this editor: the page measures where the editor's window is and the screen it is
+  // on, and DGC places the window from that. An older DGC (or Pips off) shows neither. ----
+  // Where Google Chrome is needed (his call, 18 Nov): ONE button, Install Google Chrome, on Home's card and the dock's
+  // tile; a small dialog says what it does first, then the computer's own password prompt does the one root step (DGC
+  // never sees the password). Where no prompt can open (Remote-SSH, a server) or it was closed, the one terminal line, with
+  // Copy. While it installs the card asks again every couple of seconds, and becomes the field and the links by itself.
+  // Where the computer DGC runs on has no screen (view "tab"), "Open Your Browser" opens an editor tab that streams your
+  // own tab instead of a window.
+  const YB_API = 107, YB_POLL_MS = 60000, YB_INSTALL_POLL_MS = 2000;
+  const yb = { generation: 0, connected: false, api: 0, links: [], lanes: [], available: true, reason: "", open: false, error: "", seq: 0, pending: new Map(), asked: 0,
+    install: null, view: "window", installTimer: 0 };
+  const ybOffered = () => yb.connected && yb.api >= YB_API;
+  /** Where this editor's window is and the work area of its screen, in screen pixels; null where the page can't tell. */
+  function editorBounds() {
+    const n = (v) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : NaN), s = window.screen || {};
+    const box = { x: n(window.screenX), y: n(window.screenY), width: n(window.outerWidth), height: n(window.outerHeight) };
+    if (![box.x, box.y].every(Number.isFinite) || !(box.width > 0) || !(box.height > 0)) return null;
+    const area = { x: n(s.availLeft ?? 0), y: n(s.availTop ?? 0), width: n(s.availWidth), height: n(s.availHeight) };
+    return [area.x, area.y].every(Number.isFinite) && area.width > 0 && area.height > 0 ? { ...box, screen: area } : box;
+  }
+  function ybAsk(type, fields = {}) {
+    return new Promise((resolve, reject) => {
+      const id = `your-browser-${yb.generation}-${++yb.seq}`;
+      const timer = setTimeout(() => { yb.pending.delete(id); reject(new Error("DGC didn't answer. Try again.")); }, 20000);
+      yb.pending.set(id, { resolve, reject, timer });
+      vscode.postMessage({ type: "pipsRequest", id, generation: yb.generation, request: { type, ...fields }, documentId: document.documentElement.dataset.pipsDocumentId });
+    });
+  }
+  function ybPaint() { if (dock) paintDock(); home?.update(); }
+  /** The last links (and whether it can run here), for Home's card and the dock's tile. */
+  function ybRecent() {
+    if (!ybOffered() || document.hidden) return;
+    yb.asked = Date.now();
+    ybAsk("get_your_browser_recent").then((said) => {
+      const links = Array.isArray(said?.links) ? said.links.filter((l) => l && typeof l.url === "string" && /^https?:\/\//i.test(l.url)).slice(0, 3)
+        .map((l) => ({ url: String(l.url).slice(0, 2000), title: String(l.title || "").slice(0, 200), host: String(l.host || "").slice(0, 253) })) : [];
+      yb.links = links; yb.available = said?.available !== false; yb.reason = yb.available ? "" : String(said?.reason || "").slice(0, 600); yb.open = said?.open === true;
+      yb.install = yb.available ? null : ybInstallOf(said?.install); yb.view = said?.view === "tab" ? "tab" : "window";
+      ybInstallPoll();
+      // The Pips working in it (each in its own tab): the dock's menu offers to watch one in a streamed tab.
+      yb.lanes = Array.isArray(said?.lanes) ? said.lanes.filter((l) => l && /^pip_[A-Za-z0-9]{1,64}$/.test(String(l.pip_id)) && typeof l.name === "string" && l.name.trim()).slice(0, 8)
+        .map((l) => ({ pip_id: String(l.pip_id), name: String(l.name).trim().slice(0, 120) })) : [];
+      ybPaint();
+    }, () => {});
+  }
+  /** What DGC says of Install Google Chrome, checked: {how, state, error, line}, or null. */
+  function ybInstallOf(value) {
+    if (!value || typeof value !== "object" || !["password", "terminal"].includes(value.how)) return null;
+    return { how: value.how, state: ["running", "failed"].includes(value.state) ? value.state : "", error: String(value.error || "").slice(0, 400),
+      line: typeof value.line === "string" && /^sudo sh -c '/.test(value.line) ? value.line.slice(0, 4000) : "" };
+  }
+  /** While it installs: asked again every couple of seconds, until it ends (then the card is itself again). */
+  function ybInstallPoll() {
+    clearTimeout(yb.installTimer); yb.installTimer = 0;
+    if (yb.install?.state === "running") yb.installTimer = setTimeout(() => { yb.asked = 0; ybRecent(); }, YB_INSTALL_POLL_MS);
+  }
+  /** The one terminal line, on the clipboard. */
+  function ybCopyLine() {
+    if (!yb.install?.line) return;
+    vscode.postMessage({ type: "copy", text: yb.install.line });
+  }
+  // Install Google Chrome's small dialog: what it does, in plain words, then Install · Cancel. Where no password prompt
+  // can open here, the line to run in a terminal and Copy instead. The shared dialog and the shared buttons (New session's).
+  let ybDialog = null;
+  function ybCloseDialog(refocus = true) {
+    const current = ybDialog; if (!current) return;
+    ybDialog = null; current.dialog.remove();
+    if (refocus && current.focus?.isConnected) current.focus.focus();
+  }
+  function ybInstall() {
+    const i = yb.install;
+    if (!ybOffered() || !i) return;
+    if (i.state === "running") { dock?.note?.("browser", "Installing Google Chrome…"); return; }
+    ybCloseDialog(false);
+    const terminal = i.how === "terminal";
+    const dialog = document.createElement("dialog");
+    dialog.className = "new-session-dialog yb-install-dialog dgc-dialog";
+    dialog.setAttribute("aria-labelledby", "yb-install-title"); dialog.setAttribute("aria-describedby", "yb-install-intro");
+    const copyIcon = window.DgcIcons?.html?.("copy", { size: 14 }) || "";
+    dialog.innerHTML = `<div class="new-session-body"><h2 id="yb-install-title">Install Google Chrome</h2>
+      <p id="yb-install-intro" class="new-session-intro">${terminal
+        ? "This computer can’t show its password prompt here. Run this line in a terminal on it (the editor’s own terminal is one): it installs Google Chrome from Google’s own package source, as you would yourself, and asks for your password there."
+        : "Installs Google Chrome from Google’s own package source, as you would yourself. Your computer asks for your password."}</p>
+      ${terminal ? `<code class="yb-install-line"></code>` : ""}</div>
+      <div class="new-session-buttons">${terminal
+        ? `<button type="button" class="act yb-install-cancel">Close</button><button type="button" class="act primary yb-install-copy">${copyIcon}<span>Copy</span></button>`
+        : `<button type="button" class="act yb-install-cancel">Cancel</button><button type="button" class="act primary yb-install-go">Install</button>`}</div>`;
+    const line = dialog.querySelector(".yb-install-line"); if (line) { line.textContent = i.line; line.title = i.line; }
+    dialog.querySelector(".yb-install-cancel").onclick = () => ybCloseDialog();
+    const copy = dialog.querySelector(".yb-install-copy");
+    if (copy) copy.onclick = () => { ybCopyLine(); copy.querySelector("span").textContent = "Copied"; };
+    const go = dialog.querySelector(".yb-install-go");
+    if (go) go.onclick = () => {
+      ybCloseDialog();
+      yb.install = { ...i, state: "running", error: "" }; ybPaint();
+      ybAsk("install_google_chrome").then((said) => {
+        yb.available = said?.available === true;
+        yb.install = yb.available ? null : ybInstallOf(said?.install) || yb.install;
+        if (yb.available) yb.reason = "";
+        ybPaint(); ybInstallPoll();
+        if (yb.install?.state !== "running") { yb.asked = 0; ybRecent(); }
+      }, (error) => {
+        yb.install = { ...i, state: "failed", error: String(error?.message || "Google Chrome wasn't installed.").slice(0, 400) };
+        ybPaint();
+      });
+      ybInstallPoll();
+    };
+    dialog.addEventListener("cancel", (e) => { e.preventDefault(); ybCloseDialog(); });
+    dialog.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); ybCloseDialog(); } });
+    ybDialog = { dialog, focus: document.activeElement };
+    document.body.appendChild(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+    // (Focused here, not by autofocus: see the Auto-mode dialog. And once the click that opened it is done, so the card it
+    // came from doesn't take the focus back as it is drawn.)
+    const first = dialog.querySelector(".yb-install-go") || dialog.querySelector(".yb-install-copy");
+    first.focus();
+    setTimeout(() => { if (ybDialog?.dialog === dialog && !dialog.contains(document.activeElement)) first.focus(); }, 0);
+  }
+  /** Open Your Browser with what was typed (a search or an address), a link, or nothing (its window comes forward). */
+  function ybOpen(text) {
+    if (!ybOffered()) return;
+    if (yb.install) { ybInstall(); return; }               // (Google Chrome first: the one button)
+    const bounds = editorBounds(), url = String(text || "").trim().slice(0, 2000);
+    yb.error = "";
+    ybAsk("open_your_browser", { ...(url ? { url } : {}), ...(bounds ? { editor_bounds: bounds } : {}) }).then((said) => {
+      yb.open = true; ybPaint();
+      // No screen where DGC runs (Remote-SSH): your own tab, streamed into an editor tab.
+      if (said?.view === "tab") { yb.view = "tab"; vscode.postMessage({ type: "pipsOpenYourBrowser", own: true, documentId: document.documentElement.dataset.pipsDocumentId }); }
+      setTimeout(ybRecent, 3000);
+    }, (error) => {
+      yb.error = String(error?.message || "Your Browser didn't open.").slice(0, 600);
+      dock?.note?.("browser", yb.error);
+      ybPaint();
+    });
+  }
+  function ybReceive(msg) {
+    if (msg.type === "pipsConnection") {
+      if (msg.generation !== yb.generation) { for (const p of yb.pending.values()) { clearTimeout(p.timer); p.reject(new Error("The connection changed.")); } yb.pending.clear(); }
+      const was = ybOffered();
+      yb.generation = msg.generation;
+      yb.connected = msg.connected === true && msg.supported !== false && msg.enabled === true;
+      yb.api = Number(msg.apiVersion) || 0;
+      if (ybOffered()) ybRecent();
+      if (was !== ybOffered()) ybPaint();
+      return;
+    }
+    if (msg.type !== "pipsReply") return;
+    const p = yb.pending.get(msg.id); if (!p) return;
+    yb.pending.delete(msg.id); clearTimeout(p.timer);
+    if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error?.message || "Your Browser didn't answer."));
+  }
+  if (chatPlace === "home") {
+    setInterval(() => { if (ybOffered() && !document.hidden && Date.now() - yb.asked >= YB_POLL_MS) ybRecent(); }, 5000);
+    window.addEventListener("focus", () => { if (ybOffered() && Date.now() - yb.asked >= 3000) ybRecent(); });
+  }
+  const HALO = '<span class="halo dgc-dock-halo" aria-hidden="true"><i></i><i></i><i></i></span>';
+  /** The dock's one item that is always there (his call, 17 Nov): Your Browser, just before "+". */
+  function dockFixed() {
+    if (!ybOffered()) return [];
+    const here = yb.view === "tab" ? "in a tab here" : "to the right of the editor";
+    const state = yb.install?.state === "running" ? "Installing Google Chrome" : yb.install ? "Needs Google Chrome" : !yb.available ? "Can't open here"
+      : yb.open ? `Open, ${here}` : `Opens ${here}`;
+    // Its menu: Open (or, where it is needed, Install Google Chrome), then each Pip working in it, to watch that Pip's tab
+    // in an editor tab beside the chat.
+    const watch = yb.lanes.map((l) => ({ id: `lane:${l.pip_id}`, label: `Watch ${l.name}'s tab`, icon: "open-in-editor" }));
+    const first = yb.install ? { id: "open", label: "Install Google Chrome…", icon: "save" } : { id: "open", label: "Open Your Browser", icon: "open" };
+    return [{ key: "browser", kind: "browser", title: "Your Browser", state, icon: HALO, menu: [[first], ...(watch.length ? [watch] : [])] }];
+  }
   /** The dock itself, made once on the side bar's page: the last thing on it, under every screen. */
   function mountDock() {
     if (chatPlace !== "home" || dock || !window.DgcDock) return;
@@ -1361,6 +1531,7 @@
     if (typeof MutationObserver === "function") new MutationObserver(glassRoom).observe(host, { attributes: true, attributeFilter: ["data-show", "data-state", "hidden"] });
     dock = window.DgcDock.create({ host,
       onOpen: (key) => {
+        if (key === "browser") { ybOpen(""); return; }          // Your Browser: its window, to the right of the editor
         const pin = dockState.pins.find((p) => p.key === key);
         if (!pin) return;
         if (pin.kind === "pip") openPipsAt({ pip: pin.id });
@@ -1370,6 +1541,12 @@
       },
       // A tile's own menu rows (a folder's): New session here, Open in new window.
       onMenu: (key, what) => {
+        if (key === "browser") {
+          // A Pip's own tab in Your Browser, streamed into an editor tab beside the chat.
+          const lane = String(what).startsWith("lane:") ? yb.lanes.find((l) => l.pip_id === String(what).slice(5)) : null;
+          if (lane) vscode.postMessage({ type: "pipsOpenYourBrowser", pip: { id: lane.pip_id, name: lane.name }, documentId: document.documentElement.dataset.pipsDocumentId });
+          return;
+        }
         const pin = dockState.pins.find((p) => p.key === key), folder = String(pin?.ref?.folder || "");
         if (pin?.kind !== "folder" || !folder) return;
         if (what === "here") vscode.postMessage({ type: "newSessionInEditor", folder });
@@ -2022,6 +2199,8 @@
       // What the Library lists: a widget's Folio in the palette it wears, an artifact's sheet by its kind (as the dock and the Library show them).
       widgets: { mark: (id) => { wearMarks("widget", [{ id: String(id) }]); return markHtml("widget", String(id), false); } },
       artifacts: { sheet: (type) => window.DgcFileSheet?.html?.(String(type || "file")) || "" },
+      // Your Browser's card: offered only by a DGC that has it (Pips API 107).
+      browser: { offered: ybOffered(), links: yb.links, reason: yb.available ? "" : yb.reason, open: yb.open, error: yb.error, install: yb.install, view: yb.view },
     };
   }
   function homeAct(what, arg) {
@@ -2033,6 +2212,9 @@
     else if (what === "folder") { chooseFolder(arg); showSideTab("work"); }
     else if (what === "pin") toggleFolderPin(arg);
     else if (what === "usage") vscode.postMessage({ type: "openSettings", section: "usage" });       // Settings, on its Token Usage page
+    else if (what === "browse") ybOpen(arg);                // Home's Browser card: a search, an address or a last link
+    else if (what === "install") ybInstall();               // Install Google Chrome: its small dialog first
+    else if (what === "copy-line") ybCopyLine();            // the terminal line, where no password prompt can open
     // Home's Widgets and Artifacts cards: the side bar's Library, on that tab (his call, 15 Nov; it was the editor's page).
     else if (what === "library") { showSideTab("library"); libraryMount()?.view(arg === "widgets" ? "widgets" : "artifacts"); }
     else if (what === "widget") vscode.postMessage({ type: "homeWidgetOpen", id: String(arg?.id || ""), chat_id: String(arg?.chat_id || "") });
@@ -13814,6 +13996,7 @@ function permissionChoices(ev) {
       pipSetupCards?.receive(msg);
       pipDigestBar?.receive(msg);
       homePips?.receive(msg);
+      if (chatPlace === "home") ybReceive(msg);
       if (msg.type === "pipsVisibility") {
         pipsViewVisible = msg.visible === true;
         // (focused: the window has the focus. A Pip's chat reads what it shows only while someone can be looking.)
