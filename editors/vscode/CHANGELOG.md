@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Work's plan looks like a plan**: the Tasks pill shows the step being worked on; it opens the plan's section (its time, a progress bar, a mark per step that turns, draws its check or is struck); in the conversation one card per turn updates in place as the plan changes.
+- **Thinking is one slider, Faster to Smarter**, in Work, ChatDGC and a Pip's chat: a moving fill, Ultra's own colours and sparkles, the note behind its ?; press a stop, drag, or use the arrow keys.
+- **DGC's products named and coloured**: VIBE after the side bar's and ChatDGC's wordmark, in Geist; the SDK's mark in olive; Home's GitHub, Docs, DGC-SDK and Settings always live in its ⋯.
+- **The side bar's chosen tab is its name in purple**, with nothing behind it.
+- **A question card in a Pip's chat** (Work's card): one question at a time, Next, Skip, Submit, Something else…
+- **Your Browser** on the dock and Home: Install Google Chrome, and your own tab streamed over Remote-SSH.
+- **A sub-agent with Work tools from a Pip's fix card**, shown in the Pip's chat with Undo, and **a model that can see** for every chat (Settings > Models > A model that can see).
+- **A Pip at Do it all asks in its chat**: no cards from it at that level.
 - **Start a sub-agent with Work tools, from a Pip's fix card.** The card's More (its three dots) has the one row; the sub-agent's row and the agent map say "Work tools" beside its name, with its model; when it ends, what it changed in your folder is Work's changed-files card with Undo, and Undo names any file it left because you changed it since. Offered only by a DGC that runs one.
 - **Download saves on your computer, everywhere**: every Download and Save a copy in DGC (a chat's pictures and files in Work, ChatDGC and a Pip's chat, output and artifact cards, videos, the Library in the side bar and its tab, a plugin card's file, a Pip's computer files, Notes' export) is saved by the page itself on the computer the editor runs on, never through the editor's save dialog, which in a remote window browses the remote machine. "Downloaded" is said where you clicked. A file larger than 512 MB, or one asked for from a command, goes to your browser instead. A folder of notes exports as one .zip. A Pip team file downloads the same way. Only Save to project… keeps a dialog: its place is the project. Download and Save a copy wear one icon everywhere, the arrow into a tray.
 - **A picture in a chat opens in a pop-up inside the chat**: large over a dim backdrop, its name and size, and Download, Save to Library, Open in editor and Close as icons; Escape, a click outside and Close close it, the arrows step through the message's pictures, focus moves in and back. In ChatDGC and a Pip's chat; Work's own viewer has the same actions.
