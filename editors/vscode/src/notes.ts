@@ -55,10 +55,11 @@ type Context = Pick<vscode.ExtensionContext, "globalState" | "globalStorageUri" 
 export type NotesEnv = { openExternal?: (url: string) => void;
   /** A note's words to the clipboard. */
   clipboard?: (text: string) => void | Promise<void>;
-  /** The system's Save dialog for one .md file (`locked`: it says the file will not be locked). True: it was written. */
-  saveFile?: (file: { name: string; text: string; locked: boolean }) => Promise<boolean>;
-  /** A folder of .md files, made where the user chooses. The folder's name as made; undefined: nothing was written. */
-  saveFolder?: (out: { name: string; files: { name: string; text: string }[]; locked: boolean }) => Promise<string | undefined>;
+  /** One .md file, downloaded to the person's computer by the page that asked (`reply`, src/download.ts; `locked`: the
+   *  file will not be locked). True: it was handed to the page. */
+  saveFile?: (file: { name: string; text: string; locked: boolean }, reply?: Reply) => Promise<boolean>;
+  /** Many .md files, downloaded the same way as one .zip. The .zip's name; undefined: nothing was handed over. */
+  saveFolder?: (out: { name: string; files: { name: string; text: string }[]; locked: boolean }, reply?: Reply) => Promise<string | undefined>;
   /** A note opened wide in an editor tab. */
   openTab?: (id: string) => void;
   /** True where the editor keeps secrets in its own weak store, not the system's keychain: nothing is locked there. */
@@ -430,7 +431,7 @@ export class Notes {
         const text = await this.textOf(note);
         if (text === undefined) { said({ ok: false, why: note.locked ? "locked" : "gone" }); return; }
         if (m.op === "copy") { await this.env.clipboard?.(m.as === "md" ? text : plainNote(text)); said({ ok: true }); return; }
-        said({ ok: true, saved: (await this.env.saveFile?.({ name: `${fileName(note.title)}.md`, text, locked: note.locked })) === true }); return;
+        said({ ok: true, saved: (await this.env.saveFile?.({ name: `${fileName(note.title)}.md`, text, locked: note.locked }, reply)) === true }); return;
       }
       case "exportFolder": {
         const folder = this.folder(m.folder); if (folder === undefined) return;
@@ -442,7 +443,7 @@ export class Notes {
           used.add(name.toLowerCase()); files.push({ name: `${name}.md`, text }); locked = locked || note.locked;
         }
         if (!files.length) { said({ ok: false, why: "empty", skipped }); return; }
-        const where = await this.env.saveFolder?.({ name: fileName(folder ? index.folders.find((f) => f.id === folder)!.name : "All notes"), files, locked });
+        const where = await this.env.saveFolder?.({ name: fileName(folder ? index.folders.find((f) => f.id === folder)!.name : "All notes"), files, locked }, reply);
         said({ ok: true, saved: where ? files.length : 0, skipped, where: where ?? "" }); return;
       }
       // A link in a note, Ctrl+clicked: opened in the browser, and only an address of the web or of mail.

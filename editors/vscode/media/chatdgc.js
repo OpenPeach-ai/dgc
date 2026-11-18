@@ -356,7 +356,9 @@
       try { spec = JSON.parse(decodeURIComponent(pre.querySelector(".copy[data-c]")?.dataset.c || "")); } catch { spec = null; }
       const chart = spec && window.DgcChart.render(spec, {
         copy: (text) => vscode.postMessage({ type: "copy", text }),
-        save: (name, data) => (data ? vscode.postMessage({ type: "saveImage", name, data }) : showNotice("The chart couldn't be made into an image.", "info")),
+        // A chart as a PNG: this page saves it on the person's computer (media/shared/download.js).
+        save: (name, data, from) => (data && window.DgcDownload ? window.DgcDownload.here(from || document.activeElement, { name: /\.png$/i.test(name || "") ? name : `${name || "chart"}.png`, data, mime: "image/png" })
+          : data ? vscode.postMessage({ type: "saveImage", name, data }) : showNotice("The chart couldn't be made into an image.", "info")),
       });
       if (chart) pre.replaceWith(chart);
       else if (live) pre.replaceWith(el("div", "cd-chart-pending", "Drawing a chart…"));   // its JSON is still coming
@@ -1040,12 +1042,14 @@
   }
   // ---- images the chat keeps, shown as thumbnails (asked of the backend once each, then remembered)
   const images = new Map();          // attachment id -> {data} | {error} | "asked"
-  function thumb(item) {
+  /** `group`: the pictures of the same message, which the pop-up steps through with the arrows. */
+  function thumb(item, group = [item], messageId = "") {
     const button = el("button", "cd-thumb");
-    button.type = "button"; button.dataset.att = item.id; button.title = `${item.name || "Image"}: click to enlarge`;
+    button.type = "button"; button.dataset.att = item.id; button.title = `${item.name || "Image"}: click to open`;
     const picture = el("img"); picture.alt = item.name || "Image"; picture.dataset.att = item.id;
     button.append(picture);
-    button.addEventListener("click", () => button.classList.toggle("cd-thumb-big"));
+    // A click opens it large in the chat (media/shared/picturepop.js), with Download, Save to Library and Open in editor.
+    button.addEventListener("click", () => openChatPicture(group, item, button, messageId));
     const known = images.get(item.id);
     if (known?.data && IMAGE_DATA.test(known.data)) picture.src = known.data;
     else if (known?.error) button.replaceChildren(el("span", "cd-thumb-missing", item.name || "Image"));
@@ -1580,7 +1584,7 @@
         const row = el("div", "cd-thumbs");
         for (const item of pictures) {
           // A picture you attached: its "…" stands on its corner (the file's menu, as on a card).
-          const card = el("span", "cd-thumb-card"); card.append(thumb(item));
+          const card = el("span", "cd-thumb-card"); card.append(thumb(item, pictures, message.id));
           keptFile(card, message, item, "you");
           row.append(card);
         }
@@ -1966,7 +1970,8 @@
     // An image the reply made (generate_image): the picture itself, as an attached image shows, then its card.
     if (file.kind === "image" && !file.removed && /^att_[a-f0-9]{32}$/.test(file.id || "")) {
       box.classList.add("cd-file-image");
-      box.append(thumb(file));
+      const made = (Array.isArray(message.files) ? message.files : []).filter((f) => f?.kind === "image" && !f.removed && /^att_[a-f0-9]{32}$/.test(f.id || ""));
+      box.append(thumb(file, made.length ? made : [file], message.id));
     }
     box.dataset.format = String(file.format || "");
     if (file.removed) box.dataset.removed = "true";
@@ -1989,15 +1994,23 @@
       open.type = "button";
       open.setAttribute("aria-label", `Open ${file.name || "the file"}`);
       if (file.kind === "image") open.dataset.picOpen = "";     // a folded block's Open opens the picture, as this does
-      open.addEventListener("click", () => vscode.postMessage({ type: "fileOpen", messageId: message.id, fileId: file.id, name: file.name }));
+      // A picture's card opens the picture large in the chat (its pop-up has Open in editor); any other file, in its app.
+      open.addEventListener("click", () => {
+        if (file.kind === "image" && /^att_[a-f0-9]{32}$/.test(file.id || "") && window.DgcPicturePop) {
+          const made = (Array.isArray(message.files) ? message.files : []).filter((f) => f?.kind === "image" && !f.removed && /^att_[a-f0-9]{32}$/.test(f.id || ""));
+          openChatPicture(made.length ? made : [file], made.find((f) => f.id === file.id) || file, open, message.id);
+        } else vscode.postMessage({ type: "fileOpen", messageId: message.id, fileId: file.id, name: file.name });
+      });
       const save = el("button", "cd-edit-cancel cd-file-save", "Save a copy…");
       save.type = "button";
-      save.addEventListener("click", () => vscode.postMessage({ type: "fileSave", messageId: message.id, fileId: file.id, name: file.name }));
+      // Save a copy: the host hands this page the file, which saves it on the person's computer (media/shared/download.js).
+      save.addEventListener("click", () => { window.DgcDownload?.ask(save); vscode.postMessage({ type: "fileSave", messageId: message.id, fileId: file.id, name: file.name }); });
       // Save a copy is the round download icon; its words stay for a tip and a screen reader.
       if (sheets) { save.className = "cd-file-save dgc-doc-dl"; save.title = "Save a copy…"; save.innerHTML = `<span class="dgc-doc-dl-word">Save a copy…</span>${sheets.DOWNLOAD}`; }
       buttons.append(open);
       if (sheets) buttons.insertAdjacentHTML("beforeend", sheets.openPill());
       buttons.append(save);
+      if (file.kind === "image" && state.libraryOffered) buttons.append(libraryButton(file.id));
       if (file.kind === "image") {
         // A picture the chat made is in DGC's own folder: this puts a copy in the project (assets/, or where you pick).
         const project = el("button", "cd-edit-cancel cd-file-project", "Save to project…");
@@ -2033,10 +2046,67 @@
     const why = (act) => (f.picture ? (act === "editor" ? FM.whyPicture(act, "chat") : act === "path" || act === "reveal" ? FM.KEPT : "") : FM.whyKept(f.name, act));
     return { name: f.name, why, onPick: (act) => {
       fileActFrom = card.querySelector(".dgc-file-more");
+      if (act === "save") window.DgcDownload?.ask(fileActFrom);
       vscode.postMessage({ type: "fileAct", act, messageId: f.message, fileId: f.id, name: f.name, ...(f.picture ? { picture: true } : {}) });
     } };
   });
   var fileActFrom = null;               // the "…" whose pick the host answers (a picture to copy, a word to say)
+
+  // ---- a picture of the chat, opened large over it (media/shared/picturepop.js), and Save to Library ----------------
+  // A picture is in the Library when DGC made it (generate_image) or someone kept it: the host asks, by its id, once,
+  // and the button says "In Library" (off) then. Save to Library keeps it there, kept by you (dgc/image_keep.py).
+  const pictureLibrary = new Map();      // attachment id -> "in" | "can" | "saving" | "asked"
+  const libraryWaiting = new Map();      // attachment id -> [resolve]
+  function libraryState(id) {
+    const known = pictureLibrary.get(id);
+    if (!known) { pictureLibrary.set(id, "asked"); vscode.postMessage({ type: "libraryPicture", fileId: id, keep: false }); return "can"; }
+    return known === "asked" ? "can" : known;
+  }
+  function libraryButton(id) {
+    const button = el("button", "dgc-doc-lib");
+    button.type = "button"; button.dataset.libId = id;
+    button.innerHTML = window.DgcIcons?.html("library") || "";
+    paintLibrary(button, libraryState(id));
+    button.addEventListener("click", () => { if (!button.disabled) void keepPicture(id, button); });
+    return button;
+  }
+  function paintLibrary(button, now) {
+    const words = now === "in" ? "In Library" : now === "saving" ? "Saving to Library…" : "Save to Library";
+    button.disabled = now === "in" || now === "saving";
+    button.title = words; button.setAttribute("aria-label", words);
+  }
+  function keepPicture(id, from) {
+    pictureLibrary.set(id, "saving");
+    for (const b of document.querySelectorAll(`.dgc-doc-lib[data-lib-id="${CSS.escape(id)}"]`)) paintLibrary(b, "saving");
+    vscode.postMessage({ type: "libraryPicture", fileId: id, keep: true });
+    return new Promise((resolve) => {
+      libraryWaiting.set(id, [...(libraryWaiting.get(id) || []), resolve]);
+    }).then((answer) => { if (from?.isConnected && answer.in_library) window.DgcDownload?.said(from, "Saved to Library"); return answer; });
+  }
+  function libraryAnswer(msg) {
+    const id = String(msg.fileId || "");
+    if (!/^att_[a-f0-9]{32}$/.test(id)) return;
+    const now = msg.in_library === true ? "in" : "can";
+    pictureLibrary.set(id, now);
+    for (const b of document.querySelectorAll(`.dgc-doc-lib[data-lib-id="${CSS.escape(id)}"]`)) paintLibrary(b, now);
+    const pop = window.DgcPicturePop?.current();
+    if (pop?.el.dataset.chatPictures) (pop.pictures || []).forEach((p, i) => { if (p.id === id) pop.set(i, { library: now }); });
+    for (const resolve of libraryWaiting.get(id) || []) resolve({ in_library: now === "in", kept: msg.kept === true });
+    libraryWaiting.delete(id);
+    if (msg.error) showNotice(String(msg.error), "info");
+  }
+  function openChatPicture(group, item, opener, messageId) {
+    const Pop = window.DgcPicturePop;
+    if (!Pop) return;
+    const list = group.filter((f) => /^att_[a-f0-9]{32}$/.test(String(f?.id || "")));
+    const pictures = list.map((f) => ({ id: f.id, src: images.get(f.id)?.data || "", name: String(f.name || "Picture"), bytes: Number(f.size) || 0,
+                                        mime: String(f.mime || ""), library: state.libraryOffered ? libraryState(f.id) : "" }));
+    const pop = Pop.open({ pictures, index: Math.max(0, list.indexOf(item)), opener,
+      onLibrary: state.libraryOffered ? (p) => keepPicture(p.id, pop?.el.querySelector('[data-act="library"]')) : null,
+      // Open in editor: the old way, a copy in the editor's own picture viewer.
+      onEditor: (p) => vscode.postMessage({ type: "fileOpen", messageId, fileId: p.id, name: p.name }) });
+    if (pop) { pop.el.dataset.chatPictures = "1"; pop.pictures = pictures; }
+  }
 
   // ---- artifacts a reply made or changed (message.artifacts: a deck, a sheet, a dashboard, a page): a card each, which
   // opens it in its panel or exports it. They're kept with the reply, so they come back with the chat; what each one
@@ -4381,6 +4451,11 @@
       case "folderOffered":
         folderOffered(msg.on === true);
         return;
+      case "libraryOffered":
+        // Save to Library on a picture (capabilities.chatdgc.library_picture): an older DGC shows none.
+        if (state.libraryOffered !== (msg.on === true)) { state.libraryOffered = msg.on === true; render(); }
+        return;
+      case "libraryPicture": libraryAnswer(msg); return;
       case "fallbackOffered":
         state.fallbackOffered = msg.on === true; updatePill();
         return;
@@ -4947,6 +5022,9 @@
         if (!/^att_[a-f0-9]{32}$/.test(String(msg.id || ""))) return;
         const ok = typeof msg.data === "string" && IMAGE_DATA.test(msg.data);
         images.set(msg.id, ok ? { data: msg.data } : { error: String(msg.error || "") });
+        // (A picture open in the pop-up before its bytes came shows now.)
+        const pop = window.DgcPicturePop?.current();
+        if (ok && pop?.el.dataset.chatPictures) (pop.pictures || []).forEach((p, i) => { if (p.id === msg.id) pop.set(i, { src: msg.data }); });
         for (const picture of document.querySelectorAll(`img[data-att="${CSS.escape(msg.id)}"]`)) {
           if (ok && IMAGE_DATA.test(msg.data)) picture.src = msg.data;
           else if (picture.closest(".cd-picture-item")) {

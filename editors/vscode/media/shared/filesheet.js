@@ -66,10 +66,12 @@
   const forFile = (what, name) => { const k = of(what, name); return html(k.kind, { tag: k.tag }); };
 
   const svg = (d) => `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
-  const DOWNLOAD = svg('<path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13h10"/>');
+  // Download (and Save a copy): one action, one glyph on every surface, the icon module's own (media/shared/icons.js);
+  // the same drawing here only while that module has not loaded.
+  const download = () => root.DgcIcons?.html("download", { size: 14 }) || svg('<path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13h10"/>');
   const OPEN = svg('<path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5V13H3V4.5h4"/>');
   /** The card's visible Open (the card's own Open button lies over all of it, so this one is only seen). */
   const openPill = () => `<span class="dgc-doc-open-pill" aria-hidden="true">${OPEN}Open</span>`;
 
-  root.DgcFileSheet = Object.freeze({ KINDS, of, html, forFile, openPill, DOWNLOAD, OPEN });
+  root.DgcFileSheet = Object.freeze({ KINDS, of, html, forFile, openPill, get DOWNLOAD() { return download(); }, OPEN });
 })();

@@ -19,6 +19,7 @@ that system's workers (job ``images``) for as long as it runs.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -754,6 +755,8 @@ def save(pictures, *, folder: Path, root: Path | None, prompt: str, generator: d
                 "generator_name": generator["name"], "provider": generator["provider"], "model": model,
                 "prompt": prompt[:500], "seed": picture.seed, "width": width, "height": height,
                 "bytes": len(picture.data), "cost_usd": each, "created_at": record["created_at"],
+                # Its bytes' digest, so a chat showing the same picture knows it is in the Library (image_keep.held).
+                "sha256": hashlib.sha256(picture.data).hexdigest(),
                 **(where or {})})
     return out
 

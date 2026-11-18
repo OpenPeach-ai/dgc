@@ -32,7 +32,9 @@ const stubs = () => {
   const s = { opened: [], info: [], asked: [], copied: [], choice: undefined };
   s.vscode = { commands: { executeCommand: async (...a) => { s.opened.push(a); } },
     Uri: { file: (p) => ({ fsPath: p, path: p, scheme: "file" }), joinPath: (base, name) => ({ fsPath: join(base.fsPath, name), path: join(base.fsPath, name), scheme: "file" }) },
-    workspace: { workspaceFolders: undefined, fs: { copy: async (from, to, o) => { s.copied.push([from.fsPath, to.fsPath, o]); writeFileSync(to.fsPath, readFileSync(from.fsPath)); } } },
+    workspace: { workspaceFolders: undefined, fs: { copy: async (from, to, o) => { s.copied.push([from.fsPath, to.fsPath, o]); writeFileSync(to.fsPath, readFileSync(from.fsPath)); },
+      // (What a download reads, to hand the page: the kept file itself.)
+      stat: async (u) => ({ type: 1, size: readFileSync(u.fsPath).length }), readFile: async (u) => readFileSync(u.fsPath) } },
     window: { showInformationMessage: (m) => { s.info.push(m); }, showSaveDialog: async (o) => { s.asked.push(o); return s.choice; } } };
   return s;
 };
@@ -55,17 +57,17 @@ test("59 host: Open asks DGC for the file, checks it, and opens a copy under its
   assert.equal(h.posted.some((m) => JSON.stringify(m).includes(k.path)), false, "the page is never told where it is kept");
 });
 
-test("59 host: Save a copy… asks where, and copies the kept file there", async () => {
+// His ask (18 Nov): Save a copy… saves on the computer the editor runs on: the kept file goes to the page, which saves it
+// there (media/shared/download.js). Never a save dialog, which over a remote connection browses the remote machine.
+test("59 host: Save a copy… hands the kept file to the page, under its own name, to save on this computer; no save dialog", async () => {
   const s = stubs(), h = host(101, s.vscode), bytes = Buffer.alloc(9000, 9), k = kept(bytes);
-  const save = async () => { const before = h.sent.length; h.editor.receive({ type: "pipsOpenFile", pip_id: PIP, message_id: "message_4", index: 0, save: true }); await settle(() => h.sent.length > before);
-    answer(h, h.sent.at(-1).request, { pip_id: PIP, message_id: "message_4", index: 0, name: "checkout-flow.webm", mime: "video/webm", bytes: bytes.length, path: k.path }); };
-  s.choice = { fsPath: join(k.state, "flow.webm"), path: join(k.state, "flow.webm"), scheme: "file" };
-  await save(); await settle(() => s.info.length);
-  assert.equal(s.asked.length, 1); assert.match(s.asked[0].defaultUri.fsPath, /checkout-flow\.webm$/); assert.equal(s.asked[0].saveLabel, "Save a copy");
-  assert.deepEqual(readFileSync(join(k.state, "flow.webm")), bytes);
-  assert.deepEqual(s.info, ["Saved flow.webm."]); assert.deepEqual(s.opened, [], "nothing opens in a tab");
-  s.choice = undefined; await save(); await settle(() => s.asked.length === 2); await new Promise((r) => setTimeout(r, 20));
-  assert.equal(s.info.length, 1, "Cancel saves nothing and says nothing");
+  const before = h.sent.length; h.editor.receive({ type: "pipsOpenFile", pip_id: PIP, message_id: "message_4", index: 0, save: true }); await settle(() => h.sent.length > before);
+  answer(h, h.sent.at(-1).request, { pip_id: PIP, message_id: "message_4", index: 0, name: "checkout-flow.webm", mime: "video/webm", bytes: bytes.length, path: k.path });
+  await settle(() => h.posted.some((m) => m.type === "dgcDownload"));
+  const handed = h.posted.find((m) => m.type === "dgcDownload");
+  assert.deepEqual([handed.name, handed.mime], ["checkout-flow.webm", "video/webm"]);
+  assert.deepEqual(Buffer.from(handed.data), bytes);
+  assert.deepEqual([s.asked, s.copied, s.info, s.opened], [[], [], [], []], "no dialog, nothing written here, nothing opens in a tab");
 });
 
 test("59 host: a video's or a sound's bytes are handed to its player; anything else, or a file that isn't the kept one, is not", async () => {

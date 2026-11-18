@@ -2155,8 +2155,11 @@ test("images you sent show as thumbnails, what a vision model saw is one click a
     assert.equal(await s.page.locator('img[data-att="' + att("a") + '"]').evaluate((i) => i.src.startsWith("data:image/png")), true);
     assert.equal(await s.page.locator(".cd-thumb-missing").textContent(), "gone.png");
     assert.deepEqual(await s.page.locator(".cd-user .cd-sent .cd-chip-name").allTextContents(), ["notes.pdf"], "other files stay chips");
+    // A click opens the picture large in a pop-up inside the chat (18 Nov; media/shared/picturepop.js); Escape closes it.
     await s.page.locator(".cd-thumb").first().click();
-    assert.equal(await s.page.locator(".cd-thumb").first().evaluate((b) => b.classList.contains("cd-thumb-big")), true);
+    assert.equal(await s.page.locator(".dgc-picpop .dgc-picpop-img").getAttribute("src"), png);
+    await s.page.keyboard.press("Escape");
+    assert.equal(await s.page.locator(".dgc-picpop").count(), 0);
     assert.equal(await s.page.locator(".cd-seen summary").textContent(), "Seen by qwen3-vl:8b");
     await s.page.locator(".cd-seen summary").click();
     assert.equal(await s.page.locator(".cd-seen-text").textContent(), "A white sign reading PIPS 48 READY.");
@@ -3462,12 +3465,15 @@ test("charts: a ```chart block drawn as bar, line, pie or scatter; hover values,
                                                                                 "Feb\t₹950\t₹3,400", "Mar\t₹1,100\t"]);
     await first.getByRole("button", { name: "Copy data" }).click();
     assert.equal((await s.posted("copy")).at(-1).text, ",Food,Travel\nJan,1200,400\nFeb,950,3400\nMar,1100,");
+    // Save image: the page saves the chart's PNG itself, on this computer (media/shared/download.js, 18 Nov), never
+    // through the host's save dialog.
+    await s.page.evaluate(() => { window.__saved = []; HTMLAnchorElement.prototype.click = function () { if (this.hasAttribute("data-dgc-download")) window.__saved.push({ name: this.download, href: this.href }); }; });
     await first.getByRole("button", { name: "Save image" }).click();
-    await s.page.waitForFunction(() => window.__posted.some((m) => m.type === "saveImage"), null, { timeout: 5000 });
-    const saved = (await s.posted("saveImage")).at(-1);
+    await s.page.waitForFunction(() => window.__saved.length > 0, null, { timeout: 5000 });
+    const saved = await s.page.evaluate(() => window.__saved.at(-1));
     assert.match(saved.name, /^Spend by month .*2026.*\.png$/);
-    assert.match(saved.data, /^data:image\/png;base64,/);
-    if (process.env.DGC_SHOTS) writeFileSync(join(process.env.DGC_SHOTS, "chatdgc-chart-saved.png"), Buffer.from(saved.data.split(",")[1], "base64"));
+    assert.match(saved.href, /^blob:/);
+    assert.equal((await s.posted("saveImage")).length, 0, "nothing asked of the host");
     // What the reply ran on the spreadsheets: shut, then each SQL and its rows.
     await s.send({ type: "message", message: { id: M(2), role: "assistant", text, finish: "stop", queries: [
       { sql: "SELECT category, SUM(amount) FROM expenses GROUP BY category", columns: ["category", "SUM(amount)"],

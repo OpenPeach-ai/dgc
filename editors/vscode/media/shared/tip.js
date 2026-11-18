@@ -13,7 +13,7 @@
 //   tip.hide(); tip.dispose();
 (function (root) {
   "use strict";
-  const DELAY_MS = 700, WARM_MS = 300, GAP = 6, EDGE = 4;
+  const DELAY_MS = 700, WARM_MS = 300, GAP = 6, EDGE = 4, SAID_MS = 1900;
 
   /** Words cut with "…" under the pointer: the box that cuts them and their whole text, or null. Looked for through
    *  what lies at that point (a card that is one button lies over its own lines), a few boxes up from each. A menu's
@@ -98,6 +98,7 @@
     function show(el, instant, more = "", mine = "") {
       // (The keyboard's label keeps the control's `title`: the system shows its tooltip only to a pointer. A pointer that
       // then rests on the same control has it lifted.)
+      if (Date.now() < quiet) return;
       if (el === target && more === extra) { if (!instant && !node.hidden && !lifted) { lift(el); watch(el); } return; }
       const label = mine || (el === target && lifted) || labelOf(el);
       if (!label || el.closest("[hidden]")) { hide(); return; }
@@ -133,7 +134,12 @@
       if (found && keyboard) show(found, true); else hide();
     };
     const key = (e) => { lastKey = e.key; if (e.key === "Escape") hide(); };
+    // A note that says what just happened ("Downloaded", "Saved to Library": media/shared/download.js) takes the label's
+    // place for its moment: no label shows over it, or beside it.
+    let quiet = 0;
+    const said = () => { hide(); quiet = Date.now() + SAID_MS; };
     const scrolled = () => hide();
+    scope.addEventListener("dgc-said", said, true);
     scope.addEventListener("pointerover", over);
     scope.addEventListener("pointerout", leave);
     scope.addEventListener("pointerdown", down, true);
@@ -146,7 +152,7 @@
       hide(); node.remove();
       scope.removeEventListener("pointerover", over); scope.removeEventListener("pointerout", leave); scope.removeEventListener("pointerdown", down, true);
       scope.removeEventListener("focusin", focus); scope.removeEventListener("focusout", hide); doc.removeEventListener("keydown", key, true);
-      scope.removeEventListener("scroll", scrolled, true); view.removeEventListener("blur", hide);
+      scope.removeEventListener("scroll", scrolled, true); view.removeEventListener("blur", hide); scope.removeEventListener("dgc-said", said, true);
     } };
   }
 

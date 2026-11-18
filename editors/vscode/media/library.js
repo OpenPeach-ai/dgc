@@ -179,7 +179,8 @@
   function fromImage(img) {
     const kept = img.kept === true, title = (kept && text(img.title)) || text(img.prompt) || baseName(img.rel || img.path) || "Image";
     const size = Number(img.width) > 0 && Number(img.height) > 0 ? `${Number(img.width)}×${Number(img.height)}` : "";
-    return { key: `image:${img.path}`, source: "image", type: "image", title, at: when(img.created_at), by: makerOf(img.made_by, img), verb: kept ? "kept" : "made",
+    // (One you kept with Save to Library says so, and the chat it came from: "saved by you from Painter".)
+    return { key: `image:${img.path}`, source: "image", type: "image", title, at: when(img.created_at), by: makerOf(img.made_by, img), verb: kept ? (img.kept_by === "you" ? "saved" : "kept") : "made",
       facts: [size, Number(img.bytes) ? sizeText(Number(img.bytes)) : "", text(img.generator_name, 64), baseName(img.project)], tip: [kept ? text(img.why, 500) : "", baseName(img.rel || img.path)].filter(Boolean).join("\n"), raw: img };
   }
   /** A video DGC made. */
@@ -217,6 +218,7 @@
     const by = item.by;
     if (item.verb === "chart") return by.name ? ["A chart in ", by.name] : ["A chart in a chat", ""];
     if (item.verb === "work") return by.name ? ["in Work · ", by.name] : ["in Work", ""];
+    if (item.verb === "saved") return by.name ? ["saved by you from ", by.name] : ["saved by you", ""];
     if (by.name) return [item.verb === "in" ? "in " : `${item.verb} by `, by.name];
     if (item.verb === "in") return [by.kind === "chat" ? "in a chat" : BARE[by.kind] || "", ""];
     const bare = KINDS[by.kind]?.bare || BARE[by.kind] || "";
@@ -439,11 +441,13 @@
      *  (open, save, reveal, remove) ask the host the menu's way, itemAct; the rest are what only that kind has. */
     function actions(item) {
       const r = item.raw, pinned = (kind, id) => docked.has(`${kind}:${id}`);
-      const ask = (act) => () => post({ type: "itemAct", act, item: refOf(item) });
+      // (Save a copy… is a download: the host hands this page the file, which saves it on the person's computer and says
+      // "Downloaded" beside the row: media/shared/download.js.)
+      const ask = (act) => (li) => { if (act === "save") root.DgcDownload?.ask(li?.querySelector?.(".lib-row-more") || doc.activeElement); post({ type: "itemAct", act, item: refOf(item) }); };
       const pinRow = (pinItem) => ({ id: "pin", label: pinned(pinItem.kind, pinItem.id) ? "Unpin from the dock" : "Pin to the dock", pinned: pinned(pinItem.kind, pinItem.id), run: () => sendPin({ type: "dockToggle", item: pinItem }) });
       if (item.source === "artifact") {
         return [{ id: "open", icon: "go-to-file", label: r.type === "doc" ? "Open it in the editor" : "Open it", run: ask("open") },
-          ...(Array.isArray(r.exports) && r.exports.length ? [{ id: "save", icon: "desktop-download", label: "Save a copy…", run: ask("save") }] : []),
+          ...(Array.isArray(r.exports) && r.exports.length ? [{ id: "save", icon: "save", label: "Save a copy…", run: ask("save") }] : []),
           pinRow({ kind: "artifact", id: String(r.id), title: item.title, sub: item.facts.filter(Boolean).join(" · "), look: { type: String(r.type || "") }, ...(typeof r.file === "string" ? { ref: { file: r.file } } : {}) }),
           { id: "remove", icon: "trash", label: "Remove…", tip: "Remove: it goes to DGC's trash, where it can be recovered", danger: true, run: ask("remove") }];
       }
@@ -457,13 +461,13 @@
       if (item.source === "workfile") {
         const picture = r.kind === "image";
         return [{ id: "open", icon: "go-to-file", label: picture ? "Open the picture" : "Open it in the editor", run: ask("open") },
-          { id: "save", icon: "desktop-download", label: "Save a copy…", run: ask("save") },
+          { id: "save", icon: "save", label: "Save a copy…", run: ask("save") },
           ...(picture ? [] : [{ id: "reveal", icon: "folder-opened", label: "Reveal in file manager", run: ask("reveal") }])];
       }
       if (item.source === "image") {
         return [{ id: "open", icon: "go-to-file", label: "Open the image", run: ask("open") },
           { id: "reveal", icon: "folder-opened", label: "Reveal in file manager", run: ask("reveal") },
-          { id: "save", icon: "desktop-download", label: "Save a copy…", run: ask("save") },
+          { id: "save", icon: "save", label: "Save a copy…", run: ask("save") },
           { id: "project", icon: "file-symlink-file", label: "Save to project…", tip: "Save to project… (the folder open in VS Code)", run: () => post({ type: "workImageToProject", path: r.path }) }];
       }
       if (item.source === "video") {
@@ -475,7 +479,7 @@
       const project = r.source === "project";
       return [{ id: "open", icon: project ? "folder" : "comment-discussion", label: project ? `Open the space ${r.project_name || ""}`.trim() : "Open the chat it's in", run: ask("open") },
         { id: "use", icon: "comment", label: "Use in a new chat", run: () => post({ type: "use", file: r }) },
-        { id: "save", icon: "desktop-download", label: "Save a copy…", run: ask("save") },
+        { id: "save", icon: "save", label: "Save a copy…", run: ask("save") },
         ...(r.type === "image" ? [{ id: "project", icon: "file-symlink-file", label: "Save to project…", tip: "Save to project… (the folder open in VS Code)", run: () => post({ type: "saveToProject", file: r }) }] : []),
         { id: "add", icon: "new-folder", label: "Add a copy to a space…", run: () => post({ type: "toProject", file: r }) },
         pinRow({ kind: "file", id: String(r.id || ""), title: item.title, sub: [F_KIND[r.type] || "File", project ? `in the space ${r.project_name || ""}`.trim() : `in “${r.chat_title || "a chat"}”`].join(" · "),
@@ -500,6 +504,7 @@
       if (whyNot(item, id)) return;
       // (A video plays in its own row, from the bytes the host hands over: nothing is opened anywhere else.)
       if (id === "open" && item.source === "video") { play(li, item.raw); return; }
+      if (id === "save") root.DgcDownload?.ask(li.querySelector(".lib-row-more") || li);
       post({ type: "itemAct", act: id, item: refOf(item) });
     }
     /** Opens it: beside the row's ⋯, or at a point (a right-click). `fromRow`: the keyboard came from the row, and goes back to it. */
@@ -569,6 +574,8 @@
       for (const act of acts) {
         const b = doc.createElement("button"); b.type = "button"; b.className = `lib-act${act.id === "pin" ? " lib-pin" : ""}`; b.dataset.act = act.id; b.title = act.tip || act.label; b.setAttribute("aria-label", act.label);
         if (act.id === "pin") { b.setAttribute("aria-pressed", String(!!act.pinned)); b.setAttribute("aria-label", `${act.label}: ${item.title}`); b.innerHTML = PIN(!!act.pinned); }
+        // (Save a copy is Download: one glyph on every surface, the icon module's own drawing.)
+        else if (act.icon === "save" && root.DgcIcons) b.innerHTML = root.DgcIcons.html("save");
         else b.innerHTML = `<span class="codicon codicon-${act.icon}" aria-hidden="true"></span>`;
         bar.append(b);
       }

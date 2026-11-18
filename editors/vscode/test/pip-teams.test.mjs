@@ -149,7 +149,7 @@ function host(api=88,vs={}){
  const reply=(id,from=null)=>(from?from.posted:main).filter(m=>m.type==='pipsReply'&&m.id===id).at(-1);
  const ask=(request,from=null)=>{const id='q'+(++serial),before=sent.length;(from?from.receive:m=>editor.receive(m))({type:'pipsRequest',id,generation:generation(),request});
   return {id,call:sent.slice(before).find(m=>m.type==='pips_control')?.request,reply:reply(id,from)};};
- return {editor,panels,ask,reply,sent};
+ return {editor,panels,ask,reply,sent,main};
 }
 test('the allow-list: skills and a folder go from the Pips page at API 88, each named as DGC names it, and never to an older DGC',()=>{
  const h=host();
@@ -178,35 +178,33 @@ test('the allow-list: skills and a folder go from the Pips page at API 88, each 
 
 const TEAM={format:'dgc-team',version:1,name:'Launch crew',pips:[{format:'dgc-pip',version:1,pip:{name:'Researcher'},left_out:['Memory, history, findings and results stay with the original Pip.']},
  {format:'dgc-pip',version:1,pip:{name:'Writer'},left_out:['Memory, history, findings and results stay with the original Pip.','Reads from connected apps: they name your accounts.']}]};
-test('Export team: the host asks DGC for the file, shows the save dialog under the team’s name, writes it, and tells the page only its name',async()=>{
- const calls=[];let target={path:'/home/u/teams/launch-crew.dgc-team.json'};
- const h=host(88,{window:{showSaveDialog:async o=>{calls.push(['dialog',o.defaultUri.path,o.saveLabel,o.filters]);return target;}},workspace:{fs:{writeFile:async(uri,bytes)=>{calls.push(['write',uri.path,Buffer.from(bytes).toString('utf8')]);}}}});
+// His rule (18 Nov): the save dialog stays only where the place is the project. A team file is a copy for the person: the
+// page that asked downloads it on their own computer (media/shared/download.js, src/download.ts).
+test('Export team: the host asks DGC for the file and hands it to the page as a download under the team’s name; no save dialog, nothing written here',async()=>{
+ const calls=[];
+ const h=host(88,{window:{showSaveDialog:async o=>{calls.push(['dialog',o]);return {path:'/home/u/x.json'};}},workspace:{fs:{writeFile:async(uri,bytes)=>{calls.push(['write',uri.path,Buffer.from(bytes).toString('utf8')]);}}}});
  const a=h.ask({type:'export_pip_team_file',pip_ids:[pid('1'),pid('2')],name:'Launch crew'});
  assert.deepEqual({type:a.call.type,pip_ids:a.call.pip_ids,name:a.call.name},{type:'export_pip_team',pip_ids:[pid('1'),pid('2')],name:'Launch crew'});
  assert.equal(a.reply,undefined,'nothing is answered until the file is saved');
  const text=JSON.stringify(TEAM,null,2)+'\n';
  h.editor.event({type:'pips_result',request_id:a.call.request_id,command:'export_pip_team',ok:true,result:{document:TEAM,text}});await flush();await flush();
- assert.equal(calls[0][0],'dialog');assert.match(calls[0][1],/\/launch-crew\.dgc-team\.json$/);assert.equal(calls[0][2],'Save team');assert.deepEqual(calls[0][3],{'DGC team':['json']});
- assert.deepEqual(calls[1],['write',target.path,text],'what DGC exported is what is written, where the user chose');
+ const handed=h.main.filter(m=>m.type==='dgcDownload');
+ assert.deepEqual(handed.map(m=>[m.name,m.mime,Buffer.from(m.data).toString('utf8')]),[['launch-crew.dgc-team.json','application/json',text]],'what DGC exported is what the page saves');
+ assert.deepEqual(calls,[],'no save dialog, nothing written on the machine DGC runs on');
  const reply=JSON.parse(JSON.stringify(h.reply(a.id)));
  assert.deepEqual(reply,{type:'pipsReply',id:a.id,ok:true,result:{saved:true,file:'launch-crew.dgc-team.json',name:'Launch crew',count:2,
   left_out:['Memory, history, findings and results stay with the original Pip.','Reads from connected apps: they name your accounts.']}});
  assert.doesNotMatch(JSON.stringify(reply),/\/home\/u/,'the page never hears where the file is');
- // Closing the dialog saves nothing and says so.
- target=undefined;const b=h.ask({type:'export_pip_team_file',pip_ids:[pid('1')],name:''});
- h.editor.event({type:'pips_result',request_id:b.call.request_id,command:'export_pip_team',ok:true,result:{document:TEAM,text}});await flush();await flush();
- assert.deepEqual(JSON.parse(JSON.stringify(h.reply(b.id).result)),{cancelled:true});assert.equal(calls.filter(c=>c[0]==='write').length,1);
  // A refusal from DGC reaches the page as its words.
  const c=h.ask({type:'export_pip_team_file',pip_ids:[pid('1')],name:'x'});
  h.editor.event({type:'pips_result',request_id:c.call.request_id,command:'export_pip_team',ok:false,error:{message:'Patch Pips cannot be shared yet: their reviewed edits belong to one project.'}});await flush();
  assert.match(h.reply(c.id).error.message,/Patch Pips cannot be shared yet/);
- // What is not a team file is never written; more than 256 KiB neither.
- target={path:'/home/u/x.json'};
+ // What is not a team file is never handed over; more than 256 KiB neither.
  for(const result of [{document:{...TEAM,format:'dgc-pip'},text},{document:TEAM,text:''},{document:{...TEAM,pips:[]},text},{document:TEAM,text:'x'.repeat(256*1024+1)}]){
   const d=h.ask({type:'export_pip_team_file',pip_ids:[pid('1')],name:'x'});
   h.editor.event({type:'pips_result',request_id:d.call.request_id,command:'export_pip_team',ok:true,result});await flush();await flush();
   assert.match(h.reply(d.id).error.message,/The team file is invalid/);}
- assert.equal(calls.filter(c=>c[0]==='write').length,1);
+ assert.equal(h.main.filter(m=>m.type==='dgcDownload').length,1);assert.deepEqual(calls,[]);
  // The request itself: 1 to 20 different Pips, a name of one line, nothing else (never a path).
  for(const bad of [{pip_ids:[]},{pip_ids:[pid('1'),pid('1')]},{pip_ids:Array.from({length:21},(_,i)=>'pip_'+i)},{pip_ids:['../x']},{pip_ids:pid('1')},{pip_ids:[pid('1')],path:'/tmp/x.json'}]){
   const r=h.ask({type:'export_pip_team_file',name:'x',...bad});assert.equal(r.call,undefined,JSON.stringify(bad).slice(0,60));assert.match(r.reply.error.message,/Choose 1 to 20 Pips/);}

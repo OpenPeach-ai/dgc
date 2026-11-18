@@ -7,7 +7,7 @@
 // Two ways to draw the same glyph, because a Pip's view in the side bar is in a shadow root the icon font's classes
 // can't reach: html(action) is an inline drawing that works anywhere; codicon(action) is the icon font's name for the
 // pages that draw with the font. The drawings below are the font's own outlines (media/codicon.ttf, on a 16-unit box),
-// so the two are one shape; test/uir2c-icons.test.mjs paints both and compares them. Pin, Unpin and Archive are DGC's
+// so the two are one shape; test/uir2c-icons.test.mjs paints both and compares them. Pin, Unpin, Archive and Download are DGC's
 // own line drawings (the font has no such pair), and More is the menus' three dots (DgcMenu.DOTS). What's new's rows
 // draw a few glyphs that name a thing rather than an action (a list, a chat, a bell, the Library…): the font's own
 // outlines too, by the font's names, so html("library") draws the font's "library".
@@ -18,7 +18,11 @@
 
   /** What each action draws. */
   const ACTIONS = { "open-in-editor": "go-to-file", more: "more", back: "arrow-left", settings: "settings-gear", add: "add", new: "add", close: "close", copy: "copy",
-    delete: "trash", remove: "trash", pin: "pin", unpin: "unpin", archive: "archive", stop: "debug-stop", save: "desktop-download" };
+    delete: "trash", remove: "trash", pin: "pin", unpin: "unpin", archive: "archive", stop: "debug-stop",
+    // Download and Save a copy are one action, a copy saved on the person's computer (media/shared/download.js): one
+    // glyph, the arrow down into a tray that a file's card wears (18 Nov). Save to Library (and In Library, once it is
+    // there) keeps a picture in DGC's Library: its own action, the Library's own glyph.
+    save: "download", download: "download", library: "library" };
   // The icon font's outlines, filled.
   const FONT = {
     "go-to-file": "M8.59 1.01Q9.23 1.01 9.65 1.44L12.59 4.37Q13.01 4.8 13.01 5.44V13.01Q13.01 13.81 12.43 14.4Q11.84 14.99 10.99 14.99H5.01Q4.16 14.99 3.57 14.4Q2.99 13.81 2.99 13.01V6.03H4V13.01Q4 13.44 4.29 13.73Q4.59 14.03 5.01 14.03H10.99Q11.41 14.03 11.71 13.73Q12 13.44 12 13.01V6.03H9.49Q8.85 6.03 8.43 5.57Q8 5.12 8 4.48V2.03L7.95 1.92Q7.84 1.65 7.63 1.44L7.2 1.01ZM9.01 4.48Q9.01 4.69 9.15 4.85Q9.28 5.01 9.49 5.01H11.79L9.01 2.19ZM4.48 0Q4.69 0 4.85 0.16L6.88 2.13Q6.93 2.24 6.96 2.32Q6.99 2.4 6.99 2.51Q6.99 2.61 6.96 2.69Q6.93 2.77 6.88 2.88L4.85 4.85Q4.69 5.01 4.51 5.01Q4.32 5.01 4.16 4.85Q4 4.69 4 4.51Q4 4.32 4.16 4.16L5.28 2.99H2.51Q1.87 2.99 1.44 3.44Q1.01 3.89 1.01 4.48V5.49Q1.01 5.71 0.85 5.87Q0.69 6.03 0.48 6.03Q0.27 6.03 0.13 5.87Q0 5.71 0 5.49V4.48Q0 3.47 0.72 2.75Q1.44 2.03 2.51 2.03H5.28L4.16 0.85Q4 0.69 4 0.51Q4 0.32 4.16 0.16Q4.32 0 4.48 0Z",
@@ -29,7 +33,6 @@
     "copy": "M2.99 5.01V12.75Q2.56 12.48 2.29 12Q2.03 11.52 2.03 10.99V5.01Q2.03 3.89 2.56 2.99Q3.09 2.08 4 1.55Q4.91 1.01 6.03 1.01H9.01Q9.55 1.01 10 1.28Q10.45 1.55 10.72 1.97H6.03Q4.75 1.97 3.87 2.88Q2.99 3.79 2.99 5.01ZM10.99 14.99H6.03Q5.17 14.99 4.59 14.4Q4 13.81 4 13.01V5.01Q4 4.16 4.59 3.57Q5.17 2.99 5.97 2.99H10.99Q11.84 2.99 12.43 3.57Q13.01 4.16 13.01 5.01V13.01Q13.01 13.81 12.43 14.4Q11.84 14.99 10.99 14.99ZM12 5.01Q12 4.59 11.71 4.29Q11.41 4 10.99 4H6.03Q5.6 4 5.31 4.29Q5.01 4.59 5.01 5.01V13.01Q5.01 13.44 5.31 13.71Q5.6 13.97 6.03 13.97H10.99Q11.41 13.97 11.71 13.71Q12 13.44 12 13.01Z",
     "trash": "M14.03 1.97H10.03Q9.97 1.17 9.41 0.59Q8.85 0 8 0Q7.15 0 6.59 0.59Q6.03 1.17 6.03 2.03H2.03Q1.81 1.97 1.65 2.13Q1.49 2.29 1.49 2.51Q1.49 2.72 1.65 2.85Q1.81 2.99 2.03 2.99H2.56L3.36 12.69Q3.41 13.65 4.13 14.32Q4.85 14.99 5.81 14.99H10.13Q11.15 14.99 11.87 14.32Q12.59 13.65 12.64 12.69L13.44 2.99H13.97Q14.19 2.99 14.35 2.85Q14.51 2.72 14.51 2.51Q14.51 2.29 14.35 2.13Q14.19 1.97 13.97 2.03H14.03ZM8 1.01Q8.43 1.01 8.72 1.31Q9.01 1.6 9.01 2.03H6.99Q6.99 1.6 7.28 1.31Q7.57 1.01 8 1.01ZM11.68 12.64Q11.63 13.23 11.17 13.63Q10.72 14.03 10.13 14.03H5.87Q5.28 13.97 4.83 13.6Q4.37 13.23 4.32 12.64L3.52 2.99H12.48ZM6.99 5.49V11.52Q6.99 11.73 6.85 11.87Q6.72 12 6.51 12Q6.29 12 6.13 11.87Q5.97 11.73 5.97 11.52V5.49Q6.03 5.28 6.16 5.15Q6.29 5.01 6.51 5.01Q6.72 5.01 6.85 5.15Q6.99 5.28 6.99 5.49ZM10.03 5.49V11.52Q10.03 11.73 9.87 11.87Q9.71 12 9.49 12Q9.28 12 9.15 11.87Q9.01 11.73 9.01 11.52V5.49Q9.01 5.28 9.15 5.15Q9.28 5.01 9.49 5.01Q9.71 5.01 9.84 5.15Q9.97 5.28 9.97 5.49Z",
     "debug-stop": "M12.48 3.52V12.48H3.52V3.52ZM12.48 1.97H3.52Q2.88 1.97 2.45 2.43Q2.03 2.88 1.97 3.52V12.48Q2.03 13.12 2.45 13.57Q2.88 14.03 3.52 14.03H12.48Q13.12 13.97 13.57 13.55Q14.03 13.12 13.97 12.48V3.52Q14.03 2.88 13.57 2.45Q13.12 2.03 12.48 2.03Z",
-    "desktop-download": "M16 13.49Q16 13.6 15.97 13.68Q15.95 13.76 15.84 13.87L13.87 15.84Q13.76 15.95 13.68 15.97Q13.6 16 13.49 16Q13.39 16 13.31 15.97Q13.23 15.95 13.17 15.84L11.15 13.87Q11.09 13.76 11.04 13.68Q10.99 13.6 10.99 13.49Q10.99 13.39 11.04 13.31Q11.09 13.23 11.15 13.15Q11.2 13.07 11.31 13.04Q11.41 13.01 11.49 13.01Q11.57 13.01 11.68 13.04Q11.79 13.07 11.84 13.17L13.01 14.29V9.49Q13.01 9.28 13.15 9.15Q13.28 9.01 13.49 9.01Q13.71 9.01 13.87 9.15Q14.03 9.28 14.03 9.49V14.29L15.15 13.17Q15.2 13.07 15.31 13.04Q15.41 13.01 15.49 13.01Q15.57 13.01 15.68 13.04Q15.79 13.07 15.87 13.15Q15.95 13.23 15.97 13.31Q16 13.39 16 13.49ZM10.99 12H12V10.99H2.99Q2.56 10.99 2.29 10.69Q2.03 10.4 2.03 9.97V2.99Q2.03 2.56 2.29 2.27Q2.56 1.97 2.99 1.97H13.01Q13.44 2.03 13.73 2.29Q14.03 2.56 14.03 2.99V8H14.99V2.99Q14.99 2.19 14.4 1.6Q13.81 1.01 13.01 1.01H2.99Q2.19 1.01 1.6 1.6Q1.01 2.19 1.01 2.99V9.97Q1.01 10.83 1.6 11.41Q2.19 12 2.99 12H5.01V13.97H3.52Q3.31 13.97 3.15 14.13Q2.99 14.29 2.99 14.51Q2.99 14.72 3.15 14.85Q3.31 14.99 3.52 14.99H10.03V13.97H6.03V12H10.03V13.49Q9.97 13.17 10.11 12.91Q10.24 12.64 10.43 12.45Q10.61 12.27 10.88 12.11H10.99Z",
     // What's new's rows (media/shared/whatsnew.js): things, not actions, each the font's own outline.
     "list-unordered": "M2.03 4.48Q2.4 4.48 2.69 4.19Q2.99 3.89 2.99 3.49Q2.99 3.09 2.69 2.8Q2.4 2.51 2 2.51Q1.6 2.51 1.31 2.8Q1.01 3.09 1.01 3.49Q1.01 3.89 1.31 4.19Q1.6 4.48 2.03 4.48ZM2.03 9.01Q2.4 9.01 2.69 8.72Q2.99 8.43 2.99 8Q2.99 7.57 2.69 7.28Q2.4 6.99 2 6.99Q1.6 6.99 1.31 7.28Q1.01 7.57 1.01 8Q1.01 8.43 1.31 8.72Q1.6 9.01 2.03 9.01ZM2.99 12.48Q2.99 12.91 2.69 13.2Q2.4 13.49 2 13.49Q1.6 13.49 1.31 13.2Q1.01 12.91 1.01 12.51Q1.01 12.11 1.31 11.81Q1.6 11.52 2 11.52Q2.4 11.52 2.69 11.81Q2.99 12.11 2.99 12.48ZM5.49 2.99Q5.28 2.99 5.15 3.15Q5.01 3.31 5.01 3.52Q5.01 3.73 5.15 3.87Q5.28 4 5.49 4H14.51Q14.72 4 14.85 3.87Q14.99 3.73 14.99 3.52Q14.99 3.31 14.85 3.15Q14.72 2.99 14.51 2.99ZM5.01 8Q5.01 7.79 5.15 7.65Q5.28 7.52 5.49 7.52H14.51Q14.72 7.52 14.85 7.65Q14.99 7.79 14.99 8Q14.99 8.21 14.85 8.35Q14.72 8.48 14.51 8.48H5.49Q5.28 8.48 5.15 8.35Q5.01 8.21 5.01 8ZM5.49 12Q5.28 12 5.15 12.13Q5.01 12.27 5.01 12.48Q5.01 12.69 5.15 12.85Q5.28 13.01 5.49 13.01H14.51Q14.72 13.01 14.85 12.85Q14.99 12.69 14.99 12.48Q14.99 12.27 14.85 12.13Q14.72 12 14.51 12Z",
     "comment-discussion": "M14.56 7.47Q14.13 6.99 13.49 6.99H13.01V4Q13.01 3.2 12.43 2.61Q11.84 2.03 10.99 2.03H2.99Q2.19 2.03 1.6 2.61Q1.01 3.2 1.01 4V9.01Q1.01 9.81 1.6 10.4Q2.19 10.99 2.99 10.99V12Q2.99 12.37 3.25 12.67Q3.52 12.96 3.89 13.01Q4.27 13.07 4.59 12.8L6.99 11.04V11.52Q6.99 12.11 7.44 12.56Q7.89 13.01 8.48 13.01H10.29L12.16 14.83Q12.21 14.93 12.29 14.96Q12.37 14.99 12.48 14.99Q12.59 14.99 12.72 14.93Q12.85 14.88 12.93 14.77Q13.01 14.67 13.01 14.51V13.01H13.49Q14.13 13.01 14.56 12.56Q14.99 12.11 14.99 11.52V8.48Q14.99 7.89 14.56 7.47ZM6.77 10.03 4 12V10.03H2.99Q2.61 10.03 2.32 9.71Q2.03 9.39 2.03 9.01V4Q2.03 3.57 2.32 3.28Q2.61 2.99 2.99 2.99H10.99Q11.41 2.99 11.71 3.28Q12 3.57 12 4V6.99H8.48Q7.89 6.99 7.44 7.44Q6.99 7.89 6.99 8.48V10.03ZM14.03 11.52Q14.03 11.73 13.87 11.87Q13.71 12 13.49 12H12.48Q12.27 12 12.13 12.13Q12 12.27 12 12.48V13.28L10.83 12.16Q10.77 12.05 10.69 12.03Q10.61 12 10.51 12H8.48Q8.27 12 8.13 11.87Q8 11.73 8 11.52V8.48Q8 8.27 8.13 8.13Q8.27 8 8.48 8H13.49Q13.71 8 13.87 8.13Q14.03 8.27 14.03 8.48Z",
@@ -57,6 +60,8 @@
     pin: `<path d="${PIN}"/>`,
     unpin: `<path d="${PIN}"/>`,          // (the pin, solid: it is pinned, and pressing it unpins)
     archive: '<path d="M2 3.5h12v3H2zM3.2 6.5V13h9.6V6.5M6.5 9.2h3"/>',
+    // (Download: the arrow down into a tray; media/shared/filesheet.js's DOWNLOAD is this one.)
+    download: '<path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13h10"/>',
   };
   const DOTS = '<circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/>';
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -99,10 +104,23 @@
     if (/^archive\b/.test(w)) return "archive";
     if (/^stop\b/.test(w)) return "stop";
     if (/^save to (the )?project\b/.test(w)) return "";
+    if (/^(save to (the |your )?library|in (the |your )?library)\b/.test(w)) return "library";
     if (/^save\b/.test(w)) return "save";
     if (/\bsettings\b/.test(w)) return "settings";
     return "";
   }
 
-  root.DgcIcons = { ACTIONS, html, node, name, codicon, forLabel, has: (action) => !!name(action) };
+  /** A page's own markup that names a glyph (`<span data-dgc-icon="download">`, as a host writes a header) gets its
+   *  drawing here, so a page drawn by its host wears the same glyph as one drawn by its script. */
+  function fill(scope = root.document) {
+    for (const slot of scope?.querySelectorAll?.("[data-dgc-icon]") || []) {
+      if (!slot.firstElementChild) slot.innerHTML = html(slot.dataset.dgcIcon, { size: Number(slot.dataset.dgcIconSize) || 0 });
+    }
+  }
+  if (root.document?.addEventListener) {
+    if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => fill());
+    else fill();
+  }
+
+  root.DgcIcons = { ACTIONS, html, node, name, codicon, forLabel, fill, has: (action) => !!name(action) };
 })();

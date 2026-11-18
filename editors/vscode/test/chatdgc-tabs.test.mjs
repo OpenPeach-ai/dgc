@@ -140,7 +140,9 @@ globalThis.__DGC_TEST_VSCODE = {
     if (world.dirs?.includes(uri.fsPath)) return { size: 0, type: 2 };
     if (world.missing?.includes(uri.fsPath)) throw new Error("ENOENT");
     return { size: world.sizes[uri.fsPath] ?? 1, type: 1 };
-  } } },
+  },
+      // (A file a download reads: a real one, as the process wrote it into its private folder.)
+      readFile: async (uri) => readFileSync(uri.fsPath) } },
 };
 
 const bundle = join(scratch, "chatdgc.cjs");
@@ -547,27 +549,41 @@ test("canvas: versions compare in VS Code's diff or come back; Download saves a 
   await tick(); await tick(); await tick();
   assert.deepEqual({ ...last("chatdgc_canvas"), request_id: "" }, { type: "chatdgc_canvas", conversation_id: ID(7), canvas_id: CV,
                                                                     op: "restore", version: 1, request_id: "" });
+  // Download (18 Nov): no save dialog; the process writes the copy into a private folder made for this download, and the
+  // chat's own page saves it on the person's computer (src/download.ts).
   world.choose = (items) => items.find((i) => i.format === "docx");
-  world.saveTo = { scheme: "file", fsPath: "/tmp/out/Plan.docx" };
-  await chat.canvasDownload();
-  assert.deepEqual({ ...last("chatdgc_canvas"), request_id: "" }, { type: "chatdgc_canvas", conversation_id: ID(7), canvas_id: CV,
-                                                                    op: "export", format: "docx", path: "/tmp/out/Plan.docx", request_id: "" });
+  world.saveAsked = undefined;
+  const downloading = chat.canvasDownload();
+  for (let i = 0; i < 100 && last("chatdgc_canvas").op !== "export"; i++) await new Promise((r) => setTimeout(r, 5));
+  const exporting = last("chatdgc_canvas");
+  assert.deepEqual({ ...exporting, path: "", request_id: "" }, { type: "chatdgc_canvas", conversation_id: ID(7), canvas_id: CV, op: "export", format: "docx", path: "", request_id: "" });
+  assert.match(exporting.path, /dgc-download-[^/\\]+[/\\]Plan\.docx$/, "a private folder of its own");
+  createRequire(import.meta.url)("node:fs").writeFileSync(exporting.path, "the document");
+  chat.onEvent({ type: "chatdgc_exported", request_id: exporting.request_id, conversation_id: ID(7), path: exporting.path, bytes: 12 });
+  await downloading;
+  assert.equal(world.saveAsked, undefined, "no save dialog");
+  const handed = panel.webview.posted.filter((m) => m.type === "dgcDownload").at(-1);
+  assert.equal(handed?.name, "Plan.docx");
+  assert.equal(String(Buffer.from(handed.data)), "the document");
+  assert.equal(createRequire(import.meta.url)("node:fs").existsSync(exporting.path), false, "its private folder is gone");
 });
 
-test("a chart saved as an image: only a PNG the page drew, written where you chose", async () => {
+test("a chart saved as an image: only a PNG the page drew, handed back to the page to save on this computer", async () => {
   chat.open(ID(7));
   const [panel] = world.panels;
   panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "Spend" });
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
-  world.saveTo = { scheme: "file", fsPath: "/tmp/out/Spend.png", path: "/tmp/out/Spend.png" };
+  world.saveAsked = undefined;
   panel.say({ type: "saveImage", name: "Spend by month", data: `data:image/png;base64,${png.toString("base64")}` });
   await tick(); await tick();
-  assert.match(String(world.saveAsked.defaultUri), /Spend by month\.png$/);
-  assert.deepEqual(world.written.map((w) => [w.path, [...w.bytes]]), [["/tmp/out/Spend.png", [...png]]]);
+  assert.equal(world.saveAsked, undefined, "no save dialog");
+  const handed = panel.webview.posted.filter((m) => m.type === "dgcDownload");
+  assert.deepEqual(handed.map((m) => [m.name, m.mime, [...m.data]]), [["Spend by month.png", "image/png", [...png]]]);
   panel.say({ type: "saveImage", name: "x", data: "data:text/html;base64,PHNjcmlwdD4=" });
   panel.say({ type: "saveImage", name: "x", data: "javascript:alert(1)" });
   await tick(); await tick();
-  assert.equal(world.written.length, 1, "nothing but a PNG");
+  assert.equal(panel.webview.posted.filter((m) => m.type === "dgcDownload").length, 1, "nothing but a PNG");
+  assert.deepEqual(world.written, []);
 });
 
 test("a widget's page: nothing loads from anywhere, its own code only, no network APIs, the editor's colours", () => {
@@ -1047,26 +1063,27 @@ test("versions: edits, retries and switches go as their commands, and a new vers
   assert.deepEqual(sent.filter((c) => c.type === "chatdgc_version").map((c) => [c.parent_id, c.index]), [["root", 0], [MSG(1), 2]]);
 });
 
-test("export: the save dialog's choice says where and in which format, and the result is announced", async () => {
+// Export (18 Nov): which kind of file is asked, then the process writes it into a private folder and the chat's page saves
+// it on the person's computer (src/download.ts): never a save dialog, which in a remote window browses the remote.
+test("export: Markdown or JSON, made by the process in a private folder, then saved by the chat's page on this computer", async () => {
   chat.open(ID(8));
   const [panel] = world.panels;
   panel.say({ type: "ready" }); opened(panel, { id: ID(8), title: "Goa: trip/plan" });
-  world.pick = "export"; world.saveTo = { scheme: "file", fsPath: "/home/u/Goa trip.json", path: "/home/u/Goa trip.json" };
+  world.pick = "export"; world.saveAsked = undefined;
+  world.choose = (items) => items.find((i) => i.id === "export") || items.find((i) => i.format === "json");
   panel.say({ type: "menu" });
-  await new Promise((r) => setTimeout(r, 0));
-  assert.match(world.saveAsked.defaultUri.toString(), /Goa trip plan\.md$/, "named after the chat, without path characters");
+  for (let i = 0; i < 20 && !last("chatdgc_export"); i++) await new Promise((r) => setTimeout(r, 0));
   const ask = last("chatdgc_export");
-  assert.deepEqual([ask.path, ask.format], ["/home/u/Goa trip.json", "json"]);
-  chat.onEvent({ type: "chatdgc_exported", request_id: ask.request_id, conversation_id: ID(8), path: "/home/u/Goa trip.json", bytes: 900 });
-  await new Promise((r) => setTimeout(r, 0));
-  assert.deepEqual(world.infos, ["Exported to Goa trip.json."]);
-  world.saveTo = undefined;
-  const before = sent.length;
-  panel.say({ type: "menu" });
-  await new Promise((r) => setTimeout(r, 0));
-  // Not a count of every message: a loaded machine let an earlier test's late message land in this wait (5 !== 3).
-  const late = sent.slice(before).map((c) => c.type);
-  assert.deepEqual(late.filter((type) => type === "chatdgc_export"), [], `cancelled: nothing written (sent: ${late.join(", ")})`);
+  assert.equal(ask.format, "json");
+  assert.match(ask.path, /dgc-download-[^/\\]+[/\\]Goa trip plan\.json$/, "named after the chat, without path characters, in a private folder");
+  createRequire(import.meta.url)("node:fs").writeFileSync(ask.path, "{}");
+  chat.onEvent({ type: "chatdgc_exported", request_id: ask.request_id, conversation_id: ID(8), path: ask.path, bytes: 2 });
+  for (let i = 0; i < 20 && !panel.webview.posted.some((m) => m.type === "dgcDownload"); i++) await new Promise((r) => setTimeout(r, 5));
+  const handed = panel.webview.posted.find((m) => m.type === "dgcDownload");
+  assert.equal(handed?.name, "Goa trip plan.json");
+  assert.equal(String(Buffer.from(handed.data)), "{}");
+  assert.equal(world.saveAsked, undefined, "no save dialog");
+  world.choose = undefined;
 });
 
 test("Open on a file the chat made: one private folder for this window, the file's last copy only, gone on dispose", () => {
@@ -1311,12 +1328,19 @@ test("the Library: its own tab, its files asked for, and each file's actions thr
   assert.deepEqual([image.conversation_id, image.attachment_id], [ID(7), file.id]);
   chat.onEvent({ type: "chatdgc_file", request_id: image.request_id, conversation_id: ID(7), attachment_id: file.id, data: "data:image/png;base64,AAAA" });
   assert.equal(lib.last("image").data, "data:image/png;base64,AAAA");
-  world.saveTo = { scheme: "file", fsPath: "/home/u/budget.csv" };
+  // Save a copy… (18 Nov): the process writes it into a private folder made for this download, and the Library's page saves
+  // it on the person's computer: no save dialog.
+  world.saveAsked = undefined;
   lib.say({ type: "save", file });
-  await tick();
-  assert.deepEqual([last("chatdgc_library_file").op, last("chatdgc_library_file").path, last("chatdgc_library_file").conversation_id], ["save", "/home/u/budget.csv", ID(7)]);
-  chat.onEvent({ type: "chatdgc_library_file", request_id: last("chatdgc_library_file").request_id, op: "save", path: "/home/u/budget.csv", bytes: 15 });
-  assert.deepEqual(world.infos.at(-1), "Saved budget.csv.");
+  for (let i = 0; i < 100 && last("chatdgc_library_file")?.op !== "save"; i++) await new Promise((r) => setTimeout(r, 5));
+  const saving = last("chatdgc_library_file");
+  assert.deepEqual([saving.op, saving.conversation_id], ["save", ID(7)]);
+  assert.match(saving.path, /dgc-download-[^/\\]+[/\\]budget\.csv$/);
+  createRequire(import.meta.url)("node:fs").writeFileSync(saving.path, "month,amount\n");
+  chat.onEvent({ type: "chatdgc_library_file", request_id: saving.request_id, op: "save", path: saving.path, bytes: 13 });
+  for (let i = 0; i < 100 && !lib.last("dgcDownload"); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual([lib.last("dgcDownload")?.name, String(Buffer.from(lib.last("dgcDownload").data))], ["budget.csv", "month,amount\n"]);
+  assert.equal(world.saveAsked, undefined, "no save dialog");
   // Save to project… on a picture: a copy in the folder open in VS Code (assets/ unless you pick); never another file.
   {
     const vs = globalThis.__DGC_TEST_VSCODE;
@@ -1353,7 +1377,7 @@ test("the Library: its own tab, its files asked for, and each file's actions thr
 });
 
 test("the Library lists every image DGC made or kept (images_library: every surface, or the one asked for) with who made it, and only those may be shown, opened or copied", async () => {
-  const fs = globalThis.__DGC_TEST_VSCODE.workspace.fs;
+  const fs = globalThis.__DGC_TEST_VSCODE.workspace.fs, keptRead = fs.readFile;
   const read = [], copied = [];
   fs.readFile = async (uri) => { read.push(uri.fsPath); return Buffer.from("png-bytes"); };
   fs.copy = async (from, to) => { copied.push([from.fsPath, to.fsPath]); };
@@ -1405,16 +1429,18 @@ test("the Library lists every image DGC made or kept (images_library: every surf
     lib.say({ type: "workImageReveal", path: made.path });
     await tick();
     assert.deepEqual(world.commands.map((c) => [c[0], c[1].fsPath]), [["vscode.open", made.path], ["revealFileInOS", made.path]]);
-    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/fox.png" };
+    // Save a copy (18 Nov): the picture goes to the Library's page, which saves it on the person's computer.
+    world.saveAsked = undefined;
     lib.say({ type: "workImageSave", path: made.path });
-    await tick();
-    assert.deepEqual(copied, [[made.path, "/home/me/Desktop/fox.png"]]);
-    assert.equal(world.saveAsked.title, "Save a copy of this image");
+    await tick(); await tick();
+    assert.deepEqual([lib.last("dgcDownload")?.name, String(Buffer.from(lib.last("dgcDownload").data))], ["fox.png", "png-bytes"]);
+    assert.equal(world.saveAsked, undefined, "no save dialog");
+    assert.deepEqual(copied, [], "nothing written on this machine");
     // Save to project…: a copy in the open project, assets/ unless you pick another place; with no folder open, said.
     const vs = globalThis.__DGC_TEST_VSCODE;
     lib.say({ type: "workImageToProject", path: made.path });
     await tick();
-    assert.equal(copied.length, 1, "no folder open: nothing copied");
+    assert.equal(copied.length, 0, "no folder open: nothing copied");
     assert.match(world.infos.at(-1), /Open a folder first: Save to project… copies the picture into it\./);
     vs.workspace.workspaceFolders = [{ uri: { fsPath: "/home/me/app", toString: () => "file:///home/me/app" } }];
     vs.workspace.asRelativePath = (uri) => String(uri.fsPath).replace("/home/me/app/", "");
@@ -1424,14 +1450,14 @@ test("the Library lists every image DGC made or kept (images_library: every surf
       lib.say({ type: "workImageToProject", path: made.path });
       await tick();
       assert.deepEqual(copied.at(-1), [made.path, "/home/me/app/assets/fox.png"]);
-      assert.equal(copied.length, 2, "only a picture the Library was given");
+      assert.equal(copied.length, 1, "only a picture the Library was given");
       assert.equal(world.saveAsked.title, "Save to project");
       assert.match(String(world.saveAsked.defaultUri), /home\/me\/app\/assets\/fox\.png$/, "assets/ by default");
       assert.equal(world.infos.at(-1), "Saved assets/fox.png in the project.");
     } finally { delete vs.workspace.workspaceFolders; delete vs.workspace.asRelativePath; }
     chat.imagesMade();
     assert.deepEqual(lib.last("refresh"), { type: "refresh" }, "a picture made since is listed");
-  } finally { delete fs.readFile; delete fs.copy; }
+  } finally { fs.readFile = keptRead; delete fs.copy; }      // (the stub's own reader back, for the tests after)
 });
 
 test("a Library file in a new chat, or from the paperclip, and a send names only files picked for it", async () => {
@@ -2389,10 +2415,10 @@ test("an item's menu asks one way (itemAct): each of the eight is done only for 
     assert.deepEqual(lib.last("itemCopy"), { type: "itemCopy", key: `image:${fox}`, data: `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}` }, "Copy: the picture, handed to the page for the clipboard");
     await act("copy", { kind: "image", path: "/home/me/secret.png" });
     assert.ok(!read.includes("/home/me/secret.png"), "never one it wasn't given");
-    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/fox.png" };
+    world.saveAsked = undefined;
     await act("save", { kind: "image", path: fox });
-    assert.deepEqual(copied.at(-1), [fox, "/home/me/Desktop/fox.png"], "Save a copy…: asked where, then written");
-    assert.equal(world.saveAsked.title, "Save a copy of this image");
+    assert.equal(lib.last("dgcDownload")?.name, "fox.png", "Save a copy…: handed to the page, to save on the person's computer");
+    assert.equal(world.saveAsked, undefined, "no save dialog");
     await act("rename", { kind: "image", path: fox });
     assert.equal(hub.renamed.length, 1, "an image is not renamed");
     world.answer = undefined; const warned = world.warnings.length;
@@ -2429,10 +2455,10 @@ test("an item's menu asks one way (itemAct): each of the eight is done only for 
     assert.equal(world.clipboard, clip, "a video the Library wasn't given is never named");
     await act("reveal", { kind: "video", path: clip }); await act("editor", { kind: "video", path: clip });
     assert.deepEqual(world.commands.slice(-2).map((c) => [c[0], c[1].fsPath]), [["revealFileInOS", clip], ["vscode.open", clip]]);
-    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/clip.mp4" };
+    world.saveAsked = undefined; files[clip] = "the clip";
     await act("save", { kind: "video", path: clip });
-    assert.deepEqual(copied.at(-1), [clip, "/home/me/Desktop/clip.mp4"]);
-    assert.equal(world.saveAsked.title, "Save a copy of this video");
+    assert.equal(lib.last("dgcDownload")?.name, "clip.mp4", "Save a copy…: handed to the page, to save on the person's computer");
+    assert.equal(world.saveAsked, undefined, "no save dialog");
     const posted = lib.webview.posted.filter((m) => m.type === "itemCopy").length;
     await act("copy", { kind: "video", path: clip });
     assert.equal(lib.webview.posted.filter((m) => m.type === "itemCopy").length, posted, "a video is not put on the clipboard");
@@ -2457,9 +2483,12 @@ test("an item's menu asks one way (itemAct): each of the eight is done only for 
     const clipboard = world.clipboard;
     await act("path", ref(map)); await act("reveal", ref(map)); await act("editor", ref(map)); await act("rename", ref(map));
     assert.equal(world.clipboard, clipboard, "a chat's file has no path of its own to copy");
-    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/map.png" };
+    // Save a copy… (18 Nov): written into a private folder made for this download, for the Library's page to save.
     await act("save", ref(map));
-    assert.deepEqual({ ...last("chatdgc_library_file"), request_id: "" }, { type: "chatdgc_library_file", op: "save", conversation_id: ID(1), attachment_id: map.id, path: "/home/me/Desktop/map.png", request_id: "" });
+    const saving = last("chatdgc_library_file");
+    assert.deepEqual({ ...saving, path: "", request_id: "" }, { type: "chatdgc_library_file", op: "save", conversation_id: ID(1), attachment_id: map.id, path: "", request_id: "" });
+    assert.match(saving.path, /dgc-download-[^/\\]+[/\\]map\.png$/);
+    chat.onEvent({ type: "chatdgc_error", request_id: saving.request_id, message: "That file is no longer in your Library." });
     world.answer = undefined; const w3 = world.warnings.length, files3 = count("chatdgc_library_file");
     await act("remove", ref(map));
     assert.equal(world.warnings.length, w3 + 1, "Remove asks first"); assert.match(world.warnings.at(-1), /Delete “map\.png” from your Library\?/);
@@ -2634,9 +2663,10 @@ test("uir2c: Files' Work attachments: listed by a name of the host's own, never 
       if (process.platform !== "win32") assert.equal(st.mode & 0o077, 0, "for this user alone"); nfs.rmSync(join(openedPic[1].fsPath, ".."), { recursive: true, force: true }); }
     await act("copy", pic);
     assert.deepEqual(lib.webview.posted.filter((m) => m.type === "itemCopy").at(-1), { type: "itemCopy", key: `workfile:${pic}`, data: PNG_URI });
-    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/Picture 1.png" }; world.written.length = 0;
+    world.written.length = 0; world.saveAsked = undefined;
     await act("save", pic);
-    assert.equal(world.written.at(-1).path, "/home/me/Desktop/Picture 1.png", "Save a copy… writes where you chose");
+    assert.equal(lib.last("dgcDownload")?.name, "Picture 1.png", "Save a copy…: the picture handed to the page, to save on the person's computer");
+    assert.deepEqual([world.written.length, world.saveAsked], [0, undefined], "nothing written here, no save dialog");
     await act("path", pic); await act("reveal", pic); await act("editor", pic);
     assert.equal(world.clipboard, "", "a picture has no path to give");
     // A file: Open and Open in editor show it in the editor; Copy path, Reveal, Save a copy….
@@ -2648,9 +2678,10 @@ test("uir2c: Files' Work attachments: listed by a name of the host's own, never 
     assert.equal(lib.webview.posted.filter((m) => m.type === "itemSaid").at(-1).words, "Path copied");
     await act("reveal", file);
     assert.deepEqual(world.commands.at(-1).slice(0, 1), ["revealFileInOS"]); assert.equal(world.commands.at(-1)[1].fsPath, `${PROJECT}/billing/order_total.py`);
-    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/order_total.py" };
-    await act("save", file);
-    assert.deepEqual(copied.at(-1), [`${PROJECT}/billing/order_total.py`, "/home/me/Desktop/order_total.py"]);
+    const fsx = globalThis.__DGC_TEST_VSCODE.workspace.fs, readBefore = fsx.readFile;
+    fsx.readFile = async (u) => (u.fsPath === `${PROJECT}/billing/order_total.py` ? Buffer.from("def total(): ...\n") : readBefore(u));
+    try { await act("save", file); } finally { fsx.readFile = readBefore; }
+    assert.equal(lib.last("dgcDownload")?.name, "order_total.py", "Save a copy…: handed to the page, to save on the person's computer");
     await act("remove", file); await act("rename", file); await act("copy", file);
     // What DGC answers is checked: another attachment's answer, a file outside its project, a picture that isn't one.
     world.shown.length = 0; world.commands.length = 0; world.clipboard = "";
@@ -2697,6 +2728,7 @@ test("uir2c 2b: a chat file's menu asks DGC for the file by its id in this chat:
   assert.equal(asks(), before, "a workbook has no text an editor can show: nothing is asked");
   // Copy: a text file's text, read from a private copy that is then taken away.
   pick("copy", F("a"), "Notes.md"); asked = written("# Notes\n\nCheck the totals.\n"); await wait(); await wait();
+  for (let i = 0; i < 100 && world.clipboard !== "# Notes\n\nCheck the totals.\n"; i++) await wait();   // (a loaded machine reads later)
   assert.equal(world.clipboard, "# Notes\n\nCheck the totals.\n");
   assert.equal(panel.last("fileSaid").words, "Text copied");
   assert.equal(existsSync(asked.path), false, "the copy made to read it is gone");
@@ -2706,10 +2738,19 @@ test("uir2c 2b: a chat file's menu asks DGC for the file by its id in this chat:
   assert.deepEqual([want.conversation_id, want.attachment_id], [ID(5), F("c")]);
   chat.onEvent({ type: "chatdgc_file", request_id: want.request_id, conversation_id: ID(5), attachment_id: F("c"), data: "data:image/png;base64,iVBORw0KGgo=" }); await wait();
   assert.equal(panel.last("fileCopy").data, "data:image/png;base64,iVBORw0KGgo=");
-  // Save a copy…: where you choose.
-  world.saveTo = { scheme: "file", fsPath: "/home/u/notes.md", path: "/home/u/notes.md" };
-  pick("save", F("a"), "Notes.md"); await wait();
-  assert.deepEqual([last("chatdgc_library_file").op, last("chatdgc_library_file").path], ["save", "/home/u/notes.md"]);
+  // Save a copy… (18 Nov): DGC writes it into a private folder made for this download; the chat's page saves it on the
+  // person's computer. No save dialog.
+  world.saveAsked = undefined;
+  pick("save", F("a"), "Notes.md");
+  for (let i = 0; i < 100 && !/dgc-download-/.test(last("chatdgc_library_file").path || ""); i++) await new Promise((r) => setTimeout(r, 5));
+  const saving = last("chatdgc_library_file");
+  assert.equal(saving.op, "save");
+  assert.match(saving.path, /dgc-download-[^/\\]+[/\\]Notes\.md$/);
+  writeFileSync(saving.path, "# Notes\n");
+  chat.onEvent({ type: "chatdgc_library_file", request_id: saving.request_id, op: "save", path: saving.path, bytes: 8 });
+  for (let i = 0; i < 100 && !panel.last("dgcDownload"); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(panel.last("dgcDownload")?.name, "Notes.md");
+  assert.equal(world.saveAsked, undefined, "no save dialog");
   // Copy path, Reveal, and anything that isn't one of the six: DGC keeps this copy for the chat. Nothing is asked.
   before = asks(); const clip = world.clipboard, ran = world.commands.length;
   for (const act of ["path", "reveal", "remove", "rename", "cut"]) pick(act, F("a"), "Notes.md");

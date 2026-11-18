@@ -49,6 +49,7 @@ export const ACTION_OF = `(label) => { const w = String(label || "").replace(/\\
   if (/^stop and\\b/.test(w)) return "";                           // (dictation's two ways to end: its own bar)
   if (/^stop\\b/.test(w)) return "stop";
   if (/^save to (the )?project\\b/.test(w)) return "";              // (into the project's folder: its own glyph, a file with an arrow)
+  if (/^(save to (the |your )?library|in (the |your )?library)\\b/.test(w)) return "library";   // (Save to Library: the Library's own glyph)
   if (/^save\\b/.test(w)) return "save";
   return ""; }`;
 /** Read in the page (document and every shadow root): each button or menu row that draws a glyph, with its action,

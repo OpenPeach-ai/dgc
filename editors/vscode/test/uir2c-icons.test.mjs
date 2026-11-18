@@ -70,7 +70,7 @@ test("DgcIcons: one glyph per action, as an inline drawing and by its icon-font 
     const font = readFileSync(new URL("../media/codicon.ttf", import.meta.url)).toString("base64"), css = readFileSync(new URL("../media/codicon.css", import.meta.url), "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/, `url("data:font/ttf;base64,${font}")`);
     await page.setContent(`<style>${css} body{margin:0;background:#fff;color:#000} .cell{display:inline-block;width:64px;height:64px;line-height:64px;font-size:64px;overflow:hidden;vertical-align:top} .cell .codicon{font-size:64px} .cell svg{display:block}</style><div id="a"></div>`);
     await page.addScriptTag({ content: readFileSync(new URL("../media/shared/menu.js", import.meta.url), "utf8") + "\n" + readFileSync(ICONS, "utf8") });
-    const names = Object.entries(GLYPH).filter(([action]) => !["more", "pin", "unpin", "archive"].includes(action));
+    const names = Object.entries(GLYPH).filter(([action]) => !["more", "pin", "unpin", "archive", "save"].includes(action));
     await page.evaluate((names) => { document.getElementById("a").innerHTML = names.map(([action, glyph]) => `<span class="cell" data-f="${glyph}"><span class="codicon codicon-${glyph}"></span></span><span class="cell" data-s="${glyph}">${window.DgcIcons.html(action, { size: 64 })}</span>`).join(""); }, names);
     await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(200);
     for (const [, glyph] of names) {

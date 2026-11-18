@@ -10,6 +10,7 @@
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
+import {existsSync,readFileSync,statSync,writeFileSync} from 'node:fs';
 import {JSDOM} from 'jsdom';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
@@ -95,19 +96,21 @@ test('a cancelled Add file… leaves the panel as it was; copying rows show only
  assert.equal(y.d.querySelector('.pc-copying'),null);
 });
 
-test('Save to this computer… asks the host with the file in Files, whatever its size, and says "Saved to <name>" or DGC\'s words',async()=>{
+// His ask (18 Nov): Download saves on the computer the editor runs on. DGC copies the file out and the host hands it to
+// this page, which saves it there (media/shared/download.js); one too large for a page goes to the person's browser.
+test('Download asks the host with the file in Files, whatever its size, and says "Downloaded <name>" or DGC\'s words',async()=>{
  const x=await openFiles();
  x.click('[data-file="film.mov"]');await x.drain();
  const save=x.d.querySelector('#pc-save-as');
- assert.equal(save.textContent,'Save to this computer…');assert.ok(!save.disabled,'a 700 MB file can be saved: DGC copies it, not the page');
+ assert.equal(save.textContent,'Download');assert.ok(!save.disabled,'a 700 MB file can be downloaded: DGC copies it, not the page');
  assert.ok(save.classList.contains('dgc-btn'));assert.equal(x.d.querySelector('#pc-save'),null);
  x.click('#pc-save-as');
  assert.deepEqual(x.posted('pipComputerSaveAs'),[{type:'pipComputerSaveAs',path:'film.mov'}],'only the file in Files');
- assert.equal(x.d.querySelector('#pc-save-as').textContent,'Saving…');assert.ok(x.d.querySelector('#pc-save-as').disabled);
+ assert.equal(x.d.querySelector('#pc-save-as').textContent,'Downloading…');assert.ok(x.d.querySelector('#pc-save-as').disabled);
  assert.ok(x.d.querySelector('#pc-add').disabled,'one copy at a time');
- x.message({type:'pipComputerSavedAs',ok:true,name:'holiday.mov'});
- assert.equal(x.d.querySelector('.pc-notice').textContent,'Saved to holiday.mov.');
- assert.equal(x.d.querySelector('#pc-save-as').textContent,'Save to this computer…');
+ x.message({type:'pipComputerSavedAs',ok:true,name:'film.mov',downloaded:true});
+ assert.equal(x.d.querySelector('.pc-notice').textContent,'Downloaded film.mov.');
+ assert.equal(x.d.querySelector('#pc-save-as').textContent,'Download');
  x.click('#pc-save-as');x.message({type:'pipComputerSavedAs',ok:false,error:'That file is not in this computer\'s Files.'});
  assert.equal(x.d.querySelector('.pc-files .pc-error').textContent,'That file is not in this computer\'s Files.');
  assert.equal(x.d.querySelector('.pc-notice'),null,'the old "Saved" is not left beside the refusal');
@@ -127,15 +130,19 @@ test('a dropped file has no path: up to 2 MB it goes as before, a bigger one say
  assert.equal(x.posted('pipComputerAddFiles').length,0,'a drop opens no dialog');
 });
 
-test('before API 87 nothing changes: Add files… is the file input and Save to… sends the bytes it read',async()=>{
+test('before API 87: Add files… is the file input, and Download saves the bytes it read from this page',async()=>{
  const x=await openFiles(86);
  assert.ok(x.d.querySelector('label.pc-add #pc-add-input'));assert.equal(x.d.querySelector('label.pc-add').textContent,'Add files…');
  assert.equal(x.d.querySelector('#pc-add'),null);
  x.click('[data-file="notes.txt"]');await x.drain();
- assert.equal(x.d.querySelector('#pc-save').textContent,'Save to…');assert.equal(x.d.querySelector('#pc-save-as'),null);
+ assert.equal(x.d.querySelector('#pc-save').textContent,'Download');assert.equal(x.d.querySelector('#pc-save-as'),null);
  assert.equal(x.d.querySelector('#pc-remove').className,'pc-quiet');
+ let saved=null;x.w.URL.createObjectURL=b=>{saved={blob:b};return 'blob:notes';};x.w.URL.revokeObjectURL=()=>{};
+ x.w.HTMLAnchorElement.prototype.click=function(){saved.name=this.download;};
  x.click('#pc-save');
- assert.deepEqual(x.posted('pipComputerSave').map(m=>[m.name,m.text]),[['notes.txt','buy milk\n']]);
+ assert.equal(saved?.name,'notes.txt','saved by this page, on this computer');
+ assert.equal(await saved.blob.text(),'buy milk\n');
+ assert.equal(x.posted('pipComputerSave').length,0,'nothing asked of the host');
  x.click('[data-file="film.mov"]');await x.drain();
  assert.ok(x.d.querySelector('#pc-save').disabled,'over 2 MB it cannot be saved there');
  const big=new x.w.File(['x'],'film.mov');Object.defineProperty(big,'size',{value:5*1024*1024});
@@ -148,8 +155,10 @@ test('before API 87 nothing changes: Add files… is the file input and Save to�
 const uri=(path,scheme='file')=>({scheme,path,fsPath:path});
 function host(api=87,{open=async()=>[uri('/home/me/film.mov')],save=async()=>uri('/home/me/Desktop/out.mov')}={}){
  const panels=[],dialogs=[];
- const vscode={ViewColumn:{Active:-1,Beside:-2},Uri:{joinPath:(...p)=>uri(p.map(x=>x.path||x).join('/')),file:p=>uri(p)},
-  workspace:{workspaceFolders:[],fs:{writeFile:async()=>{throw Error('the host writes no bytes here');}}},
+ const vscode={ViewColumn:{Active:-1,Beside:-2},Uri:{joinPath:(...p)=>uri(p.map(x=>x.path||x).join('/')),file:p=>uri(p)},FileType:{File:1,Directory:2},
+  workspace:{workspaceFolders:[],fs:{writeFile:async()=>{throw Error('the host writes no bytes here');},
+   // (What a download reads: the file DGC copied out into its private folder.)
+   stat:async u=>{const s=statSync(u.fsPath);return {type:s.isFile()?1:2,size:s.size};},readFile:async u=>readFileSync(u.fsPath)}},
   window:{showOpenDialog:async o=>{dialogs.push(['open',o]);return open(o);},showSaveDialog:async o=>{dialogs.push(['save',o]);return save(o);},
    createWebviewPanel:(id,title)=>{const p={id,title,posted:[],receive:null,dispose:null,
     webview:{cspSource:'csp',asWebviewUri:u=>u,postMessage:m=>{p.posted.push(m);return Promise.resolve(true);},onDidReceiveMessage:f=>{p.receive=f;}},
@@ -195,9 +204,6 @@ test('a page message carrying a path on this computer is ignored: the host copie
  none.tab.receive({type:'pipComputerAddFiles',folder:'',...evil});
  await settle(()=>none.last('pipComputerAdded'),'the dialog was shown and closed');
  assert.equal(none.last('pipComputerAdded').cancelled,true);
- none.tab.receive({type:'pipComputerSaveAs',path:'notes.txt',target:'/home/me/.bashrc',name:'../../.bashrc',defaultUri:'/home/me/.ssh/authorized_keys'});
- await settle(()=>none.last('pipComputerSavedAs'),'the save dialog was shown and closed');
- assert.equal(none.last('pipComputerSavedAs').cancelled,true);
  assert.equal(none.copies().length,0);assert.equal(none.sent.length,0,'nothing reached DGC');
  // Something picked: the path sent is the dialog's, and the page's is nowhere in it.
  const h=host();
@@ -208,13 +214,13 @@ test('a page message carrying a path on this computer is ignored: the host copie
  assert.deepEqual(Object.keys(h.copies()[0]).sort(),['path','pip_id','request_id','source','type']);
  h.answer(h.copies()[0],{path:'film.mov',name:'film.mov',bytes:5});await settle(()=>h.last('pipComputerAdded'),'done');
  h.tab.receive({type:'pipComputerSaveAs',path:'notes.txt',target:'/home/me/.bashrc',name:'../../.bashrc'});
- await settle(()=>h.copies().length===2,'the save is sent');
- assert.equal(h.copies()[1].target,'/home/me/Desktop/out.mov');
- assert.equal(h.dialogs.at(-1)[1].defaultUri.path.split('/').pop(),'notes.txt','the dialog starts on the file\'s own name');
+ await settle(()=>h.copies().length===2,'the download is sent');
+ assert.match(h.copies()[1].target,/dgc-download-[^/]+\/notes\.txt$/,'copied out into a private folder made for this download, named as in Files');
  assert.ok(!JSON.stringify(h.sent).includes('.bashrc'));
  // A folder or file that is not one in Files opens no dialog at all.
  const dialogs=h.dialogs.length;
- h.answer(h.copies()[1],{path:'notes.txt',target:'/home/me/Desktop/out.mov',bytes:12});await settle(()=>h.last('pipComputerSavedAs'),'done');
+ writeFileSync(h.copies()[1].target,'buy milk\n');
+ h.answer(h.copies()[1],{path:'notes.txt',target:h.copies()[1].target,bytes:9});await settle(()=>h.last('pipComputerSavedAs'),'done');
  for(const bad of [{type:'pipComputerAddFiles',folder:'/etc'},{type:'pipComputerAddFiles',folder:'../..'},{type:'pipComputerAddFiles',folder:['x']},{type:'pipComputerAddFiles'},
                    {type:'pipComputerSaveAs',path:'/etc/passwd'},{type:'pipComputerSaveAs',path:'a/../../b'},{type:'pipComputerSaveAs',path:''},{type:'pipComputerSaveAs',path:7}]){
   h.tab.receive(bad);await flush();
@@ -241,16 +247,20 @@ test('no page can send the copy commands themselves: not a computer tab, not the
  assert.equal(h.copies()[0].pip_id,PIP.id);
 });
 
-test('Save to this computer… shows the save dialog, sends copy_pip_computer_file_out, and says the name it was saved under or DGC\'s words',async()=>{
+test('Download: no save dialog; DGC copies the file out into a private folder, the page is handed it, and says Downloaded or DGC\'s words',async()=>{
  const h=host();
  h.tab.receive({type:'pipComputerSaveAs',path:'Downloads/film.mov'});
  await settle(()=>h.copies().length===1,'sent');
- assert.equal(h.dialogs[0][0],'save');assert.equal(h.dialogs[0][1].defaultUri.path.split('/').pop(),'film.mov');
- const {request_id,...copy}=h.copies()[0];
- assert.deepEqual(copy,{type:'copy_pip_computer_file_out',pip_id:PIP.id,path:'Downloads/film.mov',target:'/home/me/Desktop/out.mov'});
- h.answer(h.copies()[0],{path:'Downloads/film.mov',target:'/home/me/Desktop/out.mov',bytes:700});
+ assert.deepEqual(h.dialogs,[],'no save dialog: it would browse the machine DGC runs on');
+ const {request_id,target,...copy}=h.copies()[0];
+ assert.deepEqual(copy,{type:'copy_pip_computer_file_out',pip_id:PIP.id,path:'Downloads/film.mov'});
+ assert.match(target,/dgc-download-[^/]+\/film\.mov$/);
+ writeFileSync(target,'the film');
+ h.answer(h.copies()[0],{path:'Downloads/film.mov',target,bytes:8});
  await settle(()=>h.last('pipComputerSavedAs'),'answered');
- assert.deepEqual(h.last('pipComputerSavedAs'),{type:'pipComputerSavedAs',ok:true,name:'out.mov'});
+ assert.deepEqual(h.last('pipComputerSavedAs'),{type:'pipComputerSavedAs',ok:true,name:'film.mov',downloaded:true});
+ const handed=h.last('dgcDownload');assert.equal(handed.name,'film.mov');assert.equal(String(Buffer.from(handed.data)),'the film');
+ assert.equal(existsSync(target),false,'its private folder is gone once handed over');
  h.tab.receive({type:'pipComputerSaveAs',path:'gone.txt'});await settle(()=>h.copies().length===2,'sent');
  h.answer(h.copies()[1],{message:'That file is not in this computer\'s Files.'},false);
  await settle(()=>h.tab.posted.filter(m=>m.type==='pipComputerSavedAs').length===2,'answered');

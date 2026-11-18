@@ -193,8 +193,10 @@ for (const theme of ["dark-modern", "light-modern"]) {
         const box = await made.boundingBox();
         assert.ok(box.height <= 30, `one line (${box.height}px)`);
         await made.locator(".pic-fold-open").click();
-        const opened = await page.evaluate(() => window.__posted.filter((m) => m.type === "fileOpen"));
-        assert.equal(opened.length, 1, "Open, folded, opens the picture as its card's Open does");
+        // (Its card's Open opens the picture large in the chat, 18 Nov: media/shared/picturepop.js.)
+        assert.equal(await page.locator(".dgc-picpop").count(), 1, "Open, folded, opens the picture as its card's Open does");
+        assert.equal(await page.textContent(".dgc-picpop-name"), "felt-purple-ball.png");
+        await page.keyboard.press("Escape");
         const posted = await page.evaluate(() => window.__posted.filter((m) => m.type === "pictureFold"));
         assert.deepEqual(posted, [{ type: "pictureFold", key: `chat:${M(2)}:made`, folded: true }]);
         // A redraw (the reply comes again) keeps it folded.

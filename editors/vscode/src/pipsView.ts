@@ -3,6 +3,7 @@ import { MIC_MESSAGES, SPEAK_MESSAGES, type Dictation, type DictationOwner, type
 import { randomBytes } from 'crypto';
 import { homedir } from 'os';
 import { FILE_ACTS, keptFileAct } from './fileActs';
+import { downloadBytes, downloadFile, downloadMade } from './download';
 import { GitRefs } from './gitRefs';
 import { openCommit } from './gitCommitDoc';
 import { isAbsolute } from 'path';
@@ -161,7 +162,7 @@ export function workSessionTitles(list: unknown): WorkSessionTitle[] {
 }
 /** A Project Pip a session owns, as list_session_pips lists it. */
 export interface OwnedPip { id: string; name: string; pip_type: string; status: string }
-const commands = new Set([...AGENT_COMMANDS,'set_pip_pay_limits','set_pip_knows_you','list_pip_sent','get_pip_import_prompt','import_pip_source','get_pip_skills','set_pip_skill','get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','fill_pip_code','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'answer_pip_questions', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen', 'get_pip_webhook', 'replace_pip_webhook_address', 'set_pip_webhook_signing', 'send_pip_webhook_test', 'get_webhook_reach', 'set_webhook_reach', ...OWNER_COMMANDS, ...GOAL_COMMANDS, ...PROJECT_COMMANDS, ...FOLDER_COMMANDS, ...FLOW_COMMANDS]);
+const commands = new Set([...AGENT_COMMANDS,'set_pip_pay_limits','set_pip_knows_you','list_pip_sent','get_pip_import_prompt','import_pip_source','get_pip_skills','set_pip_skill','get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','fill_pip_code','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','library_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'answer_pip_questions', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen', 'get_pip_webhook', 'replace_pip_webhook_address', 'set_pip_webhook_signing', 'send_pip_webhook_test', 'get_webhook_reach', 'set_webhook_reach', ...OWNER_COMMANDS, ...GOAL_COMMANDS, ...PROJECT_COMMANDS, ...FOLDER_COMMANDS, ...FLOW_COMMANDS]);
 /** Images sent with a Pip message, as data URIs: 2 MiB of image, base64, plus headers. */
 const MAX_IMAGE_URI_CHARS = 2_800_000;
 /** Pips API 52: photos and files go the Work chat's way. The host writes them into the backend's spool
@@ -1067,8 +1068,9 @@ export class PipsEditor implements vscode.Disposable {
       done(added, [...errors, error instanceof Error && error.message ? error.message : 'DGC could not add those files.']);
     } finally { this.computerCopying.delete(surface); }
   }
-  /** Save to this computer… on a file in a computer tab's Files (Pips API 87): the user picks the place in VS Code's own
-   *  save dialog and DGC copies the file there, whatever its size. The page says which file in Files and nothing else. */
+  /** Download on a file in a computer tab's Files (Pips API 87): DGC copies it out into a private folder made for this
+   *  download, and the page saves it on the person's own computer (src/download.ts; one too large for a page goes to
+   *  their browser). The page says which file in Files and nothing else. */
   private async saveComputerFileAs(surface: string, computer: { pip: ComputerPip }, message: any): Promise<void> {
     const done = (ok: boolean, extra: Record<string, unknown> = {}) => this.post({ type: 'pipComputerSavedAs', ok, ...extra }, surface);
     if (this.apiVersion < COMPUTER_COPY_API) { done(false, { error: 'Update DGC to save files over 2 MB.' }); return; }
@@ -1077,15 +1079,16 @@ export class PipsEditor implements vscode.Disposable {
     this.computerCopying.add(surface);
     try {
       const last = message.path.split('/').pop() || '', name = /^[^/\\\0]{1,255}$/.test(last) ? last : 'file';
-      const target = this.pickedPath(await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), name), saveLabel: 'Save' }) ?? undefined);
-      if (!target) { done(false, { cancelled: true }); return; }
-      const result = await this.computerCopy('copy_pip_computer_file_out', { pip_id: computer.pip.id, path: message.path, target });
-      done(true, { name: (typeof result.target === 'string' && result.target ? result.target : target).split(/[\\/]/).pop()!.slice(0, 255) });
+      const sent = await downloadMade((m) => this.post(m, surface), name, async (target) => {
+        const result = await this.computerCopy('copy_pip_computer_file_out', { pip_id: computer.pip.id, path: message.path, target: this.pickedPath(vscode.Uri.file(target)) || target });
+        return typeof result.target === 'string' && result.target ? result.target : target;
+      });
+      done(sent, sent ? { name, downloaded: true } : { error: 'Not downloaded.' });
     } catch (error) {
       done(false, { error: error instanceof Error && error.message ? error.message : 'Not saved.' });
     } finally { this.computerCopying.delete(surface); }
   }
-  /** Save a file from a Pip's computer where the user chooses. The bytes came from its own read. */
+  /** Download a small file from a Pip's computer, from the bytes its own read gave the page (src/download.ts). */
   private async saveComputerFile(surface: string, message: any): Promise<void> {
     const name = typeof message.name === 'string' && /^[^/\\\0]{1,255}$/.test(message.name) ? message.name : 'file';
     try {
@@ -1100,10 +1103,8 @@ export class PipsEditor implements vscode.Disposable {
         data = Buffer.from(message.text, 'utf8');
       }
       if (!data || data.byteLength > 2 * 1024 * 1024) throw Error('Nothing to save.');
-      const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), name), saveLabel: 'Save' });
-      if (!target) { this.post({ type: 'pipComputerSaved', ok: false, error: 'Not saved.' }, surface); return; }
-      await vscode.workspace.fs.writeFile(target, data);
-      this.post({ type: 'pipComputerSaved', ok: true, name: target.path.split('/').pop() }, surface);
+      const sent = await downloadBytes((m) => this.post(m, surface), name, data);
+      this.post(sent ? { type: 'pipComputerSaved', ok: true, name, downloaded: true } : { type: 'pipComputerSaved', ok: false, error: 'Not downloaded.' }, surface);
     } catch (error) {
       this.post({ type: 'pipComputerSaved', ok: false, error: error instanceof Error ? error.message : 'Not saved.' }, surface);
     }
@@ -1406,21 +1407,21 @@ export class PipsEditor implements vscode.Disposable {
       fail(error instanceof Error ? error.message : 'Could not read the shared Pip file.');
     }
   }
-  /** pips-12: a team's file is saved where the user chooses in the save dialog. The text came from DGC's own export; the
-   *  page hears the file's name and what was left out, never where it is. */
+  /** pips-12: a team's file, downloaded by the page on the person's own computer. The text came from DGC's own export;
+   *  the page hears the file's name and what was left out. */
   private async saveTeam(client: string, generation: number, result: any, surface?: string): Promise<void> {
     try {
       if (generation !== this.generation || !this.state.connected) throw Error('The DGC connection changed. Export again.');
       const text = result?.text, team = result?.document;
       if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text, 'utf8') > TEAM_FILE_BYTES || team?.format !== 'dgc-team' || typeof team.name !== 'string'
         || !Array.isArray(team.pips) || !team.pips.length || team.pips.length > TEAM_PIPS) throw Error('The team file is invalid.');
-      const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), teamFileName(team.name)),
-        saveLabel: 'Save team', filters: { 'DGC team': ['json'] } });
-      if (!target) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }, surface); return; }
-      await vscode.workspace.fs.writeFile(target, Buffer.from(text, 'utf8'));
+      // A download to the person's own computer, from the page that asked (src/download.ts): the dialog stays only where
+      // the place is the project (his call, 18 Nov).
+      const file = teamFileName(team.name);
+      if (!await downloadBytes((m) => this.post(m, surface), file, Buffer.from(text, 'utf8'), 'application/json')) throw Error('The team file could not be handed to this page.');
       const leftOut: string[] = [];
       for (const pip of team.pips) for (const note of Array.isArray(pip?.left_out) ? pip.left_out : []) if (typeof note === 'string' && !leftOut.includes(note)) leftOut.push(note);
-      this.post({ type: 'pipsReply', id: client, ok: true, result: { saved: true, file: String(target.path).split(/[\\/]/).pop() || teamFileName(team.name), name: team.name, count: team.pips.length, left_out: leftOut.slice(0, 8) } }, surface);
+      this.post({ type: 'pipsReply', id: client, ok: true, result: { saved: true, file, name: team.name, count: team.pips.length, left_out: leftOut.slice(0, 8) } }, surface);
     } catch (error) {
       this.post({ type: 'pipsReply', id: client, ok: false, error: { message: error instanceof Error ? error.message : 'Could not export the team.' } }, surface);
     }
@@ -1569,8 +1570,9 @@ export class PipsEditor implements vscode.Disposable {
       fail('DGC couldn’t send that. Refresh to see whether it worked before trying again.');
     }
   }
-  /** Open a photo from a Pip's chat, the original, in an editor tab (one click on its thumbnail). With `save` (Download
-   *  on a made file's row, pips-08) it asks where to save the original instead, under a name a person can read. */
+  /** Open a photo from a Pip's chat, the original, in an editor tab (Open in editor, from its pop-up). With `save`
+   *  (Download on its row or in its pop-up) the original goes to the page, which saves it on the person's computer under a
+   *  name a person can read (src/download.ts); with `view` (its pop-up), the page is handed the original to show. */
   private async openPhoto(message: any, surface = 'main'): Promise<void> {
     const unavailable = () => void vscode.window.showInformationMessage('That photo is no longer available.');
     const pip = message?.pip_id, id = message?.message_id, index = message?.index;
@@ -1595,11 +1597,12 @@ export class PipsEditor implements vscode.Disposable {
       // (Copy, from the picture's menu: its bytes go to the page, whose clipboard it is.)
       if (message?.copy === true) { this.post({ type: 'pipsFileCopy', data: uri }, surface); return; }
       if (message?.save === true) {
-        const name = `Picture ${index + 1}.${match[1] === 'jpeg' ? 'jpg' : match[1]}`;
-        const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), name), saveLabel: 'Download' });
-        if (!target) return;
-        await vscode.workspace.fs.writeFile(target, Buffer.from(match[2], 'base64'));
-        void vscode.window.showInformationMessage(`Saved ${target.path.split('/').pop()}.`);
+        await downloadBytes((m) => this.post(m, surface), `Picture ${index + 1}.${match[1] === 'jpeg' ? 'jpg' : match[1]}`, Buffer.from(match[2], 'base64'), `image/${match[1]}`);
+        return;
+      }
+      if (message?.view === true) {
+        const requestId = typeof message.requestId === 'string' ? message.requestId.slice(0, 64) : '';
+        this.post({ type: 'pipsPhotoData', requestId, data: uri }, surface);
         return;
       }
       const fs = await import('node:fs/promises');
@@ -1677,17 +1680,11 @@ export class PipsEditor implements vscode.Disposable {
     if (message.type === 'pipsGitCommitOpen') { if (folder) await openCommit(this.gitRefs, folder, message.hash); return; }
     this.post({ type: 'pipsGitRefs', pip_id: pipId, ...(await this.gitRefs.answer(folder, message.hashes)) }, surface);
   }
-  private async openFile(message: any): Promise<void> {
+  private async openFile(message: any, surface = 'main'): Promise<void> {
     const unavailable = () => void vscode.window.showInformationMessage('That file is no longer available.');
     try {
       const file = await this.messageFile(message);
-      if (message?.save === true) {
-        const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()), file.name), saveLabel: 'Save a copy' });
-        if (!target) return;
-        await vscode.workspace.fs.copy(vscode.Uri.file(file.path), target, { overwrite: true });
-        void vscode.window.showInformationMessage(`Saved ${target.path.split('/').pop()}.`);
-        return;
-      }
+      if (message?.save === true) { await downloadFile((m) => this.post(m, surface), file.path, file.name, file.mime); return; }
       const fs = await import('node:fs/promises');
       const os = await import('node:os');
       const nodePath = await import('node:path');
@@ -1717,6 +1714,7 @@ export class PipsEditor implements vscode.Disposable {
         say: (words) => this.post({ type: 'pipsFileSaid', words }, surface),
         picture: (data) => this.post({ type: 'pipsFileCopy', data }, surface),
         copyFolder: async () => nodePath.join(os.tmpdir(), 'dgc-pip-files', file.message, String(message.index)),
+        page: (m) => this.post(m, surface),
       });
     } catch { void vscode.window.showInformationMessage('That file is no longer available.'); }
   }
@@ -1802,8 +1800,8 @@ export class PipsEditor implements vscode.Disposable {
     }
     // Full screen in a computer tab went on or off: the window follows (ComputerFullScreen).
     if (message?.type === 'pipComputerFull' && computer) { void computerFullScreen.set(computer.panel, message.on === true, this.fullScreenSide); return; }
-    if (message?.type === 'pipsOpenPhoto' && !computer) { void this.openPhoto(message); return; }
-    if (message?.type === 'pipsOpenFile' && !computer) { void this.openFile(message); return; }
+    if (message?.type === 'pipsOpenPhoto' && !computer) { void this.openPhoto(message, surface); return; }
+    if (message?.type === 'pipsOpenFile' && !computer) { void this.openFile(message, surface); return; }
     if (message?.type === 'pipsFileAct' && !computer) { void this.fileAct(message, surface); return; }
     if ((message?.type === 'pipsGitRefs' || message?.type === 'pipsGitCommitOpen') && !computer) { void this.gitRefsAct(message, surface); return; }
     if (message?.type === 'pipsFileData' && !computer) { void this.fileData(message, surface); return; }
@@ -2106,6 +2104,7 @@ export class PipsEditor implements vscode.Disposable {
     if(request.type === 'set_plugin_permission' && this.apiVersion < 45) { fail('Update DGC to choose what a plugin may do without asking.'); return; }
     if(request.type === 'introduce_pip' && this.apiVersion < 43) { fail('Update DGC for Pips that say hello.'); return; }
     if(request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'files') && this.apiVersion < 43) { fail('Update DGC to send files to a Pip.'); return; }
+    if (request.type === 'library_pip_message_image' && this.apiVersion < 106) { fail('Update DGC to save a picture in the Library.'); return; }
     if((request.type === 'get_pip_message_image' || request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'images')) && this.apiVersion < 43) { fail('Update DGC to send images to a Pip.'); return; }
     if(['list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_computer_desktop'].includes(request.type) && this.apiVersion < 43) { fail('Update DGC for a Pip computer’s Files and Terminal.'); return; }
     if(['always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view'].includes(request.type) && this.apiVersion < 42) { fail('Update DGC for Pip computers.'); return; }

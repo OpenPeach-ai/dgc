@@ -236,6 +236,19 @@ for (const place of ["side", "tab"]) {
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
+  // Save to Library (18 Nov): a picture you kept from a chat says so, and leads back to the chat it came from.
+  test(`${place}: a picture you saved to the Library says "saved by you from" its chat`, async (t) => {
+    if (skipOrFail(t)) return;
+    const mine = { ...LIB_IMAGES[0], path: "/home/me/.dgc/images/kept/cafe-front-20261118.png", title: "Painter: picture 1", why: "", kept_by: "you",
+                   made_by: { kind: "pip", id: TILE, name: "Painter" } };
+    const x = await open(place, { width: place === "side" ? 300 : 1100, images: [mine] });
+    try {
+      await x.libTab("images");
+      const l = await x.lib();
+      assert.deepEqual(l.rows.map((r) => [r.title, r.by, r.maker]), [["Painter: picture 1", "saved by you from", "Painter"]]);
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  });
   test(`${place}: an image's maker leads back (a Pip to its chat, a session and a chat open), and it opens, shows in its folder and saves a copy`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await open(place, { width: place === "side" ? 300 : 1100 });

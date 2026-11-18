@@ -11,7 +11,7 @@
 // Copy puts a text file's text on the clipboard; a picture goes to the page as bytes, because only a page can write a
 // picture to the clipboard. Any other kind is not copied (the menu shows that row off, with why).
 import * as vscode from "vscode";
-import { homedir } from "os";
+import { downloadFile, type DownloadPage } from "./download";
 
 export type FileAct = "open" | "editor" | "save" | "copy" | "path" | "reveal";
 export const FILE_ACTS: ReadonlySet<string> = new Set(["open", "editor", "save", "copy", "path", "reveal"]);
@@ -30,6 +30,8 @@ export interface FileActHost {
   picture(data: string): void;
   /** A private folder (0700) for a copy that is opened; the same file opened again replaces its copy. */
   copyFolder(): Promise<string>;
+  /** The page the menu is on: Save a copy… hands it the file, to save on the person's computer (src/download.ts). */
+  page: DownloadPage;
 }
 
 const mimeOf = (name: string) => { const e = (PICTURE.exec(name)?.[1] || "png").toLowerCase(); return e === "jpg" || e === "jpeg" ? "image/jpeg" : `image/${e}`; };
@@ -53,13 +55,10 @@ async function copyOut(path: string, name: string, host: FileActHost): Promise<b
   host.say("Text copied");
   return true;
 }
-async function saveCopy(path: string, name: string): Promise<boolean> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
-  const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Save a copy" });
-  if (!target) return false;
-  await vscode.workspace.fs.copy(vscode.Uri.file(path), target, { overwrite: true });
-  void vscode.window.showInformationMessage(`Saved ${target.path.split("/").pop()}.`);
-  return true;
+/** Save a copy…: the file goes to the page, which saves it on the computer the editor runs on (never a dialog here,
+ *  which over a remote connection would browse the remote machine). */
+async function saveCopy(path: string, name: string, host: FileActHost): Promise<boolean> {
+  return downloadFile(host.page, path, name);
 }
 
 /** One of the six on a file DGC keeps for a chat. `kept.path` is where DGC keeps it (the caller asked DGC and checked
@@ -69,7 +68,7 @@ export async function keptFileAct(act: string, kept: { path: string; name: strin
   const name = ownName(kept.name);
   // Where it is kept is DGC's own: no path to hand out, nothing to reveal (the menu shows both off, and says why).
   if (act === "path" || act === "reveal") return false;
-  if (act === "save") return saveCopy(kept.path, name);
+  if (act === "save") return saveCopy(kept.path, name, host);
   if (act === "copy") return copyOut(kept.path, name, host);
   if (act === "editor" && fileKind(name) !== "text") return false;
   // Open, Open in editor: a private copy under its own name (an edit to the kept file would break its digest).
@@ -94,7 +93,7 @@ export async function projectFileAct(act: string, path: string, host: FileActHos
       // Text opens as text, to stay; what an editor can't show as text opens in the editor that owns its kind.
       try { await vscode.window.showTextDocument(uri, { preview: false }); } catch { await vscode.commands.executeCommand("vscode.open", uri); }
       return true;
-    case "save": return saveCopy(path, name);
+    case "save": return saveCopy(path, name, host);
     case "copy": return copyOut(path, name, host);
     case "path": await vscode.env.clipboard.writeText(path); host.say("Path copied"); return true;
     case "reveal": await vscode.commands.executeCommand("revealFileInOS", uri); return true;

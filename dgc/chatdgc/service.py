@@ -556,6 +556,7 @@ class ChatService:
              "chatdgc_folder": self._folder, "chatdgc_set_folder": self._set_folder, "chatdgc_work_brief": self._work_brief,
              "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
              "chatdgc_library": self._library, "chatdgc_library_file": self._library_file,
+             "chatdgc_library_picture": self._library_picture,
              "chatdgc_action": self._action, "chatdgc_pips": self._pips, "chatdgc_mentions": self._mentions, "chatdgc_draft": self._draft,
              "chatdgc_canvas": self._canvas, "chatdgc_widget_report": self._widget_report, "chatdgc_widgets": self._widgets,
              "chatdgc_context": lambda cmd: self._context_later(cmd["conversation_id"]),
@@ -1609,6 +1610,33 @@ class ChatService:
         self.emit("chatdgc_library_file", request_id=cmd["request_id"], op=op, **fields)
         if op != "save":
             self._projects_changed()
+
+    def _library_picture(self, cmd: dict) -> None:
+        """Save to Library on a chat's picture (image_keep): whether it is in the Library already and, with `keep`, kept
+        there by you with this chat. Never twice; a temporary chat keeps nothing; only a picture."""
+        from .. import image_keep
+        chat = self.engine._chat(cmd["conversation_id"])
+        meta, raw, _text = self.engine.library_file({"conversation_id": cmd["conversation_id"],
+                                                     "attachment_id": cmd["attachment_id"]})
+        if meta.get("kind") != "image":
+            raise ChatEngineError("Only a picture goes in the Library's Images.")
+        there = image_keep.held(raw)
+        if there is not None or not cmd.get("keep"):
+            title = str((there or {}).get("title") or (there or {}).get("prompt") or "")[:200]
+            self.emit("chatdgc_library_picture", request_id=cmd["request_id"], in_library=there is not None, kept=False,
+                      **({"title": title} if title else {}))
+            return
+        if chat.get("temporary"):
+            raise ChatEngineError("This is a temporary chat, which keeps nothing.")
+        name = str(meta.get("prompt") or meta.get("name") or "Picture").rsplit(".", 1)[0][:200]
+        try:
+            kept = image_keep.keep(raw, title=name, why="", source="chat", surface="chat",
+                                   where={"chat": str(chat.get("id") or ""), "chat_title": str(chat.get("title") or "")[:120]},
+                                   by="you")
+        except image_keep.KeepError as exc:
+            raise ChatEngineError(f"Not saved: {exc}") from exc
+        self.emit("chatdgc_library_picture", request_id=cmd["request_id"], in_library=True,
+                  kept=not kept.get("already"), title=kept["title"])
 
     # -- plugins: the user's choice on a card under a reply
 

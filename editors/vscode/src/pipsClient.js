@@ -7,6 +7,9 @@ import '../media/shared/menu.css';
 import '../media/shared/menu.js';
 import '../media/shared/icons.js';
 import '../media/shared/askcard.js';   // window.DgcAskCard: Work's question card, drawn under the reply that asked (API 106)
+import '../media/shared/download.js';   // window.DgcDownload: Download saves on the person's own computer, from this page
+import '../media/shared/picturepop.css';
+import '../media/shared/picturepop.js';   // window.DgcPicturePop: a picture in the chat, opened large over it
 // A file's menu on its card in the chat, as on a Library row (window.DgcFileMenu), opened by DGC's small menu
 // (window.DgcBlob: the side bar's page already has it; a chat's own tab gets it from here).
 import '../media/shared/blob.css';
@@ -1157,7 +1160,7 @@ function chatMarkup(){
   const timed=(m,mark=true)=>{const at=Date.parse(m.created_at),line=mark&&simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return line;};
   const latest=S.messages.at(-1),answerable=latest&&latest.role==='assistant'&&Array.isArray(latest.choices)?latest:null;
   // One message as drawn: yours, or a reply. (`bubble` alone: a message that is drawn inside a reply, where it was read.)
-  const bubble=(m,more={})=>messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:renderPipReply,canSend,quote:quoteFor(m,shown),canReply:canReply(),canDownload:S.apiVersion>=43&&!remoteHost,canOpenFiles:canOpenFiles(),activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,undo:canUndoOwn(),openChanges:ownDetailsOpen,undoing:ownUndoing,undoErrors:ownUndoErrors,...more});
+  const bubble=(m,more={})=>messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:renderPipReply,canSend,quote:quoteFor(m,shown),canReply:canReply(),canDownload:S.apiVersion>=43&&!remoteHost,canOpenFiles:canOpenFiles(),library:pictureLibraryLive()?pictureLibraryOf:null,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,undo:canUndoOwn(),openChanges:ownDetailsOpen,undoing:ownUndoing,undoErrors:ownUndoErrors,...more});
   const drawMessage=m=>{
     if(routineFailed(m)){const failed=window.DgcMarkdown?.modelFailure?.(m.error);return timed(m,false)+failedRoutineMarkup(m,postRoutineTitle(m.text),{failure:failed,detail:typeof m.error_detail==='string'&&m.error_detail?(window.DgcMarkdown?.editorAdvice?.(m.error_detail)??m.error_detail):failed?.detail||''});}
     if(failedHidden(m))return timed(m,false)+failedHiddenMarkup(m);
@@ -1699,7 +1702,7 @@ globalThis.DgcFileMenu?.listen(document,card=>{
  const FM=globalThis.DgcFileMenu,raw=String(card.dataset.fileKey||''),photo=raw.startsWith('photo:'),[messageId,index]=(photo?raw.slice(6):raw).split(':'),name=card.dataset.fileName||'file';
  if(!canOpenFiles()||!S.selected||!messageId||!/^\d+$/.test(index||''))return null;
  const why=act=>photo?(act==='editor'?FM.whyPicture(act,'chat'):act==='path'||act==='reveal'?FM.KEPT:''):FM.whyKept(name,act);
- return {name,why,onPick:act=>{fileActFrom={key:raw};vscode.postMessage({type:'pipsFileAct',act,pip_id:S.selected,message_id:messageId,index:Number(index),...(photo?{photo:true}:{})});}};
+ return {name,why,onPick:act=>{fileActFrom={key:raw};if(act==='save')globalThis.DgcDownload?.ask(card.querySelector('.dgc-file-more')||card);vscode.postMessage({type:'pipsFileAct',act,pip_id:S.selected,message_id:messageId,index:Number(index),...(photo?{photo:true}:{})});}};
 });
 function fileActSaid(message){
  const FM=globalThis.DgcFileMenu;if(!FM)return;
@@ -1756,6 +1759,68 @@ function hydrateMessageMedia(){
   if(entry.box.parentNode!==slot)slot.replaceChildren(entry.box);
   if(entry.state==='idle'&&entry.bytes<=MEDIA_AUTO_BYTES)loadMessageMedia(entry);
  }
+}
+// ---- a picture in the chat, opened large over it (media/shared/picturepop.js), saved on the person's own computer
+// (media/shared/download.js) and kept in the Library (Pips API 108: library_pip_message_image). A picture is in the
+// Library when it was generated, or when someone kept it: asked once per picture, then "In Library" (off), so nothing
+// is kept twice. Nothing is kept on its own.
+const LIBRARY_API=108;
+const pictureLibraryLive=()=>S.apiVersion>=LIBRARY_API&&!remoteHost;
+const pictureLibrary=new Map();          // `${message}:${index}` -> 'in' | 'can' | 'saving' | 'asked'
+const PICTURE_TYPES={'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/webp':'webp','image/bmp':'bmp'};
+function pictureLibraryOf(key){
+ const known=pictureLibrary.get(key);
+ if(!known){pictureLibrary.set(key,'asked');void askPictureLibrary(key,false);return 'can';}
+ return known==='asked'?'can':known;
+}
+function askPictureLibrary(key,keep){
+ const [messageId,index]=String(key||'').split(':'),pip=S.selected;
+ if(!pictureLibraryLive()||!pip||!messageId||!/^\d+$/.test(index||''))return Promise.resolve(null);
+ return send('library_pip_message_image',{pip_id:pip,message_id:messageId,index:Number(index),keep}).then(result=>{
+  if(!record(result))return null;
+  pictureLibrary.set(key,result.in_library===true?'in':'can');render();picturePopLibrary(key);return result;
+ }).catch(error=>{pictureLibrary.set(key,'can');render();picturePopLibrary(key);if(keep)setError(error);return null;});
+}
+function keepPipPicture(key,from){
+ const now=pictureLibrary.get(key);
+ if(now==='in'||now==='saving')return Promise.resolve(null);
+ pictureLibrary.set(key,'saving');render();picturePopLibrary(key);
+ return askPictureLibrary(key,true).then(result=>{
+  const button=from?.isConnected?from:root.querySelector?.(`[data-message-library="${CSS.escape(key)}"]`);
+  if(result?.in_library)globalThis.DgcDownload?.said(button,'Saved to Library');
+  return result;
+ });
+}
+function picturePopLibrary(key){
+ const pop=globalThis.DgcPicturePop?.current();
+ if(!pop?.pipPictures)return;
+ pop.pipPictures.forEach((p,i)=>{if(p.key===key)pop.set(i,{library:pictureLibraryLive()?pictureLibraryOf(key):''});});
+}
+// The original of a picture the chat shows a small copy of, from the host (no frame's size limit on the way).
+const photoWaiting=new Map();let photoSeq=0;
+function fullPicture(key){
+ const [messageId,index]=String(key||'').split(':');
+ return new Promise(resolve=>{
+  const requestId=`pipphoto-${++photoSeq}`,timer=window.setTimeout(()=>{if(photoWaiting.delete(requestId))resolve('');},30000);
+  photoWaiting.set(requestId,data=>{window.clearTimeout(timer);resolve(typeof data==='string'&&/^data:image\/(png|jpeg|gif|webp|bmp);base64,/.test(data)?data:'');});
+  vscode.postMessage({type:'pipsOpenPhoto',pip_id:S.selected,message_id:messageId,index:Number(index),view:true,requestId});
+ });
+}
+/** A click on a picture in the chat: it opens large in a pop-up over the chat, with the message's other pictures. */
+function openChatPicture(img){
+ const Pop=globalThis.DgcPicturePop,key=String(img?.dataset.messageImage||''),[messageId,at]=key.split(':');
+ if(!Pop||!S.selected||!messageId||!/^\d+$/.test(at||''))return false;
+ const m=(S.messages||[]).find(x=>x&&x.id===messageId);
+ const list=m&&Array.isArray(m.images)&&m.images.length?m.images.slice(0,64):[{index:Number(at)}];
+ const who=m?.role==='user'?'Photo':'Picture';
+ const pictures=list.map(i=>{const k=`${messageId}:${Number(i.index)}`;return {key:k,src:messageImageCache.get(k)||'',name:`${who} ${Number(i.index)+1}.${PICTURE_TYPES[i.mime]||'png'}`,
+  bytes:Number(i.bytes)||0,mime:typeof i.mime==='string'?i.mime:'',library:pictureLibraryLive()?pictureLibraryOf(k):''};});
+ const pop=Pop.open({pictures,index:Math.max(0,pictures.findIndex(p=>p.key===key)),opener:img,load:p=>fullPicture(p.key),
+  onLibrary:pictureLibraryLive()?p=>keepPipPicture(p.key,pop?.el.querySelector('[data-act="library"]')):null,
+  // Open in editor: the old way, the original in an editor tab.
+  onEditor:p=>openMessageImage(p.key)});
+ if(pop)pop.pipPictures=pictures;
+ return !!pop;
 }
 function openMessageImage(key,save=false){
  const [messageId,index]=String(key||'').split(':');
@@ -7537,13 +7602,15 @@ document.addEventListener('click',event=>{
   // Download on a file's row in a reply (pips-08): the host asks where to save the kept file.
   // A file in a message (API 101): Save a copy…, or Open (the card, or your own file's chip).
   const saveFile=event.target.closest?.('button[data-message-file-save]');
-  if(saveFile){openMessageFile(saveFile.dataset.messageFileSave,true);return;}
+  if(saveFile){globalThis.DgcDownload?.ask(saveFile);openMessageFile(saveFile.dataset.messageFileSave,true);return;}
+  const keep=event.target.closest?.('button[data-message-library]');
+  if(keep){if(!keep.disabled)void keepPipPicture(keep.dataset.messageLibrary,keep);return;}
   const openFile=event.target.closest?.('button[data-message-file]');
   if(openFile){openMessageFile(openFile.dataset.messageFile);return;}
   const download=event.target.closest?.('button[data-message-download]');
-  if(download&&S.apiVersion>=43&&!remoteHost){openMessageImage(download.dataset.messageDownload,true);return;}
+  if(download&&S.apiVersion>=43&&!remoteHost){globalThis.DgcDownload?.ask(download);openMessageImage(download.dataset.messageDownload,true);return;}
   const photo=event.target.closest?.('img[data-message-image]');
-  if(photo&&S.apiVersion>=43&&!remoteHost){openMessageImage(photo.dataset.messageImage);return;}
+  if(photo&&S.apiVersion>=43&&!remoteHost){if(!openChatPicture(photo))openMessageImage(photo.dataset.messageImage);return;}
   const target=event.target.closest('button');if(!target||target.disabled)return;
   if(flow.menu&&!target.dataset.flowMenu&&!target.dataset.flowHelper){flow.menu='';render();}
   if(target.dataset.pipsTab){chooseScopeTab(target.dataset.pipsTab);return;}
@@ -7935,7 +8002,7 @@ document.addEventListener('click',event=>{
       const token=scope();try{const result=documentationDraft(S.run?.result);if(S.run?.manifest?.run_kind!=='draft'||S.run.status!=='succeeded')return;checkedRunSource(S.run);if(!window.navigator.clipboard?.writeText)throw new Error('Clipboard access is unavailable. Select the draft text and copy it manually.');void window.navigator.clipboard.writeText(result.draft.markdown).then(()=>{if(token===scope()){S.notice='Draft copied. Nothing was published or applied.';render();}},()=>{if(token===scope())setError('Clipboard access was refused. Select the draft text and copy it manually.');});}catch(error){setError(error);}break;
     }
     case 'download-draft':{
-      if(!remoteHost||options.downloadDraft===false)return;try{const result=documentationDraft(S.run?.result);if(S.run?.manifest?.run_kind!=='draft'||S.run.status!=='succeeded')return;checkedRunSource(S.run);const url=window.URL.createObjectURL(new window.Blob([result.draft.markdown],{type:'text/markdown;charset=utf-8'})),link=owner.createElement('a');link.href=url;link.download='quill-draft.md';link.hidden=true;owner.body.append(link);link.click();link.remove();window.setTimeout(()=>window.URL.revokeObjectURL(url),0);}catch(error){setError(error);}break;
+      if(!remoteHost||options.downloadDraft===false)return;try{const result=documentationDraft(S.run?.result);if(S.run?.manifest?.run_kind!=='draft'||S.run.status!=='succeeded')return;checkedRunSource(S.run);const blob=new window.Blob([result.draft.markdown],{type:'text/markdown;charset=utf-8'});if(globalThis.DgcDownload)globalThis.DgcDownload.save(owner,{name:'quill-draft.md',data:blob});else{const url=window.URL.createObjectURL(blob),link=owner.createElement('a');link.href=url;link.download='quill-draft.md';link.hidden=true;owner.body.append(link);link.click();link.remove();window.setTimeout(()=>window.URL.revokeObjectURL(url),0);}}catch(error){setError(error);}break;
     }
     case 'run':runNow();break;
     case 'toggle-pip':if(archived())break;if(S.apiVersion>=16&&!canLifecycle()){setError('Refresh, then try again.');break;}void mutate({type:S.pip.status==='paused'?'resume_pip':'pause_pip',pip_id:S.selected,...(S.apiVersion>=16?{expected_lifecycle_revision:S.pip.lifecycle_revision}:{})});break;
@@ -8254,6 +8321,7 @@ const stopMessages=options.onMessage(message=>{
   if(message.type==='pipsAppLogos'){takePluginLogos(message.logos,true);return;}
   if(message.type==='pipsGitRefs'){if(/^pip_[A-Za-z0-9]{1,64}$/.test(String(message.pip_id||'')))inlineTouches?.refsAnswer({scope:message.pip_id,remote:message.remote===true,github:message.github,known:message.known});return;}
   if(message.type==='pipsFileCopy'||message.type==='pipsFileSaid'){fileActSaid(message);return;}
+  if(message.type==='pipsPhotoData'){const done=photoWaiting.get(message.requestId);if(done){photoWaiting.delete(message.requestId);done(message.data);}return;}
   if(message.type==='pipsFileData'){const done=mediaWaiting.get(message.requestId);if(done){mediaWaiting.delete(message.requestId);done(message);}return;}
   if(message.type==='pipsFiles'){projectFiles=(Array.isArray(message.files)?message.files:[]).filter(f=>record(f)&&typeof f.label==='string').slice(0,600);chatPicker?.refresh();return;}
   // Settings or the Router changed: Default may run somewhere else now. A list already read is read again.

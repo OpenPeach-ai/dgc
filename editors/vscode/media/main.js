@@ -2340,6 +2340,7 @@
   let pipReportsLive = false;            // ready.capabilities.pip_reports: Dismiss is saved with the chat
   let displayMentionsVersion = 0;       // display-only inline marks replayed in sent prompts
   let pipFixLive = false;                // ready.capabilities.pip_fix: Ask DGC to fix runs in the background
+  let libraryPictureLive = false;        // ready.capabilities.library_picture: Save to Library on a picture (18 Nov)
   // Pips API 96 (the Pips flow): a Pip tells you what it finds in its own chat. A report card in a Work chat is history
   // then: no Ask DGC to fix and no Dismiss, one quiet "Open in its chat"; and a session that used to get cards says so
   // once, above its chat (media/shared/pipswelcome.js).
@@ -4145,13 +4146,17 @@
   // labelled at once.
   const SIDE_TIP_DELAY_MS = 800;
   const sideBarTip = (el0) => !!el0.closest?.("#side-tabs, #sessions-host, #dgc-dock");
+  const SAID_MS = 1900;             // how long a "Downloaded" note stands (media/shared/download.js)
   const hoverTip = (() => {
     const node = el("div", "tip");
     node.hidden = true; node.setAttribute("role", "tooltip"); node.id = "hover-tip";
     document.body.appendChild(node);
     // (`extra`: words cut with "…" under the pointer, said under the control's own label; `own`: the label of a box
     // that has none of its own, only words that are cut.)
-    let timer = 0, warm = 0, target = null, native = "", alive = 0, extra = "", own = "";
+    let timer = 0, warm = 0, target = null, native = "", alive = 0, extra = "", own = "", quiet = 0;
+    // A note that says what just happened ("Downloaded", "Saved to Library": media/shared/download.js) takes the label's
+    // place for its moment: no label shows over it, or beside it.
+    document.addEventListener("dgc-said", () => { hide(); quiet = Date.now() + SAID_MS; }, true);
     function hide() {
       clearTimeout(timer); if (alive) { clearInterval(alive); alive = 0; }
       if (target && native) target.setAttribute("title", native);
@@ -4184,6 +4189,7 @@
       node.classList.add(side);
     }
     function show(el0, instant, more = "", mine = "") {
+      if (Date.now() < quiet) return;
       if (el0 === target && more === extra) return;
       const label = mine || (el0 === target && native ? native : (el0.getAttribute("title") || el0.dataset.tip || "")).trim();
       if (!label || el0.closest("[hidden]")) return;
@@ -5220,7 +5226,7 @@
     // A chip's "…" stands beside it; a picture's, on the line under it (beside Save to project…, where there is one).
     const figure = card.querySelector(":scope > figure.made-image");
     let into = null;
-    if (figure) { into = el("span", "made-image-acts"); const save = figure.querySelector(":scope > .made-image-save"); if (save) into.appendChild(save); figure.appendChild(into); }
+    if (figure) { into = el("span", "made-image-acts"); for (const act of figure.querySelectorAll(":scope > .made-image-save, :scope > .made-image-lib")) into.appendChild(act); figure.appendChild(into); }
     else card.classList.add("file-card");
     FM.mark(card, { name: spec.name, side: spec.side, into });
   }
@@ -5236,11 +5242,12 @@
         : (act === "save" || act === "copy") && !(record.state === "ready" && record.src) ? "The picture isn't here yet." : "");
       return { name: spec.name, why, onPick: (act) => {
         if (act === "open") (card.querySelector(".image-chip, .image-tile") || record.chip)?.click();
-        else if (act === "save") vscode.postMessage({ type: "saveImage", name: imageFileName(record.name) || record.name || "image.png", data: record.src });
+        else if (act === "save") downloadPicture(more, record);
         else if (act === "copy") FM.copyPicture(document, record.src).then((ok) => FM.said(more, ok ? "Image copied" : "Couldn't copy here"));
       } };
     }
-    return { name: spec.name, why: (act) => FM.whyProject(spec.path, act), onPick: (act) => { fileCardsMap.from = more; vscode.postMessage({ type: "fileAct", act, file: { kind: "project", path: spec.path } }); } };
+    return { name: spec.name, why: (act) => FM.whyProject(spec.path, act), onPick: (act) => { fileCardsMap.from = more; if (act === "save") window.DgcDownload?.ask(more);
+      vscode.postMessage({ type: "fileAct", act, file: { kind: "project", path: spec.path } }); } };
   }
   window.DgcFileMenu?.listen(log, fileCardSpec);
   // Inline touches in what you type and what you read (media/shared/inline.js): a colour's swatch in the box, a sent
@@ -5339,6 +5346,7 @@
       });
       figure.appendChild(caption);
       figure.appendChild(save);
+      if (libraryPictureLive) figure.appendChild(libraryButton(twin));
       li.appendChild(figure);
       fileCard(li, { name: imageFileName(twin.name) || twin.name || "Image", side: "dgc", picture: twin, kept: "in DGC's own folder" });
       row.appendChild(li);
@@ -9673,6 +9681,7 @@ function permissionChoices(ev) {
         backgroundNowLive = Number(ev.capabilities?.background_now?.version) >= 1;
         pipReportsLive = ev.capabilities?.pip_reports === 1;
         pipFixLive = pipReportsLive && ev.capabilities?.pip_fix === 1;
+        libraryPictureLive = ev.capabilities?.library_picture === 1;
         pipsApi = Number.isSafeInteger(ev.capabilities?.pips_api_version) ? ev.capabilities.pips_api_version : 0;
         sessionNoteFor(ev.session_id);
         steerQueuedLive = nativeSteering && ev.capabilities?.steer_queued === true;
@@ -10004,6 +10013,7 @@ function permissionChoices(ev) {
       case "video_job": videoJobEvent(ev.job); return;
       case "video_jobs": (Array.isArray(ev.jobs) ? ev.jobs : []).forEach(videoJobEvent); return;
       case "image": imagesOnAnswer(ev); break;     // a getImage answer (the host answers for a backend without one)
+      case "library_picture": libraryAnswer(ev); break;   // Save to Library: whether a picture is there, and kept
       case "tool_result": {
         const childId = agentIdFromCall(ev.call_id);
         if (childId && !turn) {
@@ -17921,15 +17931,85 @@ function permissionChoices(ev) {
     if (!group) return record.owner?._images?.length ? [...record.owner._images] : [record];
     return [...group.querySelectorAll(".tool")].flatMap((card) => card._images || []);
   }
+  // ---- a picture's Download and Save to Library (one module each: media/shared/download.js, dgc/image_keep.py) --------
+  /** Download: the picture this page holds, saved from the page itself on the person's own computer. */
+  function downloadPicture(control, record) {
+    const name = imageFileName(record.name) || record.name || "image.png";
+    if (window.DgcDownload) window.DgcDownload.here(control, { name, data: record.src });
+    else vscode.postMessage({ type: "saveImage", name, data: record.src });
+  }
+  /** A picture's place for Save to Library: a picture of the session by its ref, or a project picture by its path. */
+  const libraryKey = (record) => (record?.ref ? record.ref : record?.path ? `path:${record.path}` : "");
+  const libraryStates = new Map();       // key -> "in" | "can" | "saving" | "asked"
+  const libraryWaiting = new Map();      // request id -> { key, done }
+  let librarySeq = 0;
+  function askLibrary(record, keep) {
+    const key = libraryKey(record);
+    if (!key || !libraryPictureLive) return Promise.resolve(null);
+    const requestId = `library-${++librarySeq}`;
+    vscode.postMessage({ type: "libraryPicture", requestId, keep, title: imageFileName(record.name) || record.name || "",
+                         ...(record.ref ? { ref: record.ref } : { path: record.path }) });
+    return new Promise((done) => {
+      libraryWaiting.set(requestId, { key, done });
+      setTimeout(() => { if (libraryWaiting.delete(requestId)) done(null); }, 30_000);
+    });
+  }
+  function libraryNow(record) {
+    const key = libraryKey(record), known = libraryStates.get(key);
+    if (!key || !libraryPictureLive) return "";
+    if (!known) { libraryStates.set(key, "asked"); void askLibrary(record, false); return "can"; }
+    return known === "asked" ? "can" : known;
+  }
+  function paintLibrary(button, record) {
+    if (!button) return;
+    const now = libraryNow(record);
+    button.hidden = !now;
+    const words = now === "in" ? "In Library" : now === "saving" ? "Saving to Library…" : "Save to Library";
+    button.disabled = now === "in" || now === "saving";
+    button.setAttribute("aria-label", words); button.title = words;
+  }
+  function paintLibraries() {
+    for (const button of document.querySelectorAll(".made-image-lib")) paintLibrary(button, button._record);
+    if (imageViewer) paintLibrary(imageViewer.el.querySelector(".iv-library"), imageViewer.records[imageViewer.index]);
+  }
+  /** Save to Library beside a made picture's Save to project…: the Library's glyph; "In Library" (off) once it is there. */
+  function libraryButton(record) {
+    const button = el("button", "made-image-lib dgc-doc-lib");
+    button.type = "button"; button._record = record;
+    button.innerHTML = window.DgcIcons?.html("library") || "";
+    paintLibrary(button, record);
+    button.addEventListener("click", () => { if (!button.disabled) void keepPicture(record, button); });
+    return button;
+  }
+  async function keepPicture(record, from) {
+    const key = libraryKey(record);
+    if (!key || libraryStates.get(key) === "in" || libraryStates.get(key) === "saving") return;
+    libraryStates.set(key, "saving"); paintLibraries();
+    const answer = await askLibrary(record, true);
+    libraryStates.set(key, answer?.in_library ? "in" : "can"); paintLibraries();
+    if (answer?.in_library) window.DgcDownload?.said(from, "Saved to Library");
+    else if (answer) speak("That picture wasn't saved to the Library.");
+  }
+  function libraryAnswer(ev) {
+    const waiting = libraryWaiting.get(String(ev.request_id || ""));
+    if (!waiting) return;
+    libraryWaiting.delete(String(ev.request_id));
+    if (!ev.reason) libraryStates.set(waiting.key, ev.in_library === true ? "in" : "can");
+    else libraryStates.set(waiting.key, "can");
+    paintLibraries();
+    waiting.done(ev.reason ? { in_library: false, reason: ev.reason } : { in_library: ev.in_library === true, kept: ev.kept === true });
+  }
   function viewerButton(icon, label, title, cls) {
-    return `<button type="button" class="iv-btn ${cls}" aria-label="${label}" title="${title}"><span class="codicon codicon-${icon}" aria-hidden="true"></span></button>`;
+    // (Download is one glyph on every surface, the icon module's own drawing: media/shared/icons.js.)
+    const glyph = icon === "download" && window.DgcIcons ? window.DgcIcons.html("download") : `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`;
+    return `<button type="button" class="iv-btn ${cls}" aria-label="${label}" title="${title}">${glyph}</button>`;
   }
   function openImageViewer(record, opener) {
     if (imageViewer) closeImageViewer(false);
     const viewer = el("div");
     viewer.id = "image-viewer";
     viewer.setAttribute("role", "dialog"); viewer.setAttribute("aria-modal", "true"); viewer.setAttribute("aria-labelledby", "iv-title");
-    viewer.innerHTML = `<div class="iv-bar"><div class="iv-heading"><h2 id="iv-title"></h2><span id="iv-meta"></span></div><div class="iv-controls"><span class="iv-pos"></span>${viewerButton("chevron-left", "Previous image", "Previous image (←)", "iv-prev")}${viewerButton("chevron-right", "Next image", "Next image (→)", "iv-next")}<span class="iv-zoomer"><button type="button" class="iv-btn iv-out" aria-label="Zoom out" title="Zoom out (-)"><span class="codicon codicon-zoom-out" aria-hidden="true"></span></button><output class="iv-level" aria-live="off">100%</output><button type="button" class="iv-btn iv-in" aria-label="Zoom in" title="Zoom in (+)"><span class="codicon codicon-zoom-in" aria-hidden="true"></span></button></span>${viewerButton("screen-full", "Actual size", "Actual size (Z)", "iv-zoom")}${viewerButton("desktop-download", "Save image", "Save image", "iv-save")}${viewerButton("go-to-file", "Open file", "Open file", "iv-open")}${viewerButton("debug-stop", "Stop generation", "Stop generation", "iv-stop")}${viewerButton("close", "Close image preview", "Close (Esc)", "iv-close")}</div></div><div class="iv-notice" hidden><span class="iv-notice-text"></span><button type="button" class="act iv-show">Show</button></div><div class="iv-stage"></div>`;
+    viewer.innerHTML = `<div class="iv-bar"><div class="iv-heading"><h2 id="iv-title"></h2><span id="iv-meta"></span></div><div class="iv-controls"><span class="iv-pos"></span>${viewerButton("chevron-left", "Previous image", "Previous image (←)", "iv-prev")}${viewerButton("chevron-right", "Next image", "Next image (→)", "iv-next")}<span class="iv-zoomer"><button type="button" class="iv-btn iv-out" aria-label="Zoom out" title="Zoom out (-)"><span class="codicon codicon-zoom-out" aria-hidden="true"></span></button><output class="iv-level" aria-live="off">100%</output><button type="button" class="iv-btn iv-in" aria-label="Zoom in" title="Zoom in (+)"><span class="codicon codicon-zoom-in" aria-hidden="true"></span></button></span>${viewerButton("screen-full", "Actual size", "Actual size (Z)", "iv-zoom")}${viewerButton("download", "Download", "Download to this computer", "iv-save")}${viewerButton("library", "Save to Library", "Save to Library", "iv-library")}${viewerButton("go-to-file", "Open in editor", "Open in editor", "iv-open")}${viewerButton("debug-stop", "Stop generation", "Stop generation", "iv-stop")}${viewerButton("close", "Close image preview", "Close (Esc)", "iv-close")}</div></div><div class="iv-notice" hidden><span class="iv-notice-text"></span><button type="button" class="act iv-show">Show</button></div><div class="iv-stage"></div>`;
     const inert = [...document.body.children]
       .filter((node) => node !== viewer && node.id !== "announcer" && !node.classList.contains("tip"))
       .map((node) => ({ node, attr: node.hasAttribute("inert"), prop: node.inert }));
@@ -17944,12 +18024,17 @@ function permissionChoices(ev) {
     q(".iv-zoom").onclick = () => toggleViewerZoom();
     q(".iv-in").onclick = () => stepViewerZoom(1);
     q(".iv-out").onclick = () => stepViewerZoom(-1);
-    // A webview cannot write a file: the bytes go to the extension host, which owns the save
-    // dialog and the workspace. Nothing is written without the reader choosing where.
+    // Download: the picture this page shows, saved from the page itself on the person's own computer (the editor's
+    // computer, even when DGC runs on another: media/shared/download.js).
     q(".iv-save").onclick = () => {
       const record = imageViewer?.records[imageViewer.index];
       if (!record || record.state !== "ready" || !record.src) return;
-      vscode.postMessage({ type: "saveImage", name: record.name || "image.png", data: record.src });
+      downloadPicture(q(".iv-save"), record);
+    };
+    // Save to Library: kept in DGC's Library by you (dgc/image_keep.py); "In Library" once it is there.
+    q(".iv-library").onclick = () => {
+      const record = imageViewer?.records[imageViewer.index];
+      if (record) void keepPicture(record, q(".iv-library"));
     };
     q(".iv-close").onclick = () => closeImageViewer(true);
     // The viewer covers the composer, and with it Stop: while a turn runs, Stop is in the viewer too.
@@ -18120,6 +18205,7 @@ function permissionChoices(ev) {
     q("#iv-meta").textContent = [imageDims(record), imageSize(record.bytes), record.host || label].filter(Boolean).join(" · ");
     q(".iv-open").hidden = record.source === "prompt" || (!record.ref && !record.path);
     q(".iv-open").title = `Open ${record.name} in the editor`;
+    paintLibrary(q(".iv-library"), record);
     const stage = q(".iv-stage");
     stage.textContent = "";
     if (record.state === "ready" && record.src) {

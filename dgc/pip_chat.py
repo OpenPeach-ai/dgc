@@ -547,6 +547,45 @@ def get_image(store, pip_id, message_id, index, as_file=False):
     asks for the kept file instead and reads it itself. Either way it is checked against its digest."""
     if type(as_file) is not bool:
         raise RegistryError("invalid_request", "as_file is true or false.")
+    item, path = _message_image(store, pip_id, message_id, index)
+    if as_file:
+        read_image(path, item)
+        return {"pip_id": pip_id, "message_id": message_id, "index": index, "path": str(path),
+                "mime": item["mime"], "bytes": item["bytes"]}
+    return {"pip_id": pip_id, "message_id": message_id, "index": index, "image": read_image(path, item)}
+
+
+def library_image(store, pip_id, message_id, index, keep, actor):
+    """Pips API 108, Save to Library on a picture of a Pip's chat: whether it is in the Library already (a generated
+    picture is, from the start; one kept before is) and, with ``keep``, keeps it there through image_keep, kept by the
+    person with this Pip's chat as where it came from. Never twice; local only."""
+    from . import image_keep
+    if actor not in ("editor-user", "local-console"):
+        raise RegistryError("local_only", "Save to Library from a Pip's chat on the computer DGC runs on.")
+    if type(index) is not int or not isinstance(message_id, str):
+        raise RegistryError("invalid_request", "Choose one picture of the message.")
+    if type(keep) is not bool:
+        raise RegistryError("invalid_request", "keep is true or false.")
+    item, path = _message_image(store, pip_id, message_id, index)
+    raw = Path(path).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != item["sha256"]:
+        raise RegistryError("invalid_images", "That kept picture changed on disk, so it isn't saved.")
+    answer = {"pip_id": pip_id, "message_id": message_id, "index": index}
+    there = image_keep.held(raw)
+    if there is not None or not keep:
+        title = str((there or {}).get("title") or (there or {}).get("prompt") or "")[:200]
+        return {**answer, "in_library": there is not None, "kept": False, "title": title}
+    pip = store.get(pip_id)
+    try:
+        kept = image_keep.keep(raw, title=f"{pip.get('name') or 'Pip'}: picture {index + 1}", why="", source="pip chat",
+                               surface="pip", where={"pip": pip_id, "message": message_id}, by="you")
+    except image_keep.KeepError as exc:
+        raise RegistryError("invalid_images", f"Not saved: {exc}") from exc
+    return {**answer, "in_library": True, "kept": not kept.get("already"), "title": kept["title"]}
+
+
+def _message_image(store, pip_id, message_id, index):
+    """One picture of a message in this Pip's chat: its record and where it is kept (still there, at its size)."""
     row = store.db.execute("SELECT i.sha256,i.mime,i.bytes FROM pip_chat_images i JOIN pip_chat_messages m ON m.id=i.message_id "
                            "WHERE m.pip_id=? AND m.id=? AND i.idx=?", (pip_id, message_id, index)).fetchone()
     if row is None and type(index) is int and isinstance(message_id, str) and store.db.execute(
@@ -560,11 +599,7 @@ def get_image(store, pip_id, message_id, index, as_file=False):
         raise RegistryError("not_found", "That image is not in this Pip's chat.")
     item = {"sha256": row[0], "mime": row[1], "bytes": row[2]}
     [path] = image_paths(store.registry.directory, pip_id, [item])
-    if as_file:
-        read_image(path, item)
-        return {"pip_id": pip_id, "message_id": message_id, "index": index, "path": str(path),
-                "mime": item["mime"], "bytes": item["bytes"]}
-    return {"pip_id": pip_id, "message_id": message_id, "index": index, "image": read_image(path, item)}
+    return item, path
 
 
 # His live test (15 Nov): minutes of silence on a long job, and a message sent while it worked made it drop the first

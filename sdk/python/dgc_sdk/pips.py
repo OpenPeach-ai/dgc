@@ -525,6 +525,11 @@ API107_FIELDS = {'open_your_browser': frozenset({'editor_bounds'}),
                  'use_your_browser_view': frozenset({'own', 'seq', 'events', 'tab', 'width', 'height'})}
 READ_COMMANDS |= API107_READS
 MUTATION_COMMANDS |= API107_MUTATIONS
+# API 108: Save to Library on a picture in a Pip's chat. library_pip_message_image {pip_id, message_id, index, keep?}
+# answers {in_library, kept, title}: whether it is in the Library already and, with keep, kept there by you, never twice.
+# Local only.
+API108_MUTATIONS = frozenset({'library_pip_message_image'})
+MUTATION_COMMANDS |= API108_MUTATIONS
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -816,6 +821,7 @@ COMMAND_FIELDS = {
     'answer_pip_questions': frozenset({'pip_id', 'message_id', 'idempotency_key', 'answers', 'dismissed', 'chat_options'}),
     'get_pip_message_image': frozenset(['as_file', 'index', 'message_id', 'pip_id']),
     'get_pip_message_file': frozenset(['index', 'message_id', 'pip_id']),
+    'library_pip_message_image': frozenset(['index', 'keep', 'message_id', 'pip_id']),
     'introduce_pip': frozenset(['pip_id']),
     'stop_pips': frozenset([]),
 }
@@ -1022,7 +1028,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API107_READS | API107_MUTATIONS:
+        if command in API108_MUTATIONS:
+            minimum = 108
+        elif command in API107_READS | API107_MUTATIONS:
             minimum = 107
         elif command in API106_MUTATIONS:
             minimum = 106

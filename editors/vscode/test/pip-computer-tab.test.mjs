@@ -240,8 +240,12 @@ test('Files shows the computer\'s own folder: open folders, preview, save, remov
  x.click('[data-crumb="0"]');await x.drain();
  x.click('[data-file="notes.txt"]');await x.drain();
  assert.equal(x.d.querySelector('.pc-text').textContent,'buy milk\n');
+ // Download (18 Nov): saved by this page on the person's own computer, from the bytes it read (media/shared/download.js).
+ let saved=null;x.w.URL.createObjectURL=b=>{saved={blob:b};return 'blob:notes';};x.w.URL.revokeObjectURL=()=>{};
+ x.w.HTMLAnchorElement.prototype.click=function(){saved.name=this.download;};
  x.click('#pc-save');
- assert.deepEqual(x.sent.filter(m=>m.type==='pipComputerSave').map(m=>[m.name,m.text]),[['notes.txt','buy milk\n']],'the host saves it where you choose');
+ assert.equal(saved?.name,'notes.txt','downloaded from the page');
+ assert.equal(x.sent.filter(m=>m.type==='pipComputerSave').length,0,'nothing asked of the host');
  x.click('#pc-remove');await x.drain();
  assert.equal(x.requests('remove_pip_computer_file')[0].request.path,'notes.txt');
  const file=new x.w.File(['hey'],'hi.txt',{type:'text/plain'}),input=x.d.querySelector('#pc-add-input');
@@ -323,12 +327,13 @@ test('a computer tab asks only about its own Pip\'s computer, and its replies co
  h.editor.receive({type:'pipsOpenComputer',pip:PIP});assert.equal(h.panels.length,2,'closed, it opens afresh');
 });
 
-test('Save to… writes the file where you choose, from the host',async()=>{
+test('a page that still sends its bytes to the host gets them back as a download, never a save dialog',async()=>{
  const h=host();h.editor.receive({type:'pipsOpenComputer',pip:PIP});const tab=h.panels[0];
  tab.receive({type:'pipComputerSave',name:'notes.txt',text:'buy milk\n'});
- for(let i=0;i<20&&!h.saved.length;i++)await new Promise(r=>setTimeout(r,1));
- assert.deepEqual(h.saved,[['/home/me/notes.txt','buy milk\n']]);
- await new Promise(r=>setTimeout(r,1));
+ for(let i=0;i<20&&!tab.posted.some(m=>m.type==='pipComputerSaved');i++)await new Promise(r=>setTimeout(r,1));
+ const handed=tab.posted.find(m=>m.type==='dgcDownload');
+ assert.deepEqual([handed?.name,String(Buffer.from(handed.data))],['notes.txt','buy milk\n']);
+ assert.deepEqual(h.saved,[],'nothing written on the machine DGC runs on');
  assert.equal(tab.posted.at(-1).type,'pipComputerSaved');assert.equal(tab.posted.at(-1).ok,true);
 });
 

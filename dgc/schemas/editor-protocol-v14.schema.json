@@ -1197,6 +1197,55 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "library_picture"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "in_library": {
+              "type": "boolean"
+            },
+            "kept": {
+              "type": "boolean"
+            },
+            "title": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "invalid_ref",
+                "not_found",
+                "outside",
+                "not_image",
+                "too_large",
+                "unreadable"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "in_library",
+            "kept"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "tool_denied"
             },
             "seq": {
@@ -8158,6 +8207,44 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "chatdgc_library_picture"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "in_library": {
+              "type": "boolean"
+            },
+            "kept": {
+              "type": "boolean"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "in_library",
+            "kept"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chatdgc_project"
             },
             "seq": {
@@ -13665,6 +13752,39 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "library_picture"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "keep": {
+              "type": "boolean"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "agent_control"
             },
             "chat_id": {
@@ -15751,6 +15871,38 @@
             "type",
             "request_id",
             "op",
+            "attachment_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chatdgc_library_picture"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "attachment_id": {
+              "type": "string"
+            },
+            "keep": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "conversation_id",
             "attachment_id"
           ],
           "additionalProperties": false

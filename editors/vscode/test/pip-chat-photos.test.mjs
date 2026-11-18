@@ -206,25 +206,35 @@ test('opening a photo shows the original in an editor tab, under a name a person
  assert.ok(existsSync(target.fsPath));
 });
 
-// pips-08: Download on a made file's row saves the original where the person chooses, under a name they can read.
-test('Download on a file a Pip made asks where to save it and writes the original there', async()=>{
+// pips-08, and his ask of 18 Nov: Download on a picture's row (or in its pop-up) saves the original on the computer the
+// editor runs on, under a name a person can read: its bytes go to the page, which saves them (media/shared/download.js).
+// Never VS Code's save dialog, which over a remote connection browses the remote machine.
+test('Download on a picture a Pip made hands the original to the page, which saves it on this computer; no save dialog', async()=>{
  const opened=[],info=[],asked=[],written=[];let choice;
  const vscode={commands:{executeCommand:async(...a)=>{opened.push(a);}},Uri:{file:p=>({fsPath:p,path:p}),joinPath:(base,name)=>({fsPath:join(base.fsPath,name),path:join(base.fsPath,name)})},
   workspace:{workspaceFolders:undefined,fs:{writeFile:async(target,data)=>{written.push([target.fsPath,Buffer.from(data)]);}}},
-  window:{showInformationMessage:m=>{info.push(m);},showSaveDialog:async o=>{asked.push(o);return choice;}}};
+  window:{showInformationMessage:m=>{info.push(m);},showWarningMessage:m=>{info.push(m);},showSaveDialog:async o=>{asked.push(o);return choice;}}};
  const h=host(84,{vscode}),state=mkdtempSync(join(tmpdir(),'dgc-pips-')),folder=join(state,'chat_images',bills.id);mkdirSync(folder,{recursive:true});
  const original=Buffer.concat([Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]),Buffer.alloc(4096,7)]),kept=join(folder,'c'.repeat(64)+'.png');writeFileSync(kept,original);
  const download=async()=>{const before=h.sent.length;h.editor.receive({type:'pipsOpenPhoto',pip_id:bills.id,message_id:'message_7',index:1,save:true});await settle(()=>h.sent.length>before);
   const request=h.sent.at(-1).request;assert.equal(request.as_file,true);
   h.editor.event({type:'pips_result',request_id:request.request_id,command:'get_pip_message_image',ok:true,result:{pip_id:bills.id,message_id:'message_7',index:1,path:kept,mime:'image/png',bytes:original.length}});};
  choice={fsPath:join(state,'cover.png'),path:join(state,'cover.png')};
- await download();await settle(()=>written.length);
- assert.equal(asked.length,1);assert.match(asked[0].defaultUri.fsPath,/Picture 2\.png$/);assert.equal(asked[0].saveLabel,'Download');
- assert.equal(written[0][0],join(state,'cover.png'));assert.deepEqual(written[0][1],original);
- assert.deepEqual(info,['Saved cover.png.']);assert.deepEqual(opened,[],'nothing opens in a tab');
- // Cancel in the dialog saves nothing and says nothing.
- choice=undefined;await download();await settle(()=>asked.length===2);await new Promise(r=>setTimeout(r,20));
- assert.equal(written.length,1);assert.equal(info.length,1);
+ await download();await settle(()=>h.posted.some(m=>m.type==='dgcDownload'));
+ const handed=h.posted.find(m=>m.type==='dgcDownload');
+ assert.equal(handed.name,'Picture 2.png');assert.equal(handed.mime,'image/png');
+ assert.ok(handed.data instanceof Uint8Array,'bytes, not a path');assert.deepEqual(Buffer.from(handed.data),original);
+ assert.deepEqual(asked,[],'no save dialog: it would browse the machine DGC runs on');assert.deepEqual(written,[]);
+ assert.deepEqual(info,[]);assert.deepEqual(opened,[],'nothing opens in a tab');
+ // Its pop-up asks for the original to show: the page is handed it, nothing else happens.
+ const before=h.sent.length;
+ h.editor.receive({type:'pipsOpenPhoto',pip_id:bills.id,message_id:'message_7',index:1,view:true,requestId:'pipphoto-1'});await settle(()=>h.sent.length>before);
+ const asking=h.sent.at(-1).request;
+ h.editor.event({type:'pips_result',request_id:asking.request_id,command:'get_pip_message_image',ok:true,result:{pip_id:bills.id,message_id:'message_7',index:1,path:kept,mime:'image/png',bytes:original.length}});
+ await settle(()=>h.posted.some(m=>m.type==='pipsPhotoData'));
+ const shown=h.posted.find(m=>m.type==='pipsPhotoData');
+ assert.equal(shown.requestId,'pipphoto-1');assert.equal(shown.data,`data:image/png;base64,${original.toString('base64')}`);
+ assert.deepEqual(opened,[]);assert.deepEqual(asked,[]);
 });
 
 // Limits for everyone (10 Nov), from Pips API 79: 20 MB a photo, 50 files, 100 MB a document, 200 MB a message. A runtime

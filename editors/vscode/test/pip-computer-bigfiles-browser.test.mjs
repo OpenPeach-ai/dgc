@@ -1,6 +1,6 @@
 // Big files in a Pip computer's Files (pc-background-commands, Pips API 87), laid out in real Chromium with the real client
 // and its CSS (test/support/pip-computer-files-scene.mjs), dark and light, at a 700 px tab and a 300 px one:
-// Add file…, a copy running (the names with "copying"), a file's Save to this computer…, and DGC's over-the-limit words.
+// Add file…, a copy running (the names with "copying"), a file's Download, and DGC's over-the-limit words.
 // Nothing is clipped, nothing overlaps, nothing leaves the window, and the buttons are the shared quiet ones (no purple).
 // What the page and the host say to each other is in pip-computer-bigfiles.test.mjs.
 import { after, before, test } from "node:test";
@@ -41,7 +41,7 @@ const apart = (a, b, name) => assert.ok(!(a.left < b.right - 0.5 && b.left < a.r
 const quiet = (b, name) => { assert.ok(b.shared, `${name} is the shared button`); assert.ok(!PURPLE.test(b.ground) && !PURPLE.test(b.ink), `${name} is not purple: ${b.ground} ${b.ink}`); };
 
 for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
-  test(`Files at ${width}px, ${theme}: Add file…, a copy running, Save to this computer… and the over-the-limit words all fit`, async (t) => {
+  test(`Files at ${width}px, ${theme}: Add file…, a copy running, Download and the over-the-limit words all fit`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openFiles(browser, { theme, width });
     try {
@@ -76,14 +76,14 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       apart(m.error, m.add, "the words and Add file…"); apart(m.error, m.list, "the words and the list");
       assert.equal(m.add.text, "Add file…"); assert.equal(m.copying.length, 0);
       assert.ok(!m.paneScrollsSideways && !m.pageScrollsSideways, "nothing scrolls sideways");
-      // A big file's Save to this computer…
+      // A big file's Download
       await x.p.click('[data-file="dataset.bin"]');
       await x.p.waitForSelector("#pc-save-as");
       m = await measure(x.p);
-      assert.equal(m.save.text, "Save to this computer…"); quiet(m.save, "Save to this computer…"); quiet(m.remove, "Remove");
+      assert.equal(m.save.text, "Download"); quiet(m.save, "Download"); quiet(m.remove, "Remove");
       assert.ok(!m.save.clipped && !m.remove.clipped && !m.save.disabled, "both show all their words, and a 700 MB file can be saved");
       assert.equal(m.bytes.text, "700.0 MB");
-      for (const [name, b] of [["Save to this computer…", m.save], ["Remove", m.remove], ["the file's name", m.title], ["its size", m.bytes]]) within(b, m.pane, `${name} is inside Files`);
+      for (const [name, b] of [["Download", m.save], ["Remove", m.remove], ["the file's name", m.title], ["its size", m.bytes]]) within(b, m.pane, `${name} is inside Files`);
       apart(m.save, m.remove, "Save and Remove"); apart(m.save, m.title, "Save and the name"); apart(m.remove, m.title, "Remove and the name");
       apart(m.save, m.bytes, "Save and the size"); apart(m.title, m.bytes, "the name and the size");
       assert.ok(Math.abs(m.save.height - m.remove.height) < 0.5, "Save and Remove are the same height");
@@ -91,7 +91,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       await x.p.click("#pc-save-as");
       assert.deepEqual(await x.posted("pipComputerSaveAs"), [{ type: "pipComputerSaveAs", path: "dataset.bin" }]);
       m = await measure(x.p);
-      assert.equal(m.save.text, "Saving…"); assert.ok(m.save.disabled && !m.save.clipped);
+      assert.equal(m.save.text, "Downloading…"); assert.ok(m.save.disabled && !m.save.clipped);
       await x.say({ type: "pipComputerSavedAs", ok: true, name: "dataset.bin" });
       await x.p.waitForFunction(() => document.querySelector(".pc-notice")?.textContent === "Saved to dataset.bin.");
       assert.deepEqual(x.errors, []);
@@ -99,7 +99,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
   });
 }
 
-test("before API 87 the Files panel is as it was: Add files… and Save to…", async (t) => {
+test("before API 87 the Files panel is as it was: Add files… and Download", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openFiles(browser, { api: 86 });
   try {
@@ -107,7 +107,7 @@ test("before API 87 the Files panel is as it was: Add files… and Save to…", 
     assert.equal(await x.p.$("#pc-add"), null);
     await x.p.click('[data-file="notes.txt"]');
     await x.p.waitForSelector("#pc-save");
-    assert.equal(await x.p.textContent("#pc-save"), "Save to…");
+    assert.equal(await x.p.textContent("#pc-save"), "Download");
     assert.equal(await x.p.$("#pc-save-as"), null);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }

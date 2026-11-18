@@ -169,13 +169,16 @@ test("with words already in the box the thumb adds its answer to them, as a tap 
   } finally { await s.close(); }
 });
 
-test("a click on your picture opens the original, and Download on a made file asks the host to save it", async (t) => {
+test("a click on your picture opens the original in the chat's pop-up, and Download on a made file asks the host for it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await open();
   try {
     await s.p.evaluate(() => { (window.__pipsRoot || document).querySelector(".conversation-log").scrollTop = 0; });
     await s.p.click(`${message("u1")} .msg-image`);
-    assert.deepEqual((await posted(s.p, "pipsOpenPhoto")).map(({ message_id, index, save }) => ({ message_id, index, save })), [{ message_id: "u1", index: 0, save: undefined }]);
+    // (18 Nov: large in a pop-up inside the chat, its original asked of the host to show; Open in editor is in the pop-up.)
+    assert.equal(await s.p.locator(".dgc-picpop").count(), 1);
+    assert.deepEqual((await posted(s.p, "pipsOpenPhoto")).map(({ message_id, index, save, view }) => ({ message_id, index, save, view })), [{ message_id: "u1", index: 0, save: undefined, view: true }]);
+    await s.p.keyboard.press("Escape");
     await s.p.click(`${message("a1")} .msg-made-file .dgc-doc-dl`);
     assert.deepEqual((await posted(s.p, "pipsOpenPhoto")).slice(1).map(({ message_id, index, save }) => ({ message_id, index, save })), [{ message_id: "a1", index: 0, save: true }]);
     await s.p.keyboard.press("Shift");   // the keyboard is in use: focus shows

@@ -30,6 +30,9 @@ REASONING_SOURCES = ("raw", "summarized", "narration", "withheld", "unknown")
 REASONING_PROVIDERS = ("anthropic", "openai")
 # v14: why get_image answered with no bytes.
 IMAGE_UNAVAILABLE_REASONS = ("invalid_ref", "not_found", "changed", "too_large", "unreadable", "busy")
+# Why library_picture (Save to Library) couldn't answer for a picture: no such picture here, outside the project, not
+# a picture DGC keeps (PNG, JPEG, WebP or GIF), larger than 15 MB, or unreadable.
+LIBRARY_PICTURE_REASONS = ("invalid_ref", "not_found", "outside", "not_image", "too_large", "unreadable")
 # v14: why a user's message did not reach a background sub-agent. CLOSED here and total at the
 # emitter: Emitter.emit RAISES on a validator failure (dgc/protocol.py:41), from the thread that
 # reads stdin, so an undeclared reason does not degrade one frame -- it throws inside the command
@@ -192,6 +195,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(), "ref": _S(), "image": _S(), "mime": _S(False),
         "width": _I(False), "height": _I(False), "path": _S(False),
         "reason": _f("string", required=False, enum=IMAGE_UNAVAILABLE_REASONS),
+    },
+    # The answer to library_picture, exactly one per request: whether the picture is in the Library now, whether this
+    # request kept it, its title there, or ``reason`` when the picture couldn't be read or isn't a picture to keep.
+    "library_picture": {
+        "request_id": _S(), "in_library": _B(), "kept": _B(), "title": _S(False),
+        "reason": _f("string", required=False, enum=LIBRARY_PICTURE_REASONS),
     },
     "tool_denied": {
         "call_id": _NS(False), "name": _S(), "args": _O(), "reason": _S(),
@@ -1037,6 +1046,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # exactly one `image` event carrying this request_id (``ref`` is "img_" + 32 hex).
     "list_agents": {"request_id": _S(False)},
     "get_image": {"request_id": _S(), "ref": _S()},
+    # Save to Library on a picture in the chat (18 Nov; ready.capabilities.library_picture): one of the session's
+    # pictures by its ``ref`` ("img_" + 32 hex), or a picture in the project by its ``path``. Without ``keep`` it only
+    # asks whether the picture is in the Library already (a picture DGC made is; one kept before is, by its bytes); with
+    # it, keeps it there, kept by you (dgc/image_keep.py), never twice. Answered by one `library_picture` event.
+    "library_picture": {"request_id": _S(), "ref": _S(False), "path": _S(False), "keep": _B(False), "title": _S(False)},
     # Steer or stop ONE background sub-agent, for the USER. `id` is the child's `sub-<12 hex>`, as
     # `agent_started.id` and `agents.items[].id` carry it. With capabilities.agent_control_foreground,
     # "close" also stops one FOREGROUND sub-agent at any depth without ending the turn.
@@ -1647,6 +1661,11 @@ COMMAND_FIELDS.update({
     "chatdgc_library_file": {"request_id": _S(), "op": _f("string", enum=("save", "remove", "to_project")),
                              "conversation_id": _S(False), "project_id": _S(False), "attachment_id": _S(),
                              "path": _S(False), "target_project": _S(False)},
+    # Save to Library on a chat's picture (18 Nov; capabilities.chatdgc.library_picture): one you attached or one a
+    # reply made, by its attachment id. Without `keep`, whether it is in the Library already (a picture DGC made is; one
+    # kept before is, by its bytes); with it, kept there by you with this chat (dgc/image_keep.py), never twice.
+    # Answered by `chatdgc_library_picture`.
+    "chatdgc_library_picture": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S(), "keep": _B(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "before": _S()},
     # Every prompt of a chat as shown, however much of it the screen has paged in: the prompt rail and the chat's
     # Widgets list read it (offered as ready.capabilities.chatdgc.outline). Answered by `chatdgc_outline`.
@@ -1788,6 +1807,7 @@ EVENT_FIELDS.update({
     # `followups` too. Only the chat's last reply has any worth showing.
     "chatdgc_followups": {"conversation_id": _S(), "message_id": _S(), "followups": _A()},
     "chatdgc_library_file": {"request_id": _S(), "op": _S(), "path": _S(False), "bytes": _I(False)},
+    "chatdgc_library_picture": {"request_id": _S(), "in_library": _B(), "kept": _B(), "title": _S(False)},
     "chatdgc_project": {"request_id": _S(), "project": _f("object", "null"), "deleted": _A(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "messages": _A(), "earlier": _I()},
     # The answer to chatdgc_outline: `prompts`, oldest first, each {id, text (its first words, or what it attached),

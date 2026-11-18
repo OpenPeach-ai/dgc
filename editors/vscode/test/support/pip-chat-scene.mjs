@@ -486,6 +486,12 @@ export const host = (opts) => `(${function (PIP, opts) {
       return c.toDataURL("image/png"); };
     const sendBase = answers.send_pip_message;
     window.__brought = [];
+    window.__picture = picture;
+    // (opts.library {held: ["a1:0"]}: Save to Library, Pips API 106: the pictures in the Library already, by key; a keep
+    // puts one there. Each ask is in window.__sent as any request is.)
+    const held = new Set(opts.library?.held || []);
+    if (opts.library) answers.library_pip_message_image = (r) => { const key = `${r.message_id}:${r.index}`, had = held.has(key);
+      if (r.keep === true) held.add(key); return { pip_id: PIP, message_id: r.message_id, index: r.index, in_library: held.has(key), kept: r.keep === true && !had, title: "" }; };
     Object.assign(answers, {
       get_pip_message_image: (r) => ({ pip_id: PIP, message_id: r.message_id, index: r.index, image: picture(`${r.message_id}:${r.index}`) }),
       send_pip_message: (r) => {
@@ -787,6 +793,8 @@ export const host = (opts) => `(${function (PIP, opts) {
       const asked = opts.logos && (m?.type === "pipsPluginLogos" ? m.plugins : m?.type === "pipsAppLogos" ? m.apps : null);
       if (asked) { const known = opts.logos[m.type === "pipsPluginLogos" ? "plugins" : "apps"] || {};
         setTimeout(() => window.postMessage({ type: m.type, logos: Object.fromEntries(asked.map((id) => [id, known[id] || ""])) }, "*"), opts.logosAfter || 1); }
+      // A picture's original for its pop-up (opts.details): answered as the host does (pipsPhotoData).
+      if (m?.type === "pipsOpenPhoto" && m.view === true && window.__picture) setTimeout(() => window.postMessage({ type: "pipsPhotoData", requestId: m.requestId, data: window.__picture(`${m.message_id}:${m.index}`) }, "*"), 1);
       // A sent file's bytes for its player (opts.sent): answered as the host does, the bytes or why not.
       if (m?.type === "pipsFileData") { const b64 = opts.sentMedia?.[m.index], file = messages.find((v) => v.id === m.message_id)?.files?.find((f) => f.index === m.index);
         const bytes = b64 ? Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)) : null;

@@ -7,11 +7,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Notes, NotesEnv } from "./notes";
+import { downloadBytes, zipFiles } from "./download";
 
 export const NOTE_TAB = "dgc.noteTab";
 const ID = /^[a-z0-9]{4,24}$/;
 const attr = (value: string) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
-const STYLES = ["shared/tokens.css", "shared/menu.css", "shared/homecards.css", "shared/notes.css", "shared/tip.css"], SCRIPTS = ["shared/menu.js", "shared/tip.js", "shared/notes.js", "shared/notestab.js"];
+const STYLES = ["shared/tokens.css", "shared/menu.css", "shared/homecards.css", "shared/notes.css", "shared/tip.css"], SCRIPTS = ["shared/menu.js", "shared/tip.js", "shared/download.js", "shared/notes.js", "shared/notestab.js"];
 /** The tab's document for one note. `uri(name)`: where a file under media/ is served from. */
 export function noteTabDocument(uri: (name: string) => string, cspSource: string, noteId: string): string {
   const id = ID.test(noteId) ? noteId : "";
@@ -76,23 +77,14 @@ export function notesEnv(tabs: NoteTabs): NotesEnv {
     openExternal: (url) => { void vscode.env.openExternal(vscode.Uri.parse(url, true)); },
     weakKeychain,
     clipboard: async (text) => { await vscode.env.clipboard.writeText(text); },
-    saveFile: async ({ name, text, locked }) => {
-      const to = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(os.homedir(), name)), filters: { Markdown: ["md"] }, saveLabel: "Export",
-        title: locked ? "Export note as Markdown. This file will not be locked." : "Export note as Markdown" });
-      if (!to) return false;
-      await vscode.workspace.fs.writeFile(to, bytes(text));
-      return true;
-    },
-    saveFolder: async ({ name, files, locked }) => {
-      const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: "Export here",
-        title: `Export ${files.length === 1 ? "1 note" : `${files.length} notes`} as a folder of Markdown files${locked ? ". These files will not be locked." : ""}` });
-      if (!picked?.[0]) return undefined;
-      // A folder of its own, never over one that is there: "Trips", then "Trips 2".
-      let made = name, dir = vscode.Uri.joinPath(picked[0], made);
-      for (let k = 2; k < 200; k++) { try { await vscode.workspace.fs.stat(dir); made = `${name} ${k}`; dir = vscode.Uri.joinPath(picked[0], made); } catch { break; } }
-      await vscode.workspace.fs.createDirectory(dir);
-      for (const file of files) await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(dir, file.name), bytes(file.text));
-      return made;
+    // Export: a download to the person's own computer from the page that asked (src/download.ts), never a dialog here,
+    // which over a remote connection would browse the remote machine. A folder of notes is one .zip of their files.
+    saveFile: async ({ name, text }, reply) => downloadBytes(reply ? (m) => { reply(m); return true; } : undefined, name, bytes(text), "text/markdown"),
+    saveFolder: async ({ name, files }, reply) => {
+      const zip = `${name}.zip`;
+      const sent = await downloadBytes(reply ? (m) => { reply(m); return true; } : undefined, zip,
+                                       zipFiles(files.map((f) => ({ name: f.name, bytes: bytes(f.text) }))), "application/zip");
+      return sent ? zip : undefined;
     },
     openTab: (id) => tabs.open(id),
   };

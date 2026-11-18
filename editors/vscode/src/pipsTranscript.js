@@ -154,7 +154,9 @@ export function yesChoice(choices){
 const fileBytes=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
 const PICTURE_ENDING={'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/webp':'webp','image/bmp':'bmp'};
 // `menu`: the file's menu is offered (media/shared/filemenu.js: a "…" on the card, a right-click, the keyboard).
-export function madeFilesMarkup(m,menu=false){
+// `library`: Save to Library is offered (Pips API 108): what the picture is there, by its key ("in", "saving" or "can"),
+// as an icon button beside Download: "In Library" (off) once it is there, so nothing is kept twice.
+export function madeFilesMarkup(m,menu=false,library=null){
   const fileMenu=menu?globalThis.DgcFileMenu:null;
   const sheets=globalThis.DgcFileSheet,made=Array.isArray(m.images)?m.images.slice(0,64).filter(i=>i&&Number.isInteger(i.index)&&i.index>=0&&PICTURE_ENDING[i.mime]):[];
   if(!sheets||!made.length)return '';
@@ -162,8 +164,14 @@ export function madeFilesMarkup(m,menu=false){
     const ending=PICTURE_ENDING[i.mime],name=`Picture ${i.index+1}.${ending}`,kind=sheets.of(ending,name),size=Number.isFinite(i.bytes)&&i.bytes>0?fileBytes(i.bytes):'';
     return `<div class="dgc-doc-card msg-made-file" data-tone="img"${fileMenu?fileMenu.cardAttrs(name,'pip')+` data-file-key="photo:${esc(`${m.id}:${i.index}`)}"`:''}><span class="dgc-doc-tile has-sheet" aria-hidden="true">${sheets.forFile(ending,name)}</span>`
       +`<span class="dgc-doc-words"><span class="dgc-doc-name">${esc(name)}</span><span class="dgc-doc-meta">${esc(kind.tag)}${size?` \u00b7 ${esc(size)}`:''}</span></span>`
-      +`<span class="dgc-doc-acts"><button type="button" class="dgc-doc-dl" data-message-download="${esc(`${m.id}:${i.index}`)}" aria-label="Download ${esc(name)}" title="Download">${sheets.DOWNLOAD}</button>${fileMenu?fileMenu.moreHtml(name):''}</span></div>`;
+      +`<span class="dgc-doc-acts"><button type="button" class="dgc-doc-dl" data-message-download="${esc(`${m.id}:${i.index}`)}" aria-label="Download ${esc(name)}" title="Download">${sheets.DOWNLOAD}</button>${library?libraryHtml(`${m.id}:${i.index}`,library):''}${fileMenu?fileMenu.moreHtml(name):''}</span></div>`;
   }).join('')}</div>`;
+}
+
+/** Save to Library on a picture's row (Pips API 108): the Library's glyph; off, saying "In Library", once it is there. */
+function libraryHtml(key,library){
+  const now=library(key),words=now==='in'?'In Library':now==='saving'?'Saving to Library\u2026':'Save to Library';
+  return `<button type="button" class="dgc-doc-lib" data-message-library="${esc(key)}" aria-label="${words}" title="${words}"${now==='in'||now==='saving'?' disabled':''}>${globalThis.DgcIcons?.html('library')||''}</button>`;
 }
 
 // A file in a message (Pips API 101): what a Pip sent from its computer with its reply (send_to_chat), like a person
@@ -219,11 +227,11 @@ export function madeArtifactsMarkup(m){
 // it is being written, the finished reply's own markup without the row it ends with.
 // `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
 // key}, a long one's start and its Show all.
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,quote='',canReply=false,canDownload=false,canOpenFiles=false,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map(),inline=null,live=false}) {
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null,quote='',canReply=false,canDownload=false,canOpenFiles=false,undo=false,openChanges=new Set(),undoing='',undoErrors=new Map(),inline=null,live=false,library=null}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   // Every photo the message brought (no four-photo cap from Pips API 52); a click opens the original.
   // A Pip's reply shows the images it made (generate_image) the same way, below its words.
-  const pictures=Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,64).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" data-pic-open alt="Image ${Number(i.index)+1}" title="Open the photo"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
+  const pictures=Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,64).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" data-pic-open alt="Image ${Number(i.index)+1}" title="Open the picture"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
   const size=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
   const fileMenu=canOpenFiles?globalThis.DgcFileMenu:null;
   // Your own files (API 101: each opens, and saves a copy, as a file the Pip sent does; the chip is its Open).
@@ -240,7 +248,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
     // A reply's pictures and videos fold away under one header row each, as in Work and ChatDGC (media/pictureFold.js).
     +(!user&&pictures?foldPictures(`pip:${m.id}:images`,pictures,{pictures:Math.min(64,m.images.length)}):'')
     // Each picture it made is a file too: a row with its kind, its size and Download (pips-08).
-    +(!user&&pictures&&canDownload?madeFilesMarkup(m,canOpenFiles):'')
+    +(!user&&pictures&&canDownload?madeFilesMarkup(m,canOpenFiles,library):'')
     // The files it sent from its computer (API 101): a player for a video or a sound, and each file's card.
     +(!user&&canOpenFiles?sentFilesMarkup(m,name):'')
     // API 71: the videos it started (generate_video), each its job's figure (media/videoPlayer.js), filled in by the

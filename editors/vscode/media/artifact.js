@@ -109,8 +109,10 @@
     if (!view) return [];
     return view.exports?.length ? view.exports : state.offer?.exports?.[view.type] || [];
   }
-  function exportItems(version) {
-    return formats().map((f) => [FORMATS[f] || f.toUpperCase(), () => vscode.postMessage({ type: "export", format: f, ...(version ? { version } : {}) })]);
+  // Download: the host makes the file and hands it to this page, which saves it on the person's computer
+  // (media/shared/download.js), "Downloaded" beside the button it was asked from.
+  function exportItems(version, from = $("art-export")) {
+    return formats().map((f) => [FORMATS[f] || f.toUpperCase(), () => { window.DgcDownload?.ask(from); vscode.postMessage({ type: "export", format: f, ...(version ? { version } : {}) }); }]);
   }
 
   // ---- the header
@@ -187,7 +189,7 @@
         button.append(el("span", "", "Download"), icon("chevron-down", "art-caret"));
         button.setAttribute("aria-label", `Download version ${v.n}`);
         const menu = el("div", "art-menu dgc-popover"); menu.setAttribute("role", "menu"); menu.hidden = true;
-        button.addEventListener("click", (e) => { e.stopPropagation(); showMenu(button, menu, exportItems(v.n === view.version ? 0 : v.n)); });
+        button.addEventListener("click", (e) => { e.stopPropagation(); showMenu(button, menu, exportItems(v.n === view.version ? 0 : v.n, button)); });
         wrap.append(button, menu);
         actions.append(wrap);
       }

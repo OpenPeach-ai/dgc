@@ -31,7 +31,7 @@ test("the tab's document: scripts and styles from the extension only, no inline 
   assert.match(html, /<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src vscode-resource:\/\/ext; script-src vscode-resource:\/\/ext;">/);
   assert.equal(/<script(?![^>]*\ssrc=)[^>]*>/.test(html), false, "no inline script"); assert.equal(/\son[a-z]+=|style="/.test(html), false, "no inline handlers or styles");
   assert.match(html, /<body[^>]* data-note="ferry1"/);
-  assert.deepEqual([...html.matchAll(/(?:src|href)="vscode-resource:\/\/ext\/media\/([^"]+)"/g)].map((m) => m[1]), ["shared/tokens.css", "shared/menu.css", "shared/homecards.css", "shared/notes.css", "shared/tip.css", "shared/menu.js", "shared/tip.js", "shared/notes.js", "shared/notestab.js"]);
+  assert.deepEqual([...html.matchAll(/(?:src|href)="vscode-resource:\/\/ext\/media\/([^"]+)"/g)].map((m) => m[1]), ["shared/tokens.css", "shared/menu.css", "shared/homecards.css", "shared/notes.css", "shared/tip.css", "shared/menu.js", "shared/tip.js", "shared/download.js", "shared/notes.js", "shared/notestab.js"]);
   assert.equal(noteTabDocument((n) => n, "x", '"><script>alert(1)</script>').includes("<script>alert"), false, "a note id is never markup");
 });
 
@@ -115,6 +115,6 @@ test("in the card: ⋯ has Duplicate, Open in an editor tab, Export and Copy; Ct
     await p.click(`${OPEN} .nt-folder`); await x.rest(150); await p.locator(".nt-menu .dgc-menu-row", { hasText: "Reading" }).click(); await x.rest(250);
     await p.click(`${OPEN} .nt-folder`); await x.rest(150); await p.locator(".nt-menu .dgc-menu-row", { hasText: "Export Reading…" }).click(); await x.rest(300);
     assert.deepEqual([calls.folder[0].name, calls.folder[0].files.map((f) => f.name)], ["Reading", ["Book club the March pick.md", "Reading list.md", "Lines I liked.md"]]);
-    assert.match(await p.locator(".hc-live").innerText(), /3 notes exported to the folder Reading/);
+    assert.match(await p.locator(".hc-live").innerText(), /3 notes exported in Reading/);
   } finally { await x.close(); }
 });

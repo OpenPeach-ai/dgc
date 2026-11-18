@@ -1,7 +1,7 @@
 // Files under a Pip computer's live screen (pc-background-commands, 0.52). With a live desktop the tab is the screen and
 // its bar, and there was no Files at all there: no way to add or save a big file. Now the bar has a Files button beside
 // Keyboard and Clipboard, opening a panel with the same list, folder, sizes and "x used" as the Files window,
-// Add file…, and for a chosen file Save to this computer… and Remove, through the same host messages.
+// Add file…, and for a chosen file Download and Remove, through the same host messages.
 // From 12 Nov the panel floats over the screen and never pushes it, and the bar is one row: at 700 px the tools are their
 // marks, and at 300 px Fit and 100% are in "…" (pip-computer-room-browser.test.mjs).
 // Real Chromium, the real client and CSS, the real noVNC viewer on a fake RFB server (support/pip-computer-scene.mjs),
@@ -55,7 +55,7 @@ const apart = (a, b, name) => assert.ok(!(a.left < b.right - 0.5 && b.left < a.r
 const quiet = (b, name) => { assert.ok(b.shared, `${name} is the shared button`); assert.ok(!PURPLE.test(b.ground) && !PURPLE.test(b.ink), `${name} is not purple: ${b.ground} ${b.ink}`); };
 
 for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
-  test(`under the live screen at ${width}px, ${theme}: Files opens a panel with the list, Add file…, a copy running, the limit's words and Save to this computer…`, async (t) => {
+  test(`under the live screen at ${width}px, ${theme}: Files opens a panel with the list, Add file…, a copy running, the limit's words and Download`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openComputer(browser, { theme, width, api: 87, files: FILES });
     try {
@@ -105,13 +105,13 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       assert.equal(m.error.text, LIMIT); within(m.error, m.panel, "the words are inside the panel"); assert.ok(!m.error.clipped);
       apart(m.error, m.add, "the words and Add file…"); apart(m.error, m.list, "the words and the list");
       assert.ok(!m.sideways, "nothing scrolls sideways");
-      // A big file: Save to this computer… and Remove.
+      // A big file: Download and Remove.
       await x.p.click('#pc-files-panel [data-file="dataset.bin"]'); await x.p.waitForSelector("#pc-save-as");
       m = await measure(x.p);
-      assert.equal(m.save.text, "Save to this computer…"); quiet(m.save, "Save to this computer…"); quiet(m.remove, "Remove");
+      assert.equal(m.save.text, "Download"); quiet(m.save, "Download"); quiet(m.remove, "Remove");
       assert.ok(!m.save.clipped && !m.remove.clipped && !m.save.disabled && !m.remove.disabled);
       assert.equal(m.bytes.text, "700.0 MB");
-      for (const [name, b] of [["Save to this computer…", m.save], ["Remove", m.remove], ["the file's name", m.title], ["its size", m.bytes]]) across(b, m.panel, `${name} is inside the panel`);
+      for (const [name, b] of [["Download", m.save], ["Remove", m.remove], ["the file's name", m.title], ["its size", m.bytes]]) across(b, m.panel, `${name} is inside the panel`);
       apart(m.save, m.remove, "Save and Remove"); apart(m.save, m.title, "Save and the name"); apart(m.remove, m.title, "Remove and the name"); apart(m.save, m.bytes, "Save and the size"); apart(m.title, m.bytes, "the name and the size");
       within(m.holder, m.live, "the panel stays inside the screen's room"); assert.deepEqual([m.canvas.top, m.canvas.height], [closed.canvas.top, closed.canvas.height], "and the screen is where it was");
       assert.ok(!m.sideways, "nothing scrolls sideways");
@@ -156,7 +156,7 @@ test("while a Pip run uses the computer, Files still opens and saves, and Add an
   } finally { await x.close(); }
 });
 
-test("before API 87 the panel has today's Add files… and Save to…, 2 MB", async (t) => {
+test("before API 87 the panel has today's Add files… and Download, 2 MB", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openComputer(browser, { api: 86, files: FILES });
   try {
@@ -164,9 +164,12 @@ test("before API 87 the panel has today's Add files… and Save to…, 2 MB", as
     assert.equal(await x.p.textContent("#pc-files-panel label.pc-add"), "Add files…");
     assert.equal(await x.p.$("#pc-add"), null);
     await x.p.click('#pc-files-panel [data-file="notes.txt"]'); await x.p.waitForSelector("#pc-save");
-    assert.equal(await x.p.textContent("#pc-save"), "Save to…"); assert.equal(await x.p.$("#pc-save-as"), null);
+    assert.equal(await x.p.textContent("#pc-save"), "Download"); assert.equal(await x.p.$("#pc-save-as"), null);
+    // Download (18 Nov): the page saves the bytes it read, on this computer (media/shared/download.js).
+    const caught = x.p.waitForEvent("download");
     await x.p.click("#pc-save");
-    assert.deepEqual((await posted(x.p, "pipComputerSave")).map((s) => [s.name, s.text]), [["notes.txt", "buy milk\n"]]);
+    assert.equal((await caught).suggestedFilename(), "notes.txt");
+    assert.deepEqual(await posted(x.p, "pipComputerSave"), [], "nothing asked of the host");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });

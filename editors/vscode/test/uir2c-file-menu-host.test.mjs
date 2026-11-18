@@ -20,7 +20,9 @@ const stubs = () => {
   s.vscode = { commands: { executeCommand: async (...a) => { s.ran.push(a); } },
     Uri: { file: (p) => ({ fsPath: p, path: p, scheme: "file" }), joinPath: (base, name) => ({ fsPath: join(base.fsPath, name), path: join(base.fsPath, name), scheme: "file" }) },
     env: { clipboard: { writeText: async (t) => { s.clip.push(t); } } },
-    workspace: { workspaceFolders: undefined, fs: { copy: async (from, to, o) => { s.copied.push([from.fsPath, to.fsPath, o]); writeFileSync(to.fsPath, readFileSync(from.fsPath)); } } },
+    workspace: { workspaceFolders: undefined, fs: { copy: async (from, to, o) => { s.copied.push([from.fsPath, to.fsPath, o]); writeFileSync(to.fsPath, readFileSync(from.fsPath)); },
+      // (What Save a copy… reads, to hand the page: the file itself.)
+      stat: async (u) => { const st = statSync(u.fsPath); return { type: st.isFile() ? 1 : 2, size: st.size }; }, readFile: async (u) => readFileSync(u.fsPath) } },
     window: { showInformationMessage: (m) => { s.info.push(m); }, showWarningMessage: (m) => { s.warn.push(m); }, showSaveDialog: async (o) => { s.asked.push(o); return s.choice; },
       showTextDocument: async (uri, o) => { s.shown.push([uri.fsPath, o]); }, setStatusBarMessage: (m) => { s.info.push(`status: ${m}`); } } };
   return s;
@@ -28,7 +30,9 @@ const stubs = () => {
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 
 const acts = await bundle("fileActs.ts");
-function actsHost(s) { const said = [], pictures = [], folder = mkdtempSync(join(tmpdir(), "dgc-acts-")); return { said, pictures, folder, host: { say: (w) => said.push(w), picture: (d) => pictures.push(d), copyFolder: async () => join(folder, "copy") } }; }
+function actsHost(s) { const said = [], pictures = [], downloads = [], folder = mkdtempSync(join(tmpdir(), "dgc-acts-"));
+  return { said, pictures, downloads, folder, host: { say: (w) => said.push(w), picture: (d) => pictures.push(d), copyFolder: async () => join(folder, "copy"),
+                                                      page: { postMessage: (m) => { downloads.push(m); return Promise.resolve(true); } } } }; }
 
 test("a file DGC keeps for a chat: Open and Open in editor show a private copy under its own name; Copy path and Reveal are never done", async () => {
   const s = stubs(), m = load(acts, s.vscode), h = actsHost(s), keptAt = join(mkdtempSync(join(tmpdir(), "dgc-kept-")), "c".repeat(64));
@@ -50,7 +54,7 @@ test("a file DGC keeps for a chat: Open and Open in editor show a private copy u
   assert.equal(dirname(s.ran.at(-1)[1].fsPath), join(h.folder, "copy"));
 });
 
-test("a kept picture is handed to the page for its clipboard; a kept zip is neither copied nor opened in an editor; Save a copy… asks where", async () => {
+test("a kept picture is handed to the page for its clipboard; a kept zip is neither copied nor opened in an editor; Save a copy… hands the page the file", async () => {
   const s = stubs(), m = load(acts, s.vscode), h = actsHost(s), dir = mkdtempSync(join(tmpdir(), "dgc-kept-")), pic = join(dir, "a".repeat(64)), zip = join(dir, "b".repeat(64));
   writeFileSync(pic, PNG); writeFileSync(zip, Buffer.concat([Buffer.from("PK\x03\x04"), Buffer.alloc(500, 3)]));
   assert.equal(await m.keptFileAct("copy", { path: pic, name: "last-step.png" }, h.host), true);
@@ -59,10 +63,12 @@ test("a kept picture is handed to the page for its clipboard; a kept zip is neit
   assert.deepEqual([s.clip, s.shown, h.pictures.length], [[], [], 1]);
   // A file named as text that isn't: nothing reaches the clipboard.
   assert.equal(await m.keptFileAct("copy", { path: zip, name: "not-text.txt" }, h.host), false); assert.deepEqual(s.clip, []); assert.match(s.warn.at(-1), /isn't text/);
-  s.choice = { fsPath: join(dir, "out.zip"), path: join(dir, "out.zip"), scheme: "file" };
+  // Save a copy… (18 Nov): the file goes to the page, which saves it on the person's own computer; no save dialog.
   assert.equal(await m.keptFileAct("save", { path: zip, name: "logs.zip" }, h.host), true);
-  assert.match(s.asked[0].defaultUri.fsPath, /logs\.zip$/); assert.equal(s.asked[0].saveLabel, "Save a copy"); assert.deepEqual(readFileSync(join(dir, "out.zip")), readFileSync(zip)); assert.deepEqual(s.info, ["Saved out.zip."]);
-  s.choice = undefined; assert.equal(await m.keptFileAct("save", { path: zip, name: "logs.zip" }, h.host), false, "Cancel saves nothing");
+  const [handed] = h.downloads;
+  assert.deepEqual([handed.type, handed.name, handed.mime], ["dgcDownload", "logs.zip", "application/zip"]);
+  assert.deepEqual(Buffer.from(handed.data), readFileSync(zip), "the kept file's own bytes, under the name a person gave it");
+  assert.deepEqual([s.asked, s.copied], [[], []], "no save dialog, nothing written on this machine");
 });
 
 test("a file in the project does all six: its real path is copied and revealed, its text copied, a copy saved", async () => {
@@ -73,6 +79,9 @@ test("a file in the project does all six: its real path is copied and revealed, 
   assert.equal(await m.projectFileAct("copy", file, h.host), true); assert.equal(s.clip.at(-1), "def total(xs):\n    return sum(xs)\n");
   assert.equal(await m.projectFileAct("editor", file, h.host), true); assert.deepEqual(s.shown.at(-1), [file, { preview: false }]);
   assert.equal(await m.projectFileAct("open", file, h.host), true); assert.deepEqual([s.ran.at(-1)[0], s.ran.at(-1)[1].fsPath], ["vscode.open", file]);
+  assert.equal(await m.projectFileAct("save", file, h.host), true);
+  assert.deepEqual([h.downloads.at(-1).name, String(Buffer.from(h.downloads.at(-1).data))], ["totals.py", "def total(xs):\n    return sum(xs)\n"], "Save a copy…: to the page");
+  assert.deepEqual(s.asked, []);
   assert.equal(await m.projectFileAct("remove", file, h.host), false);
 });
 
@@ -107,9 +116,10 @@ test("a Pip's chat host: each of the menu's picks asks DGC for the file by its m
   assert.deepEqual(s.clip, [text.toString()]);
   await settle(() => h.posted.some((m) => m.type === "pipsFileSaid"));
   assert.equal(h.posted.find((m) => m.type === "pipsFileSaid").words, "Text copied");
-  s.choice = { fsPath: join(k.state, "notes.md"), path: join(k.state, "notes.md"), scheme: "file" };
-  assert.equal(await pick("save"), true); await settle(() => s.info.length);
-  assert.deepEqual(readFileSync(join(k.state, "notes.md")), text);
+  assert.equal(await pick("save"), true); await settle(() => h.posted.some((m) => m.type === "dgcDownload"));
+  const handed = h.posted.find((m) => m.type === "dgcDownload");
+  assert.deepEqual([handed.name, Buffer.from(handed.data)], ["checkout-notes.md", text], "Save a copy…: the file to the page, to save on this computer");
+  assert.deepEqual(s.asked, [], "no save dialog");
   // Copy path and Reveal: DGC keeps this copy for the chat. Nothing is asked, copied or revealed.
   const clips = s.clip.length, ran = s.ran.length;
   for (const act of ["path", "reveal"]) { await pick(act); await new Promise((r) => setTimeout(r, 30)); }

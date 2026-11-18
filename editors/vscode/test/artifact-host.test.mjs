@@ -41,7 +41,9 @@ globalThis.__DGC_ART_VSCODE = {
          openExternal: async (u) => { world.external.push(u.toString()); return true; } },
   workspace: { workspaceFolders: [{ uri: uri("/work") }],
     fs: { copy: async (from, to) => { world.copies.push([from.fsPath, to.fsPath]); },
-          readFile: async (u) => Buffer.from(world.files[u.fsPath] ?? "") } },
+          // (A download reads the file the process made, as a real file.)
+          stat: async (u) => { const { statSync } = await import("node:fs"); const s = statSync(u.fsPath); return { type: s.isFile() ? 1 : 2, size: s.size }; },
+          readFile: async (u) => (u.fsPath in world.files ? Buffer.from(world.files[u.fsPath]) : (await import("node:fs")).readFileSync(u.fsPath)) } },
   commands: { executeCommand: async (...args) => { world.commands.push(args); } },
 };
 const art = artifactsModule();
@@ -206,23 +208,50 @@ test("Remove asks first, says it goes to DGC's trash and can be recovered, and o
   assert.equal(await removing, true);
 });
 
-test("Download, in a local window: where to keep it first, then the process makes it and it is copied there", async () => {
-  world.saveTo = uri("/work/Q3 plan.pptx");
-  const done = hub.exportArtifact(VIEW, "pptx");
-  await tick();
-  assert.match(world.saveAsked.title, /Download “Q3 plan” as PowerPoint/);
-  assert.equal(world.saveAsked.defaultUri.fsPath, "/work/Q3 plan.pptx");
-  const cmd = last("artifact_export");
-  assert.deepEqual({ ...cmd, request_id: "" }, { type: "artifact_export", id: ID, format: "pptx", request_id: "" });
-  hub.onEvent({ type: "artifact_exported", id: ID, format: "pptx", path: "/home/u/.dgc/artifacts/ar_x/exports/Q3 plan.pptx", request_id: cmd.request_id });
-  await done;
-  assert.deepEqual(world.copies, [["/home/u/.dgc/artifacts/ar_x/exports/Q3 plan.pptx", "/work/Q3 plan.pptx"]]);
-  assert.match(world.infos[0], /Saved “Q3 plan.pptx”/);
-  await hub.exportArtifact(VIEW, "xlsx");
-  assert.equal(last("artifact_export").format, "pptx", "a format it doesn't have is never asked for");
-  world.saveTo = undefined;
-  await hub.exportArtifact(VIEW, "pdf");
-  assert.equal(sent.filter((c) => c.type === "artifact_export").length, 1, "no place chosen: nothing made");
+// His ask (18 Nov): Download saves on the computer the editor runs on, in any window. The process makes the file and its
+// bytes go to the page that asked, which saves it there (src/download.ts, media/shared/download.js): never a save dialog,
+// which in a remote window browses the remote machine. Asked with no page (a command), the artifact's own panel saves it.
+test("Download, in any window: no save dialog; the process makes it and its bytes go to the page that asked", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const folder = mkdtempSync(join(tmpdir(), "dgc-export-"));
+  const made = join(folder, "Q3 plan.pptx");
+  writeFileSync(made, "the deck");
+  try {
+    for (const remote of [false, true]) {
+      const env = globalThis.__DGC_ART_VSCODE.env;
+      if (remote) env.remoteName = "ssh-remote"; else delete env.remoteName;
+      const posted = [], page = { postMessage: (m) => { posted.push(m); return Promise.resolve(true); } };
+      world.saveAsked = undefined; world.external = [];
+      const done = hub.exportArtifact(VIEW, "pptx", undefined, page);
+      await tick();
+      assert.equal(world.saveAsked, undefined, "no save dialog");
+      const cmd = last("artifact_export");
+      assert.deepEqual({ ...cmd, request_id: "" }, { type: "artifact_export", id: ID, format: "pptx", request_id: "" });
+      hub.onEvent({ type: "artifact_exported", id: ID, format: "pptx", path: made, request_id: cmd.request_id });
+      await done;
+      const [m] = posted;
+      assert.equal(m?.type, "dgcDownload", `${remote ? "remote" : "local"}: handed to the page`);
+      assert.equal(m.name, "Q3 plan.pptx");
+      assert.equal(String(Buffer.from(m.data)), "the deck");
+      assert.deepEqual(world.external, [], "not the browser: the page saves it");
+      delete env.remoteName;
+    }
+    const before = sent.filter((c) => c.type === "artifact_export").length;
+    await hub.exportArtifact(VIEW, "xlsx");
+    assert.equal(sent.filter((c) => c.type === "artifact_export").length, before, "a format it doesn't have is never asked for");
+    // From a command (no page): the artifact's own panel opens and is handed it.
+    const done = hub.exportArtifact(VIEW, "pdf");
+    await tick();
+    hub.onEvent({ type: "artifact_exported", id: ID, format: "pdf", path: made, request_id: last("artifact_export").request_id });
+    await done;
+    const panel = world.panels.at(-1);
+    assert.ok(panel, "its panel opened");
+    panel.say({ type: "ready" });
+    await tick();
+    assert.equal(panel.last("dgcDownload")?.name, "Q3 plan.pdf", "its own page saves it");
+  } finally { rmSync(folder, { recursive: true, force: true }); }
 });
 
 test("commands wait for a process that is starting; an older CLI says it needs updating", async () => {
@@ -278,7 +307,7 @@ test("downloads in a remote window share one port that keeps listening: the edit
   }
 });
 
-test("Download, in a remote window: no save dialog on the remote machine; the person's own browser gets the file as an attachment, a second click gets it again, and an ended link says so", async () => {
+test("a file too large for a page goes to the person's own browser as an attachment; a second click gets it again, and an ended link says so", async () => {
   const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -292,13 +321,9 @@ test("Download, in a remote window: no save dialog on the remote machine; the pe
   env.openExternal = async (u) => { address = u.toString(); return true; };
   try {
     world.saveTo = undefined; world.saveAsked = undefined;
-    const done = hub.exportArtifact(VIEW, "pptx");
-    await tick();
+    assert.equal(await art.downloadThroughBrowser(file, "Q3 plan.pptx"), true);
     assert.equal(world.saveAsked, undefined, "the remote machine's dialog isn't asked");
-    hub.onEvent({ type: "artifact_exported", id: ID, format: "pptx", path: file, request_id: last("artifact_export").request_id });
-    await done;
     assert.match(address, /^http:\/\/127\.0\.0\.1:\d+\/[a-f0-9]{48}\/Q3%20plan\.pptx$/);
-    assert.match(world.infos.at(-1), /Downloading “Q3 plan.pptx” in your browser/);
     assert.equal((await fetch(address.replace(/\/[a-f0-9]{48}\//, `/${"0".repeat(48)}/`))).status, 404, "only with its token");
     const got = await fetch(address);
     assert.equal(got.status, 200);

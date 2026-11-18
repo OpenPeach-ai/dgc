@@ -157,7 +157,7 @@ test("the picture arrives in the tile; clicking it opens the image viewer, whose
   tile.click();
   const viewer = doc.getElementById("image-viewer");
   assert.ok(viewer && !viewer.hidden, "the image viewer opens");
-  const open = viewer.querySelector('[aria-label="Open file"]');
+  const open = viewer.querySelector('[aria-label="Open in editor"]');
   assert.equal(open.hidden, false, "a shown file can always be opened");
   open.click();
   assert.deepEqual(JSON.parse(JSON.stringify(posted.at(-1))), { type: "openFile", path: "out/login.png" });

@@ -34,15 +34,23 @@ test("a tool's image opens the viewer, which is where it already went", () => {
   assert.deepEqual(h.errors, []);
 });
 
-test("saving an image asks the host, because a webview cannot write files", () => {
+// His ask (18 Nov): Download saves on the computer the editor runs on. The page saves the picture it shows itself (a
+// Blob and a hidden <a download>, media/shared/download.js): never the host's save dialog, which over a remote
+// connection browses the remote machine.
+test("Download saves the picture from the page itself, on this computer: the bytes it shows, under its name", () => {
   const h = viewerOpenOnToolImage();
   const save = h.doc.querySelector("#image-viewer .iv-save");
-  assert.ok(save, "the viewer offers a save control");
+  assert.ok(save, "the viewer offers Download");
+  assert.equal(save.getAttribute("aria-label"), "Download");
+  let link = null, blob = null;
+  h.dom.window.URL.createObjectURL = (b) => { blob = b; return "blob:shot"; };
+  h.dom.window.URL.revokeObjectURL = () => {};
+  h.dom.window.HTMLAnchorElement.prototype.click = function () { link = { name: this.download, href: this.href }; };
   save.click();
-  const msg = h.posted.at(-1);
-  assert.equal(msg.type, "saveImage");
-  assert.equal(msg.name, "shot.png");
-  assert.equal(msg.data, PNG, "the bytes it is showing, not a path it guessed");
+  assert.deepEqual(link, { name: "shot.png", href: "blob:shot" }, "a download from the page, under the picture's name");
+  assert.equal(blob.type, "image/png");
+  assert.equal(h.posted.filter((m) => m.type === "saveImage").length, 0, "nothing asked of the host");
+  assert.equal(h.doc.querySelector(".dgc-download-said")?.textContent, "Downloaded");
 });
 
 test("the zoom shows a percentage and steps both ways", () => {

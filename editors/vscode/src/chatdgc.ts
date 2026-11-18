@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { createHash } from "crypto";
 import { mkdtempSync, rmSync } from "fs";
-import { homedir, tmpdir } from "os";
+import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { FILE_ACTS, fileKind, projectFileAct } from "./fileActs";
 import { CANVAS_DOC_VIEW, CanvasDocEditor } from "./canvasDoc";
@@ -16,6 +16,7 @@ import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPicture
 import { sessionIcon, dockOf, type DockPin } from "./dock";
 import { openCodePreview } from "./codePreview";
 import { promises as fs } from "fs";
+import { downloadBytes, downloadFile, downloadMade, DOWNLOAD_MESSAGE, type DownloadPage } from "./download";
 import { displayMentions, workspaceFiles } from "./mentionsHost";
 
 /**
@@ -179,7 +180,9 @@ interface Tab {
 }
 
 type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel; path?: string; offset?: number;
-               widgetPanel?: vscode.WebviewPanel };
+               widgetPanel?: vscode.WebviewPanel;
+               // An answer awaited (made): what the process said, or why it couldn't.
+               done?: (ev: any) => void; failed?: (message: string) => void };
 
 export function chatTitle(text: string): string {
   const flat = String(text || "").replace(/\s+/g, " ").trim();
@@ -378,7 +381,7 @@ function chatdgcPage(asset: (name: string) => string, cspSource: string): string
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys dgc-dialog" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/modelpicker.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/inline.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("media/shared/picturepop.js"))}"></script><script src="${attr(asset("media/shared/modelpicker.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/inline.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library in its own editor tab. The page holds only where it goes: the ONE Library module (media/library.js, the
@@ -390,7 +393,7 @@ export function libraryDocument(asset: (name: string) => string, cspSource: stri
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}">
 <title>Library</title></head><body class="lib-body">
 <main id="library-root" aria-label="Library"></main>
-<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/shared/pagehead.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("media/shared/picturepop.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/shared/pagehead.js"))}"></script><script src="${attr(asset("media/library.js"))}"></script></body></html>`;
 }
 
 
@@ -475,6 +478,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private folderOffered(): boolean {
     try { return Number(this.host?.chatdgcOffers?.()?.folder) >= 1; } catch { return false; }
   }
+  /** Save to Library on a chat's picture (ready.capabilities.chatdgc.library_picture): an older DGC shows no button. */
+  private libraryPictureOffered(): boolean {
+    try { return Number(this.host?.chatdgcOffers?.()?.library_picture) >= 1; } catch { return false; }
+  }
 
   /** A chat's fallback model (D14, ready.capabilities.chatdgc.fallback): each chat's, as it opened or as you chose it
    *  in its model menu, added to every turn it sends. */
@@ -553,8 +560,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.canvasDocs = new CanvasDocEditor(this.context.extensionUri, {
       canvasOf: (path) => this.canvasOf(path),
       artifactOf: (path) => this.artifacts?.docAt(path),
-      artifactVersions: (id) => this.artifacts?.docVersions(id),
-      artifactExport: (id) => this.artifacts?.docExport(id),
+      artifactVersions: (id, page) => this.artifacts?.docVersions(id, page),
+      artifactExport: (id, page) => this.artifacts?.docExport(id, page),
       artifactBrowser: (id) => this.artifacts?.openInBrowser({ id, title: this.artifacts?.title(id) ?? "this document" }),
       canvasAskAbout: (conversation, canvas, text, start, end) => this.canvasAskAbout(conversation, canvas, text, start, end),
       canvasShortcut: () => this.canvasShortcut(),
@@ -631,7 +638,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
    *  that hears through the side bar ("sideLibrary"), so the tab and the Library's editor tab, one module, are answered
    *  by the same code. */
   private readonly sidePanel = { webview: { postMessage: (message: unknown): Thenable<boolean> => {
-    try { this.host?.postHome({ type: "sideLibrary", message }); } catch { /* the side bar is closed: nothing to tell */ }
+    // (A download is for the page itself, Work's, whose download module saves it: never wrapped for the Library.)
+    const download = (message as { type?: string })?.type === DOWNLOAD_MESSAGE;
+    try { this.host?.postHome(download ? message as Record<string, unknown> : { type: "sideLibrary", message }); } catch { /* the side bar is closed: nothing to tell */ }
     return Promise.resolve(true);
   } } } as unknown as vscode.WebviewPanel;
 
@@ -701,7 +710,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                  model: words(img.model, 256), project: words(img.project, 4096), created_at: words(img.created_at, 64),
                  width: count(img.width), height: count(img.height), bytes: count(img.bytes), surface: words(img.surface, 24),
                  ...(by ? { made_by: { kind: words(by.kind, 24), id: words(by.id, 128), name: words(by.name, 120) } } : {}),
-                 ...(img.kept === true ? { kept: true, title: words(img.title, 200), why: words(img.why, 500) } : {}) };
+                 ...(img.kept === true ? { kept: true, title: words(img.title, 200), why: words(img.why, 500), ...(img.kept_by === "you" ? { kept_by: "you" } : {}) } : {}) };
       });
       void panel.webview.postMessage({ type: "workImages", seq, offset, images, total: Number(ev?.total) || 0,
                                        next: Number.isInteger(ev?.next_offset) ? ev.next_offset : null });
@@ -729,10 +738,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       } else if (message.type === "workImageReveal") {
         await vscode.commands.executeCommand("revealFileInOS", uri);
       } else if (message.type === "workImageSave") {
-        const name = path.split(/[\\/]/).pop() || "image.png";
-        const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(join(homedir(), name)), saveLabel: "Save", title: "Save a copy of this image" });
-        if (!target || target.scheme !== "file") return;
-        await vscode.workspace.fs.copy(uri, target, { overwrite: true });
+        // Save a copy…: to the person's computer, from the Library's page (src/download.ts).
+        await downloadFile(panel.webview, path, path.split(/[\\/]/).pop() || "image.png");
       } else if (message.type === "workImageToProject") {
         const target = await projectTarget(path.split(/[\\/]/).pop() || "image.png");
         if (!target) return;
@@ -970,12 +977,17 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       : await vscode.window.showQuickPick([{ label: "Word document (.docx)", format: "docx", ext: "docx" }, { label: "PDF", format: "pdf", ext: "pdf" },
                                            { label: "Markdown (.md)", format: "md", ext: "md" }], { placeHolder: "Download the canvas as" });
     if (!format) return;
-    const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
     const base = name.replace(/\.[^.]+$/, "");
-    const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, `${base}.${format.ext}`), saveLabel: "Save" });
-    if (!target || target.scheme !== "file") return;
-    this.ask({ kind: "canvasExport" }, { type: "chatdgc_canvas", conversation_id: here.conversation, canvas_id: here.canvas, op: "export",
-                                         format: format.format, path: target.fsPath });
+    // Made by the process into a private folder, then saved on the person's computer by the chat's own page (or, with
+    // no tab on it, their browser): src/download.ts.
+    const page = [...this.tabs].find((t) => t.conversation === here.conversation)?.panel.webview;
+    try {
+      await downloadMade(page, `${base}.${format.ext}`, async (target) => {
+        const ev = await this.made({ kind: "canvasExport" }, { type: "chatdgc_canvas", conversation_id: here.conversation, canvas_id: here.canvas,
+                                                              op: "export", format: format.format, path: target });
+        return typeof ev?.path === "string" ? ev.path : target;
+      });
+    } catch (err: any) { void vscode.window.showWarningMessage(`The canvas wasn't downloaded: ${String(err?.message || err)}`); }
   }
 
   /** The canvas commands show in an editor's title bar and menus when the file in front is a canvas, in the Markdown
@@ -1063,7 +1075,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "artifactExport":
         if (artifact && typeof message.format === "string") {
           void this.artifacts?.exportArtifact({ id: String(artifact.id), title: String(artifact.title || "artifact").slice(0, 200), type: String(artifact.type || ""),
-                                                exports: Array.isArray(artifact.exports) ? artifact.exports.filter((f: unknown) => typeof f === "string") : [] }, message.format);
+                                                exports: Array.isArray(artifact.exports) ? artifact.exports.filter((f: unknown) => typeof f === "string") : [] }, message.format,
+                                                undefined, panel.webview);
         }
         return;
       case "artifactRemove":
@@ -1156,12 +1169,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       }
       case "save": {
+        // Save a copy…: the process writes it into a private folder; the Library's page saves it on the person's computer.
         if (!ref) return;
         const name = String(message.file?.name || "file").replace(/[\\/:*?"<>|]+/g, " ").trim() || "file";
-        const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
-        const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Save", title: "Save a copy of this file" });
-        if (!target || target.scheme !== "file") return;
-        this.libraryAsk(panel, "librarySave", { type: "chatdgc_library_file", op: "save", ...ref, path: target.fsPath });
+        try {
+          await downloadMade(panel.webview, name, async (target) => {
+            const ev = await this.made({ kind: "librarySave" }, { type: "chatdgc_library_file", op: "save", ...ref, path: target });
+            return typeof ev?.path === "string" ? ev.path : target;
+          });
+        } catch (err: any) { void panel.webview.postMessage({ type: "error", message: String(err?.message || err) }); }
         return;
       }
       case "saveToProject": {
@@ -1225,7 +1241,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           if (!formats.length) return;
           const format = formats.length === 1 ? formats[0]
             : (await vscode.window.showQuickPick(formats.map((f) => ({ label: FORMAT_LABELS[f] || f.toUpperCase(), format: f })), { placeHolder: `Save a copy of “${title}” as` }) as any)?.format;
-          if (typeof format === "string") await this.artifacts.exportArtifact({ id, title, type, exports: formats }, format);
+          if (typeof format === "string") await this.artifacts.exportArtifact({ id, title, type, exports: formats }, format, undefined, panel.webview);
           return;
         }
         case "copy": {
@@ -1281,9 +1297,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           case "path": await copyText(path, "Path copied"); return;
           case "save": {
             if (kind === "image") { await this.workImage(panel, { type: "workImageSave", path }); return; }
-            const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(join(homedir(), name)), saveLabel: "Save", title: "Save a copy of this video" });
-            if (!target || target.scheme !== "file") return;
-            await vscode.workspace.fs.copy(uri, target, { overwrite: true });
+            await downloadFile(panel.webview, path, name);       // to the person's computer (src/download.ts)
             return;
           }
           case "copy": {
@@ -1426,14 +1440,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const bytes = Buffer.from(match[2], "base64"), ending = match[1] === "jpeg" ? "jpg" : match[1];
         const name = /\.[A-Za-z0-9]{1,5}$/.test(known.name) ? known.name : `${known.name}.${ending}`;
         if (act === "copy") { void panel.webview.postMessage({ type: "itemCopy", key: `workfile:${ref}`, data: got.data }); return; }
-        if (act === "save") {
-          const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
-          const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Save", title: "Save a copy of this picture" });
-          if (!target || target.scheme !== "file") return;
-          await vscode.workspace.fs.writeFile(target, bytes);
-          say("Copy saved");
-          return;
-        }
+        if (act === "save") { await downloadBytes(panel.webview, name, bytes); return; }      // (src/download.ts)
         // Open: a copy of its own, for this user alone, in the editor's picture viewer.
         const folder = join(tmpdir(), "dgc-library-files", ref.slice(3));
         await fs.mkdir(folder, { recursive: true, mode: 0o700 });
@@ -1450,14 +1457,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           return;
         case "path": await copyText(got.file!, "Path copied"); return;
         case "reveal": await vscode.commands.executeCommand("revealFileInOS", uri); return;
-        case "save": {
-          const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
-          const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, known.name), saveLabel: "Save", title: "Save a copy of this file" });
-          if (!target || target.scheme !== "file") return;
-          await vscode.workspace.fs.copy(uri, target, { overwrite: true });
-          say("Copy saved");
-          return;
-        }
+        case "save": await downloadFile(panel.webview, got.file!, known.name); return;      // (src/download.ts)
       }
     } catch (err: any) {
       void vscode.window.showWarningMessage(`${known.name}: ${String(err?.message || err)}`);
@@ -1724,6 +1724,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     (this.holderTimer as any).unref?.();
   }
 
+  /** A request whose answer is awaited: the process's event, or its error's words as a rejection. */
+  private made(asker: Omit<Asker, "done" | "failed">, cmd: Record<string, unknown>): Promise<any> {
+    return new Promise((resolve, reject) => this.ask({ ...asker, done: resolve, failed: (message) => reject(new Error(message)) }, cmd));
+  }
+
   private ask(asker: Asker, cmd: Record<string, unknown>): void {
     const requestId = this.nextId(asker.kind);
     this.requests.set(requestId, asker);
@@ -1799,6 +1804,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     for (const tab of this.tabs) {
       this.post(tab, { type: "folderOffered", on: this.folderOffered() });
       this.post(tab, { type: "fallbackOffered", on: this.fallbackOffered() });
+      this.post(tab, { type: "libraryOffered", on: this.libraryPictureOffered() });
       if (tab.opened && !tab.held.some((cmd) => cmd.type === "chatdgc_open")) this.askFolder(tab);
     }
     this.restoreWidgets();
@@ -2063,6 +2069,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       }
       case "chatdgc_library_file": {
         if (asker) this.requests.delete(requestId);
+        if (asker?.done) { asker.done(ev); return; }
         if (asker?.kind === "fileOpen" && typeof ev.path === "string" && ev.path === asker.path) { void this.openMade(ev.path); return; }
         if (asker?.kind === "fileEditor" && typeof ev.path === "string" && ev.path === asker.path) {
           void vscode.window.showTextDocument(vscode.Uri.file(ev.path), { preview: false }).then(undefined, () => { void this.openMade(ev.path); });
@@ -2071,7 +2078,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (asker?.kind === "fileCopyText" && asker.tab && typeof ev.path === "string" && ev.path === asker.path) {
           // The copy was made to be read: its text goes to the clipboard (src/fileActs.ts checks it is text), and it is taken away.
           const tab = asker.tab, copy = ev.path;
-          void projectFileAct("copy", copy, { say: (words) => this.post(tab, { type: "fileSaid", words }), picture: () => {}, copyFolder: async () => "" })
+          void projectFileAct("copy", copy, { say: (words) => this.post(tab, { type: "fileSaid", words }), picture: () => {}, copyFolder: async () => "", page: tab.panel.webview })
             .then(undefined, () => { void vscode.window.showWarningMessage("That file couldn't be read to copy it."); })
             .then(() => { try { rmSync(dirname(copy), { recursive: true, force: true }); } catch { /* on dispose */ } });
           return;
@@ -2266,11 +2273,16 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                            source: ev.source, parts: ev.parts, compactable: ev.compactable });
         }
         return;
+      case "chatdgc_library_picture":
+        if (asker) this.requests.delete(requestId);
+        asker?.done?.(ev);
+        return;
       case "chatdgc_compacted":
         if (asker) this.requests.delete(requestId);
         for (const tab of showing(conversation)) this.post(tab, { type: "compacted", summary: ev.summary ?? null });
         return;
       case "chatdgc_exported":
+        if (asker?.done) { this.requests.delete(requestId); asker.done(ev); return; }
         if (asker?.kind === "canvasExport") {
           this.requests.delete(requestId);
           void vscode.window.showInformationMessage(`Saved ${String(ev.path || "").split(/[\\/]/).pop()}.`);
@@ -2303,6 +2315,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       case "chatdgc_error": {
         if (asker) this.requests.delete(requestId);
+        if (asker?.failed) { asker.failed(String(ev.message || "ChatDGC hit an error.")); return; }
         if (asker?.kind === "holder") return;             // the bar keeps what it says
         const message = String(ev.message || "ChatDGC hit an error.");
         const waiting = this.createWaiting.get(requestId);
@@ -2387,6 +2400,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.post(tab, { type: "artifacts", offered: this.artifactsOffer() ?? null });
         this.post(tab, { type: "folderOffered", on: this.folderOffered() });
         this.post(tab, { type: "fallbackOffered", on: this.fallbackOffered() });
+        this.post(tab, { type: "libraryOffered", on: this.libraryPictureOffered() });
         this.modsReady(tab);
         // Plugins' cards in a reply (MCP Apps): ChatDGC's screens draw them, once its backend offers them.
         if (this.host?.mcpAppsOffered?.()) this.host.chatdgcSend({ type: "watch_mcp_apps", surface: "chat" });
@@ -2434,7 +2448,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "artifactExport":
         if (typeof message.id === "string" && ARTIFACT_ID.test(message.id) && typeof message.format === "string" && typeof message.artifactType === "string") {
           void this.artifacts?.exportArtifact({ id: message.id, title: String(message.title || "artifact").slice(0, 200), type: message.artifactType,
-                                                exports: Array.isArray(message.exports) ? message.exports.filter((f: unknown) => typeof f === "string") : [] }, message.format);
+                                                exports: Array.isArray(message.exports) ? message.exports.filter((f: unknown) => typeof f === "string") : [] }, message.format,
+                                                undefined, tab.panel.webview);
         }
         return;
       case "mentionSources":
@@ -2675,16 +2690,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const found = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(data);
         if (!found || data.length > 20_000_000) return;
         const name = String(message.name || "chart.png").replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ").trim().slice(0, 80) || "chart.png";
-        const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
-        const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, /\.png$/i.test(name) ? name : `${name}.png`),
-                                                            saveLabel: "Save", filters: { "PNG image": ["png"] } });
-        if (!target) return;
-        try {
-          await vscode.workspace.fs.writeFile(target, Buffer.from(found[1], "base64"));
-          void vscode.window.showInformationMessage(`Saved ${target.path.split("/").pop()}.`);
-        } catch (err: any) {
-          void vscode.window.showErrorMessage(`The image couldn't be saved: ${String(err?.message || err)}`);
-        }
+        // (The page saves a chart itself; one sent here goes back to it as a download: src/download.ts.)
+        await downloadBytes(tab.panel.webview, /\.png$/i.test(name) ? name : `${name}.png`, Buffer.from(found[1], "base64"), "image/png");
         return;
       }
       case "canvasOpen": {
@@ -2770,10 +2777,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           return;
         }
         if (message.type === "fileSave") {
-          const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
-          const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Save", title: "Save a copy of this file" });
-          if (!target || target.scheme !== "file") return;
-          this.ask({ tab, kind: "fileSave" }, { ...ref, path: target.fsPath });
+          // Save a copy…: written by the process into a private folder, then saved on the person's computer by this
+          // chat's page (src/download.ts).
+          try {
+            await downloadMade(tab.panel.webview, name, async (target) => {
+              const ev = await this.made({ tab, kind: "fileSave" }, { ...ref, path: target });
+              return typeof ev?.path === "string" ? ev.path : target;
+            });
+          } catch (err: any) { this.post(tab, { type: "error", message: String(err?.message || err) }); }
           return;
         }
         // A fresh private directory cannot be replaced by a pre-planted /tmp symlink before the backend writes. Each
@@ -2950,6 +2961,20 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "openMemory":
         this.host?.openSettings?.("memory");
         return;
+      case "libraryPicture": {
+        // Save to Library on a picture of this chat (image_keep): whether it is there already, and, with keep, kept
+        // there by you. The answer goes back to the page by the picture's id.
+        const fileId = String(message.fileId || "");
+        if (!conversation || !/^att_[a-f0-9]{32}$/.test(fileId) || !this.libraryPictureOffered()) return;
+        try {
+          const ev = await this.made({ tab, kind: "libraryPicture" }, { type: "chatdgc_library_picture", conversation_id: conversation,
+                                                                      attachment_id: fileId, keep: message.keep === true });
+          this.post(tab, { type: "libraryPicture", fileId, in_library: ev?.in_library === true, kept: ev?.kept === true });
+        } catch (err: any) {
+          this.post(tab, { type: "libraryPicture", fileId, in_library: false, kept: false, error: String(err?.message || err).slice(0, 300) });
+        }
+        return;
+      }
       case "exportReport":
         if (conversation && MESSAGE_ID.test(String(message.messageId || ""))) {
           void this.exportReport(tab, conversation, message.messageId, String(message.title || ""));
@@ -3068,12 +3093,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   /** A finished research report as a Markdown file, with its sources and what the citation check found. */
   private async exportReport(tab: Tab, conversation: string, messageId: string, title: string): Promise<void> {
     const name = chatTitle(title).replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "report";
-    const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
-    const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, `${name}.md`),
-      filters: { Markdown: ["md"] }, saveLabel: "Export", title: "Export this report" });
-    if (!target || target.scheme !== "file") return;
-    this.ask({ tab, kind: "export" }, { type: "chatdgc_export", conversation_id: conversation, path: target.fsPath,
-                                        format: "report", message_id: messageId });
+    // Written by the process into a private folder, then saved on the person's computer by this chat's page.
+    await this.exportTo(tab, `${name}.md`, { type: "chatdgc_export", conversation_id: conversation, format: "report", message_id: messageId });
+  }
+
+  /** An export (chatdgc_export) the process writes into a private folder, then this chat's page saves on the person's
+   *  computer (src/download.ts): a chat as Markdown or JSON, a research report. */
+  private async exportTo(tab: Tab, name: string, cmd: Record<string, unknown>): Promise<void> {
+    try {
+      await downloadMade(tab.panel.webview, name, async (target) => {
+        const ev = await this.made({ tab, kind: "export" }, { ...cmd, path: target });
+        return typeof ev?.path === "string" ? ev.path : target;
+      });
+    } catch (err: any) { this.post(tab, { type: "error", message: `Not exported: ${String(err?.message || err)}` }); }
   }
 
   private async menu(tab: Tab): Promise<void> {
@@ -3103,12 +3135,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       await this.moveToProject(conversation, String(tab.summary?.project || ""), tab);
     } else if (choice.id === "export") {
       const name = chatTitle(tab.summary?.title).replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "chat";
-      const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
-      const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, `${name}.md`),
-        filters: { Markdown: ["md"], JSON: ["json"] }, saveLabel: "Export", title: "Export this chat" });
-      if (!target || target.scheme !== "file") return;
-      this.ask({ tab, kind: "export" }, { type: "chatdgc_export", conversation_id: conversation, path: target.fsPath,
-                                          format: /\.json$/i.test(target.fsPath) ? "json" : "markdown" });
+      // Which kind of file (the save dialog's filter said it before); then the chat's page saves it on this computer.
+      const kind = await vscode.window.showQuickPick([{ label: "Markdown (.md)", format: "markdown", ext: "md" }, { label: "JSON (.json)", format: "json", ext: "json" }],
+                                                     { placeHolder: "Export this chat as" });
+      if (!kind) return;
+      await this.exportTo(tab, `${name}.${kind.ext}`, { type: "chatdgc_export", conversation_id: conversation, format: kind.format });
     } else if (choice.id === "archive") {
       this.ask({ tab, kind: "update" }, { type: "chatdgc_update", conversation_id: conversation, archived: true });
       tab.panel.dispose();

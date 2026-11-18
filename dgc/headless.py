@@ -294,6 +294,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "user_saved",
     "get_config", "status", "get_history", "get_outline", "list_monitors", "stop_monitor", "list_mcp_context",
     "list_agents", "get_image", "list_troupes", "stop_troupe", "get_agents_model",
+    # Save to Library on a picture: keeps into DGC's own Library, never the chat.
+    "library_picture",
     # The window a vLLM, SGLang or llama.cpp server was started with: asked once, then sent as it changes.
     "server_window",
     # Pip reports: a client asking for them, or dismissing a card, is not a user acting on the chat.
@@ -618,7 +620,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # (Remote-SSH) Chrome runs headless and use_your_browser_view {own: true, op frame|input|go|back|forward|reload|new_tab|
 # tab|close_tab|size|close, seq, events, tab, width, height} streams the person's own tab to the editor, for the editor's
 # own actor only.
-PIPS_API_VERSION = 107
+# API 108 (0.52, Save to Library on a picture in a Pip's chat): library_pip_message_image {pip_id, message_id, index,
+# keep?} (M, local only) answers {in_library, kept, title}: whether the picture is in the Library already (a generated one
+# is; one kept before is, found by its bytes) and, with keep, keeps it there kept by you (image_keep), never twice. A
+# Pip's keep_image also takes a picture in its Files or one it sent in its chat.
+PIPS_API_VERSION = 108
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}
@@ -2992,6 +2998,7 @@ class Backend:
                           # carries match (dgc/session_index).
                           "session_paging": True,
                           "session_attachments": 1,     # list/get_session_attachment: Work's attachments in the Library
+                          "library_picture": 1,         # library_picture: Save to Library on a picture in the chat (18 Nov)
                           # list_sessions {scope: "all"}: every project's sessions, each with its folder (12 Nov).
                           "session_scopes": True,
                           # Archive and Restore for Work sessions, and a new named one (13 Nov): archive_session,
@@ -3688,7 +3695,9 @@ class Backend:
                             "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1,
                             "holder": 1, "folder": 1, "mentions": 1, "fallback": 1, "attachments": chat_attachments,
-                            "wakeups": 1},
+                            "wakeups": 1,
+                            # library_picture: chatdgc_library_picture, Save to Library on a chat's picture (18 Nov).
+                            "library_picture": 1},
                 # history: memory_history and memory_undo; learned: memory_watch, then memory_learned when a
                 # Work session's look back keeps something (dgc/memory_review.py).
                 "memory": {"version": 1, "history": 1, "learned": 1}, "voice": {"version": 1}}
@@ -8928,6 +8937,17 @@ class Backend:
             else:
                 self._request_image(image_request, cmd.get("ref"))
 
+        elif t == "library_picture":
+            # Save to Library on a picture in the chat (capability library_picture): answered by one library_picture
+            # event, off the command reader (a picture is read and hashed).
+            picture_request = cmd.get("request_id")
+            if not isinstance(picture_request, str) or not 1 <= len(picture_request) <= 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+            else:
+                threading.Thread(target=self._serve_library_picture, args=(picture_request, dict(cmd)),
+                                 name="dgc-library-picture", daemon=True).start()
+
         elif t in ("get_usage", "get_pip_usage_report"):
             usage_request = str(cmd.get("request_id") or "")
             usage_system = str(cmd.get("system") or "").strip()
@@ -10940,6 +10960,81 @@ class Backend:
         finally:
             with self.__dict__.setdefault("_image_lock", threading.Lock()):
                 self._image_requests = max(0, self.__dict__.get("_image_requests", 1) - 1)
+
+    def _library_picture_bytes(self, ref, path) -> tuple[bytes | None, str, str]:
+        """A picture of this chat for Save to Library: ``(bytes, name, reason)``. By ``ref``, one the session holds (a
+        picture you attached, or one a step showed or made), as get_image finds it; by ``path``, a picture in the project
+        (never a dot folder or a private file, as a deck's pictures)."""
+        import base64
+        from .image_views import REF_RE, resolve
+        if isinstance(ref, str) and ref:
+            if not REF_RE.match(ref):
+                return None, "", "invalid_ref"
+            session_file = getattr(self.agent, "session_file", None)
+            prompt = getattr(self, "_prompt_image_uris", {}).get(ref)
+            if prompt is not None and session_file == getattr(self, "_prompt_image_session", None):
+                return base64.b64decode(str(prompt[0]).split(",", 1)[1]), "", ""
+            record = self._current_image_record(ref)
+            if record is None or not session_file:
+                return None, "", "not_found"
+            data, reason, _path = resolve(session_file, record)
+            if data is None:
+                return None, "", {"too_large": "too_large", "not_found": "not_found", "changed": "not_found"}.get(reason, "unreadable")
+            return data, str(getattr(record, "name", "") or ""), ""
+        if isinstance(path, str) and path and len(path) <= 4096:
+            from types import SimpleNamespace
+            from .tools import _artifact_picture
+            try:
+                found = _artifact_picture(SimpleNamespace(project_root=Path(self.config.project_root)))(path)
+            except Exception:                     # noqa: BLE001 -- outside the project, private, not there
+                return None, "", "outside"
+            try:
+                if not found.is_file():
+                    return None, "", "not_found"
+                from .image_keep import MAX_BYTES
+                if found.stat().st_size > MAX_BYTES:
+                    return None, "", "too_large"
+                return found.read_bytes(), found.name, ""
+            except OSError:
+                return None, "", "unreadable"
+        return None, "", "invalid_ref"
+
+    def _serve_library_picture(self, request_id: str, cmd: dict) -> None:
+        """Answer one library_picture with exactly one event: whether the picture is in the Library and, with keep,
+        keep it there kept by you with this session (dgc/image_keep.py), never twice. No exception text is said."""
+        from . import image_keep
+
+        def answer(**fields) -> None:
+            self.em.emit("library_picture", request_id=request_id, **{"in_library": False, "kept": False, **fields})
+        try:
+            data, name, reason = self._library_picture_bytes(cmd.get("ref"), cmd.get("path"))
+            if data is None:
+                answer(reason=reason)
+                return
+            if len(data) > image_keep.MAX_BYTES:
+                answer(reason="too_large")
+                return
+            try:
+                image_keep._mime(data)
+            except image_keep.KeepError:
+                answer(reason="not_image")
+                return
+            there = image_keep.held(data)
+            if there is not None or cmd.get("keep") is not True:
+                title = str((there or {}).get("title") or (there or {}).get("prompt") or "")[:200]
+                answer(in_library=there is not None, **({"title": title} if title else {}))
+                return
+            root = Path(self.config.project_root)
+            session = getattr(getattr(self.agent, "session_file", None), "stem", "") or ""
+            title = " ".join(str(cmd.get("title") or "").split())[:200] or Path(name).stem or "Picture"
+            kept = image_keep.keep(data, title=title, why="", source=str(cmd.get("path") or "work"), surface="work",
+                                   where={"project": str(root), **({"session": session} if session else {})}, by="you")
+            answer(in_library=True, kept=not kept.get("already"), title=kept["title"])
+        except Exception:
+            try:
+                answer(reason="unreadable")
+            except Exception:
+                pass
 
     def _history_mcp_apps(self, kept: list) -> list:
         """The plugin cards a saved tool result showed (MCP Apps), as ``mcp_app_card`` items without their page (the

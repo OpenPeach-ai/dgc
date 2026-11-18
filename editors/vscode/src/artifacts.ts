@@ -8,10 +8,9 @@
 import * as vscode from "vscode";
 import * as http from "http";
 import * as https from "https";
-import { createReadStream, statSync } from "fs";
 import { randomBytes } from "crypto";
-import { homedir } from "os";
 import { CANVAS_DOC_VIEW } from "./canvasDoc";
+import { downloadFile, type DownloadPage } from "./download";
 import { tabIcon } from "./tabIcon";
 
 export { ArtifactNotice, madeWords, ARTIFACT_NOTICED_KEY, type MadeNotice } from "./artifactNotice";
@@ -158,61 +157,9 @@ export async function forwardedArtifactPage(raw: string): Promise<vscode.Uri | n
   try { return await vscode.env.asExternalUri(vscode.Uri.parse(`http://127.0.0.1:${page.port}${rest}`, true)); } catch { return undefined; }
 }
 
-/** How long a download address answers with its file. */
-export const DOWNLOAD_MINUTES = 5;
-const downloads = new Map<string, { path: string; encoded: string; until: number }>();
-let downloadServer: Promise<number> | undefined;
-const goneWords = (name: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>This download link has ended</title></head><body style="font:15px/1.5 system-ui,sans-serif;max-width:34em;margin:15vh auto;padding:0 20px"><h1 style="font-size:20px">This download link has ended</h1><p>The link for \u201c${attr(name)}\u201d worked for ${DOWNLOAD_MINUTES} minutes. In DGC, choose Download again to get a new one.</p></body></html>`;
-/** The one listener every download address is on. It stays for as long as the window does, so an address that has ended
- *  is answered in words: a forwarded port with nothing listening behind it leaves the browser waiting for ever. */
-function downloadPort(): Promise<number> {
-  return downloadServer ??= new Promise<number>((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      const now = Date.now();
-      // An address that has ended is remembered for a day, to say so; then, and past a few hundred, it is forgotten.
-      for (const [key, entry] of downloads) if (entry.until + 24 * 3_600_000 <= now || downloads.size > 400) downloads.delete(key); else break;
-      const parts = /^\/([a-f0-9]{48})\/([^/?#]+)$/.exec(req.url || "");
-      const plain = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
-      if ((req.method !== "GET" && req.method !== "HEAD") || !parts) { res.writeHead(404, plain); res.end(); return; }
-      const entry = downloads.get(parts[1]);
-      if (!entry || entry.encoded !== parts[2]) { res.writeHead(404, plain); res.end(); return; }      // only with its token
-      let size = -1;
-      if (entry.until > now) { try { size = statSync(entry.path).size; } catch { size = -1; } }
-      if (size < 0) {
-        // Past its few minutes, or its file has gone: said in words, with what to do.
-        const page = goneWords(decodeURIComponent(entry.encoded).slice(0, 120));
-        res.writeHead(410, { ...plain, "Content-Type": "text/html; charset=utf-8", "Content-Length": String(Buffer.byteLength(page)) });
-        res.end(req.method === "HEAD" ? undefined : page);
-        return;
-      }
-      res.writeHead(200, { ...plain, "Content-Type": "application/octet-stream", "Content-Length": String(size),
-        "Content-Disposition": `attachment; filename*=UTF-8''${entry.encoded}` });
-      if (req.method === "HEAD") { res.end(); return; }
-      const stream = createReadStream(entry.path);
-      stream.on("error", () => res.destroy());
-      stream.pipe(res);
-    });
-    server.once("error", (error) => { downloadServer = undefined; reject(error); });
-    server.listen(0, "127.0.0.1", () => { server.unref(); resolve((server.address() as { port: number }).port); });
-  });
-}
-
-/** One file, to the browser on the person's own computer: a remote window's save dialog can only save on the remote
- *  machine. An address on the machine that made it, forwarded like any other, answers with an attachment. It holds only
- *  this file, behind a token nobody else has, for a few minutes: a second click in that time downloads it again (a
- *  browser may itself ask twice), and after it the address says in words that it has ended. It never just stops
- *  answering. */
-export async function downloadThroughBrowser(path: string, name: string, now: () => number = Date.now): Promise<boolean> {
-  const token = randomBytes(24).toString("hex");
-  const encoded = encodeURIComponent(name);
-  statSync(path);                                    // a file that isn't there fails here, where the caller says so
-  const port = await downloadPort();
-  downloads.set(token, { path, encoded, until: now() + DOWNLOAD_MINUTES * 60_000 });
-  const external = await vscode.env.asExternalUri(vscode.Uri.parse(`http://127.0.0.1:${port}/${token}/${encoded}`, true));
-  const opened = await vscode.env.openExternal(external);
-  if (!opened) downloads.delete(token);
-  return opened;
-}
+// Download a copy (src/download.ts, the one module): the file goes to the page that asked, which saves it on the
+// person's computer; one too large for a page goes to their browser. Kept here by name for the tests that knew it here.
+export { DOWNLOAD_MINUTES, downloadThroughBrowser } from "./download";
 
 /** The artifact panel's page. Its frames: a page artifact at its own address (frame-src), and DGC's own layout of a
  *  deck, a sheet or a dashboard as text the host fetched (srcdoc, sandboxed with no script). A page is served on this
@@ -228,7 +175,7 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 <div class="art-titles"><h1 class="art-title" id="art-title">Loading…</h1><p class="art-meta" id="art-meta"></p></div>
 <div class="art-actions" id="art-actions" role="toolbar" aria-label="Artifact">
 <button type="button" class="art-btn" id="art-versions" aria-haspopup="dialog" aria-expanded="false" title="Every version: who made it, when, and what changed" disabled><span class="codicon codicon-history" aria-hidden="true"></span><span class="art-btn-label">Versions</span></button>
-<div class="art-menu-wrap"><button type="button" class="art-btn" id="art-export" aria-haspopup="menu" aria-expanded="false" title="Download a copy" disabled><span class="codicon codicon-desktop-download" aria-hidden="true"></span><span class="art-btn-label">Download</span><span class="codicon codicon-chevron-down art-caret" aria-hidden="true"></span></button>
+<div class="art-menu-wrap"><button type="button" class="art-btn" id="art-export" aria-haspopup="menu" aria-expanded="false" title="Download a copy" disabled><span class="art-glyph" data-dgc-icon="download" data-dgc-icon-size="14" aria-hidden="true"></span><span class="art-btn-label">Download</span><span class="codicon codicon-chevron-down art-caret" aria-hidden="true"></span></button>
 <div class="art-menu dgc-popover" id="art-export-menu" role="menu" aria-label="Download as" hidden></div></div>
 <button type="button" class="art-btn" id="art-browser" title="Open it in your browser, at an address of its own" disabled><span class="codicon codicon-link-external" aria-hidden="true"></span><span class="art-btn-label">Open in browser</span></button>
 </div></header>
@@ -236,7 +183,7 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 <div class="art-banner" id="art-banner" role="alert" hidden></div>
 <main class="art-main" id="art-main"><p class="art-empty" id="art-loading">Loading…</p></main>
 <div class="sr-only" id="art-announce" aria-live="polite"></div>
-${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifact.js")}
+${s("media/shared/icons.js")}${s("media/shared/download.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifact.js")}
 </body></html>`;
 }
 
@@ -393,7 +340,8 @@ class ArtifactPanel {
       }
       case "export":
         if (view && typeof message.format === "string") {
-          void this.hub.exportArtifact(view, message.format, Number.isSafeInteger(message.version) ? message.version : undefined);
+          void this.hub.exportArtifact(view, message.format, Number.isSafeInteger(message.version) ? message.version : undefined,
+                                       (m) => { this.post(m as Record<string, unknown>); return true; });
         }
         return;
       case "browser": if (view) this.hub.openInBrowser(view); return;
@@ -682,22 +630,13 @@ export class Artifacts implements vscode.Disposable {
     }
   }
 
-  /** Download a copy. Here, a save dialog: where to keep it first, then the process makes it and it is copied there. In a
-   *  remote window that dialog could only save on the remote machine, so the person's own browser downloads it. */
-  async exportArtifact(view: Pick<ArtifactView, "id" | "title" | "exports" | "type">, format: string, version?: number): Promise<void> {
+  /** Download a copy (src/download.ts): the process makes it, and its bytes go to `page`, the page it was asked from,
+   *  which saves it on the person's computer (never a save dialog here: over a remote connection it would browse the
+   *  remote machine). Asked from a command, with no page, the artifact's own panel opens and saves it. */
+  async exportArtifact(view: Pick<ArtifactView, "id" | "title" | "exports" | "type">, format: string, version?: number, page?: DownloadPage): Promise<void> {
     const formats = view.exports?.length ? view.exports : this.offers()?.exports[view.type] ?? [];
     if (!formats.includes(format)) return;
     const name = fileName(view.title, format);
-    const remote = !!vscode.env?.remoteName;
-    let target: vscode.Uri | undefined;
-    if (!remote) {
-      const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
-      target = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Download",
-        title: `Download “${view.title}”${version ? ` (version ${version})` : ""} as ${FORMAT_LABELS[format] || format}`,
-      });
-      if (!target) return;
-    }
     const made = new Promise<string>((resolve, reject) => {
       this.ask({ type: "artifact_export", id: view.id, format, ...(version ? { version } : {}) }, {
         ok: (ev) => resolve(String(ev.path || "")),
@@ -707,26 +646,19 @@ export class Artifacts implements vscode.Disposable {
     try {
       const path = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Preparing “${view.title}”…` }, () => made);
       if (!path) throw new Error("DGC said nothing about where it made the file.");
-      if (!target) {
-        if (!await downloadThroughBrowser(path, name)) throw new Error("the browser wasn't opened");
-        void vscode.window.showInformationMessage(`Downloading “${name}” in your browser.`);
-        return;
-      }
-      await vscode.workspace.fs.copy(vscode.Uri.file(path), target, { overwrite: true });
-      const shown = target.path.split("/").pop() || name;
-      const choice = await vscode.window.showInformationMessage(`Saved “${shown}”.`, "Open", "Show in Folder");
-      if (choice === "Open") await this.openFile(target);
-      else if (choice === "Show in Folder") await vscode.commands.executeCommand("revealFileInOS", target);
+      if (!await downloadFile(page ?? this.ownPage(view), path, name)) throw new Error("the page that asked has closed");
     } catch (err: any) {
       void vscode.window.showWarningMessage(`“${view.title}” wasn't downloaded: ${String(err?.message || err)}`);
     }
   }
 
-  private async openFile(uri: vscode.Uri): Promise<void> {
-    try {
-      if (/\.(md|csv)$/i.test(uri.path)) { await vscode.window.showTextDocument(uri, { preview: false }); return; }
-      await vscode.env.openExternal(uri);
-    } catch { /* it's saved where they chose */ }
+  /** The artifact's own panel, opened if it isn't, as the page a download goes to (a command has no page of its own).
+   *  None for a document (it opens in the editor): the person's browser downloads it then (src/download.ts). */
+  private ownPage(view: Pick<ArtifactView, "id" | "title" | "type">): DownloadPage | undefined {
+    if (view.type === "doc") return undefined;
+    this.open(view.id, { type: view.type as ArtifactView["type"], title: view.title });
+    const panel = this.panels.get(view.id);
+    return panel ? (message) => { panel.post(message as Record<string, unknown>); return true; } : undefined;
   }
 
   /** Remove it from the artifacts, after asking: it goes to DGC's trash, so it can be put back. */
@@ -851,8 +783,8 @@ export class Artifacts implements vscode.Disposable {
     });
   }
 
-  /** A document's versions, from the canvas editor: restore one, or export it. */
-  async docVersions(id: string): Promise<void> {
+  /** A document's versions, from the canvas editor: restore one, or export it (to `page`, the editor's own). */
+  async docVersions(id: string, page?: DownloadPage): Promise<void> {
     const view = await new Promise<ArtifactView | undefined>((resolve) => {
       this.ask({ type: "artifact_get", id }, { ok: (ev) => resolve(artifactView(ev.artifact)), fail: (_r, m) => { void vscode.window.showWarningMessage(m); resolve(undefined); } });
     });
@@ -886,17 +818,17 @@ export class Artifacts implements vscode.Disposable {
       return;
     }
     const format = view.exports.find((f) => action === `Download as ${FORMAT_LABELS[f] || f}`);
-    if (format) await this.exportArtifact(view, format, n === view.version ? undefined : n);
+    if (format) await this.exportArtifact(view, format, n === view.version ? undefined : n, page);
   }
 
-  /** Export a document from the canvas editor: which format, then where. */
-  async docExport(id: string): Promise<void> {
+  /** Export a document from the canvas editor: which format; then the editor's page (`page`) saves it. */
+  async docExport(id: string, page?: DownloadPage): Promise<void> {
     const view = await new Promise<ArtifactView | undefined>((resolve) => {
       this.ask({ type: "artifact_get", id }, { ok: (ev) => resolve(artifactView(ev.artifact)), fail: (_r, m) => { void vscode.window.showWarningMessage(m); resolve(undefined); } });
     });
     if (!view) return;
     const pick = await vscode.window.showQuickPick(view.exports.map((f) => ({ label: FORMAT_LABELS[f] || f, format: f })), { placeHolder: `Download “${view.title}” as` });
-    if (pick) await this.exportArtifact(view, (pick as any).format);
+    if (pick) await this.exportArtifact(view, (pick as any).format, undefined, page);
   }
 
   title(id: string): string { return this.titles.get(id) || "this artifact"; }

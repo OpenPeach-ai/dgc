@@ -1106,7 +1106,7 @@
         if (!m.ok) say(no);
         else if (m.op === "duplicate") { if (tab) say("Duplicated. The copy is in Notes."); else { ui.open = m.id; focusNext = "doc"; say("Duplicated. This is the copy."); } }
         else if (m.op === "export") { if (m.saved) say("Exported. The file is not locked."); }
-        else if (m.op === "exportFolder") { if (m.saved) say(`${plural(m.saved, "note")} exported to the folder ${m.where}.${m.skipped ? ` ${plural(m.skipped, "locked note")} left out: unlock them to export them.` : ""}`); }
+        else if (m.op === "exportFolder") { if (m.saved) say(`${plural(m.saved, "note")} exported in ${m.where}.${m.skipped ? ` ${plural(m.skipped, "locked note")} left out: unlock them to export them.` : ""}`); }
         else if (m.op === "copy") say("Copied.");
         draw(); return;
       }

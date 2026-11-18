@@ -1,6 +1,7 @@
 import { PLUGIN_ID, pluginLogoData } from "./pluginLogos";
 import * as vscode from "vscode";
 import { randomBytes } from "crypto";
+import { downloadBytes } from "./download";
 
 /** The extension host's side of a plugin's card (MCP Apps, media/mcpApps.js): what a card asks of its server goes on
  *  to the backend that showed it (mcp_app_call / mcp_app_answer / mcp_app_context / mcp_app_get), and its answers come
@@ -41,7 +42,7 @@ export function downloadName(uri: unknown, fallback = "download"): string {
 const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 /** A card in an editor tab of its own: the page, the same bridge, the whole window. */
-export function cardTabDocument(card: any, scriptUri: string, styleUri: string, codiconUri: string, cspSource: string, nonce: string): string {
+export function cardTabDocument(card: any, scriptUri: string, styleUri: string, codiconUri: string, cspSource: string, nonce: string, downloadUri = ""): string {
   const { html: _page, ...shown } = card || {};
   const data = JSON.stringify(shown).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -50,7 +51,7 @@ export function cardTabDocument(card: any, scriptUri: string, styleUri: string, 
 <link rel="stylesheet" href="${attr(codiconUri)}"><link rel="stylesheet" href="${attr(styleUri)}">
 <style>html,body{height:100%;margin:0;background:var(--vscode-editor-background);color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size)}#root{box-sizing:border-box;height:100%;padding:10px 14px 14px}</style>
 </head><body><div id="root"></div>
-<script nonce="${nonce}" src="${attr(scriptUri)}"></script>
+${downloadUri ? `<script nonce="${nonce}" src="${attr(downloadUri)}"></script>` : ""}<script nonce="${nonce}" src="${attr(scriptUri)}"></script>
 <script nonce="${nonce}">(() => {
   const vscode = acquireVsCodeApi();
   const card = ${data};
@@ -211,12 +212,10 @@ export class McpAppsHost implements vscode.Disposable {
         const bytes = typeof res.text === "string" ? Buffer.from(res.text, "utf8")
           : typeof res.blob === "string" && /^[A-Za-z0-9+/=\s]*$/.test(res.blob) ? Buffer.from(res.blob, "base64") : undefined;
         if (bytes && bytes.length <= MAX_DOWNLOAD_BYTES) {
-          const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
-          const name = downloadName(res.uri);
-          const target = await vscode.window.showSaveDialog({
-            title: `Save what ${plugin}'s card made`, saveLabel: "Save",
-            ...(folder ? { defaultUri: vscode.Uri.joinPath(folder, name) } : {}) });
-          if (target) { await vscode.workspace.fs.writeFile(target, bytes); ok = true; }
+          // What the card made goes to the page the card is on, which saves it on the person's own computer
+          // (src/download.ts): never this machine's save dialog, which over a remote connection is the remote's.
+          ok = await downloadBytes((message) => { post(message); return true; }, downloadName(res.uri), bytes,
+                                   typeof res.mimeType === "string" ? res.mimeType : "");
         }
       } else if (item?.type === "resource_link" && /^https:\/\//.test(String(item.uri || ""))) {
         const choice = await vscode.window.showWarningMessage(`${plugin}'s card wants to download ${String(item.name || item.uri).slice(0, 120)}.`,
@@ -240,7 +239,7 @@ export class McpAppsHost implements vscode.Disposable {
     });
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "media", name)).toString();
     panel.webview.html = cardTabDocument(card, asset("mcpApps.js"), asset("mcpApps.css"), asset("codicon.css"),
-                                         panel.webview.cspSource, randomBytes(16).toString("base64"));
+                                         panel.webview.cspSource, randomBytes(16).toString("base64"), asset("shared/download.js"));
     const post: Post = (message) => { void panel.webview.postMessage(message); };
     this.tabs.set(id, panel);
     panel.webview.onDidReceiveMessage((msg) => { if (msg?.type === "mcpApp") this.fromPage(msg, post, send); });

@@ -61,7 +61,7 @@ test("shown pictures in one turn form one viewer sequence and Open file dismisse
     assert.equal(await s.page.locator(".iv-pos").innerText(), "1 of 2");
     await s.page.getByRole("button", { name: "Next image", exact: true }).click();
     assert.equal(await s.page.locator("#iv-title").innerText(), "second.png");
-    await s.page.getByRole("button", { name: "Open file", exact: true }).click();
+    await s.page.getByRole("button", { name: "Open in editor", exact: true }).click();
     assert.equal(await s.page.locator("#image-viewer").count(), 0);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }

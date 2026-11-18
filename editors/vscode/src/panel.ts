@@ -5,7 +5,6 @@ import * as vscode from "vscode";
 import { createHash, randomBytes } from "crypto";
 import { realpath } from "fs/promises";
 import * as fs from "fs";
-import { homedir } from "os";
 import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { AttachMode, AttachedChatState, ChildExitInfo, DgcBackend, DgcEvent, MOVED_CAUSE, STOP_CAUSE } from "./backend";
@@ -24,6 +23,7 @@ import {
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { workspaceFile, workspaceImage } from "./navigation";
 import { FILE_ACTS, projectFileAct } from "./fileActs";
+import { downloadBytes } from "./download";
 import { GitRefs } from "./gitRefs";
 import { openCommit } from "./gitCommitDoc";
 import { McpBrowserRequest, editorIsRemote, handSignInBack, openMcpBrowser } from "./mcpAuth";
@@ -6799,6 +6799,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             say: (words) => this.post({ type: "fileSaid", words }),
             picture: (data) => this.post({ type: "fileCopy", data }),
             copyFolder: async () => "",
+            page: (m) => this.post(m),
           });
         } catch (err: any) { void vscode.window.showWarningMessage(`${target.split(/[\\/]/).pop()}: ${String(err?.message || err)}`); }
         break;
@@ -6838,6 +6839,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         be.send({ type: "get_image", request_id: requestId, ref });
         break;
       }
+      case "libraryPicture":
+        this.libraryPicture(msg);
+        break;
       case "openImage":
         await this.openImage(msg.ref);
         break;
@@ -6857,7 +6861,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "artifactExport":
         if (typeof msg.id === "string" && typeof msg.format === "string" && typeof msg.artifactType === "string") {
           void this.artifacts?.exportArtifact({ id: msg.id, title: String(msg.title || "artifact").slice(0, 200), type: msg.artifactType,
-            exports: Array.isArray(msg.exports) ? msg.exports.filter((f: unknown) => typeof f === "string") : [] }, msg.format);
+            exports: Array.isArray(msg.exports) ? msg.exports.filter((f: unknown) => typeof f === "string") : [] }, msg.format, undefined,
+            (m) => { this.post(m); return true; });       // (saved by this page, on the person's computer)
         }
         break;
       case "getSkill":
@@ -7251,10 +7256,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
   // ---- end 0.40 images ---------------------------------------------------------------------------
 
-  // A webview cannot write to disk, so saving an image the panel is showing has to come back
-  // here. The reader picks the destination: nothing is written anywhere without a dialog, and the
-  // bytes never leave the machine. Only the inline image types the panel renders are accepted, so
-  // a crafted `data:` URI cannot smuggle a script or an executable through the save dialog.
+  // Save to project…: a picture the panel shows, copied into the open project (the dialog is the choice: the place IS
+  // the project, on the machine DGC runs on). Any other save of a picture is a download to the person's own computer,
+  // which the page does itself (media/shared/download.js); one sent here goes back to it as a download. Only the inline
+  // image types the panel renders are accepted, so a crafted `data:` URI cannot smuggle a script or an executable.
   private async saveImage(name: string, data: string, project = false): Promise<void> {
     const match = /^data:image\/(png|jpeg|gif|webp|bmp);base64,([A-Za-z0-9+/=]+)$/.exec(data);
     if (!match) {
@@ -7266,23 +7271,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const stem = safe.replace(/\.[^.]*$/, "") || "image";
     // Save to project…: a picture DGC made lives in its own folder; this puts a copy in the open project, in assets/
     // unless the user picks another place (the dialog is the choice, as for any file they save).
+    if (!project) { await downloadBytes((m) => this.post(m), `${stem}.${ext}`, Buffer.from(match[2], "base64"), `image/${match[1]}`); return; }
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (project && !folder) {
+    if (!folder) {
       void vscode.window.showInformationMessage("Open a folder first: Save to project… copies the picture into it.");
       return;
     }
     const target = await vscode.window.showSaveDialog({
-      title: project ? "Save to project" : "Save image",
-      saveLabel: project ? "Save to project" : undefined,
-      filters: { Images: [ext] },
-      defaultUri: project && folder ? vscode.Uri.joinPath(folder, "assets", `${stem}.${ext}`)
-        : vscode.Uri.joinPath(folder ?? vscode.Uri.file(homedir()), `${stem}.${ext}`),
+      title: "Save to project", saveLabel: "Save to project", filters: { Images: [ext] },
+      defaultUri: vscode.Uri.joinPath(folder, "assets", `${stem}.${ext}`),
     });
     if (!target) return;                       // cancelled: say nothing, write nothing
     try {
       await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
       await vscode.workspace.fs.writeFile(target, Buffer.from(match[2], "base64"));
-      if (project) void vscode.window.showInformationMessage(`Saved ${vscode.workspace.asRelativePath(target, false)} in the project.`);
+      void vscode.window.showInformationMessage(`Saved ${vscode.workspace.asRelativePath(target, false)} in the project.`);
     } catch (err) {
       void vscode.window.showErrorMessage(`DGC could not save the image: ${String(err)}`);
     }
@@ -9658,6 +9661,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const commands = (this.lastReadyEvent?.capabilities as any)?.images?.commands;
     return Array.isArray(commands) && commands.includes("images_library");
   }
+  /** Save to Library on a picture in the chat (ready.capabilities.library_picture, 18 Nov). */
+  private libraryPictureCapable(): boolean { return (this.lastReadyEvent?.capabilities as any)?.library_picture === 1; }
+  /** Save to Library: a picture of the session by its ref, or a project picture by its path (as the session named it),
+   *  asked of DGC (dgc/image_keep.py) only when it says it keeps one; its answer is the page's `library_picture` event. */
+  private libraryPicture(msg: any): void {
+    if (!this.libraryPictureCapable()) return;
+    const requestId = String(msg?.requestId || "");
+    if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) return;
+    const ref = typeof msg.ref === "string" && DgcViewProvider.IMAGE_REF.test(msg.ref) ? msg.ref : "";
+    const path = !ref && typeof msg.path === "string" && msg.path.length <= 4096 ? msg.path : "";
+    if (!ref && !path) return;
+    this.backend?.send({ type: "library_picture", request_id: requestId, ...(ref ? { ref } : { path }), keep: msg.keep === true,
+                         ...(typeof msg.title === "string" && msg.title ? { title: msg.title.slice(0, 200) } : {}) });
+  }
 
   /** Asked once per backend, only of a CLI with image generation: it then tells this chat when its model made a
    *  picture (images_made), and an open Settings -> Images shows the spend and state. */
@@ -11436,6 +11453,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const iconsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "icons.js"));
     // The question card (propose_options), the same one a Pip's chat draws under its reply: after icons.js, before main.js.
     const askCardJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "askcard.js"));
+    // Download saves on the person's own computer, from the page (media/shared/download.js, window.DgcDownload); a picture
+    // opened large in the chat (media/shared/picturepop.js, window.DgcPicturePop): the same in ChatDGC and a Pip's chat.
+    const downloadJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "download.js"));
+    const picturePopJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "picturepop.js"));
     // A file's menu, the same on a Library row and on a file's card in a chat (media/shared/filemenu.js, window.DgcFileMenu).
     const fileMenuJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "filemenu.js"));
     // Inline touches in what you type and what you read: a colour's swatch, shortcuts as keys, commits as links, times in
@@ -11803,7 +11824,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div id="followup-hint" hidden></div>
 </footer>
-<script nonce="${nonce}" src="${menuJs}"></script><script nonce="${nonce}" src="${iconsJs}"></script><script nonce="${nonce}" src="${askCardJs}"></script><script nonce="${nonce}" src="${fileMenuJs}"></script><script nonce="${nonce}" src="${inlineJs}"></script>
+<script nonce="${nonce}" src="${menuJs}"></script><script nonce="${nonce}" src="${iconsJs}"></script><script nonce="${nonce}" src="${downloadJs}"></script><script nonce="${nonce}" src="${picturePopJs}"></script><script nonce="${nonce}" src="${askCardJs}"></script><script nonce="${nonce}" src="${fileMenuJs}"></script><script nonce="${nonce}" src="${inlineJs}"></script>
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>

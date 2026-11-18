@@ -13,6 +13,7 @@ import '../media/shared/dialog.css';
 import '../media/shared/portal.css';
 import './pipComputer.css';
 import '../media/shared/menu.js';
+import '../media/shared/download.js';   // window.DgcDownload: a file saved on the person's own computer, from this page
 import '../media/shared/icons.js';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
@@ -330,7 +331,7 @@ function filesMarkup(panel=false){
  // A copy under way: the file's name with "copying" (one command each, so no made-up progress bar).
  const copying=f.adding&&f.adding.folder===f.path?f.adding.names.map(name=>`<li class="pc-file pc-copying" role="status"><span class="pc-icon" aria-hidden="true">·</span><span class="pc-name">${esc(name)}</span><span class="pc-size">copying</span></li>`).join(''):'';
  const preview=!p?'<p class="pc-muted">Select a file to see it.</p>':p.text!=null?`<pre class="pc-text">${esc(p.text)}</pre>${p.truncated?'<p class="pc-muted">Showing the first 64 KB.</p>':''}`:p.data&&p.mime.startsWith('image/')?`<img class="pc-image" alt="${esc(p.name)}" src="${p.data}">`:`<p class="pc-muted">${p.too_large?'This file is over 2 MB, too large to show here.':'No preview for this kind of file.'}</p>`;
- return `<section class="${panel?'pc-panel pc-files pc-files-panel" id="pc-files-panel':'pc-pane pc-files'}" aria-label="Files"><div class="pc-bar"><nav class="pc-crumbs" aria-label="Folder">${crumbs.map((c,i)=>`<button type="button" class="pc-crumb" data-crumb="${i}">${esc(c)}</button>`).join('<span aria-hidden="true">/</span>')}</nav>${bigFiles()?`<button type="button" id="pc-add" class="dgc-btn small pc-add-big"${f.adding||f.saving||held?' disabled':''}${why}>${f.adding?'Adding…':'Add file…'}</button>`:`<label class="pc-add${held?' pc-add-off':''}"${why}><input type="file" id="pc-add-input" multiple hidden${held?' disabled':''}>Add files…</label>`}</div>${f.error?`<p class="pc-error" role="alert">${esc(f.error)}</p>`:''}<div class="pc-split"><ul class="pc-list" aria-label="Files in this folder">${copying}${rows||(copying?'':'<li class="pc-muted">Nothing here yet. Downloads from the browser land in Downloads.</li>')}</ul><div class="pc-preview">${p?`<div class="pc-bar"><strong>${esc(p.name)}</strong><span class="pc-muted">${size(p.bytes)}</span>${bigFiles()?`<button type="button" id="pc-save-as" class="dgc-btn small pc-save-big"${f.saving||f.adding?' disabled':''}>${f.saving===p.path?'Saving…':'Save to this computer…'}</button>`:`<button type="button" id="pc-save" class="pc-quiet"${p.data||p.text!=null&&!p.truncated?'':' disabled'}>Save to…</button>`}<button type="button" id="pc-remove" class="${bigFiles()?'dgc-btn small pc-remove-big':'pc-quiet'}"${held?' disabled':''}${why}>Remove</button></div>`:''}${preview}</div></div><p class="pc-muted">${size(f.total)} used. Only this computer's files: never your own.</p></section>`;
+ return `<section class="${panel?'pc-panel pc-files pc-files-panel" id="pc-files-panel':'pc-pane pc-files'}" aria-label="Files"><div class="pc-bar"><nav class="pc-crumbs" aria-label="Folder">${crumbs.map((c,i)=>`<button type="button" class="pc-crumb" data-crumb="${i}">${esc(c)}</button>`).join('<span aria-hidden="true">/</span>')}</nav>${bigFiles()?`<button type="button" id="pc-add" class="dgc-btn small pc-add-big"${f.adding||f.saving||held?' disabled':''}${why}>${f.adding?'Adding…':'Add file…'}</button>`:`<label class="pc-add${held?' pc-add-off':''}"${why}><input type="file" id="pc-add-input" multiple hidden${held?' disabled':''}>Add files…</label>`}</div>${f.error?`<p class="pc-error" role="alert">${esc(f.error)}</p>`:''}<div class="pc-split"><ul class="pc-list" aria-label="Files in this folder">${copying}${rows||(copying?'':'<li class="pc-muted">Nothing here yet. Downloads from the browser land in Downloads.</li>')}</ul><div class="pc-preview">${p?`<div class="pc-bar"><strong>${esc(p.name)}</strong><span class="pc-muted">${size(p.bytes)}</span>${bigFiles()?`<button type="button" id="pc-save-as" class="dgc-btn small pc-save-big"${f.saving||f.adding?' disabled':''}>${f.saving===p.path?'Downloading…':'Download'}</button>`:`<button type="button" id="pc-save" class="pc-quiet"${p.data||p.text!=null&&!p.truncated?'':' disabled'}>Download</button>`}<button type="button" id="pc-remove" class="${bigFiles()?'dgc-btn small pc-remove-big':'pc-quiet'}"${held?' disabled':''}${why}>Remove</button></div>`:''}${preview}</div></div><p class="pc-muted">${size(f.total)} used. Only this computer's files: never your own.</p></section>`;
 }
 function terminalMarkup(){
  const t=S.terminal;
@@ -911,8 +912,13 @@ document.addEventListener('click',event=>{
  else if(t.dataset.file!==undefined)void openFile(t.dataset.file);
  else if(t.dataset.crumb!==undefined){const i=Number(t.dataset.crumb);S.files.selected=null;S.files.preview=null;void loadFiles(S.files.path.split('/').filter(Boolean).slice(0,i).join('/'));}
  else if(t.id==='pc-add'&&!filesHeld()&&bigFiles()&&!S.files.adding&&!S.files.saving){S.files.adding={folder:S.files.path,names:[]};S.files.error='';render();vscode.postMessage({type:'pipComputerAddFiles',folder:S.files.path});}
- else if(t.id==='pc-save-as'&&bigFiles()&&S.files.preview&&!S.files.adding&&!S.files.saving){S.files.saving=S.files.preview.path;S.files.error='';S.notice='';render();vscode.postMessage({type:'pipComputerSaveAs',path:S.files.preview.path});}
- else if(t.id==='pc-save'&&S.files.preview)vscode.postMessage({type:'pipComputerSave',name:S.files.preview.name,data:S.files.preview.data||null,text:S.files.preview.data?null:S.files.preview.text});
+ else if(t.id==='pc-save-as'&&bigFiles()&&S.files.preview&&!S.files.adding&&!S.files.saving){S.files.saving=S.files.preview.path;S.files.error='';S.notice='';globalThis.DgcDownload?.ask(t);render();vscode.postMessage({type:'pipComputerSaveAs',path:S.files.preview.path});}
+ else if(t.id==='pc-save'&&S.files.preview){
+  // Download: saved on the person's own computer from this page (media/shared/download.js), from the bytes it read.
+  const p=S.files.preview,D=globalThis.DgcDownload;
+  if(D){const data=p.data||`data:text/plain;charset=utf-8,${encodeURIComponent(p.text??'')}`;D.here(t,{name:p.name,data,mime:p.mime||''});}
+  else vscode.postMessage({type:'pipComputerSave',name:p.name,data:p.data||null,text:p.data?null:p.text});
+ }
  else if(t.id==='pc-remove'&&S.files.preview&&!filesHeld()){const path=S.files.preview.path;void send('remove_pip_computer_file',{pip_id:S.pip.id,path}).then(()=>{S.files.selected=null;S.files.preview=null;return loadFiles();},error=>{S.files.error=errorText(error);render();});}
 });
 // What a press on the drawer does: a card's answer, its detail (the card opens it), Clear on an answered one, Collapse.
@@ -1038,8 +1044,8 @@ window.addEventListener('message',event=>{
   const say=()=>{if(errors.length)S.files.error=errors.join(' ');render();};
   // The list is read again first (a read clears the panel's message), then DGC's words for what it refused are shown.
   if(m.cancelled!==true&&S.pip&&S.connected)void loadFiles().then(say);else say();}
- else if(m.type==='pipComputerSavedAs'){S.files.saving='';if(m.ok===true)S.notice=`Saved to ${typeof m.name==='string'&&m.name?m.name.slice(0,255):'this computer'}.`;else if(m.cancelled!==true)S.files.error=typeof m.error==='string'&&m.error?m.error.slice(0,500):'Not saved.';render();}
- else if(m.type==='pipComputerSaved'){S.notice=m.ok?`Saved ${m.name}.`:m.error||'Not saved.';render();}
+ else if(m.type==='pipComputerSavedAs'){S.files.saving='';if(m.ok===true)S.notice=m.downloaded?`Downloaded ${typeof m.name==='string'&&m.name?m.name.slice(0,255):'the file'}.`:`Saved to ${typeof m.name==='string'&&m.name?m.name.slice(0,255):'this computer'}.`;else if(m.cancelled!==true)S.files.error=typeof m.error==='string'&&m.error?m.error.slice(0,500):'Not saved.';render();}
+ else if(m.type==='pipComputerSaved'){S.notice=m.ok?(m.downloaded?`Downloaded ${m.name}.`:`Saved ${m.name}.`):m.error||'Not saved.';render();}
 });
 setInterval(()=>broker.expire(Date.now()),5000);
 S.app=['browser','files','terminal',''].includes(vscode.getState()?.app)?vscode.getState().app:'';S.open=S.app?[S.app]:[];S.fit=vscode.getState()?.fit!==false;

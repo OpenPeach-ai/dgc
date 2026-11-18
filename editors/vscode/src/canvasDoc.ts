@@ -5,6 +5,7 @@
 // file is saved once you pause, like a doc.
 import * as vscode from "vscode";
 import { tabIcon } from "./tabIcon";
+import type { DownloadPage } from "./download";
 
 export const CANVAS_DOC_VIEW = "dgc.chatdgcCanvasDoc";
 const SAVE_AFTER_MS = 1200;
@@ -16,8 +17,8 @@ export interface CanvasDocHost {
   /** An artifact's document (dgc/artifact_service: its working file, `<store>/ar_…/work/…md`), which opens formatted
    *  too: its own versions, export and browser instead of a chat's Ask. */
   artifactOf?(path: string): { id: string; title: string } | undefined;
-  artifactVersions?(id: string): unknown;
-  artifactExport?(id: string): unknown;
+  artifactVersions?(id: string, page?: DownloadPage): unknown;
+  artifactExport?(id: string, page?: DownloadPage): unknown;
   artifactBrowser?(id: string): unknown;
   /** Ask about these lines of the canvas (1-based, inclusive), as the Markdown editor's Ask does. */
   canvasAskAbout(conversation: string, canvas: string, text: string, startLine: number, endLine: number): Promise<void>;
@@ -28,7 +29,8 @@ const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "
 
 export function canvasDocDocument(asset: (name: string) => string, cspSource: string, artifact = false): string {
   const b = (does: string, icon: string, label: string, extra = "") =>
-    `<button type="button" class="cv-btn" data-do="${does}" title="${attr(label)}" aria-label="${attr(label)}"${extra}><span class="codicon codicon-${icon}" aria-hidden="true"></span></button>`;
+    `<button type="button" class="cv-btn" data-do="${does}" title="${attr(label)}" aria-label="${attr(label)}"${extra}>${icon === "download"
+      ? '<span data-dgc-icon="download" aria-hidden="true"></span>' : `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`}</button>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/canvas.css"))}">
@@ -44,7 +46,7 @@ ${b("bullet", "list-unordered", "Bulleted list")}${b("ordered", "list-ordered", 
 ${b("table", "table", "Table")}${b("equation", "symbol-operator", "Equation (on an empty line, an equation of its own)")}
 <span class="cv-spacer"></span>
 ${artifact
-  ? `${b("versions", "history", "Versions: restore one, or export it")}${b("export", "desktop-download", "Export as Word, PDF or Markdown")}${b("browser", "link-external", "Open in browser")}${b("markdown", "markdown", "Open as Markdown")}`
+  ? `${b("versions", "history", "Versions: restore one, or export it")}${b("export", "download", "Export as Word, PDF or Markdown")}${b("browser", "link-external", "Open in browser")}${b("markdown", "markdown", "Open as Markdown")}`
   : `<button type="button" id="cv-ask" class="cv-ask" data-do="ask" title="Ask ChatDGC about the selection"><span class="codicon codicon-sparkle" aria-hidden="true"></span><span>Ask ChatDGC</span></button>
 ${b("shortcuts", "wand", "Shortcuts: suggest edits, length, reading level, polish")}${b("markdown", "markdown", "Open as Markdown")}`}
 </div>
@@ -58,7 +60,7 @@ ${b("shortcuts", "wand", "Shortcuts: suggest edits, length, reading level, polis
 <option value="">Align: none</option><option value="left">Align left</option><option value="center">Align center</option><option value="right">Align right</option></select>
 </div>
 <main class="cv-page"><div id="cv-editor" class="cv-editor"></div></main>
-<script src="${attr(asset("dist/canvas.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("dist/canvas.js"))}"></script></body></html>`;
 }
 
 /** The part of `before` that `after` changed: one range and its new text, so an edit doesn't replace the file. */
@@ -156,8 +158,9 @@ export class CanvasDocEditor implements vscode.CustomTextEditorProvider {
             // An artifact's document: what its panel's header does for every other kind.
             if (!artifact) return;
             if (document.isDirty) await document.save();
-            if (msg.type === "versions") await this.host.artifactVersions?.(artifact.id);
-            else if (msg.type === "export") await this.host.artifactExport?.(artifact.id);
+            // (A download is saved by this editor's own page, on the person's computer: src/download.ts.)
+            if (msg.type === "versions") await this.host.artifactVersions?.(artifact.id, panel.webview);
+            else if (msg.type === "export") await this.host.artifactExport?.(artifact.id, panel.webview);
             else await this.host.artifactBrowser?.(artifact.id);
             break;
           case "ask": {

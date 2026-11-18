@@ -90,7 +90,9 @@ const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" },
                        // A model's largest window for the Sub-agents page (0.52): asked only when ready.capabilities.model_window_at says so.
                        { method: "modelWindowAt", guard: "modelWindowOffered" },
                        { method: "sendHelperConnections", guard: "helperConnectionsOffered" },
-                       { method: "answerConnectionRoute", guard: "helperConnectionsOffered" }].map(g => g.method);
+                       { method: "answerConnectionRoute", guard: "helperConnectionsOffered" },
+                       // Save to Library on a picture (0.52): asked only when ready.capabilities.library_picture says so.
+                       { method: "libraryPicture", guard: "libraryPictureCapable" }].map(g => g.method);
 const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps: "mcpAppsSupported",
                               watchRouter: "routerCapable", watchImages: "imagesCapable",
                               imagesLibrary: "imagesLibraryCapable", routerThinking: "routerThinkingCapable",
@@ -101,7 +103,7 @@ const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps:
                               resetSessionAgentsModel: "agentsModelOffered",
                               sessionAttachments: "sessionAttachmentsCapable", sessionAttachment: "sessionAttachmentsCapable",
                               modelWindowAt: "modelWindowOffered", sendHelperConnections: "helperConnectionsOffered",
-                              answerConnectionRoute: "helperConnectionsOffered" };
+                              answerConnectionRoute: "helperConnectionsOffered", libraryPicture: "libraryPictureCapable" };
 
 /** Is this node inside a method with the given name? */
 function insideMethod(node, name) {
