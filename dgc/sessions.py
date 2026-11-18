@@ -743,7 +743,8 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None,
          workspace_identity: dict | None = None,
          mode: str | None = None, plan_return_mode: str | None = None,
-         prompt_cache: dict | None = None, goal_runs: list | None = None) -> bool:
+         prompt_cache: dict | None = None, goal_runs: list | None = None,
+         seeing: dict | None = None) -> bool:
     saved = False
     try:
         path = resolve_path(project_root, path)
@@ -847,6 +848,13 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
         clean_agents_fallback = _clean_agents_route(agents_fallback)
         if clean_agents_fallback:
             data["agents_fallback"] = clean_agents_fallback  # its own sub-agents fallback, likewise (0.52)
+        if seeing is not None:
+            # How this session sees when its model can't (dgc/seeing.py): a model's name and its connection's name
+            # and kind, never an address or a key.
+            from .seeing import clean_choice as _clean_seeing
+            clean_seeing = _clean_seeing(seeing)
+            if clean_seeing:
+                data["seeing"] = clean_seeing
         if images:
             # images: the viewed-image index, metadata only (the bytes live in <session>.images/).
             # A name is display text a page or tool chose, so it is redacted like any other.

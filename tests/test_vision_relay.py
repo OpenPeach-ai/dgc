@@ -316,7 +316,7 @@ class VisionRelayTests(unittest.TestCase):
         self.assertTrue(agent.run_turn("What is wrong with this?"))
         self.assertFalse(self.ui.named("tool_call"), "no card claims a look that never happened")
         infos = [call[1][0] for call in self.ui.named("info")]
-        self.assertTrue(any("txt-main cannot read images and no vision model is set up" in line
+        self.assertTrue(any("txt-main can't read images, and none of your connections has a model that can" in line
                             and "/subagent model NAME" in line for line in infos), infos)
         main = self.ollama.chats_for("txt-main")
         wire = json.dumps(main[0]["messages"])

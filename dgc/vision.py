@@ -7,7 +7,10 @@ model is configured, DGC now routes the looking to it:
   when its model has vision;
 * else a named agent definition (``~/.dgc/agents/*.md``, trusted ``.dgc/agents/*.md``) whose
   ``model`` has vision -- one named ``viewer`` first, then the others by name;
-* else, for a sub-agent whose own model cannot see, the chat's main model when it can.
+* else, for a sub-agent whose own model cannot see, the chat's main model when it can;
+* else a model that can see on any connection the user added (dgc/seeing.py): the one the session chose to look
+  for it, the one Settings chose, or, in auto mode, the best one there is. Otherwise the session's first picture
+  asks (``Agent._look_at_attachments``).
 
 A look is ONE request to that model: the image(s) plus a question, no tools, no checkout, no agent
 loop. The answer comes back as text the main model can act on:
@@ -42,9 +45,9 @@ DEFAULT_QUESTION = ("Describe this image precisely: transcribe all visible text,
                     "overlapping or inconsistent.")
 # What the user reads (an info line) and the model reads (a tool result / the note in place of an
 # attachment) when the chat's model cannot see and no vision model is configured.
-SETUP_HINT = ("To let DGC look at images for it, set a vision sub-agent model: "
-              "`/subagent model NAME` (a model whose capabilities include vision, such as "
-              "qwen3-vl:8b), or Settings ▸ Models ▸ Sub-agents in the editor.")
+SETUP_HINT = ("To let DGC look at images for it, add a connection with a model that can see and choose it in "
+              "Settings ▸ Models ▸ A model that can see, or set a vision sub-agent model: "
+              "`/subagent model NAME` (a model whose capabilities include vision, such as qwen3-vl:8b).")
 
 LOOK_SYSTEM = (
     "You are the eyes of a coding agent whose own model cannot see images. You receive one or more "
@@ -62,10 +65,12 @@ class VisionRoute:
 
     model: str
     base_url: str
-    origin: str                  # "sub-agent model", "agent viewer" or "main model"
+    origin: str                  # "sub-agent model", "agent viewer", "main model" or a connection's name
     adef: object = None          # the named AgentDef, or None
     effort: str = ""
-    kind: str = "subagent"       # "subagent" | "agent" | "main" | "pip" (a Pip's eyes, pip_eyes)
+    kind: str = "subagent"       # "subagent" | "agent" | "main" | "pip" (a Pip's eyes) | "connection" (seeing.py)
+    conn: object = field(default=None, repr=False, compare=False)   # the seeing.Connection a "connection" look uses
+    chosen: str = ""             # how a "connection" look was chosen: "session", "settings" or "auto"
 
     @property
     def label(self) -> str:
@@ -142,7 +147,16 @@ def _client_for(agent, kind: str, adef):
 
 
 def _route_client(agent, route: VisionRoute):
-    """The client for one look. A Pip's own eyes (pip_eyes) are a model on the Pip's own connection."""
+    """The client for one look. A Pip's own eyes (pip_eyes) are a model on the Pip's own connection; a model found on
+    one of the user's connections (seeing.py) is reached on that connection alone, with its own key."""
+    if route.kind == "connection":
+        conn = route.conn
+        if conn is None or not conn.ready():
+            raise RuntimeError(f"{route.origin} can't be reached now")
+        client = agent._new_client(conn.base_url, conn.api_key, route.model, api_mode=conn.api_mode or "auto",
+                                   source="subagent")
+        client._capability_overrides = dict(conn.provider_capabilities or {})   # the main host's word isn't this one's
+        return client
     if route.kind == "pip":
         config = agent.config
         return agent._new_client(str(config.base_url or ""), config.api_key, route.model,
@@ -214,10 +228,12 @@ def route_for(agent, *, probe: bool = True) -> VisionRoute | None:
     key = _cache_key(agent)
     now = time.monotonic()
     with cache.lock:
-        if cache.key == key and (not probe or cache.expires > now):
-            return cache.route
-        if not probe:
-            return None
+        hit = cache.key == key and (not probe or cache.expires > now)
+        cached = cache.route
+    if hit:
+        return cached or seeing_route(agent, probe=probe)
+    if not probe:
+        return seeing_route(agent, probe=False)
     route = _resolve(agent, getattr(agent, "cancelled", None))
     try:
         ttl = max(1.0, float(agent.config.get("capability_cache_ttl_s", 300) or 300))
@@ -227,6 +243,80 @@ def route_for(agent, *, probe: bool = True) -> VisionRoute | None:
         ttl = min(ttl, 60.0)        # a vision host that was down, or a model just pulled, recovers soon
     with cache.lock:
         cache.key, cache.expires, cache.route = key, time.monotonic() + ttl, route
+    return route or seeing_route(agent, probe=True)
+
+
+# ---- a model that can see on one of the user's connections (dgc/seeing.py) -----------------------------------------
+
+def connections(agent) -> list:
+    """Every connection this session can use to look: its own, the Sub-agents model, and each saved provider the
+    editor named (asked for its route only when a search reaches it). Never a subscription CLI."""
+    from . import seeing
+    config, client = agent.config, agent.client
+    main = seeing.main_connection(config, base_url=str(getattr(client, "base_url", "") or config.base_url or ""),
+                                  api_key=str(getattr(client, "api_key", None) or config.api_key or ""),
+                                  api_mode=str(config.get("api_mode", "auto") or "auto"),
+                                  model=str(getattr(client, "model", "") or config.model or ""))
+    out = [main] if main is not None else []
+    sub = seeing.subagent_connection(config, main)
+    if sub is not None:
+        out.append(sub)
+    top = agent._holding_agent() if hasattr(agent, "_holding_agent") else agent
+    route_of = getattr(top.ui, "connection_route", None)
+    named = agent._helper_connections() if hasattr(agent, "_helper_connections") else []
+    if named and callable(route_of):
+        out += seeing.provider_connections(named, route_of, skip_hosts=(seeing.host_of(main.base_url),) if main else ())
+    return out
+
+
+def session_choice(agent) -> dict:
+    """The session's own answer and Settings', the newer of the two (seeing.effective)."""
+    from . import seeing
+    top = agent._holding_agent() if hasattr(agent, "_holding_agent") else agent
+    own = top.__dict__.get("_seeing")
+    return seeing.effective(own, seeing.settings_choice(agent.config))
+
+
+def _auto(agent) -> bool:
+    """No one is asked: auto mode, or a run nobody can answer (`dgc -p`)."""
+    top = agent._holding_agent() if hasattr(agent, "_holding_agent") else agent
+    return getattr(top, "mode", "") == "auto" or getattr(top.ui, "non_interactive", False) is True
+
+
+def route_from(found, *, chosen: str) -> VisionRoute:
+    return VisionRoute(model=found.model, base_url=found.connection.base_url, origin=found.where,
+                       kind="connection", conn=found.connection, chosen=chosen)
+
+
+def seeing_route(agent, *, probe: bool = True) -> VisionRoute | None:
+    """The model on one of the user's connections that looks for this session: the one it (or Settings) chose, or in
+    auto mode the best one there is. ``probe=False`` answers only from what was found already."""
+    from . import seeing
+    top = agent._holding_agent() if hasattr(agent, "_holding_agent") else agent
+    if getattr(agent, "_seeing_own", False) or getattr(top, "_seeing_own", False):
+        return None                      # a Pip's run (or its helper's): its pin says how it sees (pip_eyes)
+    choice = session_choice(agent)
+    if choice["choice"] == "off":
+        return None
+    try:
+        conns = connections(agent)
+    except Exception:                                # noqa: BLE001 -- no connections: nothing to look with
+        return None
+    if choice["choice"] == "relay":
+        found = seeing.found_for(choice, conns)
+        if found is None:
+            return None
+        top = agent._holding_agent() if hasattr(agent, "_holding_agent") else agent
+        own = seeing.clean_choice(top.__dict__.get("_seeing"))
+        return route_from(found, chosen="session" if own == choice else "settings")
+    if not _auto(agent):
+        return None
+    if not probe:
+        return agent.__dict__.get("_seeing_auto")
+    found = seeing.find(conns, "main", str(getattr(agent.client, "model", "") or ""),
+                        cancel=getattr(agent, "cancelled", None))
+    route = route_from(found, chosen="auto") if found is not None else None
+    agent.__dict__["_seeing_auto"] = route
     return route
 
 
@@ -236,6 +326,9 @@ def forget_route(agent) -> None:
     if cache is not None:
         with cache.lock:
             cache.key, cache.expires, cache.route = (), 0.0, None
+    agent.__dict__.pop("_seeing_auto", None)
+    from . import seeing
+    seeing.forget()
 
 
 def bounded_question(text: str) -> str:
@@ -312,7 +405,17 @@ def look(agent, route: VisionRoute, images: list, question: str, *,
 def missing_notice(model: str, count: int) -> str:
     """The user's line when an attachment reaches a model that cannot see and nothing can look."""
     what = "the attached image" if count == 1 else f"the {count} attached images"
-    return f"{model} cannot read images and no vision model is set up, so no model saw {what}. {SETUP_HINT}"
+    return (f"{model} can't read images, and none of your connections has a model that can, so no model saw {what}. "
+            f"{SETUP_HINT}")
+
+
+def not_now_notice(count: int, *, settings: bool) -> str:
+    """The user's line when they chose that nothing looks (the session's Not now, or Settings')."""
+    what = "the picture" if count == 1 else f"the {count} pictures"
+    if settings:
+        return f"No model looked at {what}: Settings › Models › A model that can see is set to Work without seeing."
+    return (f"No model looked at {what}: you chose Not now for this session. Settings › Models › A model that can see "
+            "changes it.")
 
 
 def attachment_report(route: VisionRoute, model: str, count: int, ok: bool, answer: str) -> str:

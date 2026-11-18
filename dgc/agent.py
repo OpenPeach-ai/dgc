@@ -2859,17 +2859,50 @@ class Agent(GoalLifecycle):
     def _look_at_attachments(self, images: list, user_text: str) -> dict | None:
         """A prompt's attached images reach a model that cannot see: have the vision model look
         before the turn starts, under a view_image card that names it. Returns the record kept on
-        the prompt's message (``_dgc_vision``), or None when nothing looked. Without a vision model
-        the user is told how to get one; the request then says the image exists (today's path)."""
-        from . import vision
+        the prompt's message (``_dgc_vision``), or None when nothing looked.
+
+        Which model looks (dgc/vision.py, dgc/seeing.py): a configured one (the Sub-agents model, an
+        agent viewer), else the one this session or Settings chose, else, in auto mode, the best one
+        on the user's connections, said in one line. Otherwise the first picture of a session asks,
+        on Work's own question card: use that model to see, switch the session to it, or not now; the
+        answer is the session's from then on."""
+        from . import seeing, vision
         if not images or vision.client_sees_images(self.client):
             return None
         main = str(getattr(self.client, "model", "") or "this model")
         count = len(images)
         route = self._vision_route(probe=True)
-        if route is None:
-            self.ui.info(vision.missing_notice(main, count))
+        if route is None and getattr(self._holding_agent(), "_seeing_own", False):
+            self.ui.info(vision.missing_notice(main, count))    # a Pip's run: its pin chose how it sees (pip_eyes)
             return None
+        if route is None:
+            choice = vision.session_choice(self)
+            if choice["choice"] == "off":
+                own = seeing.clean_choice(self._holding_agent().__dict__.get("_seeing"))
+                self.ui.info(vision.not_now_notice(count, settings=own != choice))
+                return None
+            found = None
+            if self.depth == 0:
+                try:
+                    found = seeing.find(vision.connections(self), "main", main, cancel=self.cancelled)
+                except Exception:                  # noqa: BLE001 -- a search that fails finds nothing
+                    found = None
+            if found is None:
+                self.ui.info(vision.missing_notice(main, count))
+                return None
+            which = self._seeing_ask(main, found)
+            if which == "switch" and self._seeing_switch(found):
+                return None                        # the session's model sees now: the pixels go to it
+            if which == "off":
+                self._seeing = seeing.choice_for(None, "off")
+                self._persist()
+                self.ui.info(vision.not_now_notice(count, settings=False))
+                return None
+            if which != "relay":
+                return None                        # the card was closed: nothing looks, and the next picture asks again
+            self._seeing = seeing.choice_for(found, "relay")
+            self._persist()
+            route = vision.route_from(found, chosen="session")
         question = vision.bounded_question(self._safe_text(_trusted_intent_text(user_text)))
         call_id = f"vision-{uuid.uuid4().hex[:12]}"
         args = {"path": "attached image" if count == 1 else f"{count} attached images",
@@ -2882,8 +2915,55 @@ class Agent(GoalLifecycle):
         self.ui.tool_result("view_image", output, call_id)
         if not ok:
             return None
+        if route.kind == "connection" and route.chosen in ("auto", "settings"):
+            # Auto, but inspectable: which model looked, in one line.
+            self.ui.info(seeing.looked_line(route.model, count=count))
         return {"call_id": call_id, "model": route.model, "origin": route.origin, "images": count,
                 "question": question[:500], "text": answer, "output": output}
+
+    def _seeing_ask(self, main: str, found) -> str | None:
+        """Work's own question card for a picture its model can't see: "relay", "switch", "off", or None (closed)."""
+        from . import seeing
+        if self._non_interactive() or getattr(self, "_monitor_turn", False):
+            return None
+        ask_id = f"seeing-{uuid.uuid4().hex[:12]}"
+        self._ask_questions(ask_id, {"questions": [seeing.question(main, found)]}, self._secret_values())
+        record = (getattr(self, "_decision_records", {}) or {}).get(ask_id) or {}
+        if record:
+            # Kept with the prompt (run_turn), so a reopened session shows the card as it was answered.
+            self.__dict__["_seeing_asked"] = {**record, "call_id": ask_id}
+        if getattr(self, "_end_turn_after_batch", None) == "dismissed":
+            # Closing DGC's own card at the turn's start ends nothing: the turn goes on without the picture seen.
+            self._end_turn_after_batch = ""
+        return seeing.answer_of(record.get("questions") or [], record)
+
+    def _seeing_switch(self, found) -> bool:
+        """"Switch to <model>": this session runs on the model that can see, on its own connection, from now on. The
+        editor's host does it as its model menu would (set_model for the session); without one, a model on the
+        session's own connection is switched here."""
+        hook = getattr(self.ui, "_seeing_switch_hook", None)
+        conn = found.connection
+        if callable(hook):
+            try:
+                return bool(hook(found))
+            except Exception:                      # noqa: BLE001 -- not switched: the card's answer stays unmade
+                return False
+        if conn.key != "main":
+            return False
+        previous = str(self.config.model or "")
+        hold = getattr(self.config, "hold", None)
+        if callable(hold):
+            hold("model", found.model)
+        else:
+            self.config.data["model"] = found.model
+        self.refresh_client()
+        try:
+            self.window_after_switch(previous, scoped=True)
+        except Exception:                          # noqa: BLE001
+            pass
+        self._persist()
+        self.ui.info(f"Switched to {found.model}")
+        return True
 
     def _router_failure_text(self, error) -> str:
         """Why a DGC Router worker failed, in a few words for the task result (never a URL or a key)."""
@@ -5410,6 +5490,7 @@ class Agent(GoalLifecycle):
         self._active_mcp_tools: set[str] = set()
         self._mcp_offered: set[str] = set()      # MCP tools this chat has offered (_tool_schemas)
         self._cache_record = None                # the prompt cache's clock (dgc/cache_clock.py)
+        self._seeing = None                      # how this session sees when its model can't (dgc/seeing.py)
         self._mcp_query_text = ""
         self._draft_mcp_context: list[dict] = []
         self._pips_tools_loaded = False
@@ -7779,6 +7860,7 @@ class Agent(GoalLifecycle):
                         agents=self.subagents.saved_state(),
                         mode=self.mode, plan_return_mode=self.plan_return_mode,
                         prompt_cache=getattr(self, "_cache_record", None),
+                        seeing=self.__dict__.get("_seeing"),
                         expected_revision=self._session_revision,
                         expected_exists=self._session_exists,
                         redact_secrets=redact_secrets,
@@ -8209,6 +8291,8 @@ class Agent(GoalLifecycle):
             self._mcp_offered = set()
             from .cache_clock import clean as _clean_cache
             self._cache_record = _clean_cache(record.get("prompt_cache"))
+            from .seeing import clean_choice as _clean_seeing
+            self._seeing = _clean_seeing(record.get("seeing"))
             self._mcp_query_text = ""
             self._draft_mcp_context = []
             self._pips_tools_loaded = False
@@ -9164,8 +9248,12 @@ class Agent(GoalLifecycle):
                 # The prompt is saved before a vision model spends time looking at its images; the
                 # look's report then joins that same message (the pixels stay in the transcript).
                 seen = self._look_at_attachments(images, user_text)
+                asked = self.__dict__.pop("_seeing_asked", None)
+                if asked:
+                    prompt_message["_dgc_seeing_asked"] = asked     # DGC's own card for the picture (seeing.py)
                 if seen:
                     prompt_message["_dgc_vision"] = seen
+                if seen or asked:
                     self._save_turn_progress()
             effort_text = user_text
         # Pass the raw level; the client maps it to the right per-provider reasoning

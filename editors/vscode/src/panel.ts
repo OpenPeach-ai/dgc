@@ -5446,6 +5446,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    ...(Number((this.lastReadyEvent?.capabilities as any)?.subagent_thinking) >= 1 && this.subagentSettings ? { subagent_thinking: this.subagentSettings.thinking, subagent_thinking_settable: true } : {}),
                                    // Nor this: image generation's commands (ready.capabilities.images); without, no Images.
                                    images_capable: this.imagesCapable(),
+                                   // Nor this: Settings -> Models -> A model that can see (ready.capabilities.seeing).
+                                   seeing_capable: this.seeingCapable(),
                                    // Nor these: Dev Mode's table of limits (ready.capabilities.dev_limits; without it, no Dev
                                    // Mode page), its two settings, and whether its warning was already shown here.
                                    ...(this.devLimits().length ? { dev_limits_table: this.devLimits(),
@@ -9773,6 +9775,51 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                         "session_attachment" as any, 30000);
   }
 
+  /** The CLI takes Settings -> Models -> "A model that can see" (ready.capabilities.seeing, dgc/seeing.py). */
+  seeingCapable(): boolean { return (this.lastReadyEvent?.capabilities as any)?.seeing === 1; }
+
+  /** Settings -> Models -> "A model that can see": the models DGC finds that can see (a search over every connection
+   *  the user added; it asks this window for a saved provider's route as it reaches it), or the choice saved. A model
+   *  on a saved provider is copied for Pips too (as a Pip set to it is): a Pip runs with no window to ask. */
+  private async seeingSettingsCommand(msg: any): Promise<void> {
+    const token = String(msg?.token || "").slice(0, 64);
+    const reply = (fields: Record<string, unknown>) =>
+      this.settingsEditor?.webview.postMessage({ type: "seeingReply", token, ...fields });
+    if (!this.seeingCapable()) { reply({ ok: false, error: "Update the DGC CLI to choose a model that can see." }); return; }
+    const op = msg?.op === "set" ? "set" : "list";
+    const cmd: Record<string, unknown> = { type: "seeing", op, request_id: this.nextRequestId("seeing") };
+    if (op === "set") {
+      const choice = String(msg?.choice || "");
+      if (!["ask", "relay", "off"].includes(choice)) { reply({ ok: false, error: "That isn't a choice here." }); return; }
+      cmd.choice = choice;
+      if (choice === "relay") {
+        const c = msg?.connection || {};
+        if (typeof msg?.model !== "string" || !msg.model || msg.model.length > 256 || !["main", "subagent", "provider"].includes(c.kind)) {
+          reply({ ok: false, error: "Choose one of the models listed." }); return;
+        }
+        cmd.model = msg.model;
+        cmd.connection = { kind: c.kind, name: String(c.name || "").slice(0, 80), ...(c.kind === "provider" ? { id: String(c.id || "") } : {}) };
+      }
+    }
+    this.sendHelperConnections(this.ensureBackend());        // the search names every saved provider as it is now
+    try {
+      const ev: any = await this.ensureBackend().request(cmd as any, "seeing" as any, op === "list" ? 90000 : 15000);
+      let note = "";
+      const conn = (cmd.connection || {}) as any;
+      if (op === "set" && cmd.choice === "relay" && conn.kind === "provider"
+          && (this.lastReadyEvent?.capabilities as any)?.saved_model_providers === 1) {
+        try { await this.savePipProvider(String(conn.id), String(cmd.model)); }
+        catch { note = "Your Pips can't use it until you choose it for a Pip once."; }
+      }
+      reply({ ok: true, choice: ev.choice && typeof ev.choice === "object" ? ev.choice : { choice: "ask" },
+              models: Array.isArray(ev.models) ? ev.models.slice(0, 24) : [], ...(typeof ev.error === "string" ? { error: ev.error } : {}),
+              ...(note ? { note } : {}) });
+    } catch (err: any) {
+      const text = String(err?.message || "");
+      reply({ ok: false, error: /timed out|timeout/i.test(text) ? "DGC is still looking. Open Models again in a moment." : text || "DGC didn't answer." });
+    }
+  }
+
   /** Settings -> Models -> Images: one images_* command, checked here, answered to the page by its token with the
    *  status DGC sends back and what it said (the change in words, a workflow's mapping to confirm, a test's answers).
    *  A key goes to DGC in its own command (set_key) and never comes back. */
@@ -10491,6 +10538,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.settingsEditor?.webview.postMessage({ type: "signInReturned", ...answer });
     } else if (msg?.type === "routerCommand") {
       await this.routerSettingsCommand(msg);
+    } else if (msg?.type === "seeingCommand") {
+      await this.seeingSettingsCommand(msg);
     } else if (msg?.type === "imagesCommand") {
       await this.imagesSettingsCommand(msg);
     } else if (msg?.type === "imagesPickWorkflow") {

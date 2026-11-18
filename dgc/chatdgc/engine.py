@@ -387,6 +387,10 @@ class ChatEngine:
         self._thumbnailer = thumbnailer or _thumbnail
         from .eyes import Eyes
         self.eyes = Eyes(self)
+        # The user's saved connections, by name ([{id, name, host, kind}], the editor's list) and a route for one by its
+        # id: the Host sets both (dgc/seeing.py searches them for a model that can see). None: only DGC's own.
+        self.connections: Callable | None = None
+        self.connection_route: Callable | None = None
         self._temporary: dict[str, dict] = {}      # temporary chats: never written, gone with the process
         self._drafts: dict[str, dict] = {}         # new chats: written with their first message
         self._temporary_files: dict[tuple[str, str], tuple[bytes, str | None]] = {}   # a temporary chat's attachments
@@ -871,14 +875,21 @@ class ChatEngine:
         if thinking is not None:
             chat["thinking"] = thinking
         relay = None
-        if any(item["meta"]["kind"] == "image" for item in prepared) and not self._sees(chat, cancel, asking=True):
+        seeing_ask = None               # a model that can see, found for this picture: the reply is DGC's card
+        decided = self._seeing_answered(chat, answering)
+        if decided is None and any(item["meta"]["kind"] == "image" for item in prepared) \
+                and not self._sees(chat, cancel, asking=True):
             # Before anything is kept: a model that can't see would be sent words about a picture it never saw, so
-            # one that can looks first (eyes.py), or the user is told why it can't go.
+            # one that can looks first (eyes.py, seeing.py), the user is asked which, or told why it can't go.
             chat_model = chat.get("model") or self.config.model
             relay = self.eyes.route(chat_model, cancel)
+            off = False
             if relay is None:
-                raise ChatEngineError(f"{chat_model} can't see images, and no model that can is set up. Choose a model "
-                                      "that can see (or install one, such as qwen3-vl), or send this without the image.")
+                relay, seeing_ask, off = self._seeing_for(chat, chat_model, cancel)
+            if relay is None and seeing_ask is None and not off:
+                raise ChatEngineError(f"{shown_model(chat_model)} can't see images, and none of your connections has a "
+                                      "model that can. Choose a model that can see (or install one, such as qwen3-vl), "
+                                      "or send this without the image.")
         if not chat["messages"] and chat["title"] in ("New chat", "Incognito chat", "Temporary chat") and not chat.get("temporary"):
             chat["title"] = title_from(text or prepared[0]["meta"]["name"])
         for item in prepared:
@@ -910,7 +921,12 @@ class ChatEngine:
         reply_id = new_message_id()
         if on_start is not None:
             on_start(mine, reply_id)
-        if relay is not None:
+        if seeing_ask is not None:
+            return self._seeing_card(chat, reply_id, chat.get("model") or self.config.model, seeing_ask, on_question)
+        if decided is not None:
+            relay = self._seeing_apply(chat, decided, on_activity, cancel)
+            chat = self._save(chat)
+        if relay is not None and decided is None:
             if on_activity is not None:
                 on_activity("looking", relay["model"])
             pictures = [(attached.image_part(item["meta"], item["raw"])["image_url"]["url"], item["meta"]["name"])
@@ -1372,6 +1388,9 @@ class ChatEngine:
         if chat.get("temporary") or len(chat["messages"]) < 2:
             return None
         first, reply = chat["messages"][0], chat["messages"][1]
+        if any(isinstance(q, dict) and q.get("seeing") for q in reply.get("questions") or []):
+            # DGC's own card for a picture the chat's model couldn't see: the exchange is the reply after its answer.
+            reply = next((m for m in chat["messages"][3:] if m.get("role") == "assistant"), {})
         if first.get("role") != "user" or reply.get("role") != "assistant" or not reply.get("text"):
             return None
         if chat.get("title") != title_from(first.get("text", "")):
@@ -1435,6 +1454,112 @@ class ChatEngine:
             return self.store.get_file(chat["id"], attachment_id)
         except ChatStoreError:
             return None
+
+    # -- a model that can see, for a chat whose own model can't (seeing.py, shared with Work and Pips)
+
+    SEEING_PROMPT = "{answer}. Then answer my message with the picture, above."
+
+    def _seeing_for(self, chat: dict, chat_model: str, cancel=None):
+        """(a route that looks now, a Found to ask about, whether the user chose nothing looks) for a picture."""
+        from .. import seeing
+        choice = seeing.effective(chat.get("seeing"), seeing.settings_choice(self.config))
+        if choice["choice"] == "off":
+            return None, None, True
+        try:
+            conns = self.eyes.connections(chat)
+        except Exception:                          # noqa: BLE001 -- no connections: none searched
+            return None, None, False
+        if choice["choice"] == "relay":
+            found = seeing.found_for(choice, conns)
+            if found is not None and found.connection.ready():
+                return self.eyes.route_of(found), None, False
+        own = str(chat_model or "")
+        own = own.split(":", 2)[2] if own.startswith("provider:") and own.count(":") >= 2 else own
+        try:
+            found = seeing.find(conns, self.eyes.chat_key(chat), own, cancel=cancel)
+        except Exception:                          # noqa: BLE001 -- a search that fails finds nothing
+            found = None
+        return None, found, False
+
+    def _seeing_card(self, chat: dict, reply_id: str, chat_model: str, found, on_question) -> dict:
+        """DGC's own reply when the chat's model can't see the picture: one line, and the card with the choices (the
+        chat's own question card; a tap sends its words as the user's next message)."""
+        from .. import seeing
+        shown = shown_model(chat_model)
+        words = seeing.labels(shown, found.model)
+        switchable = found.tools is not False and found.connection.kind in ("main", "provider")
+        options = [words["relay"]] + ([words["switch"]] if switchable else []) + [words["off"]]
+        asked = seeing.question(shown, found, whose="this chat", lead=False)
+        text = seeing.line(shown)
+        card = {"at": len(text), "question": asked["question"][:MAX_QUESTION_CHARS], "options": options,
+                "prompt": self.SEEING_PROMPT, "seeing": {**found.record(), "tools": found.tools is not False}}
+        reply = {"id": reply_id, "role": "assistant", "text": text, "created_at": now(), "model": str(chat_model or ""),
+                 "finish": "stop", "questions": [card]}
+        chat["messages"].append(reply)
+        self._save(chat)
+        if on_question is not None:
+            on_question(card)
+        return reply
+
+    @staticmethod
+    def _seeing_answered(chat: dict, answering) -> tuple | None:
+        """(what DGC's card offered, "relay" | "switch" | "off", the card's index) when this message answers it."""
+        from .. import seeing
+        if not isinstance(answering, dict):
+            return None
+        index = next((i for i, m in enumerate(chat["messages"]) if m.get("id") == answering.get("message")), None)
+        if index is None:
+            return None
+        asked = chat["messages"][index].get("questions") or []
+        q = answering.get("question")
+        card = asked[q] if isinstance(q, int) and not isinstance(q, bool) and 0 <= q < len(asked) else None
+        if not isinstance(card, dict) or not isinstance(card.get("seeing"), dict):
+            return None
+        which = seeing.which_label(answering.get("choice"))
+        return (card["seeing"], which, index) if which else None
+
+    def _seeing_apply(self, chat: dict, decided: tuple, on_activity, cancel) -> dict | None:
+        """The user's answer to DGC's card: kept as the chat's, and for "use it to see" the model looks at the pictures
+        of the message the card was about. Returns the route that looked (so the chat's model reads its report)."""
+        from .. import seeing
+        info, which, index = decided
+        conns = self.eyes.connections(chat)
+        found = seeing.found_for({"choice": "relay", "model": info.get("model"), "connection": info.get("connection")},
+                                 conns)
+        if which == "off" or found is None:
+            chat["seeing"] = seeing.choice_for(None, "off")
+            return None
+        if which == "switch":
+            conn = found.connection
+            if conn.kind == "provider" and conn.ready():
+                with self._provider_routes_lock:
+                    self._provider_routes[conn.provider_id] = (time.monotonic() + 600, {
+                        "id": conn.provider_id, "base_url": conn.base_url, "api_key": conn.api_key,
+                        "api_mode": conn.api_mode or "auto"})
+                chat["model"] = f"provider:{conn.provider_id}:{found.model}"[:200]
+            else:
+                chat["model"] = found.model[:200]
+            chat.pop("seeing", None)
+            return None
+        chat["seeing"] = seeing.choice_for(found, "relay")
+        asking = chat["messages"][index - 1] if index > 0 and chat["messages"][index - 1].get("role") == "user" else None
+        pictures = []
+        for meta in (asking or {}).get("attachments") or []:
+            kept = self._file(chat, meta.get("id", "")) if meta.get("kind") == "image" else None
+            if kept is not None:
+                pictures.append((attached.image_part(meta, kept[0])["image_url"]["url"], meta.get("name", "image")))
+        if not pictures:
+            return None
+        route = self.eyes.route_of(found)
+        if on_activity is not None:
+            on_activity("looking", route["model"])
+        try:
+            seen = self.eyes.look(route, pictures, asking.get("text") or "", cancel)
+        except Exception as exc:                  # noqa: BLE001 -- said in the chat; the answer stays
+            raise ChatEngineError(f"{route['model']} couldn't look at the image: "
+                                  f"{' '.join(str(exc).split())[:300] or type(exc).__name__}") from exc
+        chat["messages"][index - 1] = {**asking, "vision": {"model": route["model"], "text": seen}}
+        return route
 
     def _sees(self, chat: dict, cancel=None, *, asking: bool = False) -> bool:
         """Whether the chat's model can see images. Only asked when it matters: about new images (``asking``) or

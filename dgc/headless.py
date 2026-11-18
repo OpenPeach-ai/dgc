@@ -687,7 +687,7 @@ _BUSY_MUTATIONS = {
 from .artifact_commands import CAPABILITY as _ARTIFACT_CAPABILITY     # noqa: E402
 
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
-    "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss", "watch_pip_runs",
+    "pips_enable", "seeing", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss", "watch_pip_runs",
     "watch_agent_reports", "watch_turn_files", "watch_session_owner", "watch_agent_runs", "watch_mcp_apps",
     "start_pip_fix", "undo_pip_fix", "list_pip_fixes", "undo_setting_change",
     "prompt", "start_goal", "resume_turn",
@@ -1366,6 +1366,25 @@ def _history_vision_items(seen) -> list:
              "summary": arg_summary("view_image", args)},
             {"type": "tool_result", "call_id": call_id, "name": "view_image", "output": output,
              "is_error": tool_output_is_error(output), "is_diff": is_diff, "diff": diff}]
+
+
+def _history_seeing_items(asked) -> list:
+    """DGC's own question card for a picture the session's model couldn't see (dgc/seeing.py, ``_dgc_seeing_asked`` on
+    the prompt's message), as it was drawn live: the step, its answer, and what it said."""
+    if not isinstance(asked, dict):
+        return []
+    call_id = str(asked.get("call_id") or "")[:64] or None
+    resolved = _options_resolved_item(asked, call_id)
+    if resolved is None:
+        return []
+    from .questions import format_result
+    output = format_result(resolved["questions"], {"outcome": resolved["outcome"], "answers": resolved.get("answers") or {}})
+    args = {"questions": resolved["questions"]}
+    return [{"type": "tool_call", "call_id": call_id, "name": "propose_options", "args": args,
+             "summary": arg_summary("propose_options", args)},
+            resolved,
+            {"type": "tool_result", "call_id": call_id, "name": "propose_options", "output": output[:4000],
+             "is_error": False, "is_diff": False, "diff": None}]
 
 
 _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
@@ -2917,6 +2936,7 @@ class Backend:
         self.ui._rule_hook = self._add_rule
         self.ui._steering_hook = self._steering_applied
         self.ui._pips_settings_hook = self._emit_config     # pips_settings (when asked for), then config
+        self.ui._seeing_switch_hook = self._seeing_switch    # "Switch to <model>" on the card for a picture (seeing.py)
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
         self._foreground_worker: threading.Thread | None = None
@@ -3205,6 +3225,8 @@ class Backend:
                           # set_helper_connections and connection_route_request (0.52): a helper on one of the
                           # user's saved connections, named in their own words; its key asked for when it starts.
                           "helper_connections": 1,
+                          # Settings -> Models -> "A model that can see" (seeing: list, set; dgc/seeing.py).
+                          "seeing": 1,
                           # save_model_provider is understood: a provider saved in Settings, kept in secrets.json for
                           # the Pips set to it, answered by model_provider_saved.
                           "saved_model_providers": 1,
@@ -6076,6 +6098,57 @@ class Backend:
                      settings_fallback_base_url=str(settings.get("subagent_fallback_base_url", "") or ""),
                      **_request_fields(request_id))
 
+    def _seeing_command(self, cmd: dict, request_id: str) -> None:
+        """Settings -> Models -> "A model that can see": the choice every chat starts from, and the models that can see
+        on the user's connections (a search, off the wire's thread: a saved provider's route is the editor's to give)."""
+        from . import seeing, vision
+        if cmd.get("op") == "set":
+            record = seeing.clean_choice({"choice": cmd.get("choice"), "model": cmd.get("model"),
+                                          "connection": cmd.get("connection"), "at": time.time()})
+            if record is None:
+                self.em.emit("command_rejected", command="seeing", reason="invalid_config_value",
+                             message="Choose Ask when needed, a model that can see, or Work without seeing.",
+                             **_request_fields(request_id))
+                return
+            try:
+                from .config import Config
+                Config(project_root=self.config.project_root).set(seeing.KEY, record)
+            except Exception:                   # noqa: BLE001 -- its text could hold what was being saved
+                self.em.emit("command_rejected", command="seeing", reason="defaults_save_failed",
+                             message="DGC could not save how chats see.", **_request_fields(request_id))
+                return
+            self.config.data[seeing.KEY] = record
+            self.em.emit("seeing", choice=record, models=[], **_request_fields(request_id))
+            return
+
+        def search():
+            try:
+                model = str(getattr(self.agent.client, "model", "") or self.config.model or "")
+                found = seeing.every(vision.connections(self.agent), "main", model)
+                models = [{"model": f.model, "connection": f.connection.record(), "tools": f.tools is not False}
+                          for f in found]
+                self.em.emit("seeing", choice=seeing.settings_choice(self.config) or {"choice": "ask"}, models=models,
+                             **_request_fields(request_id))
+            except Exception as exc:            # noqa: BLE001 -- said to the page, never raised past it
+                self.em.emit("seeing", choice=seeing.settings_choice(self.config) or {"choice": "ask"}, models=[],
+                             error=f"DGC couldn't search your connections ({type(exc).__name__})",
+                             **_request_fields(request_id))
+        threading.Thread(target=search, daemon=True, name="dgc-seeing-list").start()
+
+    def _seeing_switch(self, found) -> bool:
+        """The card's "Switch to <model>" for a picture this session's model can't see: the session moves to the model
+        that can, on its own connection, exactly as the editor's model menu moves it (set_model for this session)."""
+        conn = found.connection
+        cmd = {"type": "set_model", "scope": "session", "model": found.model}
+        if conn.key != "main":
+            if not conn.ready():
+                return False
+            mode = conn.api_mode if conn.api_mode in ("auto", "ollama", "anthropic", "chat_completions", "responses") \
+                else "auto"
+            cmd.update(base_url=conn.base_url, api_key=conn.api_key, api_mode=mode)
+        self.dispatch(cmd)
+        return str(self.config.model or "") == found.model
+
     def _save_model_provider(self, cmd: dict, request_id: str) -> None:
         """Keep one provider saved in Settings for the Pips set to it, or forget it (``remove``). A fresh Config owns it,
         as with set_model_defaults: the running chat's route stays untouched. The answer never carries the key."""
@@ -7292,6 +7365,7 @@ class Backend:
                     items.append({"role": "time", "of": "prompt", "at": sent_at})
                 # A vision model looked at this prompt's attachments for a model that cannot see
                 # (dgc/vision.py): its view_image card comes back, as it was drawn live.
+                items.extend(_history_seeing_items(m.get("_dgc_seeing_asked")))
                 items.extend(_history_vision_items(m.get("_dgc_vision")))
             elif role == "assistant":
                 current = ensure_turn()
@@ -9461,6 +9535,8 @@ class Backend:
             self._model_window_at(cmd)
         elif t == "set_helper_connections":
             self.ui.helper_connections = helper_connections(cmd.get("connections"))
+        elif t == "seeing":
+            self._seeing_command(cmd, request_id)
         elif t == "connection_route_response":
             self.pending.resolve(cmd.get("id"), {k: cmd.get(k) for k in ("base_url", "api_mode", "api_key", "model", "error")})
         elif t == "set_think":
@@ -12149,6 +12225,11 @@ class Host:
                                             wakeups=True)
                 # Plugins' cards in a reply (MCP Apps), once ChatDGC's screens say they draw them.
                 self._chatdgc.engine.mcp_apps_watched = lambda: self.mcp_apps_watched("chat")
+                # A model that can see (dgc/seeing.py): the user's saved connections, as the editor named them to this
+                # process, and one's route asked of the editor when a search reaches it.
+                self._chatdgc.engine.connections = lambda: self._saved_connections()[0]
+                self._chatdgc.engine.connection_route = lambda ident: (self._saved_connections()[1] or (
+                    lambda _ident: {"error": "the editor isn't here"}))(ident)
                 # A reply starting or ending is news for the process's note: dgc ps and Settings -> Running
                 # sessions name the chats it is answering, and a backend with no window is kept for them.
                 self._chatdgc.on_turns_changed = self.announce_peers
@@ -12160,6 +12241,17 @@ class Host:
                 # A chat's lock that can't be made (Open here falls back to the notes) is said once, in serve.log.
                 self._chatdgc.log = getattr(board, "log", None) if board is not None else None
             return self._chatdgc
+
+    def _saved_connections(self):
+        """(the user's saved connections by name, a way to ask the editor for one's route): from the chat the editor
+        named them to (set_helper_connections), else none."""
+        chats = [getattr(self, "wire_default", None), self.default, *list(self.chats.values())]
+        for chat in chats:
+            ui = getattr(chat, "ui", None) if chat is not None else None
+            named = ui.__dict__.get("helper_connections") if ui is not None and hasattr(ui, "__dict__") else None
+            if isinstance(named, list) and named:
+                return list(named), getattr(ui, "connection_route", None)
+        return [], None
 
     def start(self) -> None:
         self.default.start()

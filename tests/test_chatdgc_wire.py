@@ -410,6 +410,41 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(last_user.get("vision"), {"model": "qwen3-vl:8b", "text": "A sign reading PIPS."},
                          "the screen hears what it saw (seen live: Seen by never appeared)")
 
+    def test_dgcs_card_for_a_picture_names_nothing_and_what_was_seen_reaches_the_screen(self):
+        # A chat whose model can't see gets DGC's own card (dgc/seeing.py); the chat isn't named after the card, and
+        # once the user picks "Use ... to see", the message with the picture is said again with what the model saw.
+        import base64
+        from dgc import seeing
+        uri = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64).decode()
+        chat = self.new()
+        found = seeing.Found(model="qwen3-vl:8b", connection=seeing.Connection(key="main", kind="main", name="this computer",
+                                                                           base_url="http://127.0.0.1:1"), tools=True)
+        self.model.script.append({"parts": ["It says PIPS."]})
+        with patch("dgc.vision.has_vision", return_value=False), \
+                patch.object(self.engine.eyes, "route", return_value=None), \
+                patch.object(self.engine, "_seeing_for", return_value=(None, found, False)):
+            self.send(chat, "What does it say?", attachments=[{"kind": "image", "data": uri}])
+            self.ended()
+        card = [f["message"] for f in self.wire.of("chatdgc_message") if f["message"]["role"] == "assistant"][-1]
+        self.assertEqual(card["text"], "**fixture can't see images.**")
+        self.assertEqual(card["questions"][0]["options"][0], "Use qwen3-vl:8b to see, keep fixture for the rest")
+        time.sleep(0.3)
+        self.assertFalse(self.model.named.is_set(), "a card for a picture names nothing")
+        with patch("dgc.vision.has_vision", return_value=False), \
+                patch.object(self.engine.eyes, "connections", return_value=[found.connection]), \
+                patch.object(self.engine.eyes, "look", return_value="A sign reading PIPS."):
+            self.service.dispatch({"type": "chatdgc_answer", "request_id": "a1", "conversation_id": chat,
+                                   "message_id": card["id"], "question": 0, "choice": card["questions"][0]["options"][0]})
+            self.ended("a1")
+        pictured = [f["message"] for f in self.wire.of("chatdgc_message")
+                    if f["message"]["role"] == "user" and f.get("request_id") == "a1" and f["message"].get("vision")]
+        self.assertEqual(pictured[-1]["vision"], {"model": "qwen3-vl:8b", "text": "A sign reading PIPS."})
+        self.assertEqual(pictured[-1]["text"], "What does it say?")
+        # Named once there is a real reply: from the message and that reply, never from the card.
+        self.assertTrue(self.model.named.wait(5), "named after the real reply")
+        self.wire.wait(lambda f: f["type"] == "chatdgc_changed" and isinstance(f.get("summary"), dict)
+                       and f["summary"].get("title") == "Named by the model")
+
     def test_an_image_the_chat_keeps_can_be_shown(self):
         import base64
         png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64

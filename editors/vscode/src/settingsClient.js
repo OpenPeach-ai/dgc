@@ -47,6 +47,7 @@ import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
 import { createModelBoxes, modelBoxMarkup } from './settingsModelBox.js';
 import { createRouter } from './settingsRouter.js';
 import { createImages } from './settingsImages.js';
+import { createSeeing } from './settingsSeeing.js';
 // The user's mods, listed as the chats' /mods lists them (window.DgcMods.listView: every word goes in as text).
 import '../media/mods.js';
 const vscode = acquireVsCodeApi();
@@ -185,6 +186,9 @@ ui.router = router;
 // Settings -> Models -> Images (settingsImages.js): its generators save at once, apart from Save all, as the Router's do.
 const images = createImages({ send, esc, switchHTML, ui, onPaint: () => keepPlace() });
 ui.images = images;
+// Settings -> Models -> A model that can see (settingsSeeing.js): one row, saved as it changes.
+const seeingRow = createSeeing({ send, esc, ui, onPaint: () => keepPlace() });
+ui.seeing = seeingRow;
 const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m', subagent_context_size: '', subagent_thinking: '', pips_model: '', wait_first_word: 'auto', wait_first_word_minutes: '', wait_between_words: '5' };
 // The pages one Save all covers, drawn by settingsFields.js: a config or a save's answer redraws the one that is open.
 const SAVED_PAGES = ['general', 'models', 'web', 'chatdgc', 'security', 'dev'];
@@ -255,6 +259,9 @@ function applyConfig(ev) {
     draft.images_capable = ev.images_capable === true;
     draft.videos_capable = ev.videos_capable === true;     // video models in + Add generator (ready.capabilities.videos)
     images.setCapability(draft);
+    // A model that can see (ready.capabilities.seeing; the extension adds it).
+    draft.seeing_capable = ev.seeing_capable === true;
+    seeingRow.setCapability(draft);
     // Dev Mode, from a DGC that has a table of capacity limits (ready.capabilities.dev_limits; the extension hands it
     // over as dev_limits_table). Without one there is no Dev Mode page, and its two settings are never sent.
     draft.dev_limits_table = devLimitRows(ev.dev_limits_table);
@@ -1542,6 +1549,7 @@ window.addEventListener('message', event => {
     const msg = event.data || {};
     if (router.receive(msg)) return;
     if (images.receive(msg)) return;
+    if (seeingRow.receive(msg)) return;
     if (msg.type === 'show') {
         navTo(msg.section, msg.range);
         // Asked for by name (a Pip's Connect card): the plugin directory, searching for it.

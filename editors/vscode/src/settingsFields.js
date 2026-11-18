@@ -438,9 +438,11 @@ export function renderFields(section, main, config, providers, ui) {
             : group("Pips", model("pips_model", "Model for Pips", c.pips_settable ? "Every Pip set to Default uses it." : old, /^router(:|$)/.test(pipsValue) ? "" : pipsValue), "", "models-pips");
         // Images (settingsImages.js): only from a CLI that makes them (ready.capabilities.images); an older one has none.
         const images = ui.images && ui.images.capable() ? ui.images.block() : "";
+        // A model that can see (settingsSeeing.js): for a chat whose own model can't see a picture.
+        const seeing = ui.seeing && ui.seeing.capable() ? ui.seeing.block() : "";
         return group("Fallback", model("fallback_model", "Model", "Tried when the main model fails.", c.fallback_model || "")
                 + more("fallback-host", fallbackHost ? `Another host · ${escapeHtml(hostName(fallbackHost))}` : "Another host", routeRows("fallback", ""), !!fallbackHost), "", "models-fallback")
-            + subagents + pips + images + (router ? router.routerBlock() : "");
+            + subagents + seeing + pips + images + (router ? router.routerBlock() : "");
     }
     function pipsRouterOptions(router, value, following) {
         const choices = pipChoices(router.status());
@@ -500,6 +502,8 @@ export function renderFields(section, main, config, providers, ui) {
         if (routerBlock && ui.router) ui.router.bind(routerBlock);
         const imagesBlock = main.querySelector("#models-images");
         if (imagesBlock && ui.images) { ui.images.bind(imagesBlock); ui.images.shown(); }
+        const seeingBlock = main.querySelector("#models-seeing");
+        if (seeingBlock && ui.seeing) { ui.seeing.bind(seeingBlock); ui.seeing.shown(); }
     }
     function renderSecurity(main) {
         const c = config;

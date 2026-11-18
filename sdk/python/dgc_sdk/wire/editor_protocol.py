@@ -1574,6 +1574,18 @@ COMMAND_FIELDS["connection_route_response"] = {
 }
 EVENT_FIELDS["connection_route_request"] = {"id": _S(), "connection": _S()}
 
+# ---- a model that can see, for every chat (0.52, dgc/seeing.py) -----------------------------------------------------
+# Settings -> Models -> "A model that can see": seeing {op: "list"} answers `seeing` {choice, models}: the choice every
+# chat starts from ({choice: "ask" | "relay" | "off", model?, connection?: {kind, id?, name}, at}) and every model that
+# can see on the user's connections ([{model, connection, tools}]), searched as a chat's card searches (its saved
+# providers' routes asked with connection_route_request). seeing {op: "set", choice, model?, connection?} saves it and
+# answers `seeing` with the new choice. Never an address or a key. Advertised as ready.capabilities.seeing = 1.
+SEEING_OPS = ("list", "set")
+COMMAND_FIELDS["seeing"] = {"op": _f("string", enum=SEEING_OPS), "choice": _f("string", required=False,
+                                                                              enum=("ask", "relay", "off")),
+                            "model": _S(False), "connection": _O(False), "request_id": _S(False)}
+EVENT_FIELDS["seeing"] = {"request_id": _S(False), "choice": _O(), "models": _A(), "error": _S(False)}
+
 # ---- ChatDGC: chats of their own, the same in every folder ----------------------------------------
 # The process's, never a session's: the router answers every chatdgc_* command itself and none of
 # their events carries the envelope's chat_id (that name is the session router's), so a conversation

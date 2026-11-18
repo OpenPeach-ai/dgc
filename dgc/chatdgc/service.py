@@ -2373,6 +2373,15 @@ class ChatService:
             if at and now_["messages"][at - 1].get("role") == "user":
                 asked = self._marked(now_, [now_["messages"][at - 1]])[0]
                 self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(asked), request_id=request_id)
+                # An answer to DGC's card for a picture the chat's model couldn't see: what the model that can see saw
+                # joined the message with the picture, two before; the screen hears that one again too.
+                answered = asked.get("answers") if isinstance(asked.get("answers"), dict) else None
+                card_at = next((i for i, m in enumerate(now_["messages"]) if answered and m.get("id") == answered.get("message")),
+                               None)
+                if card_at and now_["messages"][card_at - 1].get("role") == "user" and now_["messages"][card_at - 1].get("vision"):
+                    pictured = self._marked(now_, [now_["messages"][card_at - 1]])[0]
+                    self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(pictured),
+                              request_id=request_id)
             marked = self._marked(now_, [reply])[0]
             self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked), request_id=request_id)
             self._changed(conversation_id, request_id)
@@ -2380,7 +2389,9 @@ class ChatService:
             if reply.get("memory"):
                 self._memory_state()                  # Settings -> Memory, if it's open, shows what changed
                 self._history_changed()
-            if reply.get("finish") == "stop":
+            # (DGC's own card for a picture the chat's model can't see is no answer to name the chat by or follow up on.)
+            if reply.get("finish") == "stop" and not any(isinstance(q, dict) and q.get("seeing")
+                                                         for q in reply.get("questions") or []):
                 self._name_later(conversation_id)
                 self._followups_later(conversation_id, reply["id"])
             turn["look_back"] = True

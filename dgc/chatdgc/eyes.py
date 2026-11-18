@@ -4,12 +4,12 @@ The look is one request: the images and the user's message, no tools. What the v
 user's message (``vision``: which model looked, and what it saw), and the chat's own model reads that in place
 of the pictures, this turn and every later one. A model that can see gets the pictures themselves.
 
-Which model looks, first that can see:
-  1. the sub-agent route in Settings (its model, on its own host or the main one);
-  2. the main model in Settings, when the chat uses another;
-  3. a model installed on the same Ollama whose metadata says it sees (names that suggest vision are tried
-     first, and only a few are asked).
-The answer is cached for a few minutes, so a chat of pictures doesn't ask again for each one.
+Which model looks:
+  1. the sub-agent route in Settings (its model, on its own host or the main one), as it always has;
+  2. else a model that can see on one of the user's connections (dgc/seeing.py, shared with Work and Pips): the one
+     this chat or Settings chose, or, the first time, the one DGC found -- offered on a card with three choices
+     (engine.send makes the card; its answer is the chat's from then on).
+The sub-agent route's answer is cached for a few minutes, so a chat of pictures doesn't ask again for each one.
 """
 from __future__ import annotations
 
@@ -21,10 +21,8 @@ LOOK_SYSTEM = (
     "then describe them in detail: quote all visible text exactly, and give layout, colours, objects, people and "
     "anything else the assistant needs to answer without seeing them. Say when something is unreadable or you're "
     "unsure; never invent details.")
-MAX_PROBES = 6
 ROUTE_TTL_S = 300
 MAX_ANSWER_CHARS = 8000
-_VISION_NAMES = ("vl", "vision", "llava", "gemma3", "minicpm-v", "moondream", "pixtral", "llama4", "mistral-small3")
 
 
 class Eyes:
@@ -49,18 +47,57 @@ class Eyes:
             key = str(config.get("subagent_api_key", "") or "") or (config.api_key if same else "")
             yield {"model": sub, "base_url": sub_base, "api_key": key,
                    "api_mode": str(config.get("subagent_api_mode", "") or "") or mode, "origin": "sub-agent model"}
-        if config.model and config.model != chat_model:
-            yield {"model": config.model, "base_url": base, "api_key": config.api_key, "api_mode": mode,
-                   "origin": "main model"}
+
+    # -- a model that can see on one of the user's connections (dgc/seeing.py)
+
+    def chat_key(self, chat: dict) -> str:
+        model = str(chat.get("model") or "")
+        return f"provider:{model.split(':', 2)[1]}" if model.startswith("provider:") and model.count(":") >= 2 else "main"
+
+    def connections(self, chat: dict) -> list:
+        """DGC's own connection, the Sub-agents model, and the editor's saved providers (each asked for its route only
+        when the search reaches it; the chat's own provider from this turn's route)."""
+        from .. import seeing
+        engine, config = self.engine, self.engine.config
+        make = (lambda model: engine._client_factory(model)) if engine._client_factory is not None else None
+        main = seeing.main_connection(config)
+        out = []
+        if main is not None:
+            main.make = make
+            out.append(main)
+        sub = seeing.subagent_connection(config, main)
+        if sub is not None:
+            sub.make = make
+            out.append(sub)
+        turn = getattr(engine._provider_turn, "route", None)
+        named = []
         try:
-            installed = self.engine.client(chat_model).list_models()
-        except Exception:
-            installed = []
-        likely = sorted((m for m in installed if m != chat_model),
-                        key=lambda m: (not any(word in m.lower() for word in _VISION_NAMES), m))
-        for model in likely[:MAX_PROBES]:
-            yield {"model": model, "base_url": base, "api_key": config.api_key, "api_mode": mode,
-                   "origin": "installed model"}
+            named = list(engine.connections() or []) if callable(getattr(engine, "connections", None)) else []
+        except Exception:                          # noqa: BLE001 -- no list: no saved providers searched
+            named = []
+        route_of = getattr(engine, "connection_route", None)
+        own = self.chat_key(chat)
+        if isinstance(turn, dict) and own == f"provider:{turn.get('id')}":
+            name = next((str(c.get("name") or "") for c in named if isinstance(c, dict)
+                         and c.get("id") == turn.get("id")), "") or seeing.host_name(turn.get("base_url", ""))
+            out.append(seeing.Connection(key=own, kind="provider", name=name[:80], base_url=str(turn["base_url"]),
+                                         api_key=str(turn.get("api_key") or ""), api_mode=str(turn.get("api_mode") or "auto"),
+                                         make=make))
+            named = [c for c in named if not (isinstance(c, dict) and c.get("id") == turn.get("id"))]
+        if named and callable(route_of):
+            for conn in seeing.provider_connections(named, route_of,
+                                                    skip_hosts=(seeing.host_of(main.base_url),) if main else ()):
+                conn.make = make
+                out.append(conn)
+        return out
+
+    @staticmethod
+    def route_of(found) -> dict:
+        """A Found as the route dict a look takes."""
+        conn = found.connection
+        conn.ready()
+        return {"model": found.model, "base_url": conn.base_url, "api_key": conn.api_key,
+                "api_mode": conn.api_mode or "auto", "origin": conn.name}
 
     def route(self, chat_model: str, cancel=None) -> dict | None:
         """The first model that can see, for a chat whose own model can't (None: none can)."""

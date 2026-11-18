@@ -328,8 +328,7 @@ class EyesStoreTests(unittest.TestCase):
         pip = self.pip("glm-5.3:cloud")
         caps = {"glm-5.3:cloud": {"completion", "tools"}, "deepseek-v4.1-flash:cloud": {"completion", "tools", "vision"},
                 "qwen3-vl:8b": {"completion", "tools", "vision"}}
-        with patch("dgc.pip_models._catalog", return_value=sorted(caps)), patch.object(pip_eyes, "capabilities", side_effect=lambda c, m: caps.get(m)), \
-                patch.object(pip_eyes, "_ollama_state", return_value=(set(), {})):
+        with patch("dgc.pip_models._catalog", return_value=sorted(caps)), patch.object(pip_eyes, "capabilities", side_effect=lambda c, m: caps.get(m)):
             got = self.control({"type": "get_pip_eyes", "pip_id": pip["id"]})
             self.assertTrue(got["ok"], got.get("error"))
             self.assertEqual(got["result"]["eyes"], {"pip_id": pip["id"], "model": "glm-5.3:cloud", "sees": False,
@@ -344,8 +343,7 @@ class EyesStoreTests(unittest.TestCase):
         caps = {"glm-5.3:cloud": {"completion", "tools"}, "qwen3-vl:8b": {"completion", "tools", "vision"},
                 "qwen2.5vl:7b": {"completion", "vision"}, "deepseek-v4.1-flash:cloud": {"completion", "tools", "vision"},
                 "nomic-embed-text:latest": {"embedding"}}
-        with patch("dgc.pip_models._catalog", return_value=sorted(caps)), patch.object(pip_eyes, "capabilities", side_effect=lambda c, m: caps.get(m)), \
-                patch.object(pip_eyes, "_ollama_state", return_value=(set(), {"qwen3-vl:8b": 6, "qwen2.5vl:7b": 5})):
+        with patch("dgc.pip_models._catalog", return_value=sorted(caps)), patch.object(pip_eyes, "capabilities", side_effect=lambda c, m: caps.get(m)):
             self.assertEqual(pip_eyes.pick(self.cfg, "glm-5.3:cloud"), "deepseek-v4.1-flash:cloud")
             self.assertEqual(pip_eyes.pick(self.cfg, "qwen2.5:14b"), "qwen3-vl:8b", "local first, and it must use tools")
 
@@ -509,7 +507,8 @@ class WorkerTests(unittest.TestCase):
                 patch.object(LLMClient, "vision_supported", new=property(lambda self: False)), \
                 patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")):
             result = pips.execute_native(self.cfg, self.root, manifest, lambda e: None)
-        self.assertEqual(looked, [("deepseek-v4.1-flash:cloud", "pip", 1, True)], "the model that sees looked at the photo")
+        # On the Pip's own connection (the route its pin names: dgc/seeing.py found it there).
+        self.assertEqual(looked, [("deepseek-v4.1-flash:cloud", "connection", 1, True)], "the model that sees looked at the photo")
         self.assertIn("deepseek-v4.1-flash:cloud sees for you", seen[0])
         self.assertIn("A clinic bill for 1,200 rupees.", seen[0], "its report reaches the text-only model")
         self.assertEqual(result["text"], "It is a clinic bill for 1,200 rupees.")

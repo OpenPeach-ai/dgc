@@ -412,30 +412,114 @@ class ChatDGCTests(unittest.TestCase):
         import base64
         return "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 40).decode()
 
-    def test_a_model_that_cant_see_gets_an_installed_one_to_look_for_it(self):
+    def _seeing_setup(self, installed=("llama3:8b", "qwen3-vl:8b")):
+        from dgc import seeing
+        seeing.forget()
+        self.addCleanup(seeing.forget)
         self.addCleanup(setattr, FakeClient, "seeing", set())
         self.addCleanup(setattr, FakeClient, "installed", [])
         self.addCleanup(setattr, FakeClient, "looks", [])
-        FakeClient.seeing, FakeClient.installed, FakeClient.looks = {"qwen3-vl:8b"}, ["llama3:8b", "qwen3-vl:8b"], []
+        FakeClient.seeing, FakeClient.installed, FakeClient.looks = {"qwen3-vl:8b"}, list(installed), []
+
+    def _model_calls(self, model=None):
+        return [call for client in self.clients for call in client.calls
+                if (model is None or client.model == model) and call["messages"][0]["content"] != LOOK_SYSTEM]
+
+    def test_a_model_that_cant_see_asks_once_and_the_model_it_found_looks(self):
+        # His call (18 Nov): a chat whose model can't see finds one that can on the user's connections and asks, with
+        # three choices; the answer is the chat's from then on.
+        self._seeing_setup()
         chat = self.engine.open()
-        seen = []
+        picture = [{"kind": "image", "data": self._picture(), "name": "sign.png"}]
+        card_reply = self.engine.send(chat["id"], "What does it say?", attachments=picture)
+        self.assertEqual(card_reply["text"], "**deepseek-v4.1-flash:cloud can't see images.**")
+        asked = card_reply["questions"][0]
+        self.assertEqual(asked["options"], ["Use qwen3-vl:8b to see, keep deepseek-v4.1-flash:cloud for the rest",
+                                            "Switch to qwen3-vl:8b", "Not now"])
+        self.assertIn("qwen3-vl:8b on this computer can", asked["question"])
+        self.assertEqual(self._model_calls(), [], "no model was asked about a picture it can't see")
+        self.assertEqual(FakeClient.looks, [], "and nothing looked before the user chose")
+        self.assertEqual(len(self.store.get(chat["id"])["messages"]), 2, "the message and its picture are kept")
+        # Use it to see: it looks at the picture the card was about, then the chat's model answers from what it saw.
         self.script.append({"parts": ["It says PIPS 48 READY."]})
-        reply = self.engine.send(chat["id"], "What does it say?", attachments=[{"kind": "image", "data": self._picture(), "name": "sign.png"}],
-                                 on_activity=lambda *a: seen.append(a))
-        self.assertEqual(seen, [("looking", "qwen3-vl:8b")], "a likely name is asked first")
-        looked_model, shown = FakeClient.looks[0]
-        self.assertEqual(looked_model, "qwen3-vl:8b")
-        self.assertIn("What does it say?", shown[0]["text"])
-        self.assertEqual(shown[2]["type"], "image_url")
-        sent = self.clients[-1].calls[0]["messages"][1]["content"]
-        self.assertIsInstance(sent, str, "the chat's own model gets words, not pixels it can't read")
-        self.assertIn("qwen3-vl:8b looked at them for you and saw:\n<<<\nA white sign reading PIPS 48 READY.\n>>>", sent)
+        seen = []
+        reply = self.engine.answer(chat["id"], card_reply["id"], 0, asked["options"][0],
+                                   on_activity=lambda *a: seen.append(a))
+        self.assertEqual(seen, [("looking", "qwen3-vl:8b")])
+        self.assertEqual(FakeClient.looks[0][0], "qwen3-vl:8b")
+        self.assertIn("What does it say?", FakeClient.looks[0][1][0]["text"], "it looks with the message it came with")
         self.assertEqual(reply["text"], "It says PIPS 48 READY.")
-        kept = self.store.get(chat["id"])["messages"][0]
-        self.assertEqual(kept["vision"], {"model": "qwen3-vl:8b", "text": "A white sign reading PIPS 48 READY."})
-        self.script.append({"parts": ["Yes."]})
-        self.engine.send(chat["id"], "Is it a sign?")
-        self.assertIn("PIPS 48 READY", self.clients[-1].calls[0]["messages"][1]["content"], "and on every later turn")
+        kept = self.store.get(chat["id"])
+        self.assertEqual(kept["messages"][0]["vision"], {"model": "qwen3-vl:8b", "text": "A white sign reading PIPS 48 READY."})
+        self.assertEqual((kept["seeing"]["choice"], kept["seeing"]["model"]), ("relay", "qwen3-vl:8b"))
+        sent = self._model_calls("deepseek-v4.1-flash:cloud")[-1]["messages"]
+        self.assertIn("qwen3-vl:8b looked at them for you", json.dumps(sent))
+        # The next picture: no card, the same model looks.
+        self.script.append({"parts": ["A cat."]})
+        self.engine.send(chat["id"], "And this?", attachments=picture)
+        self.assertEqual(len(FakeClient.looks), 2)
+        self.assertFalse(self.store.get(chat["id"])["messages"][-1].get("questions"))
+
+    def test_switch_moves_the_chat_to_the_model_that_sees(self):
+        self._seeing_setup()
+        chat = self.engine.open()
+        card_reply = self.engine.send(chat["id"], "What does it say?",
+                                      attachments=[{"kind": "image", "data": self._picture(), "name": "sign.png"}])
+        self.script.append({"parts": ["PIPS 48 READY."]})
+        self.engine.answer(chat["id"], card_reply["id"], 0, "Switch to qwen3-vl:8b")
+        self.assertEqual(self.store.get(chat["id"])["model"], "qwen3-vl:8b")
+        self.assertEqual(FakeClient.looks, [], "it sees for itself: nobody looks for it")
+        sent = self._model_calls("qwen3-vl:8b")[-1]["messages"]
+        self.assertTrue(any(isinstance(m.get("content"), list) and any(p.get("type") == "image_url" for p in m["content"])
+                            for m in sent), "the picture goes to the model itself")
+
+    def test_not_now_is_the_chats_and_the_model_answers_without_seeing(self):
+        self._seeing_setup()
+        chat = self.engine.open()
+        picture = [{"kind": "image", "data": self._picture(), "name": "sign.png"}]
+        card_reply = self.engine.send(chat["id"], "What does it say?", attachments=picture)
+        self.script.append({"parts": ["I can't see it."]})
+        self.engine.answer(chat["id"], card_reply["id"], 0, "Not now")
+        self.assertEqual(FakeClient.looks, [])
+        self.assertEqual(self.store.get(chat["id"])["seeing"]["choice"], "off")
+        self.script.append({"parts": ["Still can't."]})
+        self.engine.send(chat["id"], "This one?", attachments=picture)
+        self.assertEqual(FakeClient.looks, [])
+        self.assertFalse(self.store.get(chat["id"])["messages"][-1].get("questions"), "not asked again in this chat")
+        self.assertIn("this model can't see it", json.dumps(self._model_calls()[-1]["messages"]))
+
+    def test_settings_choice_looks_without_a_card(self):
+        self._seeing_setup()
+        self.engine.config["seeing"] = {"choice": "relay", "model": "qwen3-vl:8b",
+                                        "connection": {"kind": "main", "name": "this computer"}, "at": 5}
+        chat = self.engine.open()
+        self.script.append({"parts": ["PIPS."]})
+        reply = self.engine.send(chat["id"], "What does it say?",
+                                 attachments=[{"kind": "image", "data": self._picture(), "name": "sign.png"}])
+        self.assertEqual(reply["text"], "PIPS.")
+        self.assertEqual(FakeClient.looks[0][0], "qwen3-vl:8b")
+
+    def test_a_model_on_a_saved_provider_is_found_through_the_editors_connections(self):
+        self._seeing_setup(installed=("llama3:8b",))
+        provider = "provider_" + "d" * 32
+        asked = []
+        self.engine.connections = lambda: [{"id": provider, "name": "Ollama Cloud", "host": "ollama.com", "kind": "api"}]
+
+        def route(ident):
+            asked.append(ident)
+            FakeClient.installed = ["qwen3-vl:235b-cloud"]       # what that connection lists
+            return {"base_url": "https://ollama.com", "api_mode": "ollama", "api_key": "k-cloud", "model": ""}
+        self.engine.connection_route = route
+        FakeClient.seeing = {"qwen3-vl:235b-cloud"}
+        chat = self.engine.open()
+        card_reply = self.engine.send(chat["id"], "What does it say?",
+                                      attachments=[{"kind": "image", "data": self._picture(), "name": "sign.png"}])
+        self.assertEqual(asked, [provider])
+        self.assertIn("qwen3-vl:235b-cloud on Ollama Cloud can", card_reply["questions"][0]["question"])
+        self.script.append({"parts": ["PIPS."]})
+        self.engine.answer(chat["id"], card_reply["id"], 0, "Switch to qwen3-vl:235b-cloud")
+        self.assertEqual(self.store.get(chat["id"])["model"], f"provider:{provider}:qwen3-vl:235b-cloud")
+        self.assertNotIn("k-cloud", json.dumps(self.store.get(chat["id"])), "a key is never chat data")
 
     def test_the_sub_agent_route_looks_first_and_a_failed_look_says_so(self):
         self.addCleanup(setattr, FakeClient, "seeing", set())

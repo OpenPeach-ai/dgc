@@ -1773,7 +1773,8 @@ def insert_reply(store, run, result, now):
         # buttons or with the card, never both.
         from .pip_questions import checked as checked_questions
         checked_questions(result["questions"])
-        if "choices" in result or "eyes" in result:
+        if "choices" in result or ("eyes" in result and not (isinstance(result["eyes"], dict)
+                                                             and result["eyes"].get("asked") is True)):
             raise RegistryError("invalid_reply", "A reply asks with its choices or with a question card, not both.")
     if "artifacts" in result:
         from .pip_library import valid_reply_artifacts
@@ -1799,9 +1800,12 @@ def insert_reply(store, run, result, now):
             raise RegistryError("invalid_reply", "This reply's goal update is invalid.")
     if "eyes" in result:
         # It couldn't see (pip_eyes): its choices are DGC's own card, answered by a tap.
-        from .pip_eyes import labels, validate_card
+        # (As a question card for a screen that draws one, API 106: DGC's own question, exactly.)
+        from .pip_eyes import card_labels, card_question, validate_card
         card = validate_card(result["eyes"])
-        if "choices" not in result or result["choices"] != list(labels(card["model"], card["vision_model"]).values()):
+        ok = (result.get("questions") == card_question(card) if card.get("asked")
+              else result.get("choices") == list(card_labels(card).values()))
+        if not ok:
             raise RegistryError("invalid_reply", "This reply's eyes card is invalid.")
     if "computer" in result:
         # A chat that used the Pip's computer: how many steps, and what it left waiting for the user.

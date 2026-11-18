@@ -92,7 +92,9 @@ const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" },
                        { method: "sendHelperConnections", guard: "helperConnectionsOffered" },
                        { method: "answerConnectionRoute", guard: "helperConnectionsOffered" },
                        // Save to Library on a picture (0.52): asked only when ready.capabilities.library_picture says so.
-                       { method: "libraryPicture", guard: "libraryPictureCapable" }].map(g => g.method);
+                       { method: "libraryPicture", guard: "libraryPictureCapable" },
+                       // Settings -> Models -> A model that can see (0.52): only when ready.capabilities.seeing says so.
+                       { method: "seeingSettingsCommand", guard: "seeingCapable" }].map(g => g.method);
 const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps: "mcpAppsSupported",
                               watchRouter: "routerCapable", watchImages: "imagesCapable",
                               imagesLibrary: "imagesLibraryCapable", routerThinking: "routerThinkingCapable",
@@ -103,7 +105,8 @@ const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps:
                               resetSessionAgentsModel: "agentsModelOffered",
                               sessionAttachments: "sessionAttachmentsCapable", sessionAttachment: "sessionAttachmentsCapable",
                               modelWindowAt: "modelWindowOffered", sendHelperConnections: "helperConnectionsOffered",
-                              answerConnectionRoute: "helperConnectionsOffered", libraryPicture: "libraryPictureCapable" };
+                              answerConnectionRoute: "helperConnectionsOffered", libraryPicture: "libraryPictureCapable",
+                              seeingSettingsCommand: "seeingCapable" };
 
 /** Is this node inside a method with the given name? */
 function insideMethod(node, name) {
