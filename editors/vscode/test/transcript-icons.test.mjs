@@ -50,7 +50,6 @@ const TOOL_ICONS = {
   view_image: "image",
   present_plan: "clipboard-list", ExitPlanMode: "clipboard-list", present_document: "file-text",
   propose_options: "circle-help", AskUserQuestion: "circle-help", task: "bot", Task: "bot",
-  todo: "list-todo", TodoWrite: "list-todo",
   skill: "sparkle", Skill: "sparkle", add_skill: "sparkle",
   notes: "notebook-pen", monitor: "activity", monitor_stop: "activity",
   artifact: "app-window", update_goal: "target",
@@ -96,6 +95,23 @@ test("no tool card is left showing one of the old text glyphs", () => {
   assert.deepEqual(errors, []);
 });
 
+// A plan update is the plan's own card in the turn (agent-todos.test.mjs), not a row: only a call that failed keeps a
+// row, to be inspected, and it wears the plan's mark.
+test("a plan update draws no tool row; a failed one keeps its row and the plan's mark", () => {
+  const { doc, event, errors } = panel();
+  start(event);
+  for (const [i, name] of ["todo", "TodoWrite"].entries()) {
+    event({ type: "tool_call", call_id: `p${i}`, name, args: { todos: [{ content: "Read it", status: "pending" }] }, summary: "" });
+    result(event, name, `p${i}`);
+    assert.equal(doc.querySelector(`.tool[data-call-id="p${i}"]`), null, `${name}: no row`);
+  }
+  assert.equal(doc.querySelectorAll("#log .todos-card").length, 1, "one card for the turn's plan");
+  event({ type: "tool_call", call_id: "bad", name: "todo", args: { todos: [] }, summary: "" });
+  event({ type: "tool_result", call_id: "bad", name: "todo", is_error: true, is_diff: false, diff: "", output: "error: todos must be an array" });
+  assert.equal(cardIcon(doc, "bad"), "list-todo");
+  assert.deepEqual(errors, []);
+});
+
 test("the group header wears the leading action of the sentence it prints", () => {
   // The three rows of the reference set, built from real events.
   const cases = [
@@ -107,7 +123,6 @@ test("the group header wears the leading action of the sentence it prints", () =
     // The lone-card refinement: five tools and nine CLI names live in the `other` bucket, whose
     // finished sentence can only say "Used 1 tool". A wrench on top of that told the reader
     // nothing at all — which is a user's complaint, exactly.
-    { steps: [["todo", "t1"]], icon: "list-todo", label: "Used 1 tool" },
     { steps: [["skill", "s1"]], icon: "sparkle", label: "Used 1 tool" },
     { steps: [["bash_output", "o1"]], icon: "square-terminal", label: "Used 1 tool" },
     { steps: [["code_intel", "i1"]], icon: "braces", label: "Mapped the project" },

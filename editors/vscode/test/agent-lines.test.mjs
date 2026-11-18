@@ -307,8 +307,10 @@ const BETWEEN = {
   "a monitor card": { lines: 1, events: [{ type: "monitor_event", id: "m1", description: "npm run dev", event_index: 1, lines: ["ready"],
     omitted_lines: 0, kind: "output", delivery: "inline", turn_id: "t1" }] },
   "a notice": { lines: 1, events: [{ type: "info", message: "↳ this project has no Git HEAD; sub-task writes use the shared checkout" }] },
-  "a plan update": { lines: 1, events: [{ type: "tool_call", call_id: "td1", name: "todo", args: { todos: [] }, summary: "" },
-    { type: "tool_result", call_id: "td1", name: "todo", output: "ok", is_error: false }] },
+  "a plan update": { lines: 1, events: [
+    { type: "tool_call", call_id: "td1", name: "todo", args: { todos: [{ content: "Review both", status: "in_progress" }] }, summary: "" },
+    { type: "todos", todos: [{ content: "Review both", status: "in_progress" }] },
+    { type: "tool_result", call_id: "td1", name: "todo", output: "todo list updated", is_error: false }] },
   "blank prose": { lines: 1, events: [{ type: "text_delta", text: "  \n" }, { type: "stream_end", message_id: "t1:1", phase: "commentary" }] },
 };
 for (const [what, { lines: count, events, group, steer }] of Object.entries(BETWEEN)) {

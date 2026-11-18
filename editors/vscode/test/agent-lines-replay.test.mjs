@@ -226,18 +226,24 @@ test("a reloaded agent that is still running reads 'running', never 'started wor
 const membership = (doc) => [...doc.querySelectorAll("#log .agent-line")].map((line) => line.dataset.agentIds.split(" ").sort().join(" "));
 
 test("exception S9: a plan update before a parallel batch moves, but the batch is one line in both", () => {
+  // A plan update is the turn's plan card (agent-todos.test.mjs), drawn when the backend takes the plan: live and
+  // reloaded, that is after the batch's spawns, so the card and the line now agree on their order.
+  const steps = { todos: [{ content: "Review both", status: "in_progress" }] };
   const a = live([open("t1"), task(1), task(2), { type: "info", message: "↯ running 2 isolated sub-tasks in parallel (max 4)" },
     started(1, { state: "queued", parallel: true }), started(2, { state: "queued", parallel: true }),
-    call("td1", "todo", { todos: [] }), result("td1", "todo", "ok"), updated(1), updated(2), ended(1), ended(2),
+    call("td1", "todo", steps), result("td1", "todo", "todo list updated"), updated(1), updated(2), ended(1), ended(2),
     taskResult(1), taskResult(2), ...say("Both done.", "t1:1", "answer"), close("t1", "t1:1")]);
-  const b = replayed([open("t1"), call("td1", "todo", { todos: [] }), task(1), task(2), result("td1", "todo", "ok"),
+  const b = replayed([open("t1"), call("td1", "todo", steps), task(1), task(2), result("td1", "todo", "todo list updated"),
     taskResult(1), taskResult(2), ...say("Both done.", "t1:1", "answer"), close("t1", "t1:1")], [record(1), record(2)]);
   assert.deepEqual(membership(a.doc), [`${sid(1)} ${sid(2)}`]);
   assert.deepEqual(membership(b.doc), membership(a.doc));
-  // A plan update alone reads "Used 1 tool" once finished (transcript-icons.test.mjs).
-  const plan = (doc) => turnsOf(doc)[0].findIndex((row) => row.startsWith("group: Used 1 tool"));
-  const line = (doc) => turnsOf(doc)[0].findIndex((row) => row.startsWith("line"));
-  assert.ok(plan(a.doc) > line(a.doc) && plan(b.doc) < line(b.doc), "the documented divergence: the plan group's side of the line");
+  const side = (doc) => {
+    const kids = [...doc.querySelector("#log .msg.dgc").children];
+    return Math.sign(kids.findIndex((n) => n.matches(".todos-card")) - kids.findIndex((n) => n.matches(".agent-line")));
+  };
+  assert.equal(a.doc.querySelectorAll("#log .todos-card").length, 1);
+  assert.equal(b.doc.querySelectorAll("#log .todos-card").length, 1);
+  assert.equal(side(a.doc), side(b.doc), "the plan's card is on the same side of the line, live and reloaded");
   assert.deepEqual([...a.errors, ...b.errors], []);
 });
 

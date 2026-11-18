@@ -1050,11 +1050,11 @@ if (process.argv.includes("--tasks")) {
       rowHeight: main.height, tasksHeight: tasks.height, expanded: !panel.hidden,
       panelAboveRow: panel.hidden || Math.round(panel.getBoundingClientRect().bottom) <= main.top + 1,
       count: document.getElementById("tasks-count").textContent,
-      summary: document.getElementById("tasks-text").textContent,
+      summary: document.querySelector('#tasks-list li.todo[data-status="in_progress"] .todo-label')?.textContent || "",
       blocked: document.getElementById("tasks-blocked").textContent,
       label: document.getElementById("tasks-main").getAttribute("aria-label"),
       status: document.getElementById("tasksbar").dataset.status,
-      inLog: !!log.querySelector("#tasks-list, .t"), logGrew: log.scrollHeight - before,
+      inLog: !!log.querySelector(".todos, li.todo"), logGrew: log.scrollHeight - before,
       rail: document.getElementById("composer-rail").className,
       composerVisible: cbox.bottom <= window.innerHeight,
     };
@@ -1071,7 +1071,7 @@ if (process.argv.includes("--tasks")) {
     return log.scrollTop;
   });
   await page.waitForTimeout(100);
-  await page.click("#tasks-toggle");
+  await page.click("#tasks-main");
   await page.waitForTimeout(250);
   const expanded = { ...(await probe(before)),
     logTopAfter: await page.evaluate(() => document.getElementById("log").scrollTop), logTopBefore: logTop };
@@ -1090,7 +1090,7 @@ if (process.argv.includes("--tasks")) {
   console.log("LONG " + JSON.stringify({ ...long, logTopBeforeExpanding: logTop }));
   await page.screenshot({ path: out.replace(/\.png$/, "-long.png"), fullPage: false });
   // An older CLI refuses Clear mid-turn: the reason sits on the row, in the summary's place.
-  await page.click("#tasks-toggle");
+  await page.click("#tasks-main");
   await page.click("#tasks-clear");
   await send({ type: "command_rejected", command: "clear_todos", reason: "turn_in_progress",
                message: "'clear_todos' is unavailable while a turn is running; cancel or wait" });
@@ -1102,7 +1102,7 @@ if (process.argv.includes("--tasks")) {
   await page.screenshot({ path: out.replace(/\.png$/, "-note.png"), fullPage: false });
   const ok = noted.visible && noted.rowHeight <= 28 && collapsed.order && collapsed.railOnPrompt && collapsed.belowLog && !collapsed.expanded
     && collapsed.rowHeight <= 33 && collapsed.tasksHeight <= 34 && !collapsed.inLog && collapsed.logGrew <= 0
-    && collapsed.count === "Tasks 2/5" && collapsed.status === "active" && collapsed.blocked === "1 blocked"
+    && collapsed.count === "2 of 5 done" && collapsed.status === "active" && collapsed.blocked === "1 blocked"
     && /has-tasks/.test(collapsed.rail) && collapsed.composerVisible
     && expanded.expanded && expanded.order && expanded.railOnPrompt && expanded.panelAboveRow
     && expanded.belowLog && expanded.composerVisible && !expanded.inLog

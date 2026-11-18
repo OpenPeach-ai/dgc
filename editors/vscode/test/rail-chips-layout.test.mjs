@@ -181,6 +181,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
             dot: chip.querySelector(".chip-dot") ? "dot" : "", icon: icon ? getComputedStyle(icon).color : "",
             err: getComputedStyle(document.body).getPropertyValue("--err-text").trim(),
             bg: getComputedStyle(chip).backgroundColor, word: need ? need.textContent : "", wordColor: need ? getComputedStyle(need).color : "",
+            mark: chip.querySelector(".todo-mark")?.dataset.mark || "",
             label: chip.getAttribute("aria-label") };
         };
         return { tasks: read("tasks"), monitors: read("monitors"), goal: read("goal"),
@@ -199,7 +200,8 @@ for (const theme of ["dark-modern", "light-modern"]) {
         assert.equal(c.dot, "", `${kind}: no dot`);
         assert.equal(c.border, g.goal.border, `${kind}: no outline, the same border as a chip that doesn't need you`);
         assert.equal(c.tone, kind === "tasks" ? "error" : "warn");
-        if (kind === "tasks") assert.equal(c.icon, c.wordColor, "blocked: the icon is red with the words, as the Tasks row was");
+        // The plan's pill keeps the mark of the step in progress (the reference's pill); the words say what is blocked.
+        if (kind === "tasks") assert.equal(c.mark, "doing", "the pill's mark is the step in progress's");
       }
       // At side-bar width the reason stays on screen: it takes the number's place before anything wraps.
       await page.setViewportSize({ width: 460, height: 820 });

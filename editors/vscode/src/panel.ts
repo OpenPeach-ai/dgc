@@ -11721,16 +11721,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files" title="Every file this session has changed, with its diff"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed in this session</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
       <button type="button" id="changes-review-button" class="rail-text-action" title="Open the list of changed files">Review</button>
     </section>
-    <section id="tasksbar" class="rail-item" aria-label="Session tasks" data-status="pending" hidden>
-      <div id="tasks-panel" class="tasks-panel" hidden><div id="tasks-list" role="list" aria-label="Checklist"></div></div>
-      <div class="rail-row">
-        <button type="button" id="tasks-main" class="rail-main" aria-expanded="false" aria-controls="tasks-panel" aria-label="Tasks" title="Show the checklist"><span class="tasks-icon codicon codicon-checklist rail-icon" aria-hidden="true"></span><span id="tasks-count">Tasks 0/0</span><span id="tasks-text"></span><span id="tasks-blocked" hidden></span></button>
+    <!-- Work's plan: what its pill (on the bar above the box) opens. Its header folds the steps; Clear empties the list. -->
+    <section id="tasksbar" class="rail-item todos" aria-label="Tasks" data-status="pending" hidden>
+      <div class="sr-only" role="progressbar" aria-label="Tasks progress" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></div>
+      <div class="todos-head">
+        <button type="button" id="tasks-main" class="todos-trigger" data-tray-focus aria-expanded="false" aria-controls="tasks-panel" aria-label="Tasks" title="Show the checklist"><span class="todos-words"><span class="todos-title">Tasks</span><span id="tasks-count" class="todos-sum">0 of 0 done</span><span id="tasks-blocked" class="todos-blocked" hidden></span></span><span class="todos-time"></span><span class="todos-chev codicon codicon-chevron-down" aria-hidden="true"></span></button>
         <span id="tasks-note" class="tasks-note" role="status" hidden></span>
-        <div class="goal-actions">
-          <button type="button" id="tasks-clear" class="rail-icon-button" title="Clear the checklist" aria-label="Clear the checklist"><span class="codicon codicon-trash" aria-hidden="true"></span></button>
-          <button type="button" id="tasks-toggle" class="rail-icon-button" aria-expanded="false" aria-controls="tasks-panel" title="Show the checklist" aria-label="Show the checklist"><span class="codicon codicon-chevron-up" aria-hidden="true"></span></button>
-        </div>
+        <button type="button" id="tasks-clear" class="rail-icon-button todos-clear" title="Clear the checklist" aria-label="Clear the checklist"><span class="codicon codicon-trash" aria-hidden="true"></span></button>
       </div>
+      <span class="todos-track" aria-hidden="true"><span class="todos-fill"></span></span>
+      <div id="tasks-panel" class="todos-body" hidden><p class="todos-why" hidden></p><ol id="tasks-list" class="todos-list" aria-label="Steps"></ol><span class="sr-only todos-say" aria-live="polite"></span></div>
+      <p class="todos-note" aria-live="polite"></p>
     </section>
     <section id="goalbar" class="rail-item" aria-label="Standing goal" hidden>
       <button type="button" id="goal-main" class="rail-main" aria-label="Expand and edit goal" title="Read and edit the standing objective"><span class="goal-icon codicon codicon-target rail-icon" aria-hidden="true"></span><span id="goal-status">Pursuing goal</span><span id="goal-text"></span><time id="goal-time">0:00</time></button>

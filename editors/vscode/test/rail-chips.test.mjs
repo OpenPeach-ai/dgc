@@ -74,7 +74,8 @@ test("one kind is one line on the bar; a second joins it as a pill, in a fixed o
   assert.equal(c.face("goal"), "Goal 1:12:00");
   assert.equal(c.face("troupe"), "Troupe 5/8");
   assert.equal(c.face("monitors"), "2 monitors");
-  assert.equal(c.face("tasks"), "Tasks 4/7");
+  assert.equal(c.face("tasks"), "Fix the save handler 4/7", "the step being worked on and n/m");
+  assert.equal(c.chip("tasks").querySelector(".todo-mark").dataset.mark, "doing", "with its mark");
   assert.equal(c.face("changes"), "6 files +214 −37");
   assert.ok(c.chip("troupe").querySelector(".chip-mark svg .tm-part"), "the troupe's own mark");
   assert.equal(c.chip("troupe").querySelector(".chip-mini > span").style.width, "63%");
@@ -133,7 +134,7 @@ test("one popover at a time; the checklist, Clear, the goal's buttons and Review
   c.chip("tasks").click();
   assert.equal(c.inPop("tasksbar"), true);
   assert.equal(c.$("tasks-panel").hidden, false, "the checklist comes open");
-  assert.equal(c.$("tasks-list").querySelectorAll(".t").length, 7);
+  assert.equal(c.$("tasks-list").querySelectorAll("li.todo").length, 7);
   c.chip("goal").click();
   assert.equal(c.inPop("tasksbar"), false, "opening another puts the first back");
   assert.equal(c.$("tasks-panel").hidden, true);
@@ -231,10 +232,10 @@ test("whatever needs you turns its chip amber and says why, to the eye and to a 
   for (const kind of ["goal", "troupe", "monitors", "tasks", "changes"]) assert.equal(c.chip(kind).hasAttribute("data-need"), false, kind);
   c.event({ type: "todos", todos: [...TODOS, { content: "Publish (needs your token)", status: "blocked" }] });
   assert.ok(c.chip("tasks").hasAttribute("data-need"));
-  assert.equal(c.face("tasks"), "Tasks 4/8 1 blocked");
+  assert.equal(c.face("tasks"), "Fix the save handler 4/8 1 blocked");
   assert.equal(c.chip("tasks").dataset.need, "error", "blocked is the Tasks row's red, as before the chip line");
   assert.equal(c.chip("tasks").querySelector(".chip-dot"), null, "no dot");
-  assert.match(c.chip("tasks").getAttribute("aria-label"), /1 blocked\. Needs you: 1 blocked$/);
+  assert.match(c.chip("tasks").getAttribute("aria-label"), /^Fix the save handler\. 4 of 8 tasks done\. Show tasks\. Needs you: 1 blocked$/);
 
   c.event(MONITORS({ wake_paused: true, pending_events: 3 }));
   assert.ok(c.chip("monitors").hasAttribute("data-need"), "events held for your next message");

@@ -83,9 +83,10 @@ test("webview shell pins the composer and gives scrolling exclusively to the tra
     "the composer footer must remain outside the transcript scrollport");
 });
 
-// The session checklist is one row in the composer rail, directly above the goal row. It is not a
-// card inside a turn: it updates in place across turns, restores on resume without inventing a
-// running turn, empties with the chat, and never moves a reader who has scrolled up.
+// The session's plan is one pill on the bar above the box (Work's tasks), opening its section; the rows of a plan are
+// not a card in the transcript unless a turn's own plan call drew one (agent-todos.test.mjs). The list updates in place
+// across turns, restores on resume without inventing a running turn, empties with the chat, and never moves a reader
+// who has scrolled up.
 test("the session checklist is a composer-rail row above the goal and updates in place across turns", () => {
   const { doc, send, errors } = makeDom();
   const bar = doc.getElementById("tasksbar"), log = doc.getElementById("log");
@@ -114,8 +115,8 @@ test("the session checklist is a composer-rail row above the goal and updates in
   assert.equal(rail.hidden, true, "the tasks alone are one pill on the bar, never a row above the box");
   assert.deepEqual([...doc.querySelectorAll("#rail-chips .rail-chip")].map((chip) => chip.dataset.kind), ["tasks"]);
   assert.equal(rail.classList.contains("has-tasks"), true);
-  assert.equal(count(), "Tasks 1/2");
-  assert.equal(log.querySelector("#tasks-list, .t"), null, "the checklist is not a card in the transcript");
+  assert.equal(count(), "1 of 2 done");
+  assert.equal(log.querySelector(".todos, li.todo"), null, "the session's list alone draws no card in the transcript");
   assert.equal(doc.querySelectorAll(".thinking:not(.done)").length, 0, "restoring tasks is read-only");
   event({ type: "turn_start", prompt: "Continue" });
   event({ type: "todos", todos: tasks });
@@ -124,8 +125,8 @@ test("the session checklist is a composer-rail row above the goal and updates in
   event({ type: "todos", todos: tasks.map(t => ({ ...t, status: "done" })) });
   event({ type: "turn_end", reason: "completed" });
   assert.equal(doc.querySelectorAll("#tasks-list").length, 1, "one checklist, however many turns updated it");
-  assert.equal(log.querySelector(".t"), null, "and still none in the transcript");
-  assert.equal(count(), "Tasks 2/2");
+  assert.equal(log.querySelector("li.todo"), null, "and still none in the transcript");
+  assert.equal(count(), "2 tasks done");
   assert.match(doc.getElementById("tasks-list").textContent, /Verify <script>/);
   assert.equal(bar.querySelector("script"), null, "task text is escaped");
   event({ type: "session", kind: "new", session_id: "next-chat" });
@@ -140,18 +141,18 @@ test("the session checklist is a composer-rail row above the goal and updates in
   event({ type: "session", kind: "resumed", session_id: "next-chat" });
   event({ type: "history", items: [{ role: "user", text: "Earlier" }], todos: tasks });
   assert.equal(bar.hidden, false);
-  assert.equal(count(), "Tasks 1/2");
+  assert.equal(count(), "1 of 2 done");
   assert.equal(doc.querySelectorAll(".thinking:not(.done)").length, 0);
   // A resumed session whose checklist was cleared (or never had one) removes the row too.
   event({ type: "session", kind: "resumed", session_id: "next-chat" });
   event({ type: "history", items: [], todos: [] });
   assert.equal(bar.hidden, true, "a snapshot with no tasks removes the row");
   assert.equal(doc.getElementById("tasks-list").children.length, 0);
-  assert.equal(count(), "Tasks 0/0");
+  assert.equal(count(), "0 of 0 done");
   assert.deepEqual(errors, []);
 });
 
-test("blocked tasks get their own glyph and do not count as done", () => {
+test("blocked tasks get their own mark and do not count as done", () => {
   const { doc, send, errors } = makeDom();
   send({ type: "event", event: { type: "todos", todos: [
     { content: "Read the config", status: "done" },
@@ -161,21 +162,20 @@ test("blocked tasks get their own glyph and do not count as done", () => {
     { content: "Nothing yet", status: "pending" },
     { content: "Hostile status", status: "constructor" },   // an inherited key is not a status
   ] } });
-  const rows = [...doc.querySelectorAll("#tasks-list .t")];
-  assert.deepEqual(rows.map(r => r.className), ["t done", "t block", "t doing", "t cancel", "t pend", "t pend"]);
-  assert.deepEqual(rows.map(r => r.querySelector(".ti").textContent), ["\u2713", "\u2298", "\u25B6", "\u2717", "\u25A1", "\u25A1"]);
-  assert.equal(rows[1].querySelector(".ti").getAttribute("aria-label"), "blocked");
-  assert.ok(rows.every(r => r.getAttribute("role") === "listitem"));
-  assert.equal(doc.getElementById("tasks-count").textContent, "Tasks 1/6", "blocked and in-progress items are still open");
+  const rows = [...doc.querySelectorAll("#tasks-list li.todo")];
+  assert.deepEqual(rows.map(r => r.dataset.status), ["done", "blocked", "in_progress", "cancelled", "pending", "pending"]);
+  assert.deepEqual(rows.map(r => r.querySelector(".todo-mark").dataset.mark), ["done", "blocked", "doing", "cancelled", "next", "later"]);
+  assert.equal(rows[1].getAttribute("aria-label"), "Wait for the API key, Blocked");
+  assert.equal(doc.getElementById("tasks-count").textContent, "1 of 6 done", "blocked and in-progress items are still open");
   assert.doesNotMatch(doc.getElementById("tasksbar").innerHTML, /undefined/);
   assert.deepEqual(errors, []);
 });
 
-test("the collapsed tasks row reads like the goal row: count, the step in progress, blocked, state colour", () => {
+test("the section's header says n of m done, the blocked steps in the error colour, and its state", () => {
   const { doc, send, errors } = makeDom();
   const event = data => send({ type: "event", event: data });
   const bar = doc.getElementById("tasksbar"), main = doc.getElementById("tasks-main");
-  const text = () => doc.getElementById("tasks-text").textContent;
+  const sum = () => doc.getElementById("tasks-count").textContent;
   const blocked = doc.getElementById("tasks-blocked");
   event({ type: "todos", todos: [
     { content: "Read the config", status: "done" },
@@ -184,81 +184,68 @@ test("the collapsed tasks row reads like the goal row: count, the step in progre
     { content: "Update the changelog", status: "pending" },
     { content: "Tag the release", status: "pending" },
   ] });
-  assert.equal(doc.getElementById("tasks-count").textContent, "Tasks 1/5");
-  assert.equal(text(), "Add a regression test for the bounds", "the in-progress step, on one line");
+  assert.equal(sum(), "1 of 5 done");
+  assert.equal(doc.querySelector('#tasks-list li.todo[data-status="in_progress"] .todo-label').textContent,
+    "Add a regression test for the bounds", "the step in progress, on one line");
   assert.equal(blocked.hidden, false);
   assert.equal(blocked.textContent, "1 blocked");
-  assert.equal(bar.dataset.status, "active", "in progress takes the accent, like an active goal");
-  assert.equal(main.getAttribute("aria-label"),
-    "Tasks, 1 of 5 done, in progress: Add a regression test for the bounds, 1 blocked");
-  assert.match(mainCss, /#tasks-text\s*\{[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
-    "a long step truncates on the row");
-  assert.match(mainCss, /#tasksbar\[data-status="active"\] \.tasks-icon\s*\{[^}]*--accent-text/);
-  assert.match(mainCss, /#tasksbar\[data-status="blocked"\] \.tasks-icon\s*\{[^}]*--err-text/);
-  assert.match(mainCss, /#tasksbar\[data-status="done"\] \.tasks-icon\s*\{[^}]*--faint/);
+  assert.equal(bar.dataset.status, "active");
+  assert.equal(main.getAttribute("aria-label"), "Tasks, 1 of 5 done, 1 blocked");
+  assert.match(mainCss, /\.todos-blocked\s*\{[^}]*color:\s*var\(--err-text\)/, "blocked in the panel's alert colour");
   event({ type: "todos", todos: [{ content: "A", status: "done" }, { content: "B", status: "pending" },
     { content: "C", status: "pending" }, { content: "D", status: "pending" }] });
-  assert.equal(text(), "3 pending");
+  assert.equal(sum(), "1 of 4 done");
   assert.equal(blocked.hidden, true);
   assert.equal(bar.dataset.status, "pending");
-  assert.equal(main.getAttribute("aria-label"), "Tasks, 1 of 4 done, 3 pending");
+  assert.equal(main.getAttribute("aria-label"), "Tasks, 1 of 4 done");
   event({ type: "todos", todos: [{ content: "A", status: "done" }, { content: "B", status: "blocked" }] });
-  assert.equal(text(), "");
   assert.equal(blocked.textContent, "1 blocked");
   assert.equal(bar.dataset.status, "blocked", "nothing moving and something blocked reads as the error state");
   event({ type: "todos", todos: [{ content: "A", status: "done" }, { content: "B", status: "done" }] });
-  assert.equal(text(), "all done");
+  assert.equal(sum(), "2 tasks done");
   assert.equal(bar.dataset.status, "done");
-  assert.equal(main.getAttribute("aria-label"), "Tasks, 2 of 2 done, all done");
+  assert.equal(main.getAttribute("aria-label"), "Tasks, 2 tasks done");
   // Cancelled is finished but not done: never "all done" beside a count that says otherwise.
   event({ type: "todos", todos: [{ content: "X", status: "cancelled" }, { content: "Y", status: "done" }] });
-  assert.equal(doc.getElementById("tasks-count").textContent, "Tasks 1/2");
-  assert.equal(text(), "1 cancelled");
+  assert.equal(sum(), "1 of 2 done");
   assert.equal(bar.dataset.status, "done", "nothing is left open");
-  assert.equal(main.getAttribute("aria-label"), "Tasks, 1 of 2 done, 1 cancelled");
-  event({ type: "todos", todos: [{ content: "X", status: "cancelled" }, { content: "Y", status: "pending" }] });
-  assert.equal(text(), "1 pending", "open work still leads");
+  assert.equal(main.getAttribute("aria-label"), "Tasks, 1 of 2 done");
   event({ type: "todos", todos: [{ content: "X", status: "cancelled" }, { content: "Y", status: "blocked" }] });
-  assert.equal(text(), "");
   assert.equal(main.getAttribute("aria-label"), "Tasks, 0 of 2 done, 1 blocked");
   assert.deepEqual(errors, []);
 });
 
-test("the tasks row collapses and expands like a disclosure, remembered per chat", () => {
+test("the tasks section folds and unfolds like a disclosure, remembered per chat", () => {
   const { doc, send, posted, savedState, errors } = makeDom();
   const event = data => send({ type: "event", event: data });
   const panel = doc.getElementById("tasks-panel"), main = doc.getElementById("tasks-main");
-  const toggle = doc.getElementById("tasks-toggle"), clear = doc.getElementById("tasks-clear");
-  const chevron = () => toggle.querySelector(".codicon").className;
+  const clear = doc.getElementById("tasks-clear");
   const tasks = [{ content: "Inspect", status: "done" }, { content: "Fix", status: "in_progress" }];
   event({ type: "ready", session_id: "chat-a", capabilities: {} });
   event({ type: "todos", todos: tasks });
-  // Keyboard: all three are real buttons in the tab order; Enter and Space activate them natively.
-  for (const button of [main, clear, toggle]) {
+  // Keyboard: both are real buttons in the tab order; Enter and Space activate them natively.
+  for (const button of [main, clear]) {
     assert.equal(button.tagName, "BUTTON");
     assert.equal(button.getAttribute("type"), "button");
     assert.equal(button.disabled, false);
     assert.equal(button.getAttribute("tabindex"), null);
   }
+  assert.equal(doc.getElementById("tasks-toggle"), null, "the header is the one toggle, its chevron its own");
   assert.equal(panel.hidden, true, "a chat starts collapsed");
   assert.equal(main.getAttribute("aria-expanded"), "false");
-  assert.equal(toggle.getAttribute("aria-expanded"), "false");
   assert.equal(main.getAttribute("aria-controls"), "tasks-panel");
-  assert.equal(chevron(), "codicon codicon-chevron-up");
-  assert.equal(toggle.getAttribute("aria-label"), "Show the checklist");
-  toggle.click();
-  assert.equal(panel.hidden, false, "the full list opens above the row");
-  assert.equal(panel.nextElementSibling.querySelector("#tasks-main"), main, "above, inside the same rail item");
-  assert.equal(main.getAttribute("aria-expanded"), "true");
-  assert.equal(toggle.getAttribute("aria-expanded"), "true");
-  assert.equal(chevron(), "codicon codicon-chevron-down");
-  assert.equal(toggle.getAttribute("aria-label"), "Hide the checklist");
-  assert.deepEqual(savedState().tasksOpen, ["chat-a"]);
-  assert.equal(doc.querySelectorAll("#tasks-list .t").length, 2);
-  assert.match(mainCss, /#tasks-list\s*\{[^}]*max-height:\s*min\(30vh, 200px\)[^}]*overflow-y:\s*auto/s,
-    "expanded, the list is a bounded scroller");
+  assert.equal(main.title, "Show the checklist");
   main.click();
-  assert.equal(panel.hidden, true, "clicking the row itself toggles too");
+  assert.equal(panel.hidden, false, "the list opens under the header and its bar");
+  assert.equal(main.closest(".todos-head").nextElementSibling.classList.contains("todos-track"), true);
+  assert.equal(panel.previousElementSibling.classList.contains("todos-track"), true, "inside the same section");
+  assert.equal(main.getAttribute("aria-expanded"), "true");
+  assert.equal(main.title, "Hide the checklist");
+  assert.deepEqual(savedState().tasksOpen, ["chat-a"]);
+  assert.equal(doc.querySelectorAll("#tasks-list li.todo").length, 2);
+  assert.match(mainCss, /#tasks-list\s*\{[^}]*max-height:[^}]*overflow-y:\s*auto/s, "a long list scrolls in its own bounds");
+  main.click();
+  assert.equal(panel.hidden, true);
   assert.deepEqual(savedState().tasksOpen, []);
   main.click();
   // Another chat has its own state, and a new chat starts collapsed.
@@ -321,14 +308,14 @@ test("a refused Clear says why beside the checklist, and the note never outlives
   assert.equal(note.hidden, false);
   assert.equal(note.textContent, message);
   assert.equal(note.getAttribute("role"), "status");
-  assert.equal(doc.getElementById("tasks-text").hidden, true, "the note takes the summary's place");
+  assert.equal(doc.getElementById("tasks-count").hidden, true, "the note takes the summary's place");
   assert.equal(doc.getElementById("tasksbar").hidden, false);
   assert.equal(button.getAttribute("aria-busy"), null, "Clear is usable again");
   assert.equal([...doc.querySelectorAll("#log .sys.err")].some(line => line.textContent.includes(message)), false,
     "not a red line in the transcript");
   event({ type: "todos", todos: [{ content: "Inspect", status: "done" }, { content: "Ship", status: "pending" }] });
   assert.equal(note.hidden, true, "a new list is never shown beside the old refusal");
-  assert.equal(doc.getElementById("tasks-text").hidden, false);
+  assert.equal(doc.getElementById("tasks-count").hidden, false);
   button.click();
   event({ type: "command_rejected", command: "clear_todos", reason: "turn_in_progress", message });
   event({ type: "todos", todos: [] });
@@ -1853,9 +1840,9 @@ test("a running tool group reads as a present-tense sentence built like the fini
   call("g1", "grep", "clamp");
   assert.equal(label(), "Searching code");
   done("g1", "grep");
-  call("t1", "todo");
-  assert.equal(label(), "Updating plan", "a tool with its own verb keeps it");
-  done("t1", "todo");
+  call("s1", "skill");
+  assert.equal(label(), "Loading skill", "a tool with its own verb keeps it");
+  done("s1", "skill");
   call("m1", "mcp__docs__search", "query");
   assert.equal(label(), "Calling an MCP tool");
   done("m1", "mcp__docs__search");

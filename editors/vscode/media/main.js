@@ -5717,6 +5717,7 @@
     if (!replaying) {
       turn.timer = setInterval(renderTurnMeta, 200);
       renderTurnMeta();
+      if (paintedTodos.length) renderTodos();    // a turn works on the plan now: its step's ring turns, its clocks run
       // A prompt just asked for is worth taking the reader to. A turn nobody asked for just now --
       // a monitor waking DGC, a goal resuming, a continuation, a prompt queued minutes ago -- is
       // news: it follows a reader at the end and leaves one who scrolled back where they are, with
@@ -6275,6 +6276,8 @@
     finished._turnAt = turn.t0 != null ? turn.t0 : turn.promptAt > 0 ? turn.promptAt : NaN;
     pipSetupCards?.finish(finished);
     pipDigestBar?.refresh();
+    // Its plan's card stops: nothing turns in it, and its clocks stand where the turn left them.
+    if (turn.plan) turn.plan.view.paint(turn.plan.view.rows, { running: false, why: turn.plan.why });
     turn = null;
     placeGoalEnds();                             // a goal that ended in this turn says so under it
     // Repaint the checklist now that no turn is live. The row hides itself only when it renders
@@ -6755,27 +6758,366 @@
       clearInterval(turn.timer);
       clearTimeout(turn.renderTimer);
       turn.block.querySelectorAll(".tool").forEach((card) => clearInterval(card._timer));
+      if (turn.plan) turn.plan.view.paint(turn.plan.view.rows, { running: false, why: turn.plan.why });
     }
     expireOpenRequests();
     turn = null;
     // Match the terminal: an all-done checklist folds away when idle so the next prompt's
-    // list replaces it instead of sitting at "Tasks 4/4" above the composer.
+    // list replaces it instead of sitting at "All 4 tasks done" above the composer.
     if (paintedTodos.length) renderTodos(paintedTodos);
   }
-  // A checklist belongs to the session, not to a single assistant bubble, so it is not a card
-  // in the transcript. It is a row in the composer rail, directly above the goal row and built from
-  // the same parts: collapsed it reads "Tasks 2/5 · <the step in progress>", and expanded the full
-  // list opens above the row inside the rail, scrolling within its own bounded panel. Every update
-  // — a `todos` event mid-turn, or the `history` snapshot on resume and reload — repaints that one
-  // row without inventing a running turn or starting a timer. Nothing here scrolls the transcript
-  // or touches follow mode: a reader who scrolled up must stay where they are while the list ticks.
-  const TODO_GLYPHS = {
-    pending:     ["□", "pend",   "pending"],
-    in_progress: ["▶", "doing",  "in progress"],
-    done:        ["✓", "done",   "done"],
-    blocked:     ["⊘", "block",  "blocked"],
-    cancelled:   ["✗", "cancel", "cancelled"],
+  // ---- Work's plan (0.52, his call of 18 Nov) --------------------------------------------------------------------------
+  // The session's checklist is a pill on the bar above the box, saying the step being worked on with its mark and "n/m"
+  // (railChipSpec). The pill opens its section (#tasksbar, in the popover): "Tasks · n of m done", the plan's time, the
+  // chevron that folds it, a progress bar, and a row per step with its mark, its words, its time and, under the step in
+  // progress, what DGC is running now. In the conversation a turn's plan is ONE card, drawn where the plan first appears
+  // in that turn and updated in place as it changes, with the same marks and motion. A change of plan is shown (the
+  // steps added lit for a moment, the ones removed struck where they were) and said once: "Plan updated · 1 added". The
+  // counter is the one the backend's completion gate reads: blocked is not done. Every update -- a `todos` event mid-turn,
+  // or the `history` snapshot on resume and reload -- repaints the section without inventing a running turn; nothing here
+  // scrolls the transcript or touches follow mode except a card being drawn, which is new content like any other.
+  const PLAN_STATES = { pending: "To do", in_progress: "In progress", done: "Done", blocked: "Blocked", cancelled: "Cancelled", failed: "Failed" };
+  // The words a plan call itself may use for a state: the backend's own (dgc/tools.py) and another engine's.
+  const PLAN_SAYS = { todo: "pending", open: "pending", not_started: "pending", "not started": "pending", waiting: "pending",
+    "in-progress": "in_progress", "in progress": "in_progress", doing: "in_progress", active: "in_progress", started: "in_progress",
+    working: "in_progress", completed: "done", complete: "done", finished: "done", closed: "done", resolved: "done", stuck: "blocked",
+    canceled: "cancelled" };
+  // Own keys only: a status of "constructor" must not fish a function out of the prototype. The list the backend sends
+  // is already in its own words (`loose` is for a call's own arguments, from any engine).
+  function planState(value, loose) {
+    if (!loose) return typeof value === "string" && Object.hasOwn(PLAN_STATES, value) ? value : "pending";
+    const said = String(value ?? "").trim().toLowerCase();
+    return Object.hasOwn(PLAN_STATES, said) ? said : Object.hasOwn(PLAN_SAYS, said) ? PLAN_SAYS[said] : "pending";
+  }
+  const planWords = (text) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+  // A step keeps its id while its words do; two steps with the same words are told apart by their order.
+  const planSlug = (text) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 48) || "step";
+  function planRows(list, loose = false) {
+    const seen = new Map(), rows = [];
+    for (const item of Array.isArray(list) ? list : []) {
+      if (!item || typeof item !== "object" || typeof item.content !== "string") continue;
+      const content = planWords(item.content);
+      if (!content) continue;
+      const base = planSlug(content), count = seen.get(base) || 0;
+      seen.set(base, count + 1);
+      // What a step in progress says while it runs ("Finding where search fetches"), where the engine names it.
+      const active = loose ? planWords(item.activeForm ?? item.active_form) : "";
+      rows.push({ id: count ? `${base}-${count + 1}` : base, content, active, status: planState(item.status, loose) });
+      if (rows.length >= 100) break;
+    }
+    // The first step still to do is next (a plain ring), the ones after it later (a dashed one).
+    let next = false;
+    for (const row of rows) {
+      row.mark = row.status === "in_progress" ? "doing" : row.status !== "pending" ? row.status : next ? "later" : "next";
+      if (row.status === "pending") next = true;
+    }
+    return rows;
+  }
+  const planLabel = (row) => (row.status === "in_progress" && row.active ? row.active : row.content);
+  function planCounts(rows) {
+    const count = (status) => rows.filter((row) => row.status === status).length;
+    const done = count("done"), cancelled = count("cancelled"), failed = count("failed");
+    const blocked = count("blocked"), pending = count("pending");
+    const doing = rows.find((row) => row.status === "in_progress");
+    const current = doing || rows.find((row) => row.status === "pending") || rows.find((row) => row.status === "blocked");
+    // Blocked is open: a live state, not a finished one.
+    const finished = rows.length > 0 && !doing && !pending && !blocked;
+    return { done, cancelled, failed, blocked, pending, doing, current, finished, total: rows.length, settled: done + cancelled };
+  }
+  const planSum = (c) => (c.finished && c.done === c.total ? `${c.total} ${c.total === 1 ? "task" : "tasks"} done`
+    : `${c.done} of ${c.total} done${c.failed ? ` · ${c.failed} failed` : ""}`);
+  const planTime = (seconds) => {
+    const whole = Math.floor(seconds);
+    return whole < 60 ? `${whole}s` : `${Math.floor(whole / 60)}m ${whole % 60}s`;
   };
+  // A step's mark, 16 px: a ring with a turning arc while it runs (a still half-disc when nothing runs), the next step a
+  // plain ring, the later ones dashed, a filled disc with a check once done, a slashed ring when blocked, a soft disc
+  // with a stroke when cancelled and with a cross when failed. Every arc turns in step with the others, wherever and
+  // whenever it was drawn (its delay is the clock's phase). `fresh`: it just became done, so the check draws itself.
+  const PLAN_GLYPHS = { done: "M5 12l5 5l10 -10", failed: "M18 6l-12 12M6 6l12 12", cancelled: "M5 12l14 0" };
+  function planMark(mark, running = false, fresh = false) {
+    let inner;
+    if (PLAN_GLYPHS[mark]) {
+      inner = `<svg class="todo-glyph" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true" focusable="false"><path d="${PLAN_GLYPHS[mark]}"/></svg>`;
+    } else {
+      const ring = (cls, dash = "") => `<circle class="${cls}" cx="8" cy="8" r="6.5"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`;
+      const body = mark === "doing" ? ring("todo-track") + (running
+        ? `<circle class="todo-spin" cx="8" cy="8" r="6.5" stroke-dasharray="12 40" style="animation-delay:-${Math.round(performance.now() % 1000)}ms"/>`
+        : '<path class="todo-pie" d="M8 4.25a3.75 3.75 0 0 1 0 7.5z"/>')
+        : mark === "blocked" ? ring("todo-stop") + '<path class="todo-stop" d="M3.4 12.6 12.6 3.4"/>'
+          : ring("todo-ring", mark === "later" ? "2.4 2.7" : "");
+      inner = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">${body}</svg>`;
+    }
+    return `<span class="todo-mark${fresh ? " todo-fresh" : ""}" data-mark="${mark}"${mark === "doing" && running ? " data-running" : ""} aria-hidden="true">${inner}</span>`;
+  }
+  // How long each step has been worked on, by its id, shared by the section and the cards, as long as a turn works on
+  // it: a step back in the queue starts again.
+  const planTimes = new Map();
+  // The disclosure's spring (300 ms open, 150 ms folding), the same curve as main.css's --todos-spring.
+  const PLAN_SPRING = "linear(0, 0.015 2%, 0.0532 4%, 0.1065 6%, 0.1686 8%, 0.2351 10%, 0.3363 13%, 0.4332 16%, 0.5495 20%, 0.648 24%, 0.7287 28%, 0.807 33%, 0.8646 38%, 0.9128 44%, 0.9447 50%, 0.968 57%, 0.9834 65%, 0.9924 74%, 0.9975 85%, 1)";
+  function todosFold(body, open) {
+    const still = typeof body.animate !== "function" || !body.isConnected
+      || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+    if (!body._folding && body.hidden === !open) return;
+    body._folding?.cancel();
+    body._folding = null;
+    const from = body.hidden ? 0 : body.getBoundingClientRect().height;
+    body.hidden = false;
+    const to = open ? body.scrollHeight : 0;
+    if (still || (!open && !from)) { body.hidden = !open; return; }
+    const run = body.animate([{ height: `${from}px`, overflow: "hidden" }, { height: `${to}px`, overflow: "hidden" }],
+      { duration: open ? 300 : 150, easing: PLAN_SPRING });
+    body._folding = run;
+    run.onfinish = () => { if (body._folding === run) { body._folding = null; body.hidden = !open; } };
+  }
+  // What DGC is running now in the live turn, in Work's own words ("Reading src/app.ts"): the turn's own step still
+  // running (not a helper's, not a Pip's), the last one if there are several.
+  function planSubStep() {
+    if (!turn || replaying) return null;
+    const card = [...turn.block.querySelectorAll('.tool[data-status="running"]')]
+      .filter((node) => !node.classList.contains("agent-owned") && !node.classList.contains("pip-run-owned")).at(-1);
+    return card ? { verb: card.querySelector(".verb")?.textContent || "", arg: card.querySelector(".arg")?.textContent || "" } : null;
+  }
+  // The views that keep a clock going: each is repainted every half second while a turn works on its plan.
+  const planLive = new Set();
+  let planTicking = 0;
+  function planTick() {
+    planTicking = 0;
+    for (const view of [...planLive]) {
+      if (!view.root.isConnected || !view.running) { planLive.delete(view); continue; }
+      view.times();
+    }
+    if (planLive.size) planTicking = setTimeout(planTick, 500);
+  }
+  // One plan, drawn: the section the pill opens, or a turn's card. `fold`: a long plan folds its leading done steps
+  // (the card's six, as the reference's); `timed`: a saved turn makes up no times.
+  function planView(root, { fold = Infinity, timed = true } = {}) {
+    const part = (cls) => root.querySelector(`.${cls}`);
+    const parts = { progress: root.querySelector('[role="progressbar"]'), trigger: part("todos-trigger"), sum: part("todos-sum"),
+      blocked: part("todos-blocked"), time: part("todos-time"), fill: part("todos-fill"), why: part("todos-why"),
+      list: part("todos-list"), say: part("todos-say"), note: part("todos-note") };
+    const view = { root, rows: [], running: false, why: "", mounted: false, showDone: false, added: new Set(), ghosts: [],
+      note: "", timers: [], clock: { total: 0, since: null } };
+    const clearTimers = () => { view.timers.forEach(clearTimeout); view.timers = []; };
+    function times() {
+      const now = performance.now();
+      const plan = view.clock.total + (view.clock.since == null ? 0 : now - view.clock.since);
+      const said = timed && plan >= 1000 ? planTime(plan / 1000) : "";
+      if (parts.time.textContent !== said) parts.time.textContent = said;
+      for (const li of parts.list.querySelectorAll(":scope > li.todo:not(.todo-gone)")) {
+        const record = planTimes.get(li.dataset.id), status = li.dataset.status;
+        const seconds = record ? (record.total + (record.since == null ? 0 : now - record.since)) / 1000 : 0;
+        const shown = timed && seconds >= 1 && ["in_progress", "done", "failed"].includes(status) ? planTime(seconds) : "";
+        const node = li.querySelector(".todo-time");
+        if (node.textContent !== shown) node.textContent = shown;
+      }
+    }
+    function sub() {
+      const now = view.running ? planSubStep() : null;
+      let placed = false;
+      for (const li of parts.list.querySelectorAll(":scope > li.todo:not(.todo-gone)")) {
+        const want = now && !placed && li.dataset.status === "in_progress";
+        let line = li.querySelector(".todo-sub");
+        if (!want) { line?.remove(); continue; }
+        placed = true;
+        if (!line) {
+          line = el("span", "todo-sub");
+          line.innerHTML = '<span class="todo-sub-spin codicon codicon-loading" aria-hidden="true"></span><span class="todo-sub-verb"></span> <span class="todo-sub-arg"></span>';
+          li.querySelector(".todo-text").appendChild(line);
+        }
+        if (line.children[1].textContent !== now.verb) line.children[1].textContent = now.verb;
+        if (line.children[2].textContent !== now.arg) line.children[2].textContent = now.arg;
+      }
+    }
+    function rowNode(li, row) {
+      if (!li) {
+        li = el("li", "todo");
+        li.dataset.id = row.id;
+        li.innerHTML = '<div class="todo-row"><span class="todo-markbox"></span><span class="todo-text"><span class="todo-label"></span></span>'
+          + '<span class="todo-time"></span></div>';
+        if (view.mounted && view.added.has(row.id)) {
+          li.classList.add("todo-in");
+          li.addEventListener("animationend", (event) => { if (event.animationName === "todos-enter-down") li.classList.remove("todo-in"); });
+        }
+      }
+      if (li.dataset.status !== row.status) li.dataset.status = row.status;
+      if (li.dataset.mark !== row.mark) li.dataset.mark = row.mark;
+      li.toggleAttribute("data-added", view.added.has(row.id));
+      const key = row.mark === "doing" && view.running ? "doing:running" : row.mark;
+      if (li._mark !== key) {
+        const box = li.querySelector(".todo-markbox");
+        box.innerHTML = planMark(row.mark, view.running, view.mounted && row.mark === "done" && li._mark !== "done");
+        // Drawn once: a row moved later does not draw its check again.
+        box.firstChild.addEventListener("animationend", (event) => {
+          if (event.animationName === "todos-draw") box.firstChild?.classList.remove("todo-fresh");
+        });
+        li._mark = key;
+      }
+      const words = planLabel(row), label = li.querySelector(".todo-label");
+      if (label.textContent !== words) label.textContent = words;
+      li.setAttribute("aria-label", `${words}, ${PLAN_STATES[row.status]}`);
+      return li;
+    }
+    function ghostNode(row) {
+      const li = el("li", "todo todo-gone");
+      li.dataset.id = row.id;
+      li.setAttribute("aria-hidden", "true");
+      li.innerHTML = `<div class="todo-gone-in"><div class="todo-row"><span class="todo-markbox">${planMark(row.mark)}</span>`
+        + '<span class="todo-label"></span></div></div>';
+      li.querySelector(".todo-label").textContent = row.content;
+      // Drawn struck first, then folded: its style at full height is read before it is told to go.
+      requestAnimationFrame(() => { void li.offsetHeight; li.setAttribute("data-gone", ""); });
+      return li;
+    }
+    function draw() {
+      const rows = view.rows, c = planCounts(rows);
+      const sum = planSum(c);
+      parts.sum.textContent = sum;
+      if (parts.blocked) { parts.blocked.textContent = `${c.blocked} blocked`; parts.blocked.hidden = !c.blocked; }
+      parts.trigger.setAttribute("aria-label", `Tasks, ${sum}${c.blocked ? `, ${c.blocked} blocked` : ""}`);
+      parts.progress.setAttribute("aria-valuemax", String(c.total));
+      parts.progress.setAttribute("aria-valuenow", String(c.done));
+      const filled = c.total ? Math.round(((c.finished ? c.total : c.settled) / c.total) * 10000) / 100 : 0;
+      parts.fill.style.width = `${filled}%`;
+      parts.fill.toggleAttribute("data-failed", c.failed > 0 && !c.finished);
+      root.setAttribute("aria-busy", String(view.running && !c.finished));
+      parts.why.textContent = view.why;
+      parts.why.hidden = !view.why;
+      // The steps already done at the top of a long plan fold into one row until asked for.
+      const lead = rows.findIndex((row) => row.status !== "done"), doneRun = lead < 0 ? rows.length : lead;
+      const folded = !view.showDone && rows.length > fold && doneRun >= 2 && !c.finished;
+      const kept = new Map([...parts.list.querySelectorAll(":scope > li.todo")].map((li) => [li.dataset.id + (li.classList.contains("todo-gone") ? ":gone" : ""), li]));
+      const items = (folded ? rows.slice(doneRun) : rows).map((row) => rowNode(kept.get(row.id), row));
+      for (const { row, index } of view.ghosts) {
+        const at = Math.min(Math.max(0, index - (folded ? doneRun : 0)), items.length);
+        items.splice(at, 0, kept.get(`${row.id}:gone`) || ghostNode(row));
+      }
+      if (folded) {
+        const held = parts.list.querySelector(":scope > li.todos-fold-row");
+        const li = held || el("li", "todos-fold-row");
+        if (!held) {
+          const button = el("button", "todos-fold");
+          button.type = "button";
+          button.onclick = () => { view.showDone = true; draw(); };
+          li.appendChild(button);
+        }
+        li.firstChild.innerHTML = `<span class="todo-markbox">${planMark("done")}</span>${doneRun} completed`
+          + '<span class="todos-fold-chev codicon codicon-chevron-down" aria-hidden="true"></span>';
+        items.unshift(li);
+      }
+      // Only what moved is moved: a row left in place keeps its arc turning and its colour fading.
+      items.forEach((node, i) => { if (parts.list.children[i] !== node) parts.list.insertBefore(node, parts.list.children[i] || null); });
+      while (parts.list.children.length > items.length) parts.list.lastElementChild.remove();
+      if (parts.note.textContent !== view.note) parts.note.textContent = view.note;
+      parts.note.toggleAttribute("data-shown", Boolean(view.note));
+      times();
+      sub();
+    }
+    function paint(rows, { running = false, why = "" } = {}) {
+      const before = view.rows, now = performance.now();
+      if (view.mounted && before.length && rows.length) {
+        const ids = new Set(rows.map((row) => row.id)), old = new Set(before.map((row) => row.id));
+        const added = rows.filter((row) => !old.has(row.id)).map((row) => row.id);
+        const removed = before.flatMap((row, index) => (ids.has(row.id) ? [] : [{ row, index }]));
+        if (added.length || removed.length) {
+          clearTimers();
+          view.added = new Set(added);
+          view.ghosts = removed;
+          view.note = `Plan updated · ${[added.length ? `${added.length} added` : "", removed.length ? `${removed.length} removed` : ""].filter(Boolean).join(" · ")}`;
+          view.timers.push(setTimeout(() => { view.ghosts = []; draw(); }, 400));
+          view.timers.push(setTimeout(() => { view.added = new Set(); view.note = ""; draw(); }, 2600));
+        }
+        // Said to a screen reader as a step starts, ends or fails.
+        const was = new Map(before.map((row) => [row.id, row.status]));
+        let said = "";
+        for (const row of rows) {
+          if (was.get(row.id) === row.status) continue;
+          if (row.status === "in_progress") said = `Started: ${planLabel(row)}`;
+          else if (row.status === "done") said = `Done: ${row.content}`;
+          else if (row.status === "failed") said = `Failed: ${row.content}`;
+          else if (row.status === "blocked") said = `Blocked: ${row.content}`;
+        }
+        if (said) parts.say.textContent = said;
+      }
+      view.rows = rows; view.running = running; view.why = planWords(why);
+      if (timed) {
+        for (const row of rows) {
+          const record = planTimes.get(row.id), busy = row.status === "in_progress" && running;
+          if (row.status === "pending") planTimes.delete(row.id);
+          else if (busy && !record) planTimes.set(row.id, { total: 0, since: now });
+          else if (busy && record.since == null) record.since = now;
+          else if (!busy && record && record.since != null) { record.total += now - record.since; record.since = null; }
+        }
+        if (running && rows.length && view.clock.since == null) view.clock.since = now;
+        if ((!running || !rows.length) && view.clock.since != null) { view.clock.total += now - view.clock.since; view.clock.since = null; }
+      }
+      draw();
+      view.mounted = true;
+      if (running && rows.length) {
+        planLive.add(view);
+        if (!planTicking) planTicking = setTimeout(planTick, 500);
+      } else planLive.delete(view);
+    }
+    // The list went (cleared, a new chat): nothing to show, and the plan's clock starts again with the next one.
+    function reset() {
+      clearTimers();
+      planLive.delete(view);
+      Object.assign(view, { rows: [], running: false, why: "", mounted: false, showDone: false, added: new Set(), ghosts: [], note: "",
+        clock: { total: 0, since: null } });
+      draw();
+    }
+    Object.assign(view, { paint, reset, times, sub, draw });
+    return view;
+  }
+  // A turn's plan card: the reference's section, in the turn, with a disclosure of its own.
+  function planCardNode() {
+    const id = `todos-body-${++disclosureId}`;
+    const card = el("section", "todos todos-card");
+    card.setAttribute("aria-label", "Tasks");
+    card.innerHTML = '<div class="sr-only" role="progressbar" aria-label="Tasks progress" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></div>'
+      + `<div class="todos-head"><button type="button" class="todos-trigger" aria-expanded="true" aria-controls="${id}" title="Hide the steps">`
+      + '<span class="todos-words"><span class="todos-title">Tasks</span><span class="todos-sum"></span><span class="todos-blocked" hidden></span></span>'
+      + '<span class="todos-time"></span><span class="todos-chev codicon codicon-chevron-down" aria-hidden="true"></span></button></div>'
+      + '<span class="todos-track" aria-hidden="true"><span class="todos-fill"></span></span>'
+      + `<div class="todos-body" id="${id}"><p class="todos-why" hidden></p><ol class="todos-list"></ol>`
+      + '<span class="sr-only todos-say" aria-live="polite"></span></div><p class="todos-note" aria-live="polite"></p>';
+    const trigger = card.querySelector(".todos-trigger"), body = card.querySelector(".todos-body");
+    trigger.onclick = () => {
+      const open = trigger.getAttribute("aria-expanded") !== "true";
+      trigger.setAttribute("aria-expanded", String(open));
+      trigger.title = open ? "Hide the steps" : "Show the steps";
+      todosFold(body, open);
+    };
+    return card;
+  }
+  // Draw the live turn's plan: its card, made where the plan first appears in the turn (between the steps around it, like
+  // a question the model asked) and changed in place after that. An empty plan takes its card away. Returns whether a
+  // card was drawn just now, which is new content in the transcript.
+  function paintTurnPlan(rows, why = "") {
+    if (!turn) return false;
+    if (!rows.length) {
+      if (turn.plan) { turn.plan.view.reset(); turn.plan.card.remove(); turn.plan = null; }
+      return false;
+    }
+    let drawn = false;
+    if (!turn.plan) {
+      if (turn.toolGroup) { (turn.leftGroups ||= []).push(turn.toolGroup); turn.toolGroup = null; }
+      const card = appendTurnContent(planCardNode());
+      turn.plan = { card, view: planView(card, { fold: 6, timed: !replaying }), why: "" };
+      syncLiveStep(); breakText();
+      drawn = true;
+    }
+    if (why) turn.plan.why = why;
+    turn.plan.view.paint(rows, { running: !replaying, why: turn.plan.why });
+    return drawn;
+  }
+  // The step DGC is running now changed: the step in progress says so, in the section and in the live turn's card.
+  function planSubSteps() {
+    tasksView.sub();
+    turn?.plan?.view.sub();
+  }
+  // Why the plan is what it is, where an engine's plan call says so (DGC's own todo does not).
+  const planCallWhy = (args) => planWords(args?.explanation);
   const TASKS_TIMEOUT_MS = 5000;
   // How long a Clear may wait for a backend that is reconnecting, the same bound a turn gets
   // (the backend_exit handler's thirty seconds) before it is reported as unanswered.
@@ -6783,13 +7125,11 @@
   const TASKS_NOT_RUNNING = "DGC is not running. Run DGC: Restart Backend, then clear the checklist again.";
   function tasksOpen() { return tasksExpanded.has(draftSession); }
   function paintTasksExpanded() {
-    const open = tasksOpen(), toggle = $("tasks-toggle");
-    $("tasks-panel").hidden = !open;
+    const open = tasksOpen(), main = $("tasks-main");
     const label = open ? "Hide the checklist" : "Show the checklist";
-    for (const button of [$("tasks-main"), toggle]) button.setAttribute("aria-expanded", String(open));
-    toggle.title = label; toggle.setAttribute("aria-label", label);
-    $("tasks-main").title = label;
-    toggle.querySelector(".codicon").className = `codicon codicon-chevron-${open ? "down" : "up"}`;
+    main.setAttribute("aria-expanded", String(open));
+    main.title = label;
+    todosFold($("tasks-panel"), open);
   }
   function toggleTasks() {
     if (tasksOpen()) tasksExpanded.delete(draftSession); else tasksExpanded.add(draftSession);
@@ -6800,7 +7140,7 @@
     const note = $("tasks-note");
     note.textContent = message || ""; note.title = message || ""; note.hidden = !message;
     tasksBar.classList.toggle("noted", Boolean(message));
-    $("tasks-text").hidden = Boolean(message);   // the note takes the summary's place, never both
+    $("tasks-count").hidden = Boolean(message);   // the note takes the summary's place, never both
   }
   function paintTodoClearBusy(busy) {
     const button = $("tasks-clear"), icon = button.querySelector(".codicon");
@@ -6854,15 +7194,15 @@
     showTasksNote(message);
   }
   let paintedTodos = [];
+  // The section the pill opens (the rail's #tasksbar; its trigger is #tasks-main, wired to toggleTasks).
+  const tasksView = planView(tasksBar);
   function renderTodos(value) {
     const rows = (Array.isArray(value) ? value : paintedTodos).filter((t) => t && typeof t.content === "string").slice(0, 100);
     if (Array.isArray(value)) paintedTodos = rows;
-    const list = $("tasks-list"), count = $("tasks-count");
     if (!rows.length) {
       const hadFocus = tasksBar.contains(document.activeElement);
       settleTodoClear();
-      list.innerHTML = ""; count.textContent = "Tasks 0/0"; $("tasks-text").textContent = "";
-      $("tasks-blocked").hidden = true;
+      tasksView.reset();
       tasksBar.hidden = true;
       syncComposerRail();
       // Clear removed the row the focus was on: land in the composer, the next thing to use.
@@ -6872,32 +7212,10 @@
     // A fresh list is never shown beside a stale note. A pending clear stays pending: the
     // backend's empty list or its refusal is what settles it.
     if (!todoClear) showTasksNote("");
-    // Own keys only — a status of "constructor" must not fish a function out of the prototype.
-    const statusOf = (t) => Object.hasOwn(TODO_GLYPHS, t.status) ? t.status : "pending";
-    // Blocked items are not done: the counter is the same one the backend's completion gate reads.
-    const complete = rows.filter((t) => t.status === "done").length;
-    const doing = rows.find((t) => statusOf(t) === "in_progress");
-    const pending = rows.filter((t) => statusOf(t) === "pending").length;
-    const blocked = rows.filter((t) => statusOf(t) === "blocked").length;
-    const cancelled = rows.filter((t) => statusOf(t) === "cancelled").length;
-    count.textContent = `Tasks ${complete}/${rows.length}`;
-    // "all done" only when every row is done. Cancelled rows are finished but not done, so a list
-    // with nothing left open says how many were cancelled instead of contradicting its own count.
-    const settled = doing ? "" : pending ? `${pending} pending` : blocked ? ""
-      : cancelled ? `${cancelled} cancelled` : "all done";
-    const summary = doing ? doing.content.replace(/\s+/g, " ").trim() : settled;
-    $("tasks-text").textContent = summary;
-    $("tasks-blocked").textContent = `${blocked} blocked`;
-    $("tasks-blocked").hidden = blocked === 0;
-    tasksBar.dataset.status = doing ? "active" : blocked ? "blocked" : pending ? "pending" : "done";
-    $("tasks-main").setAttribute("aria-label", `Tasks, ${complete} of ${rows.length} done`
-      + (doing ? `, in progress: ${summary.slice(0, 180)}` : settled ? `, ${settled}` : "")
-      + (blocked ? `, ${blocked} blocked` : ""));
-    list.innerHTML = rows.map((t) => {
-      const g = TODO_GLYPHS[statusOf(t)];
-      return `<div class="t ${g[1]}" role="listitem"><span class="ti" role="img" aria-label="${g[2]}">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`;
-    }).join("");
-    const open = Boolean(doing) || pending > 0 || blocked > 0;
+    const plan = planRows(rows), c = planCounts(plan);
+    tasksView.paint(plan, { running: Boolean(turn) && !replaying });
+    tasksBar.dataset.status = c.doing ? "active" : c.blocked ? "blocked" : c.pending ? "pending" : "done";
+    const open = Boolean(c.doing) || c.pending > 0 || c.blocked > 0;
     // Idle + every row done/cancelled: hide, same as the terminal todo pane.
     tasksBar.hidden = !open && !turn;
     paintTasksExpanded();
@@ -7517,6 +7835,7 @@
       }
     }
     refreshToolGroup(card.closest(".tool-group"));
+    if (card.isConnected) planSubSteps();
   }
 
   function startToolClock(c) {
@@ -9076,8 +9395,8 @@ function permissionChoices(ev) {
   // ---- the rail as one line of chips (B2) ----
   // A goal, a troupe, monitors, the checklist and this chat's changes each took a full row above the box: 204px of a
   // 460x820 side bar, a third of what the transcript had. With two or more kinds showing, each is one chip on a single
-  // line ("◎ 1:12:00", "Troupe 5/8", "2 monitors", "Tasks 4/7", "6 files +214 −37"), and a chip opens that kind's REAL
-  // row -- the same element, with every control it has -- in a popover just above the box, over the end of the
+  // line ("◎ 1:12:00", "Troupe 5/8", "2 monitors", "◌ Fix the save handler 4/7", "6 files +214 −37"), and a chip opens
+  // that kind's REAL row -- the same element, with every control it has -- in a popover just above the box, over the end of the
   // transcript. One kind alone keeps its full row: there is room for it. A kind that needs you (a blocked task, monitor
   // events waiting for your next message, a blocked goal, a failed troupe, a Pips alert) turns its chip amber and says
   // why. The chips are one toolbar: a single Tab stop, the arrows move along it, Enter or Space opens a chip, focus goes
@@ -9168,15 +9487,17 @@ function permissionChoices(ev) {
         label: `Monitors: ${said.join(", ")}`, tip: `Monitors · ${said.join(" · ")}` };
     }
     if (kind === "tasks") {
-      const statusOf = (t) => (Object.hasOwn(TODO_GLYPHS, t.status) ? t.status : "pending");
-      const rows = paintedTodos, done = rows.filter((t) => t.status === "done").length;
-      const blocked = rows.filter((t) => statusOf(t) === "blocked").length;
-      const doing = rows.find((t) => statusOf(t) === "in_progress");
-      return { icon: "checklist", word: "Tasks", num: `${done}/${rows.length}`, live: !!doing,
-        detail: String(doing?.content || "").replace(/\s+/g, " ").slice(0, 160),
-        need: blocked > 0, tone: "error", needWord: blocked ? `${blocked} blocked` : "",
-        label: $("tasks-main").getAttribute("aria-label") || `Tasks, ${done} of ${rows.length} done`,
-        tip: `Tasks · ${done} of ${rows.length} done${blocked ? ` · ${blocked} blocked: needs you` : ""}` };
+      // The step being worked on, with its mark and "n/m" (the reference's status pill, in the bar's own size): the step
+      // in progress, else the next one, else a blocked one; once nothing is open, how it ended.
+      const c = planCounts(planRows(paintedTodos)), running = Boolean(turn) && !replaying;
+      const text = c.finished
+        ? (c.done === c.total ? `All ${c.total} ${c.total === 1 ? "task" : "tasks"} done` : `Finished · ${c.failed ? `${c.failed} failed` : `${c.done} of ${c.total} done`}`)
+        : c.current ? planLabel(c.current) : `${c.done} of ${c.total} done`;
+      return { icon: "plan", mark: c.finished ? (c.done === c.total ? "done" : "cancelled") : c.current?.mark || "next",
+        word: text, num: c.finished ? "" : `${c.done}/${c.total}`, live: running && !c.finished,
+        need: c.blocked > 0, tone: "error", needWord: c.blocked ? `${c.blocked} blocked` : "",
+        label: `${text}. ${c.done} of ${c.total} tasks done. Show tasks`,
+        tip: `Tasks · ${c.done} of ${c.total} done${c.blocked ? ` · ${c.blocked} blocked: needs you` : ""}` };
     }
     if (kind === "changes") {
       const { total, additions, deletions } = changeState;
@@ -9264,7 +9585,8 @@ function permissionChoices(ev) {
     keep: RAIL_KEEP, spec: railChipSpec, detail: railBar, title: (kind) => RAIL_POP_TITLES[kind] || "",
     icon: (spec) => (spec.icon === "troupe"
       ? `<span class="chip-mark" aria-hidden="true">${troupeMark("rail-chip-troupe")}</span>`
-      : `<span class="codicon codicon-${spec.icon}" aria-hidden="true"></span>`),
+      : spec.icon === "plan" ? `<span class="chip-mark todo-chip-mark" aria-hidden="true">${planMark(spec.mark, spec.live)}</span>`
+        : `<span class="codicon codicon-${spec.icon}" aria-hidden="true"></span>`),
     // One Pip running: its chip goes straight to that Pip's chat, at the run's live post.
     direct: (kind) => (kind === "piprunning" && pipRunningList().length === 1 ? () => openRunningPip(pipRunningList()[0]) : null),
     // The stages and the checklist are what the chip summed up, so they come open; closing folds them again.
@@ -9967,6 +10289,14 @@ function permissionChoices(ev) {
         // timestamps. The measured parent task span covers them; never invent child durations.
         if (!childId && !(replaying && ev.name === "task" && /#\d+$/.test(String(ev.call_id || ""))))
           window.DgcTrace?.toolStart(turn.trace, ev);
+        // A plan update is the turn's plan card, not a row of its own (paintTurnPlan): what it asked for waits for the
+        // backend's list (the `todos` event) or, from an engine that sends none and in a saved turn, for its result.
+        if (!childId && canonicalTool(ev.name) === "todo") {
+          (turn._plans ||= new Map()).set(String(ev.call_id || ev.name), { rows: planRows(ev.args?.todos, true), why: planCallWhy(ev.args),
+            args: ev.args, summary: ev.summary, applied: false });
+          turn.chars += toolArgChars(ev.args);
+          return;
+        }
         turn._tools = turn._tools || Object.create(null);
         // One step, one row. A turn adopted from a reload snapshot can already hold this step, still
         // running, when its live tool_call arrives; a finished row whose id comes back is a new call.
@@ -9982,6 +10312,7 @@ function permissionChoices(ev) {
           // made only of tool calls (a model that works without narrating) read "↓ 0 tok" for its
           // whole run; its arguments count once, when the call first appears.
           turn.chars += toolArgChars(ev.args);
+          planSubSteps();
         }
         // A background child's step can outlive this turn: file it where its later progress and
         // result look for it, or they land on a second card with no command.
@@ -10036,6 +10367,18 @@ function permissionChoices(ev) {
         ensureTurn();
         if (!childId && !(replaying && ev.name === "task" && /#\d+$/.test(String(ev.call_id || ""))))
           window.DgcTrace?.toolEnd(turn.trace, ev);
+        // A plan update's result: the plan it asked for is taken (unless the backend's list already showed it, or the
+        // backend did not apply it), and a call that failed is still there to inspect, as a row.
+        if (!childId && canonicalTool(ev.name) === "todo" && !turn._tools?.[ev.call_id || ev.name]) {
+          const key = String(ev.call_id || ev.name), asked = turn._plans?.get(key);
+          turn._plans?.delete(key);
+          if (!ev.is_error) {
+            const taken = asked && !asked.applied && !/^todo not applied\b/.test(String(ev.output || ""));
+            if (!taken || !paintTurnPlan(asked.rows, asked.why)) return;
+            break;
+          }
+          (turn._tools ||= Object.create(null))[key] = toolCard({ name: ev.name, call_id: ev.call_id, args: asked?.args || {}, summary: asked?.summary || "" });
+        }
         if (!ev.is_error && EDIT_TOOLS.has(String(ev.name || "")) && !ev.is_diff) {
           recordEdit(turn._paths?.[ev.call_id || ev.name], 0, 0, false);
         }
@@ -10371,9 +10714,19 @@ function permissionChoices(ev) {
         });
         break;
       }
-      case "todos":
+      case "todos": {
         renderTodos(ev.todos);
-        return;   // the transcript did not change: no follow scroll, no "New" on the pill
+        // The live turn's plan call was applied: the turn's card shows the list the backend now holds. A list that is not
+        // this turn's own plan (a restore, a clear before any plan) draws no card.
+        if (!turn || replaying) return;
+        // (An empty list is not taken as the call's: it may be your Clear, and the call's own result still says.)
+        const asked = [...(turn._plans?.values() || [])].find((call) => !call.applied);
+        if (asked && Array.isArray(ev.todos) && ev.todos.length) asked.applied = true;
+        if (!asked && !turn.plan) return;
+        // Changed in place, the transcript did not grow: no follow scroll, no "New" on the pill.
+        if (!paintTurnPlan(planRows(ev.todos), asked?.why || "")) return;
+        break;
+      }
       case "pip_fix":
         applyPipFix(ev.fix);
         return;
@@ -10839,7 +11192,6 @@ function permissionChoices(ev) {
   // Clear is never disabled: the backend empties the list even while a turn runs.
   $("tasks-clear").onclick = requestTodoClear;
   $("tasks-main").onclick = toggleTasks;
-  $("tasks-toggle").onclick = toggleTasks;
   /** Remove Goal from this draft without changing an already-running standing goal. */
   function clearGoalDraft() {
     recordComposerEdit(() => setGoalDraftArmed(false));
