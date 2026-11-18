@@ -1728,6 +1728,10 @@ def insert_reply(store, run, result, now):
     commit_notes(store, run, result)
     from .pip_project_copies import undo_asked               # a change the user asked it to put back (Do it all)
     undo_asked(store, run, result)
+    from .pip_holds import made_in, reply_line                # what it held for you says so, whatever it wrote
+    held = made_in(store.registry, run["pip_id"], run["id"])
+    if held:
+        result = {**result, "text": (str(result.get("text") or "").rstrip() + "\n\n" + reply_line(held)).strip()}
     text = validate_text(result.get("text"), reply=True)
     row = store.db.execute("SELECT workspace_id,pip_id,conversation_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
     if not row or (row["workspace_id"], row["pip_id"]) != (run["workspace_id"], run["pip_id"]):

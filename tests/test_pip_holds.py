@@ -61,6 +61,7 @@ class PluginSetToAlwaysAsk(Holds):
         self.assertIn(WAITING, said)
         self.assertIn("create_record in Airtable", said)
         self.assertIn('"confirm": true', said)
+        self.assertIn("don't do the same thing another way", said, "live check, 18 Nov: a model emptied the folder file by file")
         self.assertEqual(self.sent(), [], "nothing ran")
         held = pip_holds.waiting(self.registry, self.pip["id"])
         self.assertEqual([h["kind"] for h in held], ["plugin"])
@@ -76,6 +77,14 @@ class PluginSetToAlwaysAsk(Holds):
         self.assertNotIn("confirm", str(self.sent()[0][1]), "DGC's own word never reaches the plugin")
         self.assertEqual(pip_holds.waiting(self.registry, self.pip["id"]), [], "the hold is used")
         self.assertIn(WAITING, self.call(self.session_for("run_" + "c" * 32), confirm=True), "once: the next time it asks again")
+
+    def test_the_same_call_in_the_users_next_turn_is_their_yes_without_confirm(self):
+        # As Work's holds: the same step made again in a later turn the user's own message started runs. A model that
+        # leaves out "confirm" (live check, 18 Nov) still gets the user's yes.
+        self.call(self.session_for())
+        said = self.call(self.session_for(self.NEXT))
+        self.assertIn("create_record ran in the user's Airtable", said)
+        self.assertEqual(len(self.sent()), 1)
 
     def test_the_run_that_asked_cannot_answer_it(self):
         session = self.session_for()
@@ -186,6 +195,21 @@ class TheNextTurnSaysWhatWaits(unittest.TestCase):
                 self.assertIn("send_email in Gmail", seen[0])
                 self.store.claim_next()
                 self.store.finish(run["id"], result=result)
+
+    def test_a_reply_that_held_a_step_says_so_even_if_the_model_didnt(self):
+        # Live check, 18 Nov (deepseek-v4.1-flash:cloud): a Pip's reply after its Terminal command was held said only
+        # "I'll clear my working folder", and nothing asked the user. DGC adds the line itself.
+        from dgc import pip_chat
+        run = pip_chat.send(self.store, self.pip["id"], "empty your folder", "k-held", "editor-user", self.cfg)["run"]
+        pip_holds.hold(self.registry, self.pip["id"], "floor", {"command": "x"}, run_id=run["id"],
+                       what="the Terminal command `rm -rf ~/*`", why="it could delete everything in its Files")
+        self.store.claim_next()
+        self.store.finish(run["id"], result={"text": "I'll clear my working folder."})
+        kept = self.registry.db.execute("SELECT text FROM pip_chat_messages WHERE run_id=? AND role='assistant'",
+                                        (run["id"],)).fetchone()[0]
+        self.assertTrue(kept.startswith("I'll clear my working folder."), kept)
+        self.assertIn("Waiting for your yes: the Terminal command `rm -rf ~/*`", kept)
+        self.assertIn("could delete everything in its Files", kept)
 
 
 class YourOwnChromeAtDoItAll(Borrow):

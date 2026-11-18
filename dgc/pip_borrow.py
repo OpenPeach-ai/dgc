@@ -1020,9 +1020,10 @@ class Session:
         why_not = ""
         with WorkspaceRegistry(self.directory) as registry:
             yes = consented(registry, self.pip_id)
-            if not yes and args.get("confirm") is True:
+            if not yes:
                 yes, why_not = pip_holds.release(registry, self.pip_id, "borrow", step, run_id=self.run_id,
                                                  user_turn=self.user_turn, unattended=self.unattended)
+                why_not = why_not if args.get("confirm") is True else ""
                 if yes:
                     _consent(registry, self.pip_id)
             if not yes:

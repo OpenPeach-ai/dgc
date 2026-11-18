@@ -855,14 +855,14 @@ class Host:
         why_not = ""
         try:
             with WorkspaceRegistry(self.state_directory) as registry:
-                if getattr(self, "_confirming", False):
-                    runs, why_not = pip_holds.release(registry, self.pip_id, "computer", step, run_id=self.run_id,
-                                                      user_turn=getattr(self, "user_turn", False),
-                                                      unattended=getattr(self, "unattended", False))
-                    if runs and Host._release_by_level(self, held, {"what": what[0].upper() + what[1:] + " (the user said yes in the chat)",
-                                                                    "verdict": "payment", "paid": payment is not None,
-                                                                    "payment": payment}):
-                        return None
+                runs, why_not = pip_holds.release(registry, self.pip_id, "computer", step, run_id=self.run_id,
+                                                  user_turn=getattr(self, "user_turn", False),
+                                                  unattended=getattr(self, "unattended", False))
+                why_not = why_not if getattr(self, "_confirming", False) else ""
+                if runs and Host._release_by_level(self, held, {"what": what[0].upper() + what[1:] + " (the user said yes in the chat)",
+                                                                "verdict": "payment", "paid": payment is not None,
+                                                                "payment": payment}):
+                    return None
                 said = pip_holds.hold(registry, self.pip_id, "computer", step, what=what, why=why, run_id=self.run_id)
         except Exception:                                  # noqa: BLE001 - unreadable registry: nothing sent
             said = pip_holds.line(what, why)
@@ -1640,13 +1640,13 @@ class Host:
                     return None                            # always allowed (his call 15 Nov)
                 if Host._does_it_all(self):
                     from . import pip_holds
-                    step, why_not = {"command": text_digest(command)}, ""
-                    if confirm:
-                        runs, why_not = pip_holds.release(registry, self.pip_id, "floor", step, run_id=self.run_id,
-                                                          user_turn=getattr(self, "user_turn", False),
-                                                          unattended=getattr(self, "unattended", False))
-                        if runs:
-                            return None
+                    step = {"command": text_digest(command)}
+                    runs, why_not = pip_holds.release(registry, self.pip_id, "floor", step, run_id=self.run_id,
+                                                      user_turn=getattr(self, "user_turn", False),
+                                                      unattended=getattr(self, "unattended", False), any_of_kind=True)
+                    if runs:
+                        return None
+                    why_not = why_not if confirm else ""
                     held = pip_holds.hold(registry, self.pip_id, "floor", step, run_id=self.run_id,
                                           what=f"the Terminal command `{_preview(command)[:120]}`",
                                           why=f"it {pip_levels.FLOOR_LINE}")

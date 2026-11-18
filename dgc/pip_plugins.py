@@ -1266,10 +1266,9 @@ class Session:
             # when this Pip may not pay now, is held and asked in the chat; the user's next own message answers it.
             from . import pip_holds
             step = {"server": server, "tool": tool, "arguments": arguments}
-            why_not = ""
-            if args.get("confirm") is True:
-                said_yes, why_not = pip_holds.release(registry, self.pip_id, "plugin", step, run_id=self.run_id,
-                                                      user_turn=self.user_turn, unattended=self.unattended)
+            said_yes, why_not = pip_holds.release(registry, self.pip_id, "plugin", step, run_id=self.run_id,
+                                                  user_turn=self.user_turn, unattended=self.unattended)
+            why_not = why_not if args.get("confirm") is True else ""
             if not said_yes:
                 why = ("it is set to Always ask" if level(info["plugin"], info) == "always_ask"
                        else "it can move money, and this Pip may not pay this now" if pip_level == "full"

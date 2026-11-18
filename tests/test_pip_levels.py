@@ -812,7 +812,9 @@ class RealBrowserTests(Store):
         host.end()
         host.begin(later["id"] + "x", self.registry.directory / "runs" / later["id"] / "artifacts" / "computer2",
                    careful=True, sites=pip_careful.known(self.registry, pip["id"]), level="full", user_turn=True)
-        self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*", "confirm": True}))
+        # The user said yes to emptying its Files: the model may word the command again its own way (live check, 18 Nov:
+        # it did), and leave out confirm. Any command that could wipe its Files, in that turn, uses that one yes.
+        self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/* ; ls -la ~"}))
         self.assertFalse((files / "keep.txt").exists(), "the user's yes in the chat let it run")
         self.assertEqual(pip_holds.waiting(self.registry, pip["id"]), [])
         (files / "keep.txt").write_text("mine")

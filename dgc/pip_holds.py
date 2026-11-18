@@ -83,13 +83,16 @@ def hold(registry, pip_id: str, kind: str, payload, *, what: str, why: str, run_
 def line(what: str, why: str) -> str:
     return (f"WAITING FOR THE USER: {what} needs the user's yes ({why}). Nothing ran, and no card shows: at Do it all you "
             "ask in the chat. Ask them in one plain sentence in your reply (what you want to do, and why), and carry on "
-            "with everything that doesn't depend on it. When their own next message says yes, make the same call again "
-            "with \"confirm\": true and it runs once; if it says no, leave it.")
+            "with everything that doesn't depend on it; don't do the same thing another way meanwhile. When their own next message says yes, make the same call again "
+            "(add \"confirm\": true) and it runs once; if it says no, leave it.")
 
 
-def release(registry, pip_id: str, kind: str, payload, *, run_id, user_turn: bool, unattended: bool) -> tuple[bool, str]:
-    """(runs, why not) for the same step made again with confirm: true. It runs once: in a later run than the one that
-    asked, which the user's own message started; the hold is then gone."""
+def release(registry, pip_id: str, kind: str, payload, *, run_id, user_turn: bool, unattended: bool,
+            any_of_kind: bool = False) -> tuple[bool, str]:
+    """(runs, why not) for a held step made again. It runs once: in a later run than the one that asked, which the user's
+    own message started (as Work's holds: making it again then is the yes; "confirm" is the model saying so); the hold
+    is then gone. any_of_kind: the user's yes was to the kind itself (emptying its Files), so another wording of the
+    step, held earlier, counts (live check, 18 Nov: the model wrote the command again its own way)."""
     key = key_of(kind, payload)
     row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (_row_key(pip_id, key),)).fetchone()
     value = None
@@ -98,6 +101,11 @@ def release(registry, pip_id: str, kind: str, payload, *, run_id, user_turn: boo
             value = json.loads(row[0])
         except (TypeError, ValueError):
             value = None
+    if (value is None or value.get("run_id") == run_id) and any_of_kind:
+        earlier = [v for v in waiting(registry, pip_id) if v.get("kind") == kind and v.get("run_id") != run_id]
+        if earlier:
+            value = earlier[0]
+            key = str(value.get("key") or "")
     if not isinstance(value, dict) or not _fresh(value, time.time()):
         return False, "the user wasn't asked about this exact step"
     if unattended or not user_turn:
@@ -133,6 +141,17 @@ def still_waiting(registry, pip_id: str) -> str:
     listed = "; ".join(v["what"] for v in held[:5]) + (f"; and {len(held) - 5} more" if len(held) > 5 else "")
     return ("Still waiting on the user (you asked in the chat): " + listed + ". If their message answers it, make that "
             "call again with \"confirm\": true; if it doesn't, say in one short line that it still waits on them.")
+
+
+def made_in(registry, pip_id: str, run_id) -> list[dict]:
+    """What this run held for the user, oldest first."""
+    return [v for v in waiting(registry, pip_id) if v.get("run_id") == run_id]
+
+
+def reply_line(held: list[dict]) -> str:
+    """DGC's own line under a Pip's reply that held something: the model may not have asked (live check, 18 Nov)."""
+    listed = "; ".join(f"{v['what']} ({v['why']})" for v in held[:3]) + (f"; and {len(held) - 3} more" if len(held) > 3 else "")
+    return f"Waiting for your yes: {listed}. Say yes in your next message and it runs once."
 
 
 def runtime(registry, run, manifest: dict) -> dict:
