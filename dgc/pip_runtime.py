@@ -211,11 +211,9 @@ def _start_through_keep_running(directory, before):
     return None
 
 
-def adopt_older_runner(config) -> bool:
-    """The live runner is another install's (an update left it running): move it to this install while it is idle,
-    or ask it to hand over while it is busy (start_runtime), at the editor's first look at Pips. The takeover came
-    only with the next run asked for, so opening a Pip's computer kept showing the old install's desktop (his machine,
-    18 Nov). True when it acted. A newer install's runner, or this install's own, is left alone."""
+def older_runner_waiting(config) -> bool:
+    """Whether adopt_older_runner has anything to do: Pips on, and the live runner is an older install's. A quick read,
+    done on the caller's thread, so a thread is started only for a runner to move."""
     if config.get("pips_enabled", False) is not True:
         return False
     directory = state_directory()
@@ -223,7 +221,15 @@ def adopt_older_runner(config) -> bool:
     if not supervisor_is_live(directory, status):
         return False
     kind = _other_runner(status)
-    if not kind or kind == "newer":
+    return bool(kind) and kind != "newer"
+
+
+def adopt_older_runner(config) -> bool:
+    """The live runner is another install's (an update left it running): move it to this install while it is idle,
+    or ask it to hand over while it is busy (start_runtime), at the editor's first look at Pips. The takeover came
+    only with the next run asked for, so opening a Pip's computer kept showing the old install's desktop (his machine,
+    18 Nov). True when it acted. A newer install's runner, or this install's own, is left alone."""
+    if not older_runner_waiting(config):
         return False
     try:
         start_runtime(config)

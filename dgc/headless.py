@@ -8048,14 +8048,19 @@ class Backend:
                 # not at the next run, so a Pip's computer opened first isn't drawn by the old code (18 Nov). Off this
                 # thread: moving waits for the old runner to stop.
                 self._pips_runner_looked = True
-
-                def adopt(view=config):
-                    try:
-                        from .pip_runtime import adopt_older_runner
-                        adopt_older_runner(view)
-                    except Exception:            # noqa: BLE001 -- the next run asked for moves it, as before
-                        pass
-                threading.Thread(target=adopt, daemon=True, name="dgc-pips-adopt").start()
+                try:
+                    from .pip_runtime import older_runner_waiting
+                    waiting = older_runner_waiting(config)        # a quick read; a thread only for a runner to move
+                except Exception:                                # noqa: BLE001 -- the next run asked for moves it
+                    waiting = False
+                if waiting:
+                    def adopt(view=config):
+                        try:
+                            from .pip_runtime import adopt_older_runner
+                            adopt_older_runner(view)
+                        except Exception:        # noqa: BLE001 -- the next run asked for moves it, as before
+                            pass
+                    threading.Thread(target=adopt, daemon=True, name="dgc-pips-adopt").start()
             if (cmd["request"].get("type") in ("run_pip", "send_pip_message", "accept_pip_handoff")
                     or (cmd["request"].get("type") == "answer_pip_questions" and cmd["request"].get("dismissed") is not True)):
                 from .pip_runtime import require_supervisor

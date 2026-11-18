@@ -7,7 +7,7 @@ lets the ones running finish, and stops once none runs, with queued work left qu
 asked for meanwhile is queued, never refused. The newer install then clears that stop and starts its own runner, which
 takes the queue."""
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from dgc import pip_daemon as daemon, pip_runtime as runtime, pips
 from dgc.workspace_registry import RegistryError
@@ -137,6 +137,35 @@ class TheEditorsFirstLook(unittest.TestCase):
              patch.object(runtime, "supervisor_is_live", return_value=True), \
              patch.object(runtime, "start_runtime", side_effect=busy):
             self.assertTrue(runtime.adopt_older_runner(self.config))
+
+    def test_with_no_other_installs_runner_live_no_thread_is_started(self):
+        # The look itself is a quick read on the backend's thread; only a runner to move gets a thread of its own.
+        # (A thread started for nothing outlived a test's folder: "Directory not empty" at its cleanup, 18 Nov.)
+        for status, live in (({**self.online, "install": ELSEWHERE}, False),
+                             ({**self.online, "install": runtime.this_install()}, True),
+                             ({**self.online, "install": ELSEWHERE, "version": "9.9.9"}, True)):
+            with self.subTest(live=live, install=status.get("install")), \
+                 patch.object(runtime, "_state", return_value=(status, "x")), \
+                 patch.object(runtime, "supervisor_is_live", return_value=live):
+                if status.get("install") == runtime.this_install():
+                    from dgc import __version__
+                    status["version"] = __version__
+                self.assertFalse(runtime.older_runner_waiting(self.config))
+        with patch.object(runtime, "_state", return_value=({**self.online, "install": ELSEWHERE}, "old")), \
+             patch.object(runtime, "supervisor_is_live", return_value=True):
+            self.assertTrue(runtime.older_runner_waiting(self.config))
+        off = Mock()
+        off.get.side_effect = lambda key, default=None: False if key == "pips_enabled" else default
+        with patch.object(runtime, "_state", side_effect=AssertionError("Pips off: nothing read")):
+            self.assertFalse(runtime.older_runner_waiting(off))
+
+    def test_the_backend_starts_the_thread_only_for_a_runner_to_move(self):
+        import inspect
+        from dgc import headless
+        source = inspect.getsource(headless)
+        look = source[source.index("_pips_runner_looked = True"):source.index('name="dgc-pips-adopt"')]
+        self.assertIn("older_runner_waiting(", look)
+        self.assertLess(look.index("older_runner_waiting("), look.index("threading.Thread("))
 
     def test_the_backend_looks_once_per_process_off_its_own_thread(self):
         import inspect
