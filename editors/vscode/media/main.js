@@ -18417,55 +18417,16 @@ function permissionChoices(ev) {
   // on screen with the others to check (reported 2026-10-21: "user should need to press submit button
   // to send all answers, not auto send"). The answered state renders inside the step's tool card,
   // identically live and on replay.
-  const ASK_KEY_GUARD_MS = 400, ASK_CHOSEN_MS = 150, ASK_MAX_TEXT = 4096;
-  // Moving on to another question has to be seen (reported 2026-10-21: "so quick, it gets hard for me to
-  // realise it has moved to the second question"). The pick holds a little longer, the next question
-  // streams in a word at a time and its options pop in one after another, and for a moment after the
-  // step a second click or a held key cannot answer the new question by landing where the last one was.
-  const ASK_STEP_MS = 400, ASK_STEP_GUARD_MS = 300, ASK_STREAM_MS = 260, ASK_POP_GAP_MS = 45;
+  // The card itself (its rows, the keys, the pill, the pager, "Something else", the arrival guard and the
+  // answered panel) is media/shared/askcard.js, DgcAskCard: the same card a Pip's chat draws under its reply.
+  // What is Work's here is where it docks, how it answers (options_response) and the fit rule below.
   // The fit rule's last resorts: the options list keeps one label line, the question two lines.
   const ASK_LIST_MIN = 44, ASK_QUESTION_MIN = 40;
-  let ask = null, askSerial = 0;
+  let ask = null;
   const askedClosed = new Set();          // answered cards the reader collapsed, by turn id + call
+  const AskCard = window.DgcAskCard;
 
-  function askValid(ev) {
-    const qs = Array.isArray(ev.questions) ? ev.questions : [];
-    return qs.length >= 1 && qs.length <= 4 && qs.every((q) => q && typeof q.id === "string"
-      && typeof q.question === "string" && Array.isArray(q.options) && q.options.length >= 2 && q.options.length <= 6
-      && q.options.every((o) => o && typeof o.label === "string"))
-      && new Set(qs.map((q) => q.id)).size === qs.length;
-  }
-  // A model may still write its recommendation into the text: "SQLite (Recommended)", a description
-  // ending "(Recommended)", or "Recommended: …". The badge says it instead (mirrors questions._unmark).
-  const ASK_MARK = /\(\s*recommended\s*\)/gi, ASK_LEAD_MARK = /^\s*recommended\s*(?:[:\u00b7\u2013\u2014-]\s*|\.\s+)/i;
-  const ASK_TRAIL_MARK = /(?:^|[,;:\u00b7\u2013\u2014-]|\.(?=\s))\s*recommended\s*[.!]?\s*$/i;
-  // `sentence` (a description): text left after a leading "Recommended:" starts with a capital.
-  // A plain lowercase word may start a sentence; "iOS", "eBPF" or "package.json" keep their case (questions._SENTENCE_WORD).
-  const ASK_SENTENCE_WORD = /^[a-z]+[,;:.!?]?(?=\s|$)/;
-  function askUnmark(text, sentence = false) {
-    const raw = String(text || "");
-    let stripped = raw.replace(/\(\s*recommended\s*:\s*([^()]*)\)/gi, "($1)").replace(ASK_MARK, " ");
-    let found = stripped !== raw, capital = false;
-    const lead = stripped.match(ASK_LEAD_MARK);
-    if (lead) { stripped = stripped.slice(lead[0].length); found = true; capital = sentence; }
-    const trail = stripped.match(ASK_TRAIL_MARK);
-    if (trail) { stripped = stripped.slice(0, trail.index); found = true; }
-    if (!found) return [raw, false];
-    stripped = stripped.replace(/\s+([,;.!?])/g, "$1").replace(/([,;])(?:\s*[,;])+/g, "$1")
-      .split(/\s+/).filter(Boolean).join(" ").replace(/^[\s,;:\u00b7\u2013\u2014-]+|[\s,;:\u00b7\u2013\u2014-]+$/g, "");
-    if (capital && ASK_SENTENCE_WORD.test(stripped)) stripped = stripped.charAt(0).toUpperCase() + stripped.slice(1);
-    return [stripped, true];
-  }
-  function askLabel(option) { return askUnmark(option.label)[0]; }
-  function askDesc(option) { return askUnmark(option.description, true)[0]; }
-  function askFlagged(option) {
-    return option.recommended === true || askUnmark(option.label)[1] || askUnmark(option.description)[1];
-  }
-  // What a question has picked as shown: in a single choice, written words replace the pick.
-  function askPicked(q, answer) {
-    if (q.multi_select) return answer.selected;
-    return answer.other.trim() ? [] : answer.selected.slice(0, 1);
-  }
+  function askValid(ev) { return !!AskCard && AskCard.valid(ev.questions); }
   function askCardDocked() { return !!(ask && ask.el.isConnected); }
   function askToolCard(callId) {
     if (!turn || !callId) return null;
@@ -18479,22 +18440,12 @@ function permissionChoices(ev) {
     const questions = ev.questions;
     const hadFocus = document.activeElement === input;
     const busyComposer = hadFocus && !!composerText().trim();
-    const n = ++askSerial;
-    const flagged = questions.map((q) => (q.multi_select ? -1 : q.options.findIndex(askFlagged)));
-    const el = document.createElement("section");
-    el.className = "ask";
-    el.tabIndex = -1;
+    const state = AskCard.create(questions, { speak, onFit: () => fitAskCard(),
+      onPost: (payload) => vscode.postMessage({ type: "options_response", id: ev.id, ...payload }) });
+    const el = state.el;
     el.dataset.requestId = String(ev.id);
-    el.setAttribute("role", "group");
-    el.setAttribute("aria-labelledby", `ask-q-${n}`);
-    const state = {
-      ev, el, n, questions, index: 0, armed: false, sending: false, busy: false, retired: false,
-      restoreFocus: hadFocus,
-      // Single choice: the recommendation (wherever it sits) is preselected, checked and highlighted;
-      // multi-select preselects nothing and highlights row 1.
-      answers: questions.map((q, k) => ({ selected: flagged[k] >= 0 ? [flagged[k]] : [], other: "", settled: false })),
-      hot: questions.map((q, k) => (flagged[k] >= 0 ? flagged[k] : 0)),
-    };
+    state.ev = ev;
+    state.restoreFocus = hadFocus;
     pipSetupCards?.yieldDock();                    // a question takes the dock; the Pip waits for it
     ask = state;
     const cbox = $("cbox"), textBox = cbox.querySelector(".cinput");
@@ -18505,18 +18456,12 @@ function permissionChoices(ev) {
     atts.hidden = true;
     closeRailPop({ restore: false });              // the chip line steps aside for a docked question in a short panel
     document.body.classList.add("ask-docked");
-    setTimeout(() => { state.armed = true; }, ASK_KEY_GUARD_MS);
-    renderAskCard(state);
+    AskCard.render(state);
     const card = askToolCard(ev.call_id);
     if (card) {
       const arg = card.querySelector(".arg");
       if (arg) arg.textContent = `${askCountLabel(questions.length)}…`;
     }
-    el.addEventListener("keydown", (event) => askKey(state, event));
-    el.addEventListener("focusin", (event) => {
-      if (event.target === el) return;         // the card holding focus for a busy composer keeps its hint
-      const hint = el.querySelector(".ask-hint"); if (hint) hint.hidden = true;
-    });
     speak(`DGC asks: ${questions[0].question}`);
     renderTurnMeta();
     renderComposerControls();
@@ -18531,368 +18476,19 @@ function permissionChoices(ev) {
     }
   }
 
-  function renderAskCard(state, entering = false) {
-    const { el, n, questions } = state;
-    const i = state.index, q = questions[i], answer = state.answers[i], multi = !!q.multi_select;
-    const draft = el.querySelector(".ask-field");
-    if (draft) state.answers[state.drawn ?? i].other = draft.value;
-    state.drawn = i;
-    const hot = state.hot[i];
-    const picked = askPicked(q, answer);
-    const rows = q.options.map((option, k) => {
-      const checked = picked.includes(k);
-      const flagged = askFlagged(option);
-      const label = askLabel(option);
-      const desc = askDesc(option);
-      return `<button type="button" class="ask-opt${k === hot ? " hot" : ""}${checked ? " checked" : ""}" role="${multi ? "checkbox" : "radio"}"`
-        + ` aria-checked="${checked}" tabindex="${k === hot ? 0 : -1}" data-i="${k}"`
-        + ` aria-label="${esc(label + (flagged ? ", recommended" : ""))}"${desc ? ` aria-describedby="ask-d-${n}-${k}"` : ""}>`
-        + `<span class="ask-n" aria-hidden="true">${checked && multi ? "✓" : k + 1}</span>`
-        + `<span class="ask-body"><span class="ask-label">${esc(label)}</span>${flagged ? '<span class="ask-badge">Recommended</span>' : ""}`
-        + (desc ? `<span class="ask-desc" id="ask-d-${n}-${k}">${esc(desc)}</span>` : "") + `</span>`
-        + `</button>`;
-    }).join("");
-    const pager = questions.length > 1
-      ? `<div class="ask-foot"><button type="button" class="ask-page" data-step="-1" aria-label="Previous question" title="Previous question (←)"${i === 0 ? " disabled" : ""}><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button>`
-        + `<span class="ask-pg">Question ${i + 1} of ${questions.length}</span>`
-        + `<button type="button" class="ask-page" data-step="1" aria-label="Next question" title="Next question (→)"${i === questions.length - 1 ? " disabled" : ""}><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button></div>`
-      : "";
-    el.classList.toggle("ask-multi", multi);
-    el.innerHTML = `<div class="ask-head"><div class="ask-q" id="ask-q-${n}">${esc(q.question)}</div>`
-      + `<button type="button" class="ask-x" aria-label="Dismiss questions" title="Dismiss (Esc)"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>`
-      + `<div class="ask-hint" hidden>Press Tab to answer</div>`
-      + `<div class="ask-opts" role="${multi ? "group" : "radiogroup"}" aria-labelledby="ask-q-${n}">${rows}</div>`
-      + `<div class="ask-other"><span class="ask-pencil" aria-hidden="true">${icon("pencil", "xs")}</span>`
-      + `<textarea class="ask-field" rows="1" maxlength="${ASK_MAX_TEXT}" aria-label="Your own answer" aria-describedby="ask-k-${n}"></textarea><span class="sr-only" id="ask-k-${n}">Enter sends, Shift+Enter adds a line</span>`
-      + `<button type="button" class="ask-skip" title="Skip this question" hidden>Skip</button><button type="button" class="ask-act"></button></div>`
-      + pager
-      + `<div class="ask-error" id="ask-e-${n}" hidden></div>`;
-    const field = el.querySelector(".ask-field");
-    field.value = answer.other;
-    askPlaceholder(field);
-    field.addEventListener("input", () => { answer.other = field.value; growAskField(field); paintAskChecks(state); paintAskAction(state); fitAskCard(); });
-    growAskField(field);
-    el.querySelectorAll(".ask-opt").forEach((row) => {
-      row.addEventListener("click", (event) => {
-        // A pointer click is never delayed; a synthetic or keyboard click waits out the arrival guard.
-        if ((event.detail === 0 && !state.armed) || state.entering) return;
-        askChoose(state, Number(row.dataset.i));
-      });
-    });
-    el.querySelector(".ask-x").addEventListener("click", (event) => { if (event.detail !== 0 || state.armed) askDismiss(state); });
-    el.querySelector(".ask-act").addEventListener("click", (event) => {
-      if ((event.detail === 0 && !state.armed) || state.entering) return;
-      askAction(state);
-    });
-    el.querySelector(".ask-skip").addEventListener("click", (event) => {
-      if ((event.detail === 0 && !state.armed) || state.entering) return;
-      askSkip(state);
-    });
-    el.querySelectorAll(".ask-page").forEach((button) => button.addEventListener("click", () => askPage(state, Number(button.dataset.step))));
-    paintAskAction(state);
-    el.classList.remove("ask-enter");
-    if (entering) askEnter(state);
-    fitAskCard();
-  }
-
-  // The question arrives the way the model's own words do, a word at a time, and its options follow
-  // one after another. Only opacity and transform move, so the card's measured fit never changes.
-  function askEnter(state) {
-    const { el } = state;
-    if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const line = el.querySelector(".ask-q");
-    const parts = line.textContent.split(/(\s+)/).filter(Boolean);
-    const words = parts.filter((part) => !/^\s+$/.test(part)).length;
-    const gap = Math.min(28, Math.floor(ASK_STREAM_MS / Math.max(1, words)));
-    line.textContent = "";
-    let w = 0;
-    for (const part of parts) {
-      if (/^\s+$/.test(part)) { line.append(part); continue; }
-      const word = document.createElement("span");
-      word.className = "ask-w";
-      word.textContent = part;
-      word.style.animationDelay = `${w++ * gap}ms`;
-      line.append(word);
-    }
-    const start = Math.min(w * gap, 140);
-    askRows(state).forEach((row, k) => { row.style.animationDelay = `${start + k * ASK_POP_GAP_MS}ms`; });
-    el.classList.add("ask-enter");
-  }
-  // After a step, the new question's rows and buttons sit where the last ones were.
-  function askStepGuard(state) {
-    state.entering = true;
-    setTimeout(() => { state.entering = false; }, ASK_STEP_GUARD_MS);
-  }
-
-  // The pill: Next (primary) once the question has a pick or words while another is still open; Submit
-  // (Continue on a single question) when nothing else is open, which sends; Skip while the question has
-  // neither, which settles it without sending. With a pick, Skip is its own quieter button beside the
-  // pill. A question already settled with nothing in it (skipped, or after a rejection) submits as it is.
-  function askPill(state) {
-    const i = state.index, q = state.questions[i], answer = state.answers[i];
-    const has = !!answer.other.trim() || askPicked(q, answer).length > 0;
-    const others = state.answers.every((a, k) => k === i || a.settled);
-    return others && (has || answer.settled) ? "submit" : has ? "next" : "skip";
-  }
-  function paintAskAction(state) {
-    if (!state.el.isConnected && state !== ask) return;
-    const i = state.index, q = state.questions[i], answer = state.answers[i];
-    const button = state.el.querySelector(".ask-act"), skip = state.el.querySelector(".ask-skip");
-    if (!button) return;
-    const has = !!answer.other.trim() || askPicked(q, answer).length > 0;
-    const pill = askPill(state), several = state.questions.length > 1;
-    button.textContent = pill === "submit" ? (several ? "Submit" : "Continue") : pill === "next" ? "Next" : "Skip";
-    button.classList.toggle("primary", pill !== "skip");
-    button.title = pill === "submit" ? "Send your answers" : pill === "next" ? "Go to the next question" : "Skip this question";
-    if (skip) skip.hidden = !has;
-    const pg = state.el.querySelector(".ask-pg");
-    if (pg) pg.textContent = `Question ${i + 1} of ${state.questions.length}`
-      + (state.answers.every((a) => a.settled) ? " \u00b7 all answered" : "");
-    const field = state.el.querySelector(".ask-field");
-    if (field && !field.value) askPlaceholder(field);      // Skip and the button just changed its width
-  }
-  function paintAskChecks(state) {
-    const q = state.questions[state.index], picked = askPicked(q, state.answers[state.index]);
-    askRows(state).forEach((row, k) => {
-      const on = picked.includes(k);
-      row.classList.toggle("checked", on);
-      row.setAttribute("aria-checked", String(on));
-      row.querySelector(".ask-n").textContent = on && q.multi_select ? "✓" : String(k + 1);
-    });
-  }
-  // The hint fits the field, not the window: beside Skip and Continue in a side bar the long one
-  // wrapped onto a second line and pushed the pencil out of line.
-  function askPlaceholder(field) {
-    const width = field.clientWidth || field.getBoundingClientRect().width;
-    field.placeholder = width && width < 300 ? "Something else…" : "Something else? Tell DGC what you want";
-  }
-  function growAskField(field) {
-    field.style.height = "auto";
-    const line = parseFloat(getComputedStyle(field).lineHeight) || 18;
-    const max = line * 4 + 8;
-    // An empty field is one line: Chromium counts a wrapped placeholder in scrollHeight.
-    const wanted = field.value ? (field.scrollHeight || line) : line;
-    field.style.height = `${Math.min(max, Math.max(line + 4, wanted))}px`;
-    field.style.overflowY = wanted > max ? "auto" : "hidden";
-  }
-
-  function askRows(state) { return [...state.el.querySelectorAll(".ask-opt")]; }
-  function askHotRow(state) { return askRows(state)[state.hot[state.index]] || askRows(state)[0] || null; }
   // The docked card's focus target: its highlighted row (the preselected recommendation on open).
-  function focusAskCard() {
-    if (!askCardDocked()) return false;
-    const row = askHotRow(ask);
-    (row || ask.el).focus({ preventScroll: true });
-    row?.scrollIntoView?.({ block: "nearest" });
-    return true;
-  }
-  function setAskHot(state, k, focus = true) {
-    const rows = askRows(state);
-    if (!rows.length) return;
-    const next = Math.max(0, Math.min(rows.length - 1, k));
-    state.hot[state.index] = next;
-    rows.forEach((row, index) => { row.classList.toggle("hot", index === next); row.tabIndex = index === next ? 0 : -1; });
-    if (focus) rows[next].focus({ preventScroll: true });
-    rows[next].scrollIntoView?.({ block: "nearest" });
-  }
-
-  function askKey(state, event) {
-    if (state !== ask || state.retired) { event.stopPropagation(); return; }
-    const target = event.target;
-    const inField = target.classList?.contains("ask-field");
-    const onRow = target.classList?.contains("ask-opt");
-    const key = event.key;
-    if (key === "Escape") {
-      // The card owns Escape: it must never reach the composer, where Escape means Stop.
-      event.preventDefault(); event.stopPropagation();
-      if (!state.armed || state.sending) return;
-      if (inField && target.value.trim()) { setAskHot(state, state.hot[state.index]); return; }
-      askDismiss(state);
-      return;
-    }
-    if (target === state.el) {
-      if (key === "Tab" && !event.shiftKey) { event.preventDefault(); focusAskCard(); }
-      return;                                   // keys typed at the card itself are not choices
-    }
-    if (event.repeat && (key === "Enter" || key === " ") && !(target.classList?.contains("ask-field") && event.shiftKey)) {
-      event.preventDefault();
-      return;
-    }
-    if (state.sending || state.busy) {
-      if (["Enter", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(key) || /^[1-9]$/.test(key)) event.preventDefault();
-      return;
-    }
-    const q = state.questions[state.index];
-    const count = q.options.length;
-    if (inField) {
-      if (key === "Enter" && !event.shiftKey && !event.isComposing) {
-        event.preventDefault();
-        if (!state.armed || state.entering || event.repeat) return;
-        // Enter does what the pill says when it is Next or Continue; skipping stays explicit.
-        if (target.value.trim() || askPicked(q, state.answers[state.index]).length) askAction(state);
-        return;
-      }
-      if (key === "ArrowUp") {
-        const before = target.value.slice(0, target.selectionStart ?? 0);
-        if (!before.includes("\n")) { event.preventDefault(); setAskHot(state, count - 1); }
-      }
-      return;
-    }
-    if (key === "ArrowDown" && onRow) {
-      event.preventDefault();
-      const k = state.hot[state.index];
-      if (k >= count - 1) state.el.querySelector(".ask-field")?.focus(); else setAskHot(state, k + 1);
-    } else if (key === "ArrowUp" && onRow) {
-      event.preventDefault(); setAskHot(state, state.hot[state.index] - 1);
-    } else if (key === "Home" && onRow) {
-      event.preventDefault(); setAskHot(state, 0);
-    } else if (key === "End" && onRow) {
-      event.preventDefault(); setAskHot(state, count - 1);
-    } else if ((key === "ArrowLeft" || key === "ArrowRight") && !event.altKey) {
-      event.preventDefault(); askPage(state, key === "ArrowLeft" ? -1 : 1);
-    } else if (/^[1-9]$/.test(key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      event.preventDefault();
-      if (!state.armed || state.entering || event.repeat) return;
-      const k = Number(key) - 1;
-      if (k < count) { setAskHot(state, k); askChoose(state, k); }
-    } else if ((key === "Enter" || key === " ") && onRow) {
-      event.preventDefault();
-      if (!state.armed || state.entering || event.repeat) return;
-      if (key === "Enter" && (event.ctrlKey || event.metaKey)) {
-        if (askPicked(q, state.answers[state.index]).length || state.answers[state.index].other.trim()) askAction(state);
-        return;
-      }
-      askChoose(state, Number(target.dataset.i));
-    }
-  }
-
-  function askChoose(state, k) {
-    if (state !== ask || state.retired || state.sending || state.busy) return;
-    const i = state.index, q = state.questions[i], answer = state.answers[i];
-    if (!(k >= 0 && k < q.options.length)) return;
-    setAskHot(state, k, false);
-    if (q.multi_select) {
-      answer.selected = answer.selected.includes(k) ? answer.selected.filter((x) => x !== k) : [...answer.selected, k].sort((a, b) => a - b);
-      answer.settled = false;
-      paintAskChecks(state);
-      paintAskAction(state);
-      return;
-    }
-    answer.selected = [k]; answer.other = "";
-    const field = state.el.querySelector(".ask-field"); if (field) { field.value = ""; growAskField(field); }
-    paintAskChecks(state);
-    paintAskAction(state);
-    askRows(state).forEach((row, x) => row.classList.toggle("picked", x === k));
-    const more = state.answers.some((a, x) => x !== i && !a.settled);
-    state.busy = true;
-    setTimeout(() => {
-      if (state !== ask || state.retired) return;
-      state.busy = false;
-      askSettle(state);
-    }, more ? ASK_STEP_MS : ASK_CHOSEN_MS);
-  }
-
-  // The pill settles the question with what it shows: the pick (the preselected recommendation
-  // included), the written words, or nothing (a skip) when it reads Skip.
-  function askAction(state) {
-    if (state !== ask || state.retired || state.sending || state.busy) return;
-    const i = state.index, q = state.questions[i], answer = state.answers[i];
-    const field = state.el.querySelector(".ask-field");
-    answer.other = (field ? field.value : answer.other).slice(0, ASK_MAX_TEXT);
-    const submit = askPill(state) === "submit";
-    answer.selected = [...askPicked(q, answer)];
-    if (!answer.other.trim()) answer.other = "";
-    askSettle(state, submit);
-  }
-  // Skip clears this question's pick and words and settles it as skipped.
-  function askSkip(state) {
-    if (state !== ask || state.retired || state.sending || state.busy) return;
-    const answer = state.answers[state.index];
-    answer.selected = []; answer.other = "";
-    const field = state.el.querySelector(".ask-field"); if (field) field.value = "";
-    askSettle(state);
-  }
-
-  // One question is answered or skipped: go to the next unsettled question (after this one, wrapping),
-  // never skipping one on the reader's behalf. With nothing left, a single question sends; a card of
-  // several stays where it is with Submit focused, and only Submit sends.
-  function askSettle(state, submit = false) {
-    const i = state.index;
-    state.answers[i].settled = true;
-    const open = state.answers.map((a, k) => (a.settled ? -1 : k)).filter((k) => k >= 0);
-    if (!open.length && (submit || state.questions.length === 1)) { askPost(state, { answers: Object.fromEntries(state.questions.map((q, k) => [q.id, {
-      selected: [...askPicked(q, state.answers[k])], other: state.answers[k].other.trim() }])) }); return; }
-    if (!open.length) {
-      askRows(state).forEach((row) => row.classList.remove("picked"));
-      paintAskAction(state);
-      askStepGuard(state);
-      state.el.querySelector(".ask-act")?.focus({ preventScroll: true });
-      speak(`All ${state.questions.length} questions answered. Press Submit to send them.`);
-      return;
-    }
-    state.index = open.find((k) => k > i) ?? open[0];
-    renderAskCard(state, true);
-    askStepGuard(state);
-    speak(`Question ${state.index + 1} of ${state.questions.length}: ${state.questions[state.index].question}`);
-    focusAskCard();
-  }
-
-  function askPage(state, step) {
-    if (state !== ask || state.retired || state.sending) return;
-    const next = state.index + step;
-    if (next < 0 || next >= state.questions.length) return;
-    state.index = next;
-    renderAskCard(state, true);
-    focusAskCard();
-  }
-
-  function askDismiss(state) {
-    if (state !== ask || state.retired || state.sending) return;
-    askPost(state, { dismissed: true });
-  }
-
-  function askPost(state, payload) {
-    state.sending = true;
-    // Disabling the focused control would drop focus to the page: the card holds it instead, so
-    // the composer gets it back when the card closes.
-    if (state.el.contains(document.activeElement) && document.activeElement !== state.el) state.el.focus({ preventScroll: true });
-    state.el.classList.add("sending");
-    state.el.setAttribute("aria-busy", "true");
-    state.el.querySelectorAll("button, textarea").forEach((control) => { control.disabled = true; });
-    speak(payload.dismissed ? "Closing the question" : "Sending your answers");
-    const error = state.el.querySelector(".ask-error");
-    if (error) { error.hidden = true; state.el.removeAttribute("aria-describedby"); }
-    let sending = state.el.querySelector(".ask-sending");
-    if (!sending) { sending = el("div", "ask-sending", "Sending…"); sending.setAttribute("aria-hidden", "true"); state.el.appendChild(sending); }
-    vscode.postMessage({ type: "options_response", id: state.ev.id, ...payload });
-  }
+  function focusAskCard() { return askCardDocked() && AskCard.focus(ask); }
 
   function askRejected(ev) {
     if (!ask || String(ev.request_id || "") !== String(ask.ev.id)) return false;
-    const state = ask;
-    state.sending = false;
-    state.el.classList.remove("sending");
-    state.el.removeAttribute("aria-busy");
-    state.el.querySelector(".ask-sending")?.remove();
-    // The answers stay settled, so Submit resends them; any question can still be changed first.
-    renderAskCard(state);
-    const error = state.el.querySelector(".ask-error");
-    const message = ev.message || "DGC could not use that answer. Try again.";
-    error.textContent = message;
-    error.hidden = false;
-    state.el.setAttribute("aria-describedby", error.id);
-    speak(message);
-    fitAskCard();
-    focusAskCard();
+    AskCard.rejected(ask, ev.message || "DGC could not use that answer. Try again.");
     return true;
   }
 
   function retireAsk(reason) {
     const state = ask;
     if (!state) return;
-    state.retired = true;
-    state.el.classList.add("expired");
-    state.el.querySelectorAll("button, textarea").forEach((control) => { control.disabled = true; });
+    AskCard.retire(state);
     const focusWasInside = state.el.contains(document.activeElement) || document.activeElement === state.el;
     state.el.remove();
     ask = null;
@@ -18962,8 +18558,7 @@ function permissionChoices(ev) {
   }
   window.addEventListener("resize", () => {
     if (!askCardDocked()) return;
-    const field = ask.el.querySelector(".ask-field");
-    if (field) { askPlaceholder(field); growAskField(field); }
+    AskCard.resized(ask);
     fitAskCard();
   });
   // Fonts, rails and wrapped text settle after the card mounts; fit again once they have.
@@ -18978,49 +18573,17 @@ function permissionChoices(ev) {
 
   // ---- the answered state, inside the step's tool card ----
   // Kept in full (reported 2026-10-17): "Questions · Answered · 4 questions", open, with every
-  // question and every option still there, the ones picked marked (a filled circle for one choice, a ticked
-  // box for several) and the rest quieter, so the transcript says what was asked as well as what was chosen.
-  function askedSummary(ev) {
-    const qs = Array.isArray(ev.questions) ? ev.questions : [];
-    const n = askCountLabel(qs.length);
-    if (ev.outcome === "dismissed") return `· Dismissed · ${n}`;
-    if (ev.outcome !== "answered") return `· Not answered · ${n}`;
-    return `· Answered · ${n}`;
-  }
+  // question and every option still there, the picks marked (DgcAskCard.answeredHtml, the panel a Pip's chat
+  // shows under its reply too).
+  function askedSummary(ev) { return AskCard ? AskCard.summary(ev) : `· ${askCountLabel(Array.isArray(ev.questions) ? ev.questions.length : 0)}`; }
   // The card's head says what it holds once it is answered (setToolStatus writes "Asked" over it otherwise).
   function askedHead(card) {
     const verb = card.querySelector(".verb");
     const count = Array.isArray(card._asked?.questions) ? card._asked.questions.length : 0;
     if (verb) verb.textContent = count === 1 ? "Question" : "Questions";
   }
-  function askedOption(option, picked, multi, extra = "") {
-    const desc = option.words ?? askDesc(option);
-    return `<li class="asked-opt${picked ? " picked" : ""}${extra}"><span class="asked-mark ${multi ? "check" : "radio"}" aria-hidden="true"></span>`
-      + `<span class="asked-opt-text"><span class="sr-only">${picked ? "Chosen: " : "Not chosen: "}</span>`
-      + `<span class="asked-opt-label">${esc(option.words !== undefined ? option.label : askLabel(option))}</span>`
-      + `${option.words === undefined && askFlagged(option) ? '<span class="ask-badge">Recommended</span>' : ""}`
-      + `${desc ? `<span class="asked-opt-desc">${esc(desc)}</span>` : ""}</span></li>`;
-  }
-  function askedBody(ev) {
-    const qs = Array.isArray(ev.questions) ? ev.questions : [];
-    if (ev.outcome === "dismissed") return '<p class="asked-outcome">Dismissed without an answer</p>';
-    if (ev.outcome === "unavailable") return '<p class="asked-outcome">Not answered: nobody could answer here</p>';
-    if (ev.outcome !== "answered") return '<p class="asked-outcome">Not answered: the turn stopped</p>';
-    return `<div class="asked-panel">${qs.map((q) => {
-      const a = (ev.answers || {})[q.id] || {};
-      const options = Array.isArray(q.options) ? q.options : [];
-      const multi = !!q.multi_select;
-      const words = String(a.other || "").trim();
-      const selected = Array.isArray(a.selected) ? a.selected : [];
-      // In a single choice, written words replace the pick (askPicked): only one row is marked.
-      const picked = new Set(multi ? selected : words ? [] : selected.slice(0, 1));
-      const rows = options.map((o, k) => askedOption(o, picked.has(k), multi)).join("");
-      const said = words ? askedOption({ label: "Your words", words: `“${words}”` }, true, multi, " asked-words") : "";
-      const skipped = !picked.size && !words ? '<p class="asked-skipped">Skipped</p>' : "";
-      return `<section class="asked-question"><div class="asked-q">${esc(q.question)}</div>`
-        + `<ul class="asked-options">${rows}${said}</ul>${skipped}</section>`;
-    }).join("")}</div>`;
-  }
+  function askedBody(ev) { return AskCard ? AskCard.answeredHtml(ev) : ""; }
+
   // ---- an open question ------------------------------------------------------------------------
   // The turn did not stop for this, so the card lives in the transcript rather than docking over
   // the composer the way the picker does. Pending decisions remain visible until the reader

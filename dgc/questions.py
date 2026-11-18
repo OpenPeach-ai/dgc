@@ -250,6 +250,38 @@ def normalize_questions(args) -> list[dict]:
     return result
 
 
+def validate_kept(value) -> list[dict] | None:
+    """A question list as `normalize_questions` gives it (kept with a Pip's reply, 0.52), or None when it is anything
+    else. The same bounds, read back: never normalized again, so what was asked is what is kept and shown."""
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_QUESTIONS:
+        return None
+    ids = set()
+    for q in value:
+        if not isinstance(q, dict) or set(q) != {"id", "header", "question", "multi_select", "options"}:
+            return None
+        if not isinstance(q["id"], str) or not _ID.fullmatch(q["id"]) or q["id"] in ids:
+            return None
+        ids.add(q["id"])
+        if (not isinstance(q["header"], str) or not q["header"].strip() or cells(q["header"]) > MAX_HEADER_CELLS
+                or not isinstance(q["question"], str) or not q["question"].strip()
+                or len(q["question"]) > MAX_QUESTION or type(q["multi_select"]) is not bool):
+            return None
+        options = q["options"]
+        if not isinstance(options, list) or not MIN_OPTIONS <= len(options) <= MAX_OPTIONS:
+            return None
+        for o in options:
+            if (not isinstance(o, dict) or set(o) != {"label", "description", "recommended"}
+                    or not isinstance(o["label"], str) or not o["label"].strip()
+                    or len(o["label"]) > MAX_LEGACY_OPTION or not isinstance(o["description"], str)
+                    or len(o["description"]) > MAX_DESCRIPTION or type(o["recommended"]) is not bool):
+                return None
+        if len({o["label"].casefold() for o in options}) != len(options):
+            return None
+        if not q["multi_select"] and sum(o["recommended"] for o in options) > 1:
+            return None
+    return value
+
+
 def validate_response(questions: list[dict], payload) -> dict | None:
     """The decision a client response states, or None when it is invalid (the request stays open).
 
@@ -356,6 +388,28 @@ def format_result(questions: list[dict], decision: dict) -> str:
             parts.append("wrote: " + json.dumps(other, ensure_ascii=False))
         lines.append(head + " and ".join(parts))
     lines.append(OWN_WORDS if wrote_any else CONTINUE)
+    return "\n".join(lines)
+
+
+def answer_words(questions: list[dict], decision: dict) -> str:
+    """A card answered in a chat (a Pip's, 0.52) as the user's own next message: each question and its answer, one a
+    line, as ChatDGC writes a card's answers ("Which storage? SQLite file"). Picks are the option labels, written words
+    are theirs (on one line), and a skipped question leaves the choice to the model, with its recommendation if it made
+    one. Only for an answered decision (`validate_response`)."""
+    answers = decision.get("answers") or {}
+    lines = []
+    for q in questions:
+        entry = answers.get(q["id"]) or {}
+        labels = [q["options"][i]["label"] for i in entry.get("selected", []) if 0 <= i < len(q["options"])]
+        other = one_line(entry.get("other", ""))
+        recommended = [o["label"] for o in q["options"] if o["recommended"]]
+        if labels or other:
+            said = ", ".join(labels) + (". " if labels and other else "") + other
+        else:
+            said = (f"Go with your recommendation, {_quoted(recommended)}." if recommended
+                    else "Your call: decide and say what you chose.")
+        asked = _question_line(q["question"])
+        lines.append(f"{asked} {said}" if asked.endswith(("?", ":")) else f"{asked}: {said}")
     return "\n".join(lines)
 
 

@@ -188,6 +188,16 @@ export function sentFilesMarkup(m,name='the Pip'){
   }).join('')}</div>`;
 }
 
+// A reply's question card (Pips API 106): Work's questions, kept with the reply, and how it stands now (open, answered with
+// what was chosen, dismissed, or closed when the chat moved on). Anything else is no card.
+const QUESTION_STATES=['open','answered','dismissed','closed'];
+export function questionCard(m){
+  const card=m&&m.role==='assistant'&&/^message_[0-9a-f]{32}$/.test(String(m.id||''))?m.questions:null;
+  if(!card||typeof card!=='object'||!QUESTION_STATES.includes(card.state)||!Array.isArray(card.questions))return null;
+  if(globalThis.DgcAskCard&&!globalThis.DgcAskCard.valid(card.questions))return null;
+  return {questions:card.questions,state:card.state,answers:card.answers&&typeof card.answers==='object'&&!Array.isArray(card.answers)?card.answers:{}};
+}
+
 // What its reply made or changed (Pips API 102): each page, doc, sheet, deck or dashboard is the card Work draws, its
 // tile over "Page · made", and the card opens it (data-artifact-open, the Pip page's own Open).
 const MADE_KINDS={doc:'Document',slides:'Slides',sheet:'Spreadsheet',page:'Page',dashboard:'Dashboard'};
@@ -247,6 +257,9 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const shownCards=cards.length&&globalThis.DgcMcpApps?`<div class="msg-apps">${cards.map(a=>`<div class="mcp-app-slot" data-card-id="${esc(a.card_id)}"></div>`).join('')}</div>`:'';
   // The choices the Pip offered under its latest reply, as a card; a tap answers it.
   const offered=!user&&Array.isArray(choices)&&choices.length?`<div class="msg-choices" role="group" aria-label="Answer ${esc(name)}">${choices.slice(0,4).map((c,i)=>`<button type="button" class="msg-choice" data-pip-choice="${esc(c)}"${canSend?'':' disabled'}><span class="msg-choice-key" aria-hidden="true">${'ABCD'[i]}</span><span>${esc(c)}</span></button>`).join('')}</div>`:'';
+  // Work's question card under the reply that asked (Pips API 106): a slot the page fills with the card (media/shared/
+  // askcard.js) and keeps through every redraw, open or as it was settled.
+  const asked=!user&&questionCard(m)?`<div class="msg-questions" id="pip-questions-${esc(m.id)}" data-pip-questions="${esc(m.id)}" data-dom-own="1"></div>`:'';
   // A mid-turn message the reply never read wasn't sent, and says so; one the reply read and then failed has no answer either.
   const unsent=user&&m.steer_status==='missed',again=user&&m.steered&&m.status==='failed'?` <button type="button" class="message-send-again" data-chat-action="resend" data-message-id="${esc(m.id)}"${canSend?'':' disabled'}>Send again</button>`:'';
   // A failed model request in a person's words, with what fixes it and the provider's own answer one click away.
@@ -290,7 +303,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
     if(i===lastWords)return;
     before+=`<article class="pip-message msg assistant dgc reply-piece" data-reply-piece="${esc(m.id)}:${i}">${opened?role:opens}${words(p.text)}</article>`;opened=true;
   });
-  return `${before}<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}${parted?' reply-piece reply-end':''}${live?' live-reply':''}" ${live?`data-live-reply="${esc(m.run_id)}" aria-label="Live reply"`:`data-message="${esc(m.id)}"`}>${opened?role:opens}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${user?'':madeArtifactsMarkup(m)}${used}${offered}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${missing}${status}${live?'</article>'+after:`<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${yesAction}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>${after}`}`;
+  return `${before}<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}${parted?' reply-piece reply-end':''}${live?' live-reply':''}" ${live?`data-live-reply="${esc(m.run_id)}" aria-label="Live reply"`:`data-message="${esc(m.id)}"`}>${opened?role:opens}${body}${!user&&postArtifact(m)?docCardMarkup(postArtifact(m)):''}${user?'':madeArtifactsMarkup(m)}${used}${offered}${asked}${user?'':ownChangesMarkup(m,{name,undo,open:openChanges,busy:undoing,errors:undoErrors})}${missing}${status}${live?'</article>'+after:`<div class="response-actions">${user?'':head?(startedAgain?`<span class="msg-time">${startedAgain}</span>`:''):replyTime}${yesAction}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${replyAction}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>${after}`}`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

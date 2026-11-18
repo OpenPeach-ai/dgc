@@ -11433,6 +11433,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const menuJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "menu.js"));
     // One glyph for each action on every surface (media/shared/icons.js, window.DgcIcons): Open in editor, More, Back...
     const iconsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "icons.js"));
+    // The question card (propose_options), the same one a Pip's chat draws under its reply: after icons.js, before main.js.
+    const askCardJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "askcard.js"));
     // A file's menu, the same on a Library row and on a file's card in a chat (media/shared/filemenu.js, window.DgcFileMenu).
     const fileMenuJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "filemenu.js"));
     // Inline touches in what you type and what you read: a colour's swatch, shortcuts as keys, commits as links, times in
@@ -11800,7 +11802,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div id="followup-hint" hidden></div>
 </footer>
-<script nonce="${nonce}" src="${menuJs}"></script><script nonce="${nonce}" src="${iconsJs}"></script><script nonce="${nonce}" src="${fileMenuJs}"></script><script nonce="${nonce}" src="${inlineJs}"></script>
+<script nonce="${nonce}" src="${menuJs}"></script><script nonce="${nonce}" src="${iconsJs}"></script><script nonce="${nonce}" src="${askCardJs}"></script><script nonce="${nonce}" src="${fileMenuJs}"></script><script nonce="${nonce}" src="${inlineJs}"></script>
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>

@@ -39,7 +39,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_setups", "get_pip_setup", "accept_pip_setup", "reject_pip_setup", "revise_pip_setup",
     "list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context",
     "archive_pip", "restore_pip", "delete_archived_pip",
-    "list_workspaces", "list_pips", "list_pip_types", "list_pip_models", "list_pip_messages", "send_pip_message", "introduce_pip", "get_pip_message_image", "get_pip_message_file", "create_pip", "get_pip", "propose_pip_update",
+    "list_workspaces", "list_pips", "list_pip_types", "list_pip_models", "list_pip_messages", "send_pip_message", "answer_pip_questions", "introduce_pip", "get_pip_message_image", "get_pip_message_file", "create_pip", "get_pip", "propose_pip_update",
     "accept_pip_update", "pause_pip", "resume_pip", "run_pip", "list_pip_runs",
     "get_pip_run", "cancel_pip_run", "list_workspace_activity", "list_pip_run_activity",
     "reject_pip_update", "list_pip_versions", "get_workspace_context",
@@ -279,7 +279,9 @@ _COMMAND_ARGS = {
     "list_workspaces": set(), "list_pips": {"workspace_id", "limit", "offset", "query", "order", "scope"}, "list_pip_types": set(),
     "list_pip_models": set(),
     "list_pip_messages": {"pip_id", "before_id", "limit", "conversation_id"},
-    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files", "spooled_images", "spooled_files", "display_mentions", "conversation_id", "reply_to", "output"}, "introduce_pip": {"pip_id"},
+    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files", "spooled_images", "spooled_files", "display_mentions", "conversation_id", "reply_to", "output", "questions"}, "introduce_pip": {"pip_id"},
+    # Pips API 106: a reply's question card answered (its answers as the user's next message) or dismissed (pip_questions).
+    "answer_pip_questions": {"pip_id", "message_id", "idempotency_key", "answers", "dismissed", "chat_options"},
     # API 79: several conversations per Pip (pip_conversations).
     "list_pip_conversations": {"pip_id", "archived"}, "create_pip_conversation": {"pip_id", "title"},
     "rename_pip_conversation": {"pip_id", "conversation_id", "title"},
@@ -328,7 +330,7 @@ FOLDER_WORLD_RUNS = ("conversation", "audit", "draft")
 READ_TOOLS = frozenset({"read_file", "glob", "grep", "repo_map", "todo"})
 # What a chat may offer beside reading (13 Nov, one chat style for every Pip): buttons under its reply. It reads,
 # changes and reaches nothing; a folder Pip's chat is still READ_TOOLS plus only these.
-CHAT_UI_TOOLS = frozenset({"offer_choices"})
+CHAT_UI_TOOLS = frozenset({"offer_choices", "propose_options"})   # (and Work's question card, API 106: pip_questions)
 # Everything a folder Pip's chat may hold without its box (13 Nov): reading its project copy, buttons, drafting its own
 # job (as every Pip does), and since 16 Nov (one kind of Pip) an email, an event or an app action.
 # What every Pip's chat has of its own (pips-flow-design Q8, 14 Nov): what you told it (remember), routines, its goal,
@@ -3236,6 +3238,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     setup_candidate = None
     core_setup_candidates = []
     choices_candidate = None
+    questions_candidate = None         # Work's question card under the reply (propose_options, API 106: pip_questions)
     routine_candidates = []            # routines it suggests in a chat reply (pip_routines.add_routine)
     note_candidates = []               # notes it keeps about the user in a chat reply (pip_notes.remember)
     undo_candidates = []               # changes the user asked it to put back (pip_project_copies.undo_asked)
@@ -3258,7 +3261,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_connector_drafts
     connector_context = pip_connector_drafts.pin(manifest)
     connector_candidate = None
-    from . import pip_computer, pip_app_links, pip_plugins, pip_notes, pip_sdk_apps, pip_images, pip_videos, pip_keys, pip_library, pip_research, image_keep, pip_project_copies, pip_holds, pip_agents
+    from . import pip_computer, pip_app_links, pip_plugins, pip_notes, pip_sdk_apps, pip_images, pip_videos, pip_keys, pip_library, pip_research, image_keep, pip_project_copies, pip_holds, pip_agents, pip_questions
     # It keeps notes about the user only in a reply to the user's own message: never in a routine's run or
     # a turn DGC wrote, whose text can carry an email or a page (pip_notes).
     keeps_notes = (conversation is not None and manifest.get('user_turn') is True      # every Pip (Q8, 14 Nov)
@@ -3647,7 +3650,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             # One kind of Pip (16 Nov): every Pip's chat has the Personal chat's tools; a Pip with a folder has its
             # project reads (the Agent's own, below) besides. A run that isn't a chat (an audit, a draft, a reviewed
             # execution) pins none of these, so it has only its reviewed tools.
-            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_questions.schema()] if conversation is not None and conversation.get('questions') is True and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             if personal:
                 return own
             schemas = [*super()._tool_schemas(*args, **kwargs), *own]
@@ -3903,7 +3906,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             return out
 
         def _pip_call(self, call, **kwargs):
-            nonlocal setup_candidate, email_candidate, calendar_candidate, connector_candidate, choices_candidate, choices_cut, goal_candidate
+            nonlocal setup_candidate, email_candidate, calendar_candidate, connector_candidate, choices_candidate, choices_cut, goal_candidate, questions_candidate
             # Drafting (an email, an event, an app action) is pinned for every Pip's chat (one kind of Pip, 16 Nov).
             if connector_context is not None and call.name == 'list_connector_tools':
                 if call.arguments != {}:return 'Use an empty input object. This reads only pinned metadata.'
@@ -4037,7 +4040,24 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if candidate is not None:
                     routine_candidates.append(candidate)
                 return told
+            if call.name == pip_questions.TOOL:
+                # Work's question card (API 106): the same questions Work's validator reads, kept with this reply; the
+                # user's answers come as their next message. Like offer_choices, it ends the reply. Never Work's own
+                # handler: nobody here answers a docked card, so a run that wasn't offered it is told so.
+                if not (conversation is not None and conversation.get('questions') is True
+                        and not (conversation.get('goal') or {}).get('own')):
+                    return ('error: propose_options was not offered here and will not be run. Ask in your reply'
+                            + (', with offer_choices for a few clear answers.' if conversation is not None else '.'))
+                asked, told = pip_questions.tool_result(call.arguments if isinstance(call.arguments, dict) else None)
+                if asked is None:
+                    return told
+                questions_candidate, choices_candidate = asked, None
+                choices_cut = len(self.messages)
+                self._end_turn_after_batch = 'offered'
+                return told
             if conversation is not None and call.name == 'offer_choices':
+                if questions_candidate is not None:
+                    return 'Your question card is already below your reply; the user answers it there. Your message is complete.'
                 try:
                     labels = pip_chat.validate_choices((call.arguments or {}).get('choices') if isinstance(call.arguments, dict) else None)
                 except RegistryError as exc:
@@ -4445,6 +4465,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             + ("\n\nworking_notes: " + pip_working_notes.NOTICE if working_notes is not None else "")
             + (_app_tools_note(apps_pin) if apps_pin is not None else "")
             + ("\n\n" + left_out_told if left_out_told else "")
+            + ("\n\n" + pip_questions.NOTICE if conversation.get("questions") is True
+               and not (conversation.get("goal") or {}).get("own") else "")
             + _output_line(conversation.get("output"), apps_pin)
             + "\n\nCurrent user message:\n" + conversation["text"])
     elif task_history is not None:
@@ -4575,12 +4597,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         if (ok and conversation is not None and not agent.cancelled.is_set()
                 and _claims_a_card(_turn_text(agent.messages))
                     and not (cards_shown or conversation.get('cards_waiting') or routine_candidates or core_setup_candidates or choices_candidate is not None
+                         or questions_candidate is not None
                          or any(c is not None for c in (setup_candidate, email_candidate, calendar_candidate, connector_candidate)))):
             # It told the user to tap a card it never made ("the card below is how you add that", battle test
             # 2026-10-09): once, ask it to make the card or say it again without one.
             ok = agent.run_turn(CARD_CLAIM_REPAIR)
         if (ok and conversation is not None and not agent.cancelled.is_set()
-                and eyes['card'] is None and choices_candidate is None and not _turn_text(agent.messages).strip()
+                and eyes['card'] is None and choices_candidate is None and questions_candidate is None and not _turn_text(agent.messages).strip()
                 and not (routine_candidates or core_setup_candidates
                          or any(c is not None for c in (setup_candidate, email_candidate, calendar_candidate, connector_candidate)))):
             # A turn can end on a step with no words (a long turn on its computer; a model at high thinking that ends on
@@ -4641,7 +4664,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 final = "\n\n".join(said)
             else:
                 read_at = []                # the reply is its last words alone: nothing to place in it
-            if (eyes['card'] is None and choices_candidate is None and eyes_pin is not None and eyes_pin['choice'] == 'ask'
+            if (eyes['card'] is None and choices_candidate is None and questions_candidate is None and eyes_pin is not None and eyes_pin['choice'] == 'ask'
                     and eyes_pin.get('vision_model') and eyes['mode'] == 'ask'
                     and (eyes['needs'] or _CANNOT_SEE.search(final or ''))):
                 # It worked from the text, but the page needed seeing (a canvas), or it said it couldn't see: what it
@@ -4654,6 +4677,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 # It can't see: one plain line, and the choices (pip_eyes) as its card.
                 final = pip_eyes.line(eyes['card']['model'])
                 choices_candidate = list(pip_eyes.labels(eyes['card']['model'], eyes['card']['vision_model']).values())
+                questions_candidate = None
             if not final.strip():
                 # Some models end a turn on a tool call with no words. The card it made is the answer:
                 # say so, rather than failing the turn and losing the card.
@@ -4665,6 +4689,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                          # Ended on its choices with no words before them (live 15 Nov: the reply failed as
                          # empty and the choices were lost): the choices are the answer.
                          else "Choose one below." if choices_candidate is not None
+                         else "Choose below." if questions_candidate is not None
                          else final)
             from .redaction import redact_text, secret_values
             if read_at and not final.startswith("\n\n".join(said)):
@@ -4693,6 +4718,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 result['connector_action_draft'] = connector_candidate
             if choices_candidate is not None:
                 result['choices'] = choices_candidate
+            elif questions_candidate is not None:
+                result['questions'] = questions_candidate      # Work's question card (API 106)
             if eyes['card'] is not None:
                 result['eyes'] = eyes['card']
             if routine_candidates:
@@ -6288,7 +6315,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             raise RegistryError("disabled", "Pips are disabled in this profile. Run dgc pips enable to turn them on.")
         from .pip_access import require_unrestricted
         require_unrestricted(config)
-        request_limit = CHAT_REQUEST_BYTES if command == "send_pip_message" else 32768 if command in ("register_app", "update_app", "ensure_pip_template", "prepare_pip_connector_draft", "propose_pip_connector_action", "propose_pip_handoff", "propose_pip_artifact_handoff", "propose_pip_personal_handoff", "propose_pip_app_action", "propose_pip_calendar_action", "prepare_pip_message_draft", "prepare_pip_calendar_draft") else 16384
+        request_limit = CHAT_REQUEST_BYTES if command in ("send_pip_message", "answer_pip_questions") else 32768 if command in ("register_app", "update_app", "ensure_pip_template", "prepare_pip_connector_draft", "propose_pip_connector_action", "propose_pip_handoff", "propose_pip_artifact_handoff", "propose_pip_personal_handoff", "propose_pip_app_action", "propose_pip_calendar_action", "prepare_pip_message_draft", "prepare_pip_calendar_draft") else 16384
         if (command == 'propose_pip_update' and isinstance(request, dict)
                 and isinstance(request.get('changes'), dict) and 'verification_plan' in request['changes']):
             from .pip_pulse_plans import _encode as bounded_pulse_request
@@ -7262,7 +7289,16 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                               spooled_files=request.get('spooled_files'),
                               display_mentions=request.get('display_mentions'),
                               conversation_id=request.get('conversation_id'), reply_to=request.get('reply_to'),
-                              output=request.get('output'))
+                              output=request.get('output'), questions=request.get('questions'))
+            elif command == "answer_pip_questions":
+                # Work's question card under a Pip's reply (API 106): the answers go as the user's next message there.
+                from .pip_questions import answer as answer_questions
+                if 'chat_options' in request:
+                    from .pip_chat_options import validate
+                    validate(request['chat_options'])
+                result = answer_questions(store, pip_id, request.get("message_id"), request.get("idempotency_key"), actor,
+                                          config, answers=request.get("answers"), dismissed=request.get("dismissed"),
+                                          chat_options=request.get('chat_options'))
             elif command == "list_pips":
                 # A page at a time (100 at most, the reply's size), oldest first unless `order` says
                 # "recent"; `query` keeps those whose name or title contains it. `total` is how many
@@ -7547,6 +7583,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
         if len(_json(response).encode()) > RESPONSE_BYTES:
             raise RegistryError("output_limit", "This result is too large to return at once; inspect individual Pips or runs.")
         if start_worker and (command in ("run_pip", "resume_pip", "send_pip_message", "introduce_pip", "accept_pip_handoff")
+                             or (command == "answer_pip_questions" and result.get("run"))
                              or (command in ("propose_pip_handoff", "propose_pip_artifact_handoff") and result.get("run"))):
             start_queued(config)                   # a handoff its Pip's level took (pips-11) starts at once too
     except (RegistryError, ValueError, TypeError, OSError, sqlite3.Error) as exc:

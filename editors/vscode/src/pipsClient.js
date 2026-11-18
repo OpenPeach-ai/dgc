@@ -6,6 +6,7 @@ import '../media/shared/tokens.css';
 import '../media/shared/menu.css';
 import '../media/shared/menu.js';
 import '../media/shared/icons.js';
+import '../media/shared/askcard.js';   // window.DgcAskCard: Work's question card, drawn under the reply that asked (API 106)
 // A file's menu on its card in the chat, as on a Library row (window.DgcFileMenu), opened by DGC's small menu
 // (window.DgcBlob: the side bar's page already has it; a chat's own tab gets it from here).
 import '../media/shared/blob.css';
@@ -53,6 +54,7 @@ import '../media/trace.css';
 import '../media/genui.css';
 import {accountChoices,accountReadPlan,appLabels,appReadNotices,appReadWords,extraReadTools,combineReadPlans} from './pipsAppPicker.js';
 import './pipsTranscript.css';
+import '../media/shared/askcard.css';   // the question card's one look (after this view's own buttons: it wins their ties)
 import '../media/breakdown.js'; // window.DgcBreakdown: the context window part by part, as main DGC and ChatDGC draw it
 import '../media/voicebar.js';  // window.DgcVoiceBar: the box while you dictate, as main DGC and ChatDGC show it
 import '../media/voicebar.css';
@@ -64,7 +66,7 @@ import '../media/pasteclean.js';  // window.DgcPasteClean: what a paste becomes,
 import '../media/mentions.js';   // window.DgcMentions: @ marks in the box and the bubble, the same in all three chats
 import '../media/mentions.css';
 import '../media/shared/links.css';   // a link's favicon and its bundled mark, the same in Work and ChatDGC
-import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon,outputIcon} from './pipsTranscript.js';
+import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon,outputIcon,questionCard} from './pipsTranscript.js';
 import {patchChildren} from './pipsDomPatch.js';
 import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
 import {latestActivity,activityEnded,activityParts,activityText,startedWords,routineStartedWords,elapsed} from './pipRunActivity.js';
@@ -1873,6 +1875,67 @@ function drawChatTray(){
  for(const kind of kinds)chatTray.paint(kind);
  const open=chatTray.open;if(open&&open.kind!=='more'&&open.kind!=='queue'&&open.kind!=='paste')trayDetail(open.kind);   // its words follow what it is doing
 }
+// ---- A question card under a Pip's reply (Pips API 106) ----
+// Work's own card (media/shared/askcard.js, DgcAskCard): the model asked with propose_options, and its reply keeps the
+// card. Open, it is the card itself, and keeps where you were in it through every redraw (its state lives here, its
+// element is moved into each new slot); Submit sends your answers as your next message (answer_pip_questions), and
+// Dismiss closes it with nothing sent. Answered, it shows every question with what you chose; dismissed, or closed
+// because the chat moved on, it says so in one line.
+const QUESTIONS_API=106;
+const questionCards=new Map();          // message id -> {state (DgcAskCard's), key, sig}
+function drawQuestionCards(){
+  const Ask=globalThis.DgcAskCard,slots=[...document.querySelectorAll('[data-pip-questions]')];
+  for(const slot of slots){
+    const id=slot.dataset.pipQuestions,m=S.messages.find(x=>x.id===id),card=questionCard(m);
+    if(!Ask||!card){slot.replaceChildren();continue;}
+    slot.dataset.state=card.state;
+    // (Open while Pips are stopped too: Submit then says why it can't go, as the box does, and Dismiss still closes it.)
+    const open=card.state==='open',kept=questionCards.get(id);
+    if(open){
+      let entry=kept&&kept.state&&!kept.state.retired?kept:null;
+      if(!entry){
+        // (What it says to a screen reader, "Question 2 of 3: …", is said beside it, in its own status line.)
+        const said=slot.ownerDocument.createElement('span');said.className='sr-only';said.setAttribute('role','status');
+        const pip=S.selected,state=Ask.create(card.questions,{document:slot.ownerDocument,hint:`Something else? Tell ${S.pip?.name||'this Pip'}`,
+          speak:words=>{said.textContent=String(words||'');},onPost:payload=>{void answerQuestions(pip,id,payload);}});
+        entry={state,said,key:`pip-answer-${globalThis.crypto.randomUUID()}`};
+        questionCards.set(id,entry);
+      }
+      if(entry.state.el.parentNode!==slot){slot.removeAttribute('data-sig');slot.replaceChildren(entry.state.el,entry.said);if(!entry.drawn){Ask.render(entry.state);entry.drawn=true;}else Ask.resized(entry.state);}
+      continue;
+    }
+    // Settled: what it was, drawn from DGC's own word.
+    if(kept?.state){Ask.retire(kept.state);questionCards.delete(id);}
+    const sig=`${card.state}:${JSON.stringify(card.answers)}`;
+    if(slot.dataset.sig===sig&&slot.firstChild)continue;
+    slot.dataset.sig=sig;
+    const head=card.state==='answered'?`<p class="msg-questions-head">Answered · ${Ask.countLabel(card.questions.length)}</p>`:'';
+    slot.innerHTML=`<div class="msg-questions-settled" data-state="${esc(card.state)}">${head}${Ask.answeredHtml({outcome:card.state,questions:card.questions,answers:card.answers})}</div>`;
+  }
+  // (A card left half-answered in another chat is kept for when you come back; at most a few dozen are.)
+  while(questionCards.size>40)questionCards.delete(questionCards.keys().next().value);
+}
+async function answerQuestions(pip,id,payload){
+  const entry=questionCards.get(id),Ask=globalThis.DgcAskCard;if(!entry||!Ask)return;
+  const token=scope(),epoch=S.epoch,dismissed=payload.dismissed===true;
+  const options=S.apiVersion>=24?chosenChatOptions():undefined;
+  try{
+    const result=await send('answer_pip_questions',{pip_id:pip,message_id:id,...(dismissed?{dismissed:true}:{answers:payload.answers,idempotency_key:entry.key,...(options?{chat_options:options}:{})})});
+    if(epoch!==S.epoch||token!==scope())return;
+    // DGC's own word on the card now: answered (what was chosen), or dismissed.
+    const m=S.messages.find(x=>x.id===id);if(m&&result?.questions)m.questions=result.questions;
+    Ask.retire(entry.state);questionCards.delete(id);
+    if(!dismissed)chatFollow.sending?.();
+    render();
+    await Promise.all([loadMessages(),refresh(false)]);
+  }catch(error){
+    if(token!==scope()||!questionCards.has(id))return;
+    // Refused because the chat moved on or it was answered elsewhere: DGC's word on it is read again.
+    if(['questions_closed','not_found'].includes(error?.code)){Ask.retire(entry.state);questionCards.delete(id);void loadMessages();return;}
+    Ask.rejected(entry.state,errorText(error));
+  }
+}
+
 function drawChatQueue(){
  mountChatTray();
  const box=$('chat-queue');if(!box){drawChatTray();return;}
@@ -1938,7 +2001,7 @@ async function sendChat(sent={}){
   // Your message is in the chat at once, as in DGC's own chat: the box clears now, not when the reply
   // is queued (a Pip's first step lists its workflow connectors' tools, which can take seconds).
   appLinkSettled.clear();S.sending={pip:id,conv,text,key:pending.key,marks:pending.marks,reply:pending.reply,at:new Date().toISOString()};markLiveCut(pending.key,text);chatFollow.sending();if(pending.reply)chatReplies.delete(id);chatEdit(()=>{if(messageWords(draft.chatText)===text){draft.chatText='';if(boxText)chatMarks.delete(id);}render();});
-  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{}),...(pending.marks?.length?{display_mentions:pending.marks}:{}),...(conv?{conversation_id:conv}:{}),...(pending.reply?{reply_to:pending.reply.id}:{}),...(pending.output?{output:pending.output}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');nameFromFirstMessage(id,conv,text);
+  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{}),...(pending.marks?.length?{display_mentions:pending.marks}:{}),...(conv?{conversation_id:conv}:{}),...(pending.reply?{reply_to:pending.reply.id}:{}),...(pending.output?{output:pending.output}:{}),...(S.apiVersion>=QUESTIONS_API?{questions:true}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');nameFromFirstMessage(id,conv,text);
     {const cut=S.stream?.cuts.find(c=>c.key===pending.key&&!c.id);if(cut&&typeof result.message.id==='string')cut.id=result.message.id;}
     // Its conversation left the screen meanwhile: what it kept is settled there, and the one shown is left alone.
     if(S.selected===id&&S.conv!==conv){settleStashedSend(id,conv,pending,text,false);void loadConversations();return;}
@@ -5840,7 +5903,7 @@ function render() {
   shell.classList.toggle('simple-pips',!intro&&simpleMode());
   const header=(embedded?`<header class="embedded-header${!intro&&scopeTabs()?' scoped':''}"><span class="workspace-name" title="${esc(S.workspace?.name||'Current workspace')}">${esc(S.workspace?.name||'Pips')}</span>${runnerMarkup()}</header>`:`<header><div class="heading"><div>${options.close?button('return-main','Back to DGC',false,'back-control'):''}<h1><span class="pips-wordmark">Pips</span></h1><p class="muted">${esc(S.workspace?.kind==='personal'?'Personal':S.workspace?.name||'Current workspace')}</p></div></div>${runnerMarkup()}</header>`)+(intro?'':scopeTabsMarkup());
   const markup=!intro&&simpleMode()?simpleMarkup():`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${chatView?'':undoRejectMarkup()}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
-  if(markup===lastMarkup){syncChatBox();tellInsidePip();sayShown();return;}
+  if(markup===lastMarkup){syncChatBox();tellInsidePip();sayShown();drawQuestionCards();return;}   // (a card's own state isn't in the markup)
   lastMarkup=markup;
   const allAnchor=attentionAllAnchor();
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
@@ -5865,6 +5928,7 @@ function render() {
   if(boxAt&&!S.review&&chatBox.el.isConnected&&owner.activeElement!==chatBox.el&&document.activeElement!==chatBox.el){chatBox.el.focus({preventScroll:true});chatBox.el.setSelectionRange(boxAt[0],boxAt[1]);}
   globalThis.DgcMcpApps?.fill($('app'),{sendMessage:sendCardMessage});
   drawChatQueue();
+  drawQuestionCards();
   keepChipFocus();   // a model just chosen in the picker: the keyboard stays on its chip through this redraw
   shell.dataset.motionPip=S.selected||'';shell.dataset.motionConv=S.conv;
   for(const row of document.querySelectorAll('[data-job][data-state]')){

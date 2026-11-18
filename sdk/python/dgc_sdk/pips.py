@@ -506,6 +506,13 @@ API105_MUTATIONS = frozenset({'set_your_browser_site', 'sign_out_your_browser_si
                               'use_your_browser_view'})
 READ_COMMANDS |= API105_READS
 MUTATION_COMMANDS |= API105_MUTATIONS
+# API 106: a question card in a Pip's chat, as Work has it. send_pip_message's `questions` (true: this client draws the
+# card) offers the chat Work's propose_options; a reply that asked carries `questions` {questions, state, answers};
+# answer_pip_questions sends the answers as the user's next message, or closes the card (dismissed: true).
+API106_MUTATIONS = frozenset({'answer_pip_questions'})
+API106_FIELDS = {'send_pip_message': frozenset({'questions'})}
+MUTATION_COMMANDS |= API106_MUTATIONS
+PIP_MESSAGE_ID = re.compile(r"message_[0-9a-f]{32}\Z")
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -790,7 +797,8 @@ COMMAND_FIELDS = {
     'review_pip_execution': frozenset(['expected_revision', 'reason', 'run_id', 'status']),
     'review_pip_finding': frozenset(['expected_revision', 'finding_index', 'reason', 'run_id', 'status']),
     'run_pip': frozenset(['idempotency_key', 'pip_id', 'expected_version', 'expected_lifecycle_revision', 'expected_plan_digest']),
-    'send_pip_message': frozenset(['chat_options', 'conversation_id', 'display_mentions', 'files', 'idempotency_key', 'images', 'output', 'pip_id', 'reply_to', 'spooled_files', 'spooled_images', 'text']),
+    'send_pip_message': frozenset(['chat_options', 'conversation_id', 'display_mentions', 'files', 'idempotency_key', 'images', 'output', 'pip_id', 'questions', 'reply_to', 'spooled_files', 'spooled_images', 'text']),
+    'answer_pip_questions': frozenset({'pip_id', 'message_id', 'idempotency_key', 'answers', 'dismissed', 'chat_options'}),
     'get_pip_message_image': frozenset(['as_file', 'index', 'message_id', 'pip_id']),
     'get_pip_message_file': frozenset(['index', 'message_id', 'pip_id']),
     'introduce_pip': frozenset(['pip_id']),
@@ -999,7 +1007,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API105_READS | API105_MUTATIONS:
+        if command in API106_MUTATIONS:
+            minimum = 106
+        elif command in API105_READS | API105_MUTATIONS:
             minimum = 105
         elif command in API101_READS:
             minimum = 101
@@ -1319,6 +1329,20 @@ class Pips:
             raise DGCConfigError("key_id is the key's id, pipkey_ and 32 hex digits")
         if command == 'save_pip_key' and not (isinstance(values.get('value'), str) and len(values['value']) <= MAX_PLUGIN_KEY):
             raise DGCConfigError('value is the key, up to 16,384 characters')
+        if API106_FIELDS.get(command, frozenset()) & set(values):
+            if version < 106:
+                raise DGCUnsupportedError("A question card in a Pip's chat (questions) requires a runtime advertising "
+                                          "Pips API 106 or newer")
+            if type(values['questions']) is not bool:
+                raise DGCConfigError("questions is true when this client draws a question card under a reply")
+        if command == 'answer_pip_questions':
+            if not (isinstance(values.get('message_id'), str) and PIP_MESSAGE_ID.fullmatch(values['message_id'])):
+                raise DGCConfigError("message_id is the reply's id, message_ and 32 hex digits")
+            if (values.get('dismissed') is True) == ('answers' in values) or values.get('dismissed', True) is not True:
+                raise DGCConfigError("send answers {question id: {selected, other}}, or dismissed: true to close the card")
+            if 'answers' in values and (not isinstance(values['answers'], dict) or not values['answers']
+                                        or not isinstance(values.get('idempotency_key'), str)):
+                raise DGCConfigError("answers is {question id: {selected: [indices], other: text}}, with an idempotency_key")
         if API104_FIELDS.get(command, frozenset()) & set(values) and version < 104:
             raise DGCUnsupportedError("A Pip's own sub-agents model (model_choice, thinking, context_size, fallback) "
                                       "requires a runtime advertising Pips API 104 or newer")

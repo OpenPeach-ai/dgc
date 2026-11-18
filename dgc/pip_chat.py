@@ -1533,6 +1533,9 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
         context["reply_to"] = req["reply_to"]
     if req.get("output"):
         context["output"] = req["output"]                 # API 100: what this reply should make (Work's Output menu)
+    from .pip_questions import drawn as draws_questions
+    if draws_questions(store.db, conversation_id):
+        context["questions"] = True                       # API 106: its client draws Work's question card
     if pip.get("pip_type") == "core" and not str(req.get("request_key") or "").startswith(DGC_KEYS):
         # A question another Pip has waited on for a day: Core says it once, in its next reply to the user.
         from datetime import datetime, timezone
@@ -1728,8 +1731,15 @@ def validate_steers(value, text: str) -> list:
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing", "artifacts", "undo_changes", "answers", "helper_model"}:
+    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing", "artifacts", "undo_changes", "answers", "helper_model", "questions"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
+    if "questions" in result:
+        # Work's question card under the reply (API 106, pip_questions): its own questions, exactly; a reply asks with
+        # buttons or with the card, never both.
+        from .pip_questions import checked as checked_questions
+        checked_questions(result["questions"])
+        if "choices" in result or "eyes" in result:
+            raise RegistryError("invalid_reply", "A reply asks with its choices or with a question card, not both.")
     if "artifacts" in result:
         from .pip_library import valid_reply_artifacts
         if valid_reply_artifacts(result["artifacts"]) is None:
@@ -1824,6 +1834,9 @@ def insert_reply(store, run, result, now):
         touch(store.db, row["conversation_id"], now)
     for index, label in enumerate(choices):
         store.db.execute("INSERT INTO pip_chat_choices VALUES(?,?,?)", (reply_id, index, label))
+    if "questions" in result:
+        from .pip_questions import attach as attach_questions
+        attach_questions(store.db, run["pip_id"], reply_id, result["questions"])
     if "steers" in result:
         from .pip_steering import place               # where it read each message sent while it worked (API 99)
         place(store.db, run["id"], validate_steers(result["steers"], text))
@@ -1952,6 +1965,10 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             offered = message_choices(store.db, row["id"])
             if offered:
                 message["choices"] = offered
+            from .pip_questions import view as question_card
+            asked = question_card(store.db, row["id"])
+            if asked:
+                message["questions"] = asked        # API 106: Work's question card, with its state
             from .pip_steering import places
             placed = places(store.db, row["run_id"])
             if placed:
@@ -2043,13 +2060,15 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
 
 def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, files=None,
          spooled_images=None, spooled_files=None, display_mentions=None, conversation_id=None, reply_to=None,
-         output=None, _intro=False):
+         output=None, questions=None, _intro=False):
     """Queue a reply to a message, with what it brings: images and files inline (API 43) or handed
     over through the backend's spool (API 52, ``spooled_images`` and ``spooled_files``). ``conversation_id``: which of
     the Pip's conversations (API 79, pip_conversations); none names the first one, as an older client means.
     ``reply_to``: the id of one of the Pip's own messages in that conversation, which this message quotes (API 83,
     pip_replies). ``output``: what the reply should make, Work's Output menu (API 100): document, slides, spreadsheet,
-    page or dashboard; none or "auto" asks for nothing."""
+    page or dashboard; none or "auto" asks for nothing. ``questions``: this client draws a question card under a reply
+    (API 106, pip_questions), so the Pip's chat there is offered Work's propose_options; the conversation keeps what the
+    client that wrote last in it can draw. Never part of the retry key."""
     from .pip_conversations import is_full, resolve as resolve_conversation, roll_over
     try:
         conversation_id = resolve_conversation(store.db, pip_id, conversation_id)
@@ -2059,6 +2078,8 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
             from .pip_replies import check as checked_reply
             quoted = checked_reply(store.db, pip_id, reply_to, conversation_id)
         output = checked_output(output)               # refused before anything of the message is kept
+        if questions is not None and type(questions) is not bool:
+            raise RegistryError("invalid_request", "questions is true when this client draws a question card.")
         if is_full(store.db, conversation_id):
             conversation_id = roll_over(store.registry, pip_id, conversation_id)   # a full one: carry on in a fresh one
         # Validate the request identity before copying attachments into the kept store.
@@ -2106,6 +2127,11 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
             # keeps the one it has while a change of it waits); no computer, too big: refused before anything is kept.
             from .pip_project_copies import prepare
             prepare(store, pip_id, marks, key)
+    if not _intro:
+        # What the client writing now can draw (API 106): its turn, and DGC's own turns here after it, are offered
+        # propose_options only when it draws the card (pip_questions).
+        from .pip_questions import note_client
+        note_client(store.registry, pip_id, conversation_id, questions is True)
     result = _deliver(store, pip_id, req, actor, config, _intro)
     if not _intro:
         from .pip_steering import forget_resent
@@ -2253,7 +2279,8 @@ def _left_waiting(store, run, result) -> bool:
 
 def validate_context(value):
     if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "cards_waiting", "named_pips", "projects",
-                                                    "goal", "long_waits", "conversation_id", "inputs_ref", "reply_to", "output"} not in (
+                                                    "goal", "long_waits", "conversation_id", "inputs_ref", "reply_to", "output",
+                                                    "questions"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -2263,6 +2290,8 @@ def validate_context(value):
         validate_files(value["files"])
     if "output" in value and checked_output(value["output"]) is None:
         raise RegistryError("invalid_history", "A reply's chosen output is one of Work's.")
+    if "questions" in value and value["questions"] is not True:
+        raise RegistryError("invalid_history", "Whether its client draws a question card is true, or left out.")
     if "run_posts" in value:
         from .pip_run_posts import validate_recent
         validate_recent(value["run_posts"])

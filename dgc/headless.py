@@ -146,7 +146,8 @@ def _bounded_pips_command(cmd):
     # A message to a Pip can be up to 256 KB (Limits for everyone, Pips API 79): as large as the Pips handler's own
     # request limit (pips.CHAT_REQUEST_BYTES). Every other request keeps the 32 KiB budget.
     limit = _MAX_PIPS_REQUEST_BYTES
-    if cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") == "send_pip_message":
+    if cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") in ("send_pip_message",
+                                                                                            "answer_pip_questions"):
         from .pips import CHAT_REQUEST_BYTES
         limit = CHAT_REQUEST_BYTES
     too_big = None
@@ -587,7 +588,13 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # {url, pip_id} and use_your_browser_view {op, x, y, text, key, dy, url, pip_id} (M) answer not_ready until its window
 # exists. All local only. list_pip_sent's sites gain `your_browser` (how many of its lines came from the Pip's lane
 # there) and `not_allowed` (pages or writes there refused: not one of the Pip's sites).
-PIPS_API_VERSION = 105
+# API 106 (0.52, a question card in a Pip's chat, as Work has it): send_pip_message takes `questions` (true: this client
+# draws the card), and a conversation whose client wrote so last is offered Work's propose_options (Work's schema and
+# validator, dgc/questions.py) beside offer_choices; a reply that asked carries `questions` {questions, state (open |
+# answered | dismissed | closed), answers}. answer_pip_questions {pip_id, message_id, idempotency_key, answers |
+# dismissed, chat_options?} (M) sends the answers as the user's own next message there (R: questions, run, message), or
+# closes the card with nothing sent (R: questions); only while its reply is the conversation's last message.
+PIPS_API_VERSION = 106
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}
@@ -8049,7 +8056,8 @@ class Backend:
                     except Exception:            # noqa: BLE001 -- the next run asked for moves it, as before
                         pass
                 threading.Thread(target=adopt, daemon=True, name="dgc-pips-adopt").start()
-            if cmd["request"].get("type") in ("run_pip", "send_pip_message", "accept_pip_handoff"):
+            if (cmd["request"].get("type") in ("run_pip", "send_pip_message", "accept_pip_handoff")
+                    or (cmd["request"].get("type") == "answer_pip_questions" and cmd["request"].get("dismissed") is not True)):
                 from .pip_runtime import require_supervisor
                 require_supervisor(config)
             response = handle_control(config, cmd["request"], "editor-user", start_worker=False)

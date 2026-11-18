@@ -91,6 +91,22 @@
 .msg-choice:disabled{opacity:.55;cursor:default}
 .msg-choice-key{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--pip-accent);border:1px solid color-mix(in srgb,var(--pip-accent) 45%,transparent)}
 
+/* Work's question card under the reply that asked (Pips API 106): the card is media/shared/askcard.css, the same as
+   Work's; here it stands in the chat as Work's composer frame holds it (its box, its hair, the 6 px corner), at the
+   reply's measure. Settled, it is the answered panel under a quiet line. */
+.msg-questions{margin:10px 0 2px;max-width:min(100%,560px);min-width:0}
+.msg-questions:empty{display:none}
+.msg-questions>.ask{background:var(--box,var(--vscode-input-background));border:1px solid var(--border-strong,var(--vscode-widget-border));border-radius:var(--btn-r,6px);padding:var(--sp-3,12px) var(--sp-2,8px) var(--sp-2,8px)}
+.msg-questions>.ask.expired{opacity:.6}
+/* This view styles every button and field of its own (a tall textarea, the body's line height on every button): the
+   card's options, its glyph buttons and its field keep the card's own box, as Work draws them. Its Next / Submit is
+   DGC's one button here as in Work (pips.css puts .ask-act on it). */
+.msg-questions .ask{line-height:normal}
+.msg-questions .ask-x,.msg-questions .ask-page{min-height:auto}
+.msg-questions .ask-field{width:auto;min-height:auto;border-radius:0}
+.msg-questions-head{margin:0 0 6px;color:var(--muted);font-size:11px;line-height:1.5}
+.msg-questions-settled .asked-panel{background:transparent}
+
 /* A Pip's runs in its own chat (Pips API 51, pipRunPosts.js), as the Pip speaking: its face, name and the time over
    the words, which look like its replies (a bubble in a Personal Pip's chat, a reply's text in a project's), and a
    small attachment row under them: the report (one click opens the findings), Ask DGC to fix, or the times a fold of

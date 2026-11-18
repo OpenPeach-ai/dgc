@@ -3,6 +3,7 @@
 // step's tool card, identical live and on replay. jsdom; the clock is manual.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mainCss, makeDom } from "./support/webview-dom.mjs";
 
 const opt = (label, description = "", recommended = false) => ({ label, description, recommended });
@@ -632,7 +633,11 @@ test("answered variants: one question, skipped, dismissed, cancelled, text proto
 });
 
 test("the card's CSS: stacked tiles, quiet recommended badge, forced colours for the highlight, badge and radio", () => {
-  const section = mainCss.slice(mainCss.indexOf("/* ---- 0.40 options -"), mainCss.indexOf("/* ---- end 0.40 options -"));
+  // The card's look is one stylesheet, media/shared/askcard.css (main.css imports it; a Pip's chat bundles it); where
+  // Work docks it stays in main.css's options section.
+  const dock = mainCss.slice(mainCss.indexOf("/* ---- 0.40 options -"), mainCss.indexOf("/* ---- end 0.40 options -"));
+  const section = readFileSync(new URL("../media/shared/askcard.css", import.meta.url), "utf8");
+  assert.ok(mainCss.includes(section.trim()), "main.css carries it (its @import, written in place)");
   const rule = (selector) => section.match(new RegExp(`(?:^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] || "";
   assert.match(rule(".ask-badge"), /color: var\(--text-strong\)/);
   assert.match(rule(".ask-badge"), /color-mix\(in srgb, var\(--accent-fill\) 14%, transparent\)/);
@@ -646,5 +651,7 @@ test("the card's CSS: stacked tiles, quiet recommended badge, forced colours for
   for (const selector of [".ask-opt.hot", ".ask-badge", ".ask-n"]) assert.ok(forced.includes(selector), selector);
   assert.match(forced, /\.ask-opt\.hot \{[^}]*Highlight/);
   assert.doesNotMatch(mainCss, /button\.opt|\.question-(tab|form|other|hint|progress|summary)/, "the v13 question form CSS is gone");
-  assert.match(section, /#cbox\.asking > \.cinput, #cbox\.asking > #attachments \{ display: none; \}/);
+  assert.match(dock, /#cbox\.asking > \.cinput, #cbox\.asking > #attachments \{ display: none; \}/);
+  assert.match(dock, /\.ask \{ border-bottom: 1px solid var\(--border\); border-radius: var\(--r-2xl\) var\(--r-2xl\) 0 0; \}/,
+    "docked, it is the frame's top: a rule under it and the frame's corners");
 });

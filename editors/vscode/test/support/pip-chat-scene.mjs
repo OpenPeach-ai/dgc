@@ -351,6 +351,28 @@ export const host = (opts) => `(${function (PIP, opts) {
       });
     }
   }
+  // opts.questions: Work's question card under the Pip's latest reply (Pips API 106; pass api: 106): that reply carries
+  // `questions` {questions, state, answers}. answer_pip_questions answers as DGC does: the card is answered (what was
+  // chosen) or dismissed, an answer goes as your next message (each question and its answer, one a line), a card no
+  // longer open is refused, and "refuse" refuses the first answer as a backend would. Each request is in window.__answered.
+  if (opts.questions) {
+    let refuse = opts.questions === "refuse";
+    answers.answer_pip_questions = (r) => {
+      (window.__answered ||= []).push(JSON.parse(JSON.stringify(r)));
+      const m = messages.find((v) => v.id === r.message_id && v.questions);
+      if (!m) throw Error("That reply of this Pip asked no questions.");
+      if (m.questions.state !== "open") throw Error("These questions were answered already.");
+      if (refuse) { refuse = false; throw Error("Pips are stopped on this computer. Resume Pips, then try again."); }
+      if (r.dismissed) { m.questions = { ...m.questions, state: "dismissed", answers: {} }; return { questions: m.questions }; }
+      m.questions = { ...m.questions, state: "answered", answers: r.answers };
+      const words = m.questions.questions.map((q) => { const a = r.answers[q.id] || {}, picked = (a.selected || []).map((i) => q.options[i].label).join(", ");
+        const said = [picked, a.other || ""].filter(Boolean).join(". ") || "Your call: decide and say what you chose.";
+        return /[?:]$/.test(q.question) ? `${q.question} ${said}` : `${q.question}: ${said}`; }).join("\n");
+      const message = { ...say("message_" + "f".repeat(32), "user", words, "c", 0), status: "queued", created_at: new Date().toISOString() };
+      messages.push(message);
+      return { questions: m.questions, message, run: { id: message.run_id, pip_id: PIP, status: "queued" } };
+    };
+  }
   // opts.keys: a plugin this Pip asked for needs a key (pips-10, Pips API 81): one card, with one box (or, "two", two).
   if (opts.keys) {
     const KEYCARD = "pipplugin_" + "a".repeat(32), needs = [{ name: "AIRTABLE_TOKEN", label: "Airtable token", server: "airtable" }, ...(opts.keys === "two" ? [{ name: "AIRTABLE_BASE", label: "Base ID", server: "airtable" }] : [])];

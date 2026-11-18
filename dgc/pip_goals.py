@@ -284,7 +284,8 @@ def tool_result(arguments) -> tuple[dict | None, str]:
 
 
 # What a reply leaves for the user to decide: each is a card below it.
-CARDS = ("message_draft", "calendar_draft", "connector_action_draft", "setup_draft", "core_setup_drafts", "routine_drafts")
+CARDS = ("message_draft", "calendar_draft", "connector_action_draft", "setup_draft", "core_setup_drafts", "routine_drafts",
+         "questions")
 
 
 def commit(store, run, result, choices=None) -> None:
