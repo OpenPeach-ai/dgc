@@ -211,6 +211,28 @@ def _start_through_keep_running(directory, before):
     return None
 
 
+def adopt_older_runner(config) -> bool:
+    """The live runner is another install's (an update left it running): move it to this install while it is idle,
+    or ask it to hand over while it is busy (start_runtime), at the editor's first look at Pips. The takeover came
+    only with the next run asked for, so opening a Pip's computer kept showing the old install's desktop (his machine,
+    18 Nov). True when it acted. A newer install's runner, or this install's own, is left alone."""
+    if config.get("pips_enabled", False) is not True:
+        return False
+    directory = state_directory()
+    status, _ = _state(directory)
+    if not supervisor_is_live(directory, status):
+        return False
+    kind = _other_runner(status)
+    if not kind or kind == "newer":
+        return False
+    try:
+        start_runtime(config)
+    except RegistryError as exc:
+        if exc.code != "runner_handing_over":
+            raise
+    return True
+
+
 def require_supervisor(config):
     """Local enqueue guard: a heartbeat alone cannot prove the supervisor is alive."""
     if config.get("pips_enabled", False) is not True:

@@ -8036,6 +8036,19 @@ class Backend:
                              command=kind, ok=True, result=value)
                 return
             from .pips import handle_control
+            if not getattr(self, "_pips_runner_looked", False):
+                # Once per backend: another install's runner (an update left it running) moves to this install now,
+                # not at the next run, so a Pip's computer opened first isn't drawn by the old code (18 Nov). Off this
+                # thread: moving waits for the old runner to stop.
+                self._pips_runner_looked = True
+
+                def adopt(view=config):
+                    try:
+                        from .pip_runtime import adopt_older_runner
+                        adopt_older_runner(view)
+                    except Exception:            # noqa: BLE001 -- the next run asked for moves it, as before
+                        pass
+                threading.Thread(target=adopt, daemon=True, name="dgc-pips-adopt").start()
             if cmd["request"].get("type") in ("run_pip", "send_pip_message", "accept_pip_handoff"):
                 from .pip_runtime import require_supervisor
                 require_supervisor(config)

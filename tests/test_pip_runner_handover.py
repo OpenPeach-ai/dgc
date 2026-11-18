@@ -104,3 +104,43 @@ class Draining(unittest.TestCase):
             daemon.ask_handover(self.registry, "/here/src")
         self.assertFalse(daemon.claim_or_hand_over(self.registry, self.config, "/here/src"))
         self.assertEqual(started, [1])
+
+
+class TheEditorsFirstLook(unittest.TestCase):
+    """His machine, 18 Nov: after an install, opening a Pip's computer still showed the old desktop. The runner of the
+    install before kept running, and the takeover only came with the next run asked for. Now the editor's first Pips
+    request moves it (idle) or asks it to hand over (busy), once, in the background."""
+    setUp = runtime_tests.LocalStartupTests.setUp
+
+    def test_another_installs_runner_is_taken_over_at_the_first_look(self):
+        started = []
+        with patch.object(runtime, "_state", return_value=({**self.online, "install": ELSEWHERE}, "old")), \
+             patch.object(runtime, "supervisor_is_live", return_value=True), \
+             patch.object(runtime, "start_runtime", side_effect=lambda config: started.append(config) or {}):
+            self.assertTrue(runtime.adopt_older_runner(self.config))
+        self.assertEqual(len(started), 1)
+
+    def test_this_installs_own_or_a_newer_runner_is_left_alone(self):
+        from dgc import __version__
+        for status in ({**self.online, "install": runtime.this_install(), "version": __version__},
+                       {**self.online, "install": ELSEWHERE, "version": "9.9.9"}):
+            with self.subTest(status=status.get("version")), \
+                 patch.object(runtime, "_state", return_value=(status, "x")), \
+                 patch.object(runtime, "supervisor_is_live", return_value=True), \
+                 patch.object(runtime, "start_runtime", side_effect=AssertionError("left alone")):
+                self.assertFalse(runtime.adopt_older_runner(self.config))
+
+    def test_a_busy_one_handing_over_is_not_an_error(self):
+        def busy(config):
+            raise RegistryError("runner_handing_over", "busy")
+        with patch.object(runtime, "_state", return_value=({**self.online, "install": ELSEWHERE}, "old")), \
+             patch.object(runtime, "supervisor_is_live", return_value=True), \
+             patch.object(runtime, "start_runtime", side_effect=busy):
+            self.assertTrue(runtime.adopt_older_runner(self.config))
+
+    def test_the_backend_looks_once_per_process_off_its_own_thread(self):
+        import inspect
+        from dgc import headless
+        source = inspect.getsource(headless)
+        self.assertIn("adopt_older_runner", source)
+        self.assertIn("_pips_runner_looked", source)
