@@ -1186,11 +1186,13 @@ function chatMarkup(){
    // (A reply in pieces is several of these: each is plain, and its face and name stand over its first words.)
    const out=html.replaceAll(open,`${open} pip-plain${led?' pip-led':''}`);if(!led)return out;
    const first=out.indexOf(open),into=out.indexOf('>',first)+1;return out.slice(0,into)+head+out.slice(into);};
+  const soloAt=soloWorkPlaces(items); // (a job the Pip started by itself: under the last drawn piece of the reply that started it)
   const unasked=i=>!i.message||(i.message.role==='assistant'&&S.messages.find(p=>p.role==='user'&&p.run_id===i.message.run_id)?.intro===true&&!!postRoutineTitle(S.messages.find(p=>p.role==='user'&&p.run_id===i.message.run_id).text));
   const messages=items.map(i=>{
    if(i.note){const closes=turnOpen?'</div>':'';turnOpen=false;return closes+timed({created_at:i.note.at},false)+noteMarkup(i.note);}
    const own=i.message?.role==='assistant'&&!failedHidden(i.message)&&!routineFailed(i.message);
-   const piece=(i.message?(conv&&own?plainReply(drawMessage(i.message),i.message,!pipRun):drawMessage(i.message)):drawPost(i))+(i.message?settled.byMessage.get(i.message.id)||'':settled.byRun.get((i.streak?i.streak.at(-1):i.post)?.run_id)||'');
+   const piece=(i.message?(conv&&own?plainReply(drawMessage(i.message),i.message,!pipRun):drawMessage(i.message)):drawPost(i))+(i.message?settled.byMessage.get(i.message.id)||'':settled.byRun.get((i.streak?i.streak.at(-1):i.post)?.run_id)||'')
+     +(i.message&&soloAt.has(i.message.id)?soloAt.get(i.message.id).map(soloWorkBlock).join(''):'');
    pipRun=own||!i.message;
    if(i.message&&(failedHidden(i.message)||routineFailed(i.message))){const closes=turnOpen?'</div>':'';turnOpen=false;return closes+piece;}
    if(i.message?.role==='user'){const opens=`${turnOpen?'</div>':''}<div class="pip-turn" data-turn="${esc(i.message.id)}">`;turnOpen=true;return opens+piece;}
@@ -5307,15 +5309,34 @@ function workCard(a){
  const off=archived()||!usable();
  return workDoneMarkup(a,{esc,folder:pipFolderName(),off:off||!!agentsUi.undoing&&agentsUi.undoing!==a.id,busy:agentsUi.undoing===a.id?'undo':'',error:agentsUi.undoErrors.get(a.id)||''});
 }
-// A sub-agent with Work tools the Pip started by itself at Do it all, for no fix: at the chat's end, its row while it
-// works, then the Pip's own words from its check and what it changed, with Undo. Recent ones only (a day), or one whose
-// Undo still waits.
+// A sub-agent with Work tools the Pip started by itself at Do it all, for no fix: under the reply that started it, among
+// the messages (19 Nov: at the chat's end it floated below every newer message); at the chat's end only when that reply
+// isn't drawn here. Its row while it works, then the Pip's own words from its check and what it changed, with Undo.
+// Recent ones only (a day), or one whose Undo still waits.
+function soloWorkJobs(){
+ if(!convOn())return [];
+ const now=Date.now();
+ return agentsNow().filter(a=>a.kind==='work'&&!a.fix_id&&(AGENT_LIVE.includes(a.state)||a.can_undo||now-Date.parse(a.updated_at||a.created_at)<86400000)).slice(0,4).reverse();
+}
+function soloWorkBlock(a){
+ const type=pipType(S.pip,S.types)||characterType(S.pip.pip_type),off=archived()||!usable();
+ const row=agentRowMarkup(a,{esc,face:pipAvatar(S.pip,'idle',`agent-${a.id}`,type),doing:agentsUi.doing.get(a.id)||'',pip:S.pip.name,canWatch:false,stopping:agentsUi.stopping===a.id,off,steps:agentsUi.stepsOpen.has(a.id)?agentSteps(a):null});
+ return `<div class="pip-work-solo" data-work-solo="${esc(a.id)}">${row}${AGENT_LIVE.includes(a.state)?'':saidMarkup(a.said,{esc})+workCard(a)}</div>`;
+}
+/** Where a job the Pip started by itself sits: under the last drawn piece of the reply that started it, among the items
+ *  this render draws (never under a message the chat keeps hidden). What it places, the chat's end leaves out. */
+let soloPlacedNow={pip:'',ids:new Set()};
+function soloWorkPlaces(items){
+ const last=new Map();
+ for(const i of items||[])if(i.message?.role==='assistant'&&i.message.run_id)last.set(i.message.run_id,i.message.id);
+ const at=new Map(),ids=new Set();
+ for(const a of soloWorkJobs())if(a.from_run_id&&last.has(a.from_run_id)){const id=last.get(a.from_run_id);at.set(id,[...(at.get(id)||[]),a]);ids.add(a.id);}
+ soloPlacedNow={pip:S.selected,ids};
+ return at;
+}
 function soloWorkMarkup(){
- if(!convOn())return '';
- const now=Date.now(),type=pipType(S.pip,S.types)||characterType(S.pip.pip_type),off=archived()||!usable();
- return agentsNow().filter(a=>a.kind==='work'&&!a.fix_id&&(AGENT_LIVE.includes(a.state)||a.can_undo||now-Date.parse(a.updated_at||a.created_at)<86400000)).slice(0,4).reverse().map(a=>{
-  const row=agentRowMarkup(a,{esc,face:pipAvatar(S.pip,'idle',`agent-${a.id}`,type),doing:agentsUi.doing.get(a.id)||'',pip:S.pip.name,canWatch:false,stopping:agentsUi.stopping===a.id,off,steps:agentsUi.stepsOpen.has(a.id)?agentSteps(a):null});
-  return `<div class="pip-work-solo" data-work-solo="${esc(a.id)}">${row}${AGENT_LIVE.includes(a.state)?'':saidMarkup(a.said,{esc})+workCard(a)}</div>`;}).join('');
+ const placed=soloPlacedNow.pip===S.selected?soloPlacedNow.ids:new Set();
+ return soloWorkJobs().filter(a=>!placed.has(a.id)).map(soloWorkBlock).join('');
 }
 async function undoAgentJob(id){
  const a=agentOf(id);if(!a||agentsUi.undoing||!usable()||archived())return;

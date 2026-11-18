@@ -72,7 +72,7 @@ export function makeBackend(o = {}) {
     chat: JSON.parse(JSON.stringify(o.chat || {})), activity: JSON.parse(JSON.stringify(o.activity || {})), sent: [],
     names: Array.from({ length: o.computers || 0 }, (_, i) => ({ number: i + 1, name: ["Juniper", "Poppy", "Fennel", "Clover", "Sorrel"][i % 5], named: false, state: "closed" })),
     apps: JSON.parse(JSON.stringify(o.apps || [])), skills: JSON.parse(JSON.stringify(o.skills || [])), convs: [],
-    work: o.work === true, undone: false, solo: o.solo || "", soloUndone: false };
+    work: o.work === true, undone: false, solo: o.solo || "", soloUndone: false, soloFrom: o.soloFrom };
   const COMPUTER_NAMES = ["Juniper", "Poppy", "Fennel", "Clover", "Sorrel"];
   const said = () => o.limits === false ? {} : { pay_limits: { ...state.limits }, spent_today: state.spent };
   const types = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].map((id, character_index) => ({ id, character_index, name: id[0].toUpperCase() + id.slice(1),
@@ -129,7 +129,7 @@ export function makeBackend(o = {}) {
   const soloAgent = () => !state.solo ? null : { id: SOLO, pip_id: GST, kind: "work", fix_id: null, title: "Load settings from .env", state: state.solo, try: 1, tries: 3, run_id: "run_" + hex("9"),
     run_status: state.solo === "working" ? "running" : "succeeded", started_at: new Date(now - 65000).toISOString(), model: "qwen3-coder:480b", held: [], notes: "",
     said: state.solo === "working" ? "" : "Settings load from the real .env now, and the shop starts. I checked the change: it reads the keys by name and never prints them.",
-    created_at: new Date(now - 65000).toISOString(), updated_at: new Date(now - (state.solo === "working" ? 1000 : 0)).toISOString(), from_run_id: "run_" + hex("8"),
+    created_at: new Date(now - 65000).toISOString(), updated_at: new Date(now - (state.solo === "working" ? 1000 : 0)).toISOString(), from_run_id: state.soloFrom ?? "run_" + hex("8"),
     ...(state.solo === "working" ? { changed: [], changed_more: 0, can_undo: false } : { ...workFields(true, state.soloUndone), changed: [{ path: "settings.py", status: "modified", additions: 4, deletions: 1, counted: true }] }) };
   const earlierAgents = () => Array.from({ length: o.earlier || 0 }, (_, i) => ({ id: "pipagent_" + String(i + 2).repeat(32).slice(0, 32), pip_id: GST, kind: "fix", fix_id: "pipfix_" + String(i + 2).repeat(32).slice(0, 32),
     title: i ? "Fix 1 thing in lime_tiles" : "Fix the stock count in lime_tiles", state: "merged", try: 1, tries: 3, run_id: "run_" + String(i + 5).repeat(32).slice(0, 32), run_status: "succeeded", started_at: ago(1500 + i * 60),

@@ -100,7 +100,7 @@ test('stopped: what it changed stays, and Undo is still there',async()=>{
  assert.ok(x.$(`.pip-change[data-work-done="${AGENT}"] [data-agent-undo]`));
 });
 
-test('one the Pip started by itself at Do it all, for no fix, is at the chat\'s end: its row, then its words and Undo',async()=>{
+test('one the Pip started by itself at Do it all, for no fix: its row, then its words and Undo',async()=>{
  const x=await chat({solo:'working',level:'full'});
  const solo=x.$(`[data-work-solo="${SOLO}"]`);
  assert.ok(solo);
@@ -111,6 +111,25 @@ test('one the Pip started by itself at Do it all, for no fix, is at the chat\'s 
  assert.match(y.squash(ended.textContent),/Settings load from the real \.env now/,'the Pip\'s own words from its check');
  ended.querySelector('[data-agent-undo]').click();await y.drain();
  assert.deepEqual(y.requests('undo_pip_agent_job').at(-1),{type:'undo_pip_agent_job',pip_id:GST,job_id:SOLO});
+});
+
+test('one the Pip started by itself sits under the reply that started it, among the messages; at the chat\'s end only when that reply is not drawn',async()=>{
+ // (Live, 19 Nov: drawn at the chat's end, it floated below every newer message, a later question card's answer included.)
+ const R=c=>'run_'+c.repeat(32),M=c=>'msg_'+c.repeat(32);
+ const msgs=[{id:M('a'),role:'user',text:'List the env names into a file',run_id:R('a'),status:'succeeded'},
+  {id:M('b'),role:'assistant',text:'I started a sub-agent with Work tools for it.',run_id:R('a'),status:'succeeded'},
+  {id:M('c'),role:'user',text:'Now plan the settings sync',run_id:R('c'),status:'succeeded'},
+  {id:M('d'),role:'assistant',text:'Here are three ways to store them.',run_id:R('c'),status:'succeeded'}];
+ const x=await chat({solo:'merged',level:'full',soloFrom:R('a'),chat:{[GST]:{messages:msgs}}});
+ const order=x.$$('.conversation-log .pip-message, .conversation-log [data-work-solo]').map(n=>n.matches('[data-work-solo]')?'SOLO':x.squash(n.textContent).slice(0,200));
+ const at=order.indexOf('SOLO'),said=order.findIndex(s=>/started a sub-agent with Work tools/.test(s)),later=order.findIndex(s=>/plan the settings sync/.test(s));
+ assert.ok(said>=0&&later>said,`the chat has the starting reply and a later message: ${JSON.stringify(order)}`);
+ assert.ok(at>said&&at<later,`under the reply that started it, before the later message: ${JSON.stringify(order)}`);
+ assert.equal(x.$$('[data-work-solo]').length,1,'drawn once');
+ const y=await chat({solo:'merged',level:'full',soloFrom:R('9'),chat:{[GST]:{messages:msgs}}});
+ const tail=y.$$('.conversation-log .pip-message, .conversation-log [data-work-solo]').map(n=>n.matches('[data-work-solo]')?'SOLO':'msg');
+ assert.equal(tail.at(-1),'SOLO','a reply not drawn here: at the chat\'s end, as before');
+ assert.equal(y.$$('[data-work-solo]').length,1);
 });
 
 test('what DGC sends about a work sub-agent is checked',()=>{
