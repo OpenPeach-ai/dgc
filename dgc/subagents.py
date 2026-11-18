@@ -440,6 +440,24 @@ class SubagentRegistry:
             record.dirty = True
             self._ensure_timer_locked()
 
+    def progress_of(self, id: str):
+        """For a check-in (monitors.MonitorHub.watch): what changes while it works (its steps, tokens and what it
+        is doing), or None once it has ended."""
+        with self._lock:
+            record = self._records.get(str(id or ""))
+            if record is None or record.state not in ACTIVE:
+                return None
+            return (record.tool_calls, record.tokens, record.activity)
+
+    def recent_steps(self, id: str, count: int = 8) -> list[str]:
+        """Its latest steps for a check-in: each tool it called and the line it wrote for it, never a tool's output."""
+        with self._lock:
+            record = self._records.get(str(id or ""))
+            log = list(getattr(record, "log", None) or []) if record is not None else []
+            activity = record.activity if record is not None else ""
+        rows = [f"{e.get('name', 'tool')}: {e.get('summary', '')}".rstrip(": ") for e in log if e.get("type") == "tool_call"]
+        return rows[-count:] + ([f"now: {activity}"] if activity else [])
+
     def append_log(self, id: str, event: dict) -> None:
         """Keep a bounded display transcript for the inner agent page. Never sent to the model."""
         if not isinstance(event, dict):

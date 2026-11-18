@@ -627,7 +627,8 @@ def running(computer_root: Path) -> dict | None:
     return {"by": value["by"], "command": value["command"][:MAX_COMMAND_CHARS], "at": value["at"]}
 
 
-def run_command(computer_root: Path, command, by: str, *, policy=None, env: dict | None = None) -> dict:
+def run_command(computer_root: Path, command, by: str, *, policy=None, env: dict | None = None, on_end=None,
+                expect_minutes=None, meta=None) -> dict:
     """Run one command in the computer's Terminal, wait for it, and keep it in the history. `policy`
     (careful mode) narrows where its network may go. `env`: the Pip's own keys this command may use (pip_keys
     .terminal_env, at Do it all only); what it prints is masked of them before anyone sees or keeps it."""
@@ -635,7 +636,8 @@ def run_command(computer_root: Path, command, by: str, *, policy=None, env: dict
     files = files_root(computer_root)
     _room_for(files)
     if sys.platform != "darwin":
-        return _run_or_carry_on(computer_root, files, command, by, policy=policy, env=env)
+        return _run_or_carry_on(computer_root, files, command, by, policy=policy, env=env, on_end=on_end,
+                                expect_minutes=expect_minutes, meta=meta)
     marker = Path(computer_root) / "terminal.running"
     with _TerminalLock(computer_root, COMMAND_SECONDS + 10):
         started, at = time.monotonic(), int(time.time())
@@ -656,7 +658,8 @@ def run_command(computer_root: Path, command, by: str, *, policy=None, env: dict
         return entry
 
 
-def _run_or_carry_on(computer_root: Path, files: Path, command: str, by: str, *, policy=None, env: dict | None = None) -> dict:
+def _run_or_carry_on(computer_root: Path, files: Path, command: str, by: str, *, policy=None, env: dict | None = None,
+                     on_end=None, expect_minutes=None, meta=None) -> dict:
     """Run it with no time limit and wait up to COMMAND_SECONDS (his call, 15 Nov). Done by then: today's entry. Not
     done: it is never stopped; it carries on in the background as a job (jobs, job_output, stop_job) and the Terminal is
     free again. Its end is kept in the job and in the history, as a background command's is."""
@@ -674,7 +677,8 @@ def _run_or_carry_on(computer_root: Path, files: Path, command: str, by: str, *,
     def work():
         try:
             code, text, timed_out, reached = _execute(files, command, computer_root, policy=policy, env=env, seconds=0,
-                                                      on_start=started, tail=True)
+                                                      on_start=started, tail=True,
+                                                      on_output=lambda buffer: _LIVE.__setitem__(job["id"], buffer))
             if env:
                 from .redaction import redact_text
                 text = redact_text(text, [v for v in env.values() if isinstance(v, str) and v])
@@ -693,12 +697,15 @@ def _run_or_carry_on(computer_root: Path, files: Path, command: str, by: str, *,
                        output=result["text"], ended=int(time.time()), **result["reached"])
             _JOB_THREADS.pop(job["id"], None)
             _job_write(computer_root, job)
+            _ended(job, on_end)
             try:
                 _remember(computer_root, {"by": by, "command": command, "exit": job["exit"], "output": job["output"],
                                           "timed_out": False, "background": True,
                                           "seconds": job["ended"] - job["started"], "at": job["started"]})
             except OSError:
                 pass
+        else:
+            _LIVE.pop(job["id"], None)            # done within the minute: today's entry, no job
 
     with _TerminalLock(computer_root, COMMAND_SECONDS + 10):
         started_at, at = time.monotonic(), int(time.time())
@@ -713,6 +720,7 @@ def _run_or_carry_on(computer_root: Path, files: Path, command: str, by: str, *,
                     moved.set()
                     _JOB_THREADS[job["id"]] = thread
                     _job_write(computer_root, job)
+                    _watch_job(job, expect_minutes, meta)
         finally:
             try:
                 marker.unlink()
@@ -866,7 +874,8 @@ def jobs(computer_root: Path) -> list[dict]:
     return out
 
 
-def start_background(computer_root: Path, command, by: str, *, policy=None, env: dict | None = None) -> dict:
+def start_background(computer_root: Path, command, by: str, *, policy=None, env: dict | None = None, on_end=None,
+                     expect_minutes=None, meta=None) -> dict:
     """Start one command in the background in the computer's Terminal box (the same box, network and keys as run),
     for at most background_limits()'s seconds; it doesn't hold the Terminal. Returns the job."""
     if sys.platform == "darwin":
@@ -889,7 +898,8 @@ def start_background(computer_root: Path, command, by: str, *, policy=None, env:
     def work():
         try:
             code, text, timed_out, reached = _execute(files, command, computer_root, policy=policy, env=env,
-                                                      seconds=seconds, on_start=started, tail=True)
+                                                      seconds=seconds, on_start=started, tail=True,
+                                                      on_output=lambda buffer: _LIVE.__setitem__(job["id"], buffer))
             if env:
                 from .redaction import redact_text
                 text = redact_text(text, [v for v in env.values() if isinstance(v, str) and v])
@@ -901,6 +911,7 @@ def start_background(computer_root: Path, command, by: str, *, policy=None, env:
         finally:
             _JOB_THREADS.pop(job["id"], None)
         _job_write(computer_root, job)
+        _ended(job, on_end)
         try:
             _remember(computer_root, {"by": by, "command": command, "exit": job["exit"], "output": job["output"],
                                       "timed_out": job["state"] == "timed_out", "background": True,
@@ -910,6 +921,7 @@ def start_background(computer_root: Path, command, by: str, *, policy=None, env:
 
     thread = threading.Thread(target=work, name=f"pip-computer-job-{job['id']}", daemon=True)
     _JOB_THREADS[job["id"]] = thread
+    _watch_job(job, expect_minutes, meta)
     thread.start()
     return {k: job[k] for k in ("id", "by", "command", "state", "started")}
 
@@ -939,7 +951,7 @@ def stop_job(computer_root: Path, job_id) -> dict:
 
 
 def _execute(files: Path, command: str, computer_root: Path | None = None, *, policy=None, env: dict | None = None,
-             seconds: int | None = None, on_start=None, tail: bool = False):
+             seconds: int | None = None, on_start=None, tail: bool = False, on_output=None):
     """Run it; returns (exit, output, timed out, {"reached": hosts, "blocked": hosts}). ``seconds``, ``on_start`` and
     ``tail``: a background job's (_run_boxed)."""
     from .pip_computer_box import EgressProxy, FORWARDER
@@ -969,7 +981,7 @@ def _execute(files: Path, command: str, computer_root: Path | None = None, *, po
         code, text, timed_out = _run_boxed(terminal_argv(files, command, egress=proxy.path if proxy else None,
                                                          forwarder=forwarder, keys_fd=keys_r),
                                            pass_fds=(keys_r,) if keys_r is not None else (), seconds=seconds,
-                                           on_start=on_start, tail=tail)
+                                           on_start=on_start, tail=tail, on_output=on_output)
     finally:
         if keys_r is not None:
             os.close(keys_r)
@@ -1020,7 +1032,7 @@ def _execute_in_vm(files: Path, command: str, computer_root: Path, *, policy=Non
 
 
 def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=(), seconds: int | None = None, on_start=None,
-               tail: bool = False) -> tuple[int | None, str, bool]:
+               tail: bool = False, on_output=None) -> tuple[int | None, str, bool]:
     """Run the boxed command for at most ``seconds`` (COMMAND_SECONDS). ``on_start(proc)`` learns its process (a
     background job's Stop); ``tail`` keeps the END of a long output (a background job's) rather than its start."""
     seconds = COMMAND_SECONDS if seconds is None else seconds      # 0: no time limit
@@ -1031,6 +1043,8 @@ def _run_boxed(argv: list[str], *, limits: bool = True, pass_fds=(), seconds: in
     if on_start is not None:
         on_start(proc)
     output, timed_out = (_Tail() if tail else bytearray()), False
+    if on_output is not None:
+        on_output(output)                         # a background job's live output (check-ins)
     reader = threading.Thread(target=lambda: _drain(proc.stdout, output, tail=tail), daemon=True)
     reader.start()
     full = threading.Event()
@@ -1078,6 +1092,86 @@ def _watch_disk(proc, full: threading.Event) -> None:
 
 class _Tail(bytearray):
     cut = False
+    seen = 0                                     # every byte it was given, kept or not: a check-in's progress
+
+
+# Check-ins on a Pip's background commands (his call, 18 Nov; tests/test_check_ins.py): a running job's live output, and
+# its check-in state, in memory (a job doesn't outlive the DGC that runs it). Same rule as Work's (dgc/monitors.py):
+# past its expected time, or quiet for CHECK_IN_QUIET_S, then again after a growing gap.
+_LIVE: dict[str, "_Tail"] = {}
+_CHECKS: dict[str, dict] = {}
+_CHECKS_LOCK = threading.Lock()
+CHECK_IN_QUIET_S, CHECK_IN_MIN_GAP_S, CHECK_IN_MAX_GAP_S, CHECK_IN_TAIL_LINES = 600, 300, 3600, 20
+
+
+def _watch_job(job: dict, expect_minutes, meta) -> None:
+    try:
+        minutes = int(expect_minutes or 0)
+    except (TypeError, ValueError):
+        minutes = 0
+    if minutes <= 0:
+        return
+    now = time.time()
+    with _CHECKS_LOCK:
+        _CHECKS[job["id"]] = {"command": job["command"], "started": now, "expect_s": minutes * 60,
+                              "due": now + minutes * 60, "gap": CHECK_IN_MIN_GAP_S, "seen": 0, "seen_at": now,
+                              "last": None, "meta": dict(meta or {})}
+
+
+def _live_tail(job_id: str) -> list[str]:
+    buffer = _LIVE.get(job_id)
+    if buffer is None:
+        return []
+    text = bytes(buffer[-8000:]).decode("utf-8", "replace")
+    return [row for row in text.splitlines() if row.strip()][-CHECK_IN_TAIL_LINES:]
+
+
+def check_ins_due(now: float | None = None) -> list[dict]:
+    """The Pips' background commands now due a check-in: [{job, command, head, tail, gap_minutes, meta}]. A job that
+    ended, or was started with no expected time, never is."""
+    now = time.time() if now is None else now
+    out = []
+    with _CHECKS_LOCK:
+        for job_id, entry in list(_CHECKS.items()):
+            buffer = _LIVE.get(job_id)
+            if buffer is None:
+                thread = _JOB_THREADS.get(job_id)
+                if thread is not None and thread.is_alive():
+                    continue                         # just starting: its output isn't there yet
+                _CHECKS.pop(job_id, None)            # it ended (its end has its own turn)
+                continue
+            seen = getattr(buffer, "seen", len(buffer))
+            if seen != entry["seen"]:
+                entry["seen"], entry["seen_at"] = seen, now
+            quiet = now - entry["seen_at"] >= CHECK_IN_QUIET_S
+            spaced = entry["last"] is None or now - entry["last"] >= CHECK_IN_MIN_GAP_S
+            if not (now >= entry["due"] or (quiet and spaced)):
+                continue
+            running = int((now - entry["started"]) // 60)
+            if now >= entry["due"]:
+                head = (f"running {running} min, past the {entry['expect_s'] // 60} you expected" if entry["last"] is None
+                        else f"running {running} min")
+            else:
+                head = f"nothing new for {int((now - entry['seen_at']) // 60)} min (running {running} min)"
+            gap = entry["gap"]
+            entry["last"], entry["due"], entry["gap"] = now, now + gap, min(CHECK_IN_MAX_GAP_S, gap * 2)
+            out.append({"job": job_id, "command": entry["command"], "head": head, "gap_minutes": gap // 60,
+                        "meta": dict(entry["meta"]), "check": int(now)})
+    for item in out:
+        item["tail"] = _live_tail(item["job"])
+    return out
+
+
+def _ended(job: dict, on_end) -> None:
+    """A job ended: its live output and check-ins go; one that wasn't stopped tells whoever started it."""
+    _LIVE.pop(job["id"], None)
+    with _CHECKS_LOCK:
+        _CHECKS.pop(job["id"], None)
+    if on_end is not None and job.get("state") in ("finished", "timed_out"):
+        try:
+            on_end({k: job.get(k) for k in ("id", "command", "state", "exit", "output", "started", "ended")})
+        except Exception:                        # noqa: BLE001 - telling never costs the job its record
+            pass
 
 
 def _duration(seconds: int) -> str:
@@ -1085,12 +1179,16 @@ def _duration(seconds: int) -> str:
 
 
 def _drain(stream, into: bytearray, *, tail: bool = False) -> None:
+    # read1: what has arrived, as it arrives (a running job's latest lines for a check-in), not a full 64 KB block.
+    read = getattr(stream, "read1", None) or stream.read
     while True:
-        chunk = stream.read(65536)
+        chunk = read(65536)
         if not chunk:
             break
         if tail:
             into.extend(chunk)
+            if isinstance(into, _Tail):
+                into.seen += len(chunk)
             if len(into) > 2 * MAX_OUTPUT_BYTES:
                 del into[:len(into) - MAX_OUTPUT_BYTES]          # the end is what a long job's reader needs
                 if isinstance(into, _Tail):

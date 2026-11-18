@@ -11574,6 +11574,7 @@ class Agent(GoalLifecycle):
                         elif _is_task_batch(args):
                             out = self._run_task_batch(args, call_id)
                         else:
+                            self.__dict__.setdefault("_check_in_minutes", {})[call_id] = args.get("expect_minutes")
                             out = self._run_subagent(
                                 str(args.get("description", "")), str(args.get("prompt", "")),
                                 str(args.get("agent", "")), call_id,
@@ -13295,6 +13296,16 @@ class Agent(GoalLifecycle):
         # its result must not land in whatever chat replaced it.
         hub = getattr(self, "monitors", None)
         notify_epoch = getattr(hub, "epoch", None)
+        minutes = self.__dict__.get("_check_in_minutes", {}).pop(call_id, None)
+        if minutes and hub is not None and adopt is None:
+            # Check-ins (18 Nov): past its expected time, or no new step for 10 minutes, the model hears how it goes.
+            registry = self.subagents
+            try:
+                hub.watch(agent_id, description, kind="agent", expect_minutes=minutes,
+                          progress=lambda: registry.progress_of(agent_id),
+                          tail=lambda: registry.recent_steps(agent_id))
+            except Exception:
+                pass
         # The chat this work belongs to, as it is NOW. `self.checkpoints` is replaced by a new
         # chat, and this child may outlive that; its integration belongs to the chat that asked.
         keeper = self.checkpoints
@@ -14159,6 +14170,7 @@ class Agent(GoalLifecycle):
         return helpers
 
     def _run_task_batch(self, args: dict, call_id: str | None) -> str:
+        self._batch_check_in_minutes = args.get("expect_minutes") if isinstance(args, dict) else None
         """One `task` call that starts several helpers together: its `tasks` form.
 
         Measured on a real session: a model that WROTE "six investigations in one batch" sent one
@@ -14235,6 +14247,8 @@ class Agent(GoalLifecycle):
             fields = helper.arguments
             self.ui.tool_call("task", self._safe_value(fields), helper.id)
             spawned: list = []
+            self.__dict__.setdefault("_check_in_minutes", {})[helper.id] = (
+                fields.get("expect_minutes") or getattr(self, "_batch_check_in_minutes", None))
             out = self._safe_text(self._run_subagent(
                 fields["description"], fields["prompt"], fields.get("agent", ""), helper.id,
                 background=True, queue_over_cap=True, spawned=spawned))

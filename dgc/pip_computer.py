@@ -207,7 +207,7 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                         "reload. wait (seconds, at most 30) until text shows (gone true: until it goes), a ref or selector "
                         "shows, the address has url, or the page loads. A link that opens a tab moves you to it; op tabs "
                         "with action list, open (url), switch or close (tab: t2) manages them. close_browser "
-                        "shuts down the browser and verifies it stopped. "
+                        "shuts it down. "
                         "status: where you are, "
                         "an open dialog or file picker, your downloads. dialog answers the page's confirm or prompt: "
                         "accept true (OK) or false (Cancel), text for a prompt. "
@@ -219,10 +219,10 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                         "Files (your own folder; browser downloads land in Downloads, photos and files the user sent "
                         "in From chat): files lists a folder (path), open_file reads a text file (path), send_to_chat (path) "
                         "shows the user one of your files with your reply. Terminal: run "
-                        "runs a shell command in Files (public websites only), with no time limit: one still running "
-                        "after a minute carries on in the background on its own (it says its job); background true "
-                        "starts a long one there at once: jobs lists them, stop_job (job) stops one. Reading is free; anything "
-                        "that would submit, upload or change something on a website waits for the user's approval."),
+                        "runs a shell command in Files (public websites only), no time limit: one running past a "
+                        "minute carries on in the background (it says its job); background true "
+                        "starts one there at once: jobs lists them, stop_job (job) stops one; DGC tells you here "
+                        "when one ends."),
         "parameters": {"type": "object", "additionalProperties": False, "required": ["op"],
                        "properties": {"op": {"type": "string", "enum": ops},
                                       "url": {"type": "string", "maxLength": 2048},
@@ -233,6 +233,9 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                                       "path": {"type": "string", "maxLength": 2048},
                                       "command": {"type": "string", "maxLength": 4000},
                                       "background": {"type": "boolean"}, "job": {"type": "string"},
+                                      "expect_minutes": {"type": "integer", "description": (
+                                          "run: minutes a long job should take; DGC checks in past that or "
+                                          "when it goes quiet")},
                                       "confirm": {"type": "boolean", "description": "true: a held step, after the user's yes"},
                                       "site": {"type": "string", "maxLength": 2048},
                                       "submit": {"type": "boolean"}, "to": {"type": "string", "maxLength": 16},
@@ -1626,15 +1629,19 @@ class Host:
             if held:
                 return held
             keys = terminal_keys(getattr(self, "state_directory", None), getattr(self, "pip_id", None))
+            # Its end tells the Pip in its chat, and with an expected time DGC checks in on it (18 Nov).
+            on_end, meta = Host._job_end_hook(self), {"pip_id": getattr(self, "pip_id", None),
+                                                      "run_id": getattr(self, "run_id", None)}
             if args.get("background") is True:
                 job = desk.start_background(self.root, args.get("command"), "pip",
-                                            policy=self._terminal_policy() if careful else None, env=keys)
+                                            policy=self._terminal_policy() if careful else None, env=keys,
+                                            on_end=on_end, expect_minutes=args.get("expect_minutes"), meta=meta)
                 seconds, _most = desk.background_limits()
                 limit = f"It may run up to {seconds // 60} minutes." if seconds else "It has no time limit."
                 return (f"Started in the background as {job['id']}: $ {job['command']}\n{limit} Check it with jobs; "
                         f"stop it with stop_job (job: {job['id']}).")
             entry = desk.run_command(self.root, args.get("command"), "pip", policy=self._terminal_policy() if careful else None,
-                                     env=keys)
+                                     env=keys, on_end=on_end, expect_minutes=args.get("expect_minutes"), meta=meta)
             from .tools import _UNTRUSTED_PAGE
             status = "timed out" if entry["timed_out"] else f"exit {entry['exit']}"
             return f"{_UNTRUSTED_PAGE}\n$ {entry['command']}\n({status})\n{entry['output']}"
@@ -1642,6 +1649,26 @@ class Host:
             return f"error: {str(error)[:500]}"
         except Exception as error:                         # noqa: BLE001 - never into the worker
             return f"error: the computer failed ({type(error).__name__})"
+
+    def _job_end_hook(self):
+        """What a background command does when it ends (dgc.pip_computer_files._ended): one DGC turn in the chat the
+        run that started it was in, so the Pip tells the user what came of it. Nothing when no run started it (the
+        user's own Terminal steps) or nothing can send a turn here."""
+        directory, pip_id = getattr(self, "state_directory", None), getattr(self, "pip_id", None)
+        run_id, config = getattr(self, "run_id", None), getattr(self, "config", None)
+        if not (directory and pip_id and run_id and config is not None):
+            return None
+
+        def ended(job):
+            from .pip_chat import after_job
+            from .pips import PipStore
+            from .workspace_registry import WorkspaceRegistry
+            try:
+                with WorkspaceRegistry(directory) as registry:
+                    after_job(PipStore(registry), pip_id, job, run_id, config)
+            except Exception:                              # noqa: BLE001 - its record says how it ended either way
+                pass
+        return ended
 
     def _floor(self, command: str, confirm: bool = False) -> str | None:
         """The safety floor (pip_levels.floor), at every level: a command that could wipe its Files waits for the
@@ -2503,6 +2530,24 @@ def _decide(registry, action_id, expected_digest, approve, actor):
                    payload={"action_id": action_id, "approved": approve})
 
 
+def job_check_ins(registry, config, now=None) -> int:
+    """One DGC turn per Pip background command now due a check-in (dgc.pip_computer_files.check_ins_due)."""
+    from . import pip_computer_files as desk
+    from .pip_chat import job_check_in
+    from .pips import PipStore
+    sent = 0
+    for item in desk.check_ins_due(now):
+        meta = item.get("meta") or {}
+        if not meta.get("pip_id"):
+            continue
+        try:
+            job_check_in(PipStore(registry), meta["pip_id"], item, meta.get("run_id"), config)
+            sent += 1
+        except Exception:                              # noqa: BLE001 - a busy or gone chat: the next check-in comes
+            pass
+    return sent
+
+
 def tick(registry, config) -> dict:
     """In the supervisor: carry out decisions, expire old holds, close idle computers."""
     from .pips import PipStore
@@ -2621,6 +2666,11 @@ def tick(registry, config) -> dict:
     # What the user approved while its chat was busy: its next turn, now the chat is free (pip_chat.send_owed_turns).
     from .pip_chat import send_owed_turns
     send_owed_turns(registry, config)
+    # Check-ins on the Pips' background commands started with an expected time (18 Nov).
+    try:
+        job_check_ins(registry, config)
+    except Exception:                                  # noqa: BLE001 - a pass never stops the supervisor
+        pass
     # What a Pip at Do it all asks in its chat, made where no turn could be sent (a fix a check found: pip_holds).
     try:
         from .pip_holds import announce_due

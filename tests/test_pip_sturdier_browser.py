@@ -197,6 +197,9 @@ class WordingTests(unittest.TestCase):
         # 2026-11-18: +82 (about 20 tokens a request) for `confirm`: at Do it all a step that needs the user (a payment past
         # its limit, a command that could wipe its Files) is held and asked in the chat, never a card (his rule, 17 Nov),
         # and runs once on their yes in the next turn (dgc/pip_holds.py). The description cut to fit.
+        # 2026-11-18 (later): expect_minutes for check-ins (his call: DGC checks in on a long command past its time or
+        # when it goes quiet, and its end is told in the chat) fit in at no growth: the description's lines the notice
+        # already says (approval, close_browser) cut.
         size = len(json.dumps(pip_computer.schema(None))) + len(pip_computer.NOTICE)
         self.assertLessEqual(size, 5992, size)
 

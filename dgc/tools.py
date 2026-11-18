@@ -488,7 +488,10 @@ TOOL_SCHEMAS = [
         {"command": {"type": "string"},
          "description": {"type": "string", "description": "What it does in 5-10 plain words, shown to the user: 'Run the tests'"},
          "timeout": {"type": "integer", "description": "Seconds (default from config)"},
-         "background": {"type": "boolean", "default": False}}, ["command"]),
+         "background": {"type": "boolean", "default": False},
+         "expect_minutes": {"type": "integer", "description": "With background, for a job that should finish (a build, "
+                            "a download, tests): about how long it takes. DGC checks in with you if it runs past that "
+                            "or prints nothing for 10 minutes. Leave it out for a server or a watcher"}}, ["command"]),
     _fn("bash_output", "Read a background bash task or retained long foreground result. Without "
         "arguments beyond id, background tasks show their newest output and foreground results "
         "start at line 1. Use offset/limit to page output, or query for a case-insensitive literal "
@@ -784,7 +787,10 @@ TOOL_SCHEMAS = [
                         "(tasks, or several task calls in one response), an omitted value defaults to "
                         "true so the lead stays available; set false explicitly only when the next "
                         "model step needs those results. A single task still defaults false. A "
-                        "background helper outlives the turn; the result says whether you are woken."}},
+                        "background helper outlives the turn; the result says whether you are woken."},
+         "expect_minutes": {"type": "integer", "description": "With background: about how long its job takes. DGC "
+                            "checks in with you if it runs past that or takes no new step for 10 minutes. With tasks "
+                            "it applies to every helper"}},
         []),
 ]
 
@@ -2315,7 +2321,8 @@ def bash(args: dict, ctx) -> str:
     if len(command) > MAX_BASH_COMMAND_CHARS:
         return f"error: bash command exceeds {MAX_BASH_COMMAND_CHARS} characters"
     if args.get("background"):
-        return _bash_background(command, ctx, notify_exit=args.get("_dgc_notify_exit") is True)
+        return _bash_background(command, ctx, notify_exit=args.get("_dgc_notify_exit") is True,
+                                expect_minutes=args.get("expect_minutes"))
     raw_timeout = args.get("timeout")
     if raw_timeout is None:
         raw_timeout = ctx.config.get("bash_timeout", 120)
@@ -2569,7 +2576,7 @@ def direct_bash(command: str, ctx) -> str:
         lease.release()
 
 
-def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
+def _bash_background(command: str, ctx, *, notify_exit: bool = False, expect_minutes=None) -> str:
     """Start `bash(background:true)`: return a task id at once, keep its output for bash_output.
 
     The workspace mutation lease is held only while the process is spawned and is released as soon
@@ -2646,10 +2653,29 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
     entry["thread"] = reader_thread
     reader_thread.start()
     _bg_changed(entry)
+    checked = False
+    if hub is not None and expect_minutes:
+        # Check-ins (18 Nov): past its expected time, or quiet for 10 minutes, the model hears how it is going.
+        def made():
+            if entry.get("finished") or entry.get("killed"):
+                return None
+            with entry["lock"]:
+                return entry["buf_chars"] + entry["dropped_chars"]
+
+        def tail():
+            with entry["lock"]:
+                text = "".join(entry["buf"])[-6000:]
+            return text.splitlines()
+        try:
+            checked = hub.watch(bid, safe_command, kind="command", expect_minutes=expect_minutes, progress=made,
+                                tail=tail, started=entry["started"])
+        except Exception:
+            checked = False
     return (f"started background task {bid}: {safe_command}\n"
             f"Read its output with bash_output(id=\"{bid}\"). It holds no workspace lease once "
             "started, so do not use it to change files."
-            + (" You are notified once when it exits." if hub is not None else ""))
+            + (" You are notified once when it exits." if hub is not None else "")
+            + (f" DGC checks in with you if it runs past {int(expect_minutes)} min or goes quiet." if checked else ""))
 
 
 def _bg_append(entry: dict, chunk: str) -> None:

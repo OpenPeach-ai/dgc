@@ -4924,12 +4924,13 @@ class Backend:
         threading.Thread(target=watch, daemon=True, name="dgc-restart-await").start()
 
     def _emit_monitor_events(self, notification, delivery: str, turn_id: str = "") -> None:
+        from .monitors import wire_kind              # a check-in travels as an ordinary event (released enum)
         for batch in notification.batches:
             if batch.kind == "video_ended":
                 continue                         # the screen has the video's own event (video_job): no monitor card
             self.em.emit("monitor_event", id=batch.monitor_id, description=batch.description,
                          event_index=int(batch.event_index), lines=list(batch.lines),
-                         omitted_lines=int(batch.omitted_lines), kind=batch.kind,
+                         omitted_lines=int(batch.omitted_lines), kind=wire_kind(batch.kind),
                          delivery=delivery, **({"turn_id": turn_id} if turn_id else {}))
 
     def _emit_monitors(self, request_id: str | None = None) -> None:
