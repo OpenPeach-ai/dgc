@@ -3,7 +3,7 @@
 // are the tab bar's now (Pips is a tab; Pips' "back" is the tabs themselves). Measured in real Chromium on the side
 // bar's real page (support/dock-scene.mjs). What is held here:
 //   - the header is the first thing in the side bar, then the tab bar, centred as before, on every tab
-//   - the wordmark: the mark in the accent, "DGC", the cursor; the slashes are animated, and still under reduced motion
+//   - the wordmark: the mark in the accent, "DGC", the cursor, then the product's name "VIBE" in Geist; the slashes are animated, and still under reduced motion
 //   - no button shows in it: nothing is offered twice
 //   - it fits at 240, 300 and 700 px with nothing cut
 import { after, before, test } from "node:test";
@@ -48,7 +48,7 @@ for (const width of [240, 300, 700]) {
       const h = await headNow(x.page);
       assert.equal(h.shown, true, "the side bar has its header row");
       assert.ok(h.box.top < 1, "it is the first thing in the side bar");
-      assert.equal(h.word, "DGC", "the wordmark");
+      assert.equal(h.word, "DGCVIBE", "the wordmark, then the product's name (VIBE, his call 18 Nov)");
       assert.ok(h.mark.left >= 11.5, `it starts at the side bar's 12 px gutter (${h.mark.left})`);
       assert.equal(h.markColour, h.accent, "the mark is in DGC's accent");
       assert.deepEqual(h.slashes.map(([name]) => name), ["brand-slash-pulse", "brand-slash-pulse", "brand-slash-pulse"], "its three slashes breathe");
@@ -76,7 +76,7 @@ test("the header stays on every tab, the Pips page too, still with no button of 
     for (const tab of ["work", "chat", "pips", "home"]) {
       await x.page.click(`#side-tab-${tab}`); await settle(x.page, 150);
       const h = await headNow(x.page);
-      assert.deepEqual([h.shown, h.word, h.buttons, Math.round(h.box.bottom), Math.round(h.bar.top)], [true, "DGC", [], Math.round(first.box.bottom), Math.round(first.bar.top)], `on ${tab}: the same header, and the tab bar where it was`);
+      assert.deepEqual([h.shown, h.word, h.buttons, Math.round(h.box.bottom), Math.round(h.bar.top)], [true, "DGCVIBE", [], Math.round(first.box.bottom), Math.round(first.bar.top)], `on ${tab}: the same header, and the tab bar where it was`);
     }
   } finally { await x.close(); }
 });

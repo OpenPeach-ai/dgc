@@ -133,7 +133,7 @@ for (const width of [300, 700]) {
       assert.equal(g.button.text, "Cards", "one button: the word Cards, no plus, no Add");
       assert.ok(g.button.mosaic.includes("mosaic--ember") && g.button.tiles === 4, "with the Ember mosaic");
       assert.equal(g.button.radius, "6px"); assert.equal(g.button.height, 28);
-      // (17 Nov: GitHub, Docs, DGC-SDK and Settings follow Cards; the row's last button is at Home's top right.)
+      // (18 Nov: one ⋯ holding GitHub, Docs, DGC-SDK and Settings follows Cards; the row's last button is at Home's top right.)
       const last = await p.evaluate(() => { const all = [...document.querySelectorAll("#home-hub .hc-head > button")].filter((n) => n.checkVisibility()); return all.at(-1).getBoundingClientRect().right; });
       assert.ok(last > width - 14 && last <= width - 11, "the head row ends at Home's top right");
       assert.ok(g.button.right < last, "Cards, before the links that follow it");

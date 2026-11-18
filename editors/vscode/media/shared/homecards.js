@@ -121,9 +121,9 @@
       + `<g stroke="#fff" stroke-linecap="round" stroke-width="2.3"><line x1="12.5" y1="22" x2="27" y2="22" stroke-opacity=".95"/><line x1="12.5" y1="27.5" x2="27" y2="27.5" stroke-opacity=".88"/><line x1="12.5" y1="33" x2="27" y2="33" stroke-opacity=".8"/><line x1="12.5" y1="38.5" x2="21" y2="38.5" stroke-opacity=".72"/></g>`
       + `<path d="M13.5 4.5 h4.6 v13 l-2.3 -2.1 l-2.3 2.1 Z" fill="url(#${id}e)"/></g></svg>`;
   }
-  // (The website's SDK tile, site/assets/sdk.css .sdk-art-core: its corner, its -8 degree turn, its inner ring, and DGC's
-  // mark at 84% with its strokes at 1, .83 and .62.)
-  const SDK_MARK = '<span class="hc-sdk-tile" aria-hidden="true"><svg viewBox="0 0 90 90" focusable="false"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg></span>';
+  // The SDK's mark: DGC's three strokes in the SDK's own olive (his call, 18 Nov: each DGC product its colour, the SDK
+  // olive), at 1, .83 and .62.
+  const SDK_MARK = '<svg class="hc-mark-svg hc-mark-sdk" viewBox="10 14 72 62" aria-hidden="true" focusable="false"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>';
   function gearMark() {
     const id = `hcm${++markN}`, n = 8, R = 21.5, r = 17, pts = [];
     for (let k = 0; k < n; k++) {
@@ -585,10 +585,9 @@
         // Library, beside Cards and of its shape (his call, 15 Nov): it opens the side bar's Library tab. Not while Home is arranged.
         + (ui.arranging ? "" : `<button type="button" class="hc-btn hc-library-btn" title="Library: everything DGC made for you, and who made it" aria-label="Library">${LIBRARY_ICON}<span class="hc-btn-word">Library</span></button>`)
         + `<button type="button" class="hc-btn hc-cards-btn" aria-haspopup="dialog" title="Cards: add, remove and arrange what is on Home" aria-label="Cards">${mosaic("ember", 16)}<span class="hc-btn-word">Cards</span></button>`
-        // GitHub, Docs, DGC-SDK and Settings (17 Nov). Not while Home is arranged.
-        + (ui.arranging ? "" : HEAD_LINKS.map((l) => `<button type="button" class="hc-btn hc-link-btn" data-head-link="${l.id}" title="${esc(l.title)}" aria-label="${esc(l.word)}"><span class="hc-mark">${markOf(l, "row")}</span><span class="hc-btn-word">${esc(l.word)}</span></button>`).join("")
-          // Where the four don't fit (the narrowest side bar, or a card open beside its Back), they are one ⋯ and its menu.
-          + `<button type="button" class="hc-btn hc-links-more" aria-haspopup="menu" aria-expanded="${ui.links ? "true" : "false"}" title="GitHub, Docs, DGC-SDK and Settings" aria-label="More: GitHub, Docs, DGC-SDK and Settings">${shared("more", 16)}</button>`
+        // GitHub, Docs, DGC-SDK and Settings: always the ⋯ and its menu, at every width (his call, 18 Nov); only Library
+        // and Cards are buttons of their own. Not while Home is arranged.
+        + (ui.arranging ? "" : `<button type="button" class="hc-btn hc-links-more" aria-haspopup="menu" aria-expanded="${ui.links ? "true" : "false"}" title="GitHub, Docs, DGC-SDK and Settings" aria-label="More: GitHub, Docs, DGC-SDK and Settings">${shared("more", 16)}</button>`
           + (ui.links ? `<div class="hc-links-menu dgc-menu" role="menu" aria-label="More">${HEAD_LINKS.map((l) => `<button type="button" role="menuitem" class="dgc-menu-row hc-links-row" data-head-link="${l.id}" tabindex="-1"><span class="hc-mark">${markOf(l, "menu")}</span><span class="dgc-menu-label">${esc(l.word)}</span></button>`).join("")}</div>` : ""));
       head.classList.toggle("hc-head-open", !!ui.open);
       if (head.__html !== headHtml) { const had = doc.activeElement && head.contains(doc.activeElement) ? doc.activeElement.className : ""; head.__html = headHtml; head.innerHTML = headHtml; if (had) head.querySelector(`.${had.trim().split(/\s+/).join(".")}`)?.focus({ preventScroll: true }); }

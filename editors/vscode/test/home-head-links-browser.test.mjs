@@ -1,9 +1,8 @@
-// Home's head row, after Library and Cards (his call, 17 Nov): GitHub, Docs, DGC-SDK and Settings, each with its own
-// coloured mark at the same visible size (the icon sheet he approved: Docs a page stack, DGC-SDK the website's tilted
-// tile with DGC's three strokes, Settings a graphite gear, GitHub its own mark). GitHub opens DGC's repository, Docs
-// docs.vibedgc.com, DGC-SDK vibedgc.com/sdk, Settings DGC's Settings. One row at every width: the four are their marks
-// alone below 640 px, and Library and Cards too below 360 px; a mark alone keeps its name for a screen reader and as
-// its hover label. Not while Home is arranged. In real Chromium.
+// Home's head row: Library and Cards, then one ⋯ that holds GitHub, Docs, DGC-SDK and Settings at every width (his call,
+// 18 Nov: "only Library and Cards button stay as is, rest 4 buttons always come under the 3 dotted menu"). Each row of
+// the menu has its own coloured mark (Docs a page stack, DGC-SDK DGC's three strokes in the SDK's olive, Settings a
+// graphite gear, GitHub its own mark). GitHub opens DGC's repository, Docs docs.vibedgc.com, DGC-SDK vibedgc.com/sdk,
+// Settings DGC's Settings. Not while Home is arranged. In real Chromium.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openGrid } from "./support/home-grid-scene.mjs";
@@ -21,50 +20,49 @@ const skipOrFail = (t) => {
   return true;
 };
 const posted = (p, type) => p.evaluate((t) => window.__posted.filter((m) => m && m.type === t), type);
-const ORDER = ["Library", "Cards", "GitHub", "Docs", "DGC-SDK", "Settings"];
+const MORE = "More: GitHub, Docs, DGC-SDK and Settings";
 
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 460, 700, 1100]) {
-  test(`Home at ${width} px (${theme}): Library, Cards, GitHub, Docs, DGC-SDK, Settings in one row, one shape, nothing cut`, async (t) => {
+  test(`Home at ${width} px (${theme}): Library, Cards and one ⋯ in one row; the four are in the ⋯ at every width`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openGrid(browser, { width, theme, layout: ["needs", "recent"], height: 700 });
     try {
       await x.rest(300);
       const row = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .hc-head > button")].filter((b) => b.checkVisibility())
-        .map((b) => { const r = b.getBoundingClientRect(), s = getComputedStyle(b), mark = b.firstElementChild?.getBoundingClientRect();
-          const word = b.querySelector(".hc-btn-word"), shown = word && word.getBoundingClientRect().width > 2;
-          return { label: b.getAttribute("aria-label"), title: b.title, top: Math.round(r.top), h: r.height, w: r.width, radius: s.borderTopLeftRadius,
-            ground: s.backgroundColor, border: s.borderTopWidth, word: shown ? word.textContent : "", cut: b.scrollWidth > b.clientWidth + 1,
-            mark: mark ? [Math.round(mark.width), Math.round(mark.height)] : null }; }));
-      const named = row.filter((b) => ORDER.includes(b.label));
-      assert.deepEqual(named.map((b) => b.label), ORDER, "in his order, after Library and Cards");
-      const cards = named[1];
-      for (const b of named) {
-        assert.equal(b.top, cards.top, `${b.label}: one row`);
-        for (const key of ["h", "radius", "ground", "border"]) assert.equal(b[key], cards[key], `${b.label}: the same ${key} as Cards`);
-        assert.equal(b.cut, false, `${b.label}: nothing cut`);
-        assert.deepEqual(b.mark, [16, 16], `${b.label}: a 16 px mark, as Library's and Cards'`);
-        assert.ok(b.title, `${b.label}: a hover label`);
-      }
-      const words = (b) => b.word !== "";
-      if (width >= 700) assert.ok(named.every(words), "wide: every button says its name");
-      if (width < 640) for (const b of named.slice(2)) assert.ok(!words(b) && Math.abs(b.w - b.h) < 0.5, `${b.label}: its mark alone, a square`);
-      if (width < 360) assert.ok(named.every((b) => !words(b)), "the narrowest: every one is its mark");
-      else assert.ok(words(named[0]) && words(named[1]), "Library and Cards keep their words down to 360 px");
+        .map((b) => { const r = b.getBoundingClientRect(), s = getComputedStyle(b);
+          return { label: b.getAttribute("aria-label"), top: Math.round(r.top), h: r.height, w: r.width, radius: s.borderTopLeftRadius, ground: s.backgroundColor, border: s.borderTopWidth }; }));
+      const labels = row.map((b) => b.label);
+      assert.deepEqual(labels.filter((l) => ["Library", "Cards", MORE].includes(l)), ["Library", "Cards", MORE], "Library, Cards, then the ⋯");
+      for (const gone of ["GitHub", "Docs", "DGC-SDK", "Settings"]) assert.ok(!labels.includes(gone), `${width}px: ${gone} is never a button of its own`);
+      const cards = row.find((b) => b.label === "Cards"), more = row.find((b) => b.label === MORE);
+      assert.equal(more.top, cards.top, "one row");
+      for (const key of ["h", "radius", "ground", "border"]) assert.equal(more[key], cards[key], `the ⋯: the same ${key} as Cards`);
+      assert.ok(Math.abs(more.w - more.h) < 0.5, "the ⋯ is a square");
       assert.equal(await x.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "no sideways scroll");
+      // Opened: the four, each with a 16 px mark; the SDK's strokes in its olive.
+      await x.page.click(`#home-hub .hc-head > button[aria-label="${MORE}"]`); await x.rest(120);
+      const menu = await x.page.evaluate(() => [...document.querySelectorAll("#home-hub .hc-links-menu .hc-links-row")].map((r) => {
+        const m = r.querySelector(".hc-mark").getBoundingClientRect(), sdk = r.querySelector(".hc-mark-sdk");
+        return [r.textContent.trim(), Math.round(m.width), Math.round(m.height), sdk ? getComputedStyle(sdk).fill : ""]; }));
+      assert.deepEqual(menu.map((m) => m[0]), ["GitHub", "Docs", "DGC-SDK", "Settings"]);
+      for (const [word, w, h] of menu) assert.deepEqual([w, h], [16, 16], `${word}: a 16 px mark`);
+      assert.equal(menu[2][3], "rgb(123, 140, 36)", "the SDK's strokes are its olive, #7B8C24");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
 }
 
-test("each opens its place: DGC's repository, its docs, its SDK page, and Settings", async (t) => {
+test("each opens its place from the ⋯: DGC's repository, its docs, its SDK page, and Settings", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openGrid(browser, { width: 1100, layout: ["needs"], height: 700 });
   try {
     await x.rest(300);
-    for (const label of ["GitHub", "Docs", "DGC-SDK"]) { await x.page.click(`#home-hub .hc-head > button[aria-label="${label}"]`); await x.rest(60); }
+    for (const word of ["GitHub", "Docs", "DGC-SDK", "Settings"]) {
+      await x.page.click(`#home-hub .hc-head > button[aria-label="${MORE}"]`); await x.rest(80);
+      await x.page.locator("#home-hub .hc-links-menu .hc-links-row", { hasText: word }).click(); await x.rest(60);
+    }
     assert.deepEqual((await posted(x.page, "openExternal")).map((m) => m.url),
       ["https://github.com/OpenPeach-ai/dgc", "https://docs.vibedgc.com/", "https://vibedgc.com/sdk/"]);
-    await x.page.click('#home-hub .hc-head > button[aria-label="Settings"]'); await x.rest(60);
     assert.equal((await posted(x.page, "openSettings")).length, 1, "Settings opens DGC's Settings");
   } finally { await x.close(); }
 });

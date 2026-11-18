@@ -46,8 +46,10 @@ test("ChatDGC's header opens on DGC's wordmark with its own mark: the tab icon's
   const head = d.querySelector(".cd-head"), pm = head.firstElementChild;
   assert.ok(pm?.matches(".pm"), "the wordmark comes first in the header, where Work's does");
   const work = new JSDOM(bare(workPage)).window.document.querySelector("#phead .pm");
-  assert.deepEqual(parts(work), ["svg.mk", "DGC", "span.cur"], "Work's: the mark, DGC, the cursor");
-  assert.deepEqual(parts(pm), ["svg.mk mk-chat", "DGC", "span.cur"], "ChatDGC's: the same, with its own mark");
+  // (18 Nov: then the product's name, VIBE, in Geist: his call, each DGC product named and coloured.)
+  assert.deepEqual(parts(work), ["svg.mk", "DGC", "span.cur", "span.pm-product"], "Work's: the mark, DGC, the cursor, the product");
+  assert.deepEqual(parts(pm), ["svg.mk mk-chat", "DGC", "span.cur", "span.pm-product"], "ChatDGC's: the same, with its own mark");
+  assert.deepEqual([work.querySelector(".pm-product").textContent, pm.querySelector(".pm-product").textContent], ["VIBE", "VIBE"]);
   assert.equal(pm.querySelector(".cur").getAttribute("aria-hidden"), "true");
 
   // The mark is the tab's icon, path for path: the bubble, and the three slashes inside it as DGC's own icon draws them.

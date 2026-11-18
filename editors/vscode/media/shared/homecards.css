@@ -48,48 +48,25 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
   .hc-cards-btn .hc-btn-word, .hc-library-btn .hc-btn-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 .hc-cards-btn:hover, .hc-cards-btn:focus-visible { --mosaic-play: running; }
-/* GitHub, Docs, DGC-SDK and Settings (17 Nov): Cards' button, each with its own 16 px mark. Below 640 px they are their
-   marks alone (squares of the button's height, the name kept for a screen reader and as the hover label), and Library
-   and Cards too below 360 px, so the row is always one row. */
-.hc-link-btn { height: var(--btn-h); gap: 6px; padding: 0 10px 0 8px; }
+/* GitHub, Docs, DGC-SDK and Settings: always one ⋯ after Library and Cards (his call, 18 Nov), whose menu lists them, each
+   with its own 16 px mark and its name. */
 .hc-mark { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; }
 .hc-mark-svg { display: block; width: 16px; height: 16px; overflow: visible; }
 .hc-mark-gh { width: 14.4px; height: 14.4px; color: var(--text-strong); }
 .hc-mark-docs, .hc-mark-gear { filter: drop-shadow(0 .6px .8px rgba(0, 0, 0, .28)); }
-/* The website's SDK tile: a light tile turned -8deg, an inner ring, DGC's strokes in the accent at 1, .83 and .62. */
-.hc-sdk-tile { position: relative; display: grid; place-items: center; box-sizing: border-box; width: 13.8px; height: 13.8px; border-radius: 23.1%;
-  transform: rotate(-8deg); background: linear-gradient(135deg, #fff, color-mix(in srgb, var(--accent) 7%, #fff));
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, #fff);
-  box-shadow: 0 .8px 1.9px color-mix(in srgb, var(--accent) 30%, transparent), inset 0 0 2.7px #fff; }
-.hc-sdk-tile::after { content: ""; position: absolute; inset: 5.2%; border: 1px solid color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 18.5%; pointer-events: none; }
-.hc-sdk-tile > svg { width: 84%; height: 84%; fill: var(--accent); }
-.hc-sdk-tile path:nth-child(2) { opacity: .83; } .hc-sdk-tile path:nth-child(3) { opacity: .62; }
-@media (max-width: 639px) {
-  .hc-link-btn { position: relative; width: var(--btn-h); padding: 0; gap: 0; justify-content: center; }
-  .hc-link-btn .hc-btn-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-}
-/* Where even their marks don't fit (the narrowest side bar, or a card open beside its Back), the four are one ⋯ whose
-   menu lists them, each with its mark and name. */
+/* The SDK: DGC's three strokes in the SDK's olive, at 1, .83 and .62. */
+.hc-mark-sdk { width: 15px; height: 13px; fill: var(--brand-sdk, #7B8C24); }
+.hc-mark-sdk path:nth-child(2) { opacity: .83; } .hc-mark-sdk path:nth-child(3) { opacity: .62; }
 .hc-head { position: relative; }
-.hc-links-more { display: none; position: relative; width: var(--btn-h); height: var(--btn-h); padding: 0; justify-content: center; }
+.hc-links-more { position: relative; display: inline-flex; align-items: center; width: var(--btn-h); height: var(--btn-h); padding: 0; justify-content: center; }
 .hc-links-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 40; min-width: 176px; }
 .hc-links-row { gap: 10px; }
-@media (max-width: 299px) {
-  .hc-head .hc-link-btn { display: none; }
-  .hc-head .hc-links-more { display: inline-flex; align-items: center; }
-}
-@media (max-width: 459px) {
-  .hc-head.hc-head-open .hc-link-btn { display: none; }
-  .hc-head.hc-head-open .hc-links-more { display: inline-flex; align-items: center; }
-}
 /* The narrowest side bar with a card open: Back is its arrow alone too (its name stays its label). */
 @media (max-width: 259px) {
   .hc-head.hc-head-open .hc-back { position: relative; width: var(--btn-h); padding: 0; justify-content: center; }
   .hc-head.hc-head-open .hc-back .hc-btn-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
-@media (min-width: 460px) { .hc-head .hc-links-menu { display: none; } }
-@media (min-width: 300px) { .hc-head:not(.hc-head-open) .hc-links-menu { display: none; } }
-@media (forced-colors: active) { .hc-mark-svg, .hc-sdk-tile { forced-color-adjust: none; } }
+@media (forced-colors: active) { .hc-mark-svg { forced-color-adjust: none; } }
 .hc-back { padding: 0 10px 0 5px; }
 .hc-notes:empty { display: none; }
 .dgc-home:has(> .hc-open:not([hidden]) > :is(.hc-needs, .hc-recent)) { gap: var(--sp-3); }

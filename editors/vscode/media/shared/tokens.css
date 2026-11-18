@@ -74,6 +74,9 @@ html { scrollbar-color: auto; }
   --home-count-ink: var(--text);
   --home-quiet: var(--text-2);
   --accent:#7C5CFF; --accent-text:#A78BFA; --accent-fill:#7654F6;
+  /* DGC's products, each its own colour (his call, 18 Nov): Vibe (this one) DGC's purple, the SDK olive. One shade each, in
+     both themes. */
+  --brand-vibe:#7C5CFF; --brand-sdk:#7B8C24;
   /* The Thinking slider's fill where a page has no WebGL: its colours a level at a time, from the reference's own
      palette (media/shared/modelpicker.js FILL_COLORS draws the same with WebGL). */
   --effort-1:#3B82F6; --effort-2:#6366F1; --effort-3:#7C3AED; --effort-4a:#60A5FA; --effort-4b:#A855F7; --effort-4c:#F5D0FE;

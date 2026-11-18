@@ -89,6 +89,13 @@ body {
   #phead .pm svg.mk path, .cd-head .pm .mk-slashes path { animation: none; }
 }
 #phead .pm .cur, .cd-head .pm .cur { width: 5px; height: 11px; margin-left: var(--sp-1); background: var(--accent); display: inline-block; animation: blink 1.1s step-end infinite; }
+/* The product's name after the cursor (his call, 18 Nov: DGC's products each named and coloured; this one is VIBE, in
+   DGC's purple): Geist Regular, as tall as "DGC" and set apart from the cursor as in his lockup sheet, about twice the
+   gap between "DGC" and the cursor. */
+@font-face { font-family: "Geist"; src: url("./fonts/Geist-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+#phead .pm .pm-product, .cd-head .pm .pm-product { margin-left: calc(var(--sp-1) * 1.9); font: 400 var(--t-xs)/14px "Geist", var(--sans); letter-spacing: .1em; color: inherit; }
+/* (The narrowest windows: the product's name steps aside, so the header's buttons stay inside the window.) */
+@media (max-width: 239px) { #phead .pm .pm-product, .cd-head .pm .pm-product { display: none; } }
 /* The session's name stands on the wordmark's own baseline (asked 13 Nov: each was centred in the row by its own box,
    and two fonts of two sizes centred that way sit on two lines, the name about a pixel under "DGC"). The name fills
    the row's height with its words in the middle, as before; the wordmark's letters are what its box is aligned by
