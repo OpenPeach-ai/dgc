@@ -272,6 +272,51 @@ class PersonalPipAsks(unittest.TestCase):
         self.assertEqual(pip_holds.asks(self.registry, pip["id"]), [], "its ask ends: the card (if any) shows")
 
 
+class CoreAsksToCreateAPip(unittest.TestCase):
+    """His call, 18 Nov: at Do it all, Core's "Create the Pip …?" card is asked in its chat too."""
+    setUp = local.LocalPipsTests.setUp
+
+    def candidate(self, name="Crypto Market Research"):
+        return {"name": name, "goal": "Research crypto markets each morning with dated public sources.",
+                "character": "lens", "schedule": None, "reason": "The user asked Core to create a research Pip."}
+
+    def core(self, level=levels.FULL):
+        core = self.store.create(self.registry.personal()["id"], "Core", None, "editor-user", pip_type="core")
+        levels.set_level(self.registry, core["id"], level, "editor-user")
+        run = pip_chat.send(self.store, core["id"], "Set up a Personal Pip for crypto research.", "core-ask",
+                            "editor-user", self.cfg)["run"]
+        self.store.claim_next()
+        self.store.finish(run["id"], result={"text": "I can set that up.", "core_setup_drafts": [self.candidate()]})
+        return core, run
+
+    def test_asked_in_cores_chat_with_no_card_then_created_on_your_yes(self):
+        from dgc import pip_setup
+        core, run = self.core()
+        personal = self.registry.personal()["id"]
+        [asked] = pip_holds.asks(self.registry, core["id"])
+        self.assertEqual(asked["kind"], "setup")
+        self.assertIn("create the Pip \u201cCrypto Market Research\u201d", asked["what"])
+        self.assertIn("Waiting for your answer: create the Pip", _kept(self.registry, run["id"]))
+        self.assertEqual(pip_setup.list_pending(self.registry, personal), [], "no Create Pip card")
+        self.assertEqual([i for i in pip_attention.collect(self.registry, self.registry.clock())["items"]
+                          if i["kind"] == "setup"], [], "nor in Needs you")
+        mine = pip_chat.send(self.store, core["id"], "Yes, create it", "core-yes", "editor-user", self.cfg)["run"]
+        self.store.claim_next()
+        self.store.finish(mine["id"], result={"text": "Creating it.", "answers": [{"id": asked["id"], "answer": "yes"}]})
+        [done] = pip_holds.apply_answers(self.registry, self.cfg, mine["id"])
+        self.assertTrue(done["done"], done)
+        names = [r[0] for r in self.registry.db.execute(
+            "SELECT json_extract(v.definition,'$.name') FROM pips p JOIN pip_versions v ON v.pip_id=p.id "
+            "AND v.version=p.current_version WHERE p.workspace_id=?", (personal,))]
+        self.assertIn("Crypto Market Research", names)
+
+    def test_below_do_it_all_it_stays_a_card(self):
+        from dgc import pip_setup
+        core, _ = self.core(levels.APPROVE)
+        self.assertEqual(pip_holds.asks(self.registry, core["id"]), [])
+        self.assertEqual(len(pip_setup.list_pending(self.registry, self.registry.personal()["id"])), 1)
+
+
 class HandoffAsks(project_levels.ProjectLevels):
     """A job another Pip hands a Project Pip at Do it all, that its level doesn't take by itself."""
 

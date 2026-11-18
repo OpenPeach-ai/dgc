@@ -176,7 +176,7 @@ def runtime(registry, run, manifest: dict) -> dict:
 # user's own next message answers it, through answer_waiting. A routine's turn or a turn DGC started never answers it.
 # Lowering the Pip below Do it all ends its asks: their cards show again (pip_levels.write_level).
 ASK_KEY = "pip_asked:"
-ASK_KINDS = ("handoff", "approval", "routine", "email", "event", "fix")
+ASK_KINDS = ("handoff", "approval", "routine", "email", "event", "fix", "setup")
 MAX_ASKED = 20
 ANSWER_TOOL = "answer_waiting"
 YES = {"yes", "y", "ok", "okay", "sure", "go ahead", "approve", "approved", "accept", "add", "add it", "send", "send it",
@@ -450,7 +450,12 @@ def apply_answers(registry, config, run_id) -> list[dict]:
 
 def _apply(store, config, value: dict, said: str, actor: str, local=None) -> None:
     kind, ref, pip_id = value["kind"], value["ref"], value["pip_id"]
-    if kind == "fix":
+    if kind == "setup":
+        from . import pip_setup
+        workspace = store.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()[0]
+        card = pip_setup.get(store.registry, ref, workspace)
+        pip_setup.review(store.registry, ref, workspace, card["digest"], actor, config, said != "no")
+    elif kind == "fix":
         from . import pip_fixes
         row = pip_fixes._fix(store.db, pip_id, ref)
         pip_fixes.decide(store, pip_id, ref, pip_fixes.digest(row), said != "no", local, config)

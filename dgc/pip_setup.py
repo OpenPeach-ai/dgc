@@ -477,7 +477,10 @@ def card_source_policy(registry, setup_id, workspace_id):
 def list_pending(registry, workspace_id):
     _id(workspace_id, 'ws')
     from .pip_schedules import timestamp
-    rows = registry.db.execute("SELECT id FROM pip_setup_proposals WHERE workspace_id=? AND status='pending' AND expires_at>? ORDER BY created_at,id LIMIT ?",
+    # One asked in Core's chat at Do it all has no card (pip_holds.ask).
+    rows = registry.db.execute("SELECT id FROM pip_setup_proposals WHERE workspace_id=? AND status='pending' AND expires_at>? "
+                               "AND NOT EXISTS (SELECT 1 FROM metadata m WHERE m.key='pip_asked:setup:'||pip_setup_proposals.id) "
+                               "ORDER BY created_at,id LIMIT ?",
                                (workspace_id, timestamp(registry.clock()), MAX_LIST)).fetchall()
     return [get(registry, row['id'], workspace_id) for row in rows]
 

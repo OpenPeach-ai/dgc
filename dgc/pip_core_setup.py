@@ -133,6 +133,16 @@ def commit(store, run, result):
         request = validate_request(request)
         if contains_secret(request):
             raise RegistryError("secret_detected", "A proposed Pip contains a configured credential.")
-        _store_draft(registry, request, root, session_id)
+        saved = _store_draft(registry, request, root, session_id)
+        from .pip_levels import at_full
+        if at_full(registry, job["id"]) and saved.get("status") == "pending":
+            # At Do it all, asked in Core's chat instead of a Create Pip card (his call, 18 Nov). DGC's own words.
+            from .pip_holds import ask
+            from .pip_routines import label
+            when = label({"kind": "schedule", "schedule": candidate["schedule"]}) if candidate.get("schedule") else ""
+            ask(registry, job["id"], "setup", saved["id"], run_id=run["id"],
+                what=f"create the Pip \u201c{candidate['name'][:80]}\u201d" + (f", {when}" if when else "")
+                     + f": {' '.join(candidate['goal'].split())[:120]}",
+                why="a new Pip is yours to say yes to")
     registry.event(job["workspace_id"], "pip_core_setup_proposed", pip_id=job["id"], run_id=run["id"],
                    payload={"count": len(candidates)})
