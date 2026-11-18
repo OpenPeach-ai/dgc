@@ -650,11 +650,38 @@ def by_level(store, handoff, config):
     else:
         allowed = False
     if not allowed:
+        if level == pip_levels.FULL:
+            _ask_in_chat(store, handoff, kind, config)      # at Do it all: asked in its chat, no card (18 Nov)
         return None
     try:
         return accept(store, handoff["id"], 0, f"pip-level:{level}", config)
     except RegistryError:
         return None
+
+
+def _ask_in_chat(store, handoff, kind, config) -> None:
+    """A Project Pip at Do it all asks the user in its chat whether to take a job its level doesn't take by itself (his
+    call, 18 Nov): the handoff stays pending, with no card, until the user's own next message answers. One that can't be
+    asked (the Pip is paused, its chat refused) stays a card."""
+    from . import pip_holds
+    from .pip_chat import ask_in_chat
+    payload = handoff.get("payload") if isinstance(handoff.get("payload"), dict) else {}
+    target = handoff["target_pip_id"]
+    try:
+        source = store._job((payload.get("source") or {}).get("pip_id"))["name"]
+    except Exception:                       # noqa: BLE001
+        source = "another Pip"
+    task = re.sub(r"\s+", " ", str(payload.get("task") or "")).strip()[:160] or "a job"
+    why = ("its checks run commands you haven't approved for me" if kind in ("test", "patch")
+           else "a kind of job I never take by myself")
+    value = None
+    try:
+        value = pip_holds.ask(store.registry, target, "handoff", handoff["id"],
+                              what=f"take the job {source} handed me: {task}", why=why)
+        ask_in_chat(store, target, value, config)          # its own chat: the source run is another Pip's
+    except Exception:                       # noqa: BLE001 -- not asked: it stays a card for the user
+        if value is not None:
+            pip_holds.unask(store.registry, "handoff", handoff["id"])
 
 
 def reject(store, handoff_id, expected_revision, actor, reason):
@@ -701,6 +728,9 @@ def history(store, pip_id, before_id=None, limit=20):
                 raise _error("Handoff cursor does not belong to this Pip.", "invalid_cursor")
             where += " AND (created_at,id)<(?,?)"
             params.extend(cursor)
+        # One asked in its Pip's chat at Do it all has no card (pip_holds.ask).
+        where += (" AND (status<>'pending' OR NOT EXISTS (SELECT 1 FROM metadata m "
+                  "WHERE m.key='pip_asked:handoff:'||pip_handoffs.id))")
         rows = store.db.execute("SELECT id FROM pip_handoffs WHERE " + where + " ORDER BY created_at DESC,id DESC LIMIT ?", (*params, limit + 1)).fetchall()
         items = []
         for row in rows[:limit]:

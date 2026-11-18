@@ -18,10 +18,12 @@ _REVIEW_UNION = """
  SELECT 'approval:'||a.id AS id,a.workspace_id,a.pip_id,a.created_at,a.expires_at,
         a.action_type AS kind,a.id AS origin_id
  FROM pip_approvals a WHERE a.status='pending' AND a.expires_at>?
+   AND NOT EXISTS (SELECT 1 FROM metadata m WHERE m.key='pip_asked:approval:'||a.proposal_id)
  UNION ALL
  SELECT 'handoff:'||h.id AS id,h.workspace_id,h.target_pip_id AS pip_id,h.created_at,h.expires_at,
         'handoff' AS kind,h.id AS origin_id
  FROM pip_handoffs h WHERE h.status='pending' AND h.expires_at>?
+   AND NOT EXISTS (SELECT 1 FROM metadata m WHERE m.key='pip_asked:handoff:'||h.id)
 """
 
 

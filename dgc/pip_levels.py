@@ -136,6 +136,14 @@ def does_it_all(directory, pip_id) -> bool:
         return False
 
 
+def at_full(registry, pip_id) -> bool:
+    """does_it_all, on a registry already open (inside the caller's transaction)."""
+    try:
+        return level(registry, pip_id) == FULL or project_level(registry, pip_id) == FULL
+    except Exception:                       # noqa: BLE001 - unreadable means it asks with a card, as before
+        return False
+
+
 def level(registry, pip_id) -> str:
     """The Pip's level: its own choice, else DEFAULT. A folder Pip's counts for its box only when it was chosen while
     the Pip had one ("box" in what was saved): one chosen before was about its handoffs only ("never changes your
@@ -330,6 +338,8 @@ def write_level(registry, pip_id, value, actor) -> None:
     registry.event(workspace, "pip_level_changed", pip_id=pip_id, payload={"level": value, "before": before, "actor": actor})
     if value != FULL:
         registry.db.execute("DELETE FROM metadata WHERE key=?", (PAYING_KEY + pip_id,))     # paying is only for Do it all
+        from .pip_holds import drop_asks
+        drop_asks(registry, pip_id)         # what it asked in its chat shows as cards again
 
 
 def listing(registry, pip_id) -> dict:
@@ -950,10 +960,15 @@ def check(store, actor, payload) -> None:
             raise RegistryError("local_only", "This Pip's level doesn't let that run without asking.")
 
 
-def _route(registry, config, pip_id, toolkit):
-    """The connected account a level sends with: the Pip's own connected app, its account and its current schema."""
+def _route(registry, config, pip_id, toolkit, label=None):
+    """The connected account a level sends with: the Pip's own connected app, its account and its current schema.
+    ``label``: the one the user named in the chat, of several (pip_holds: asked at Do it all)."""
     from . import pip_app_accounts, pip_app_links
     found = [a for a in pip_app_links.connected(registry, pip_id) if a["toolkit"] == toolkit]
+    if label is not None:
+        found = [a for a in found if str(a.get("label") or "").casefold() == str(label).casefold()][:1]
+        if not found:
+            raise RegistryError("not_connected", f"{label} isn't one of this Pip's {toolkit} accounts now.")
     if not found:
         raise RegistryError("not_connected", f"{toolkit} isn't connected to this Pip.")
     if len(found) > 1:
@@ -969,6 +984,65 @@ def _route(registry, config, pip_id, toolkit):
     if not any(a.get("toolkit") == toolkit and a.get("id") == link["account"] for a in discovery.get("accounts") or []):
         raise RegistryError("not_connected", f"The {toolkit} account this Pip uses is no longer connected.")
     return link["server"], discovery["connection_digest"], link["account"], found["schema_digest"]
+
+
+def _ask_account(store, config, pip_id, run_id, draft_id, draft_kind, content) -> bool:
+    """At Do it all, which of several accounts sends is asked in the Pip's chat, not a card (his call, 18 Nov). True when
+    asked; a draft that can't be asked stays a card."""
+    from . import pip_app_links, pip_holds
+    from .pip_chat import ask_in_chat
+    toolkit = "gmail" if draft_kind == "email" else "googlecalendar"
+    labels = [str(a.get("label") or "") for a in pip_app_links.connected(store.registry, pip_id) if a["toolkit"] == toolkit]
+    labels = [l for l in dict.fromkeys(labels) if l]
+    if len(labels) < 2:
+        return False                        # no names to choose by: the card's own picker
+    kind = "email" if draft_kind == "email" else "event"
+    if kind == "email":
+        to = content.get("to")
+        to = ", ".join(to) if isinstance(to, list) else str(to or "")
+        what = f"send the email \u201c{str(content.get('subject') or '')[:120]}\u201d" + (f" to {to[:160]}" if to else "")
+    else:
+        what = f"add \u201c{str(content.get('summary') or '')[:120]}\u201d to the calendar"
+    value = None
+    try:
+        value = pip_holds.ask(store.registry, pip_id, kind, draft_id, what=what, run_id=None, choices=labels,
+                              why=f"you have {len(labels)} {'Gmail' if kind == 'email' else 'Google Calendar'} "
+                                  "accounts, and which one is yours to say")
+        ask_in_chat(store, pip_id, value, config, run_id)
+        return True
+    except Exception:                       # noqa: BLE001
+        if value is not None:
+            pip_holds.unask(store.registry, kind, draft_id)
+        return False
+
+
+def send_asked_draft(registry, config, pip_id, draft_id, draft_kind, label, actor) -> dict:
+    """The user's answer in the chat to which account (pip_holds): send the draft from that one, as its level; None
+    leaves it (dismissed). Raises when it can't, and the draft stays a card."""
+    from . import pip_app_actions as actions, pip_message_drafts as drafts
+    from .pips import PipStore
+    store = PipStore(registry)
+    draft = drafts.get(store, draft_id, kind=draft_kind)
+    if draft["pip_id"] != pip_id or draft["status"] != "pending":
+        raise RegistryError("invalid_state", "That draft was decided already.")
+    if label is None:
+        return drafts.dismiss(store, draft_id, draft["digest"], actor, kind=draft_kind)
+    chosen = effective(registry, pip_id)
+    if chosen != FULL:
+        raise RegistryError("local_only", "This Pip isn't at Do it all now: the draft waits for you.")
+    content = draft["payload"]["event" if draft_kind == "calendar" else "message"]
+    if decide_send(registry, pip_id, chosen, draft_kind, content) is None:
+        raise RegistryError("local_only", "This Pip's level doesn't let that run without asking.")
+    server, connection, account, schema = _route(registry, config, pip_id,
+                                                 "gmail" if draft_kind == "email" else "googlecalendar", label)
+    level_actor = "pip-level:" + chosen
+    prepared = drafts.prepare(store, draft_id, draft["digest"], server, connection, account, schema, content, level_actor,
+                              config, kind=draft_kind)
+    done = actions.accept(store, prepared["id"], prepared["digest"], level_actor, config)
+    workspace = registry.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()[0]
+    registry.event(workspace, "pip_level_approved", pip_id=pip_id, run_id=draft.get("source_run_id"),
+                   payload={"action_id": done["id"], "level": chosen, "kind": draft_kind})
+    return done
 
 
 def dispatch_for_run(registry, config, run_id) -> list:
@@ -1037,6 +1111,11 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 from .pip_plugins import after_action
                 after_action(store, config, done)     # a plugin action: the Pip reads its answer and carries on
             except Exception as exc:        # noqa: BLE001 - it stays a draft for the user
+                if (chosen == FULL and draft_kind in ("email", "calendar") and isinstance(exc, RegistryError)
+                        and exc.code == "choose_account" and _ask_account(store, config, row[0], run_id, draft_id,
+                                                                          draft_kind, content)):
+                    outcomes.append({"draft_id": draft_id, "status": "asked"})
+                    continue
                 outcomes.append({"draft_id": draft_id, "status": "waiting", "reason": str(exc)[:300]})
                 try:
                     registry.event(row[1], "pip_level_skipped", pip_id=row[0], run_id=run_id,

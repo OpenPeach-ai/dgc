@@ -204,8 +204,26 @@ class TheFixTurn(FixWorld, unittest.TestCase):
         self.fix_turn_ends()
         self.assertEqual(self.one()["state"], "applied")
         self.check([TOTAL])                               # the same issue, found again
-        newest = self.fixes()["fixes"][-1]
-        self.assertEqual((newest["state"], newest["findings"][0]["state"]), ("ask", "back"))
+        # At Do it all it is asked in its chat, never a card (his rule, 17 Nov; 18 Nov: every card at Do it all).
+        from dgc import pip_chat, pip_holds
+        [asked] = pip_holds.asks(self.registry, self.helper["id"])
+        self.assertEqual(asked["kind"], "fix")
+        self.assertIn("came back after an earlier fix", asked["why"])
+        self.assertEqual([f["state"] for f in self.fixes()["fixes"]], ["applied"], "no Allow card in its chat")
+        self.assertEqual([i for i in self.control("list_pip_attention", projects="all")["items"]
+                          if i["kind"] == "fix_ask"], [], "nor in Needs attention")
+        newest = self.registry.db.execute("SELECT state,findings FROM pip_fixes WHERE id=?", (asked["ref"],)).fetchone()
+        self.assertEqual((newest["state"], json.loads(newest["findings"])[0]["state"]), ("ask", "back"))
+        self.assertEqual(pip_holds.announce_due(self.registry, self.cfg), 1, "the supervisor's pass asks in its chat")
+        turn = self.store.claim_next()
+        self.store.finish(turn["id"], result={"text": "Total ignores the discount again. Shall I fix it once more?"})
+        mine = pip_chat.send(self.store, self.helper["id"], "Yes, fix it again", "fix-yes", "editor-user", self.cfg)["run"]
+        self.store.claim_next()
+        self.store.finish(mine["id"], result={"text": "On it.", "answers": [{"id": asked["id"], "answer": "yes"}]})
+        [done] = pip_holds.apply_answers(self.registry, self.cfg, mine["id"])
+        self.assertTrue(done["done"], done)
+        state = self.registry.db.execute("SELECT state,by FROM pip_fixes WHERE id=?", (asked["ref"],)).fetchone()
+        self.assertEqual(tuple(state), ("queued", "you"), "your yes, as your Allow")
 
     def test_a_failed_turn_says_it_failed(self):
         self.allowed()

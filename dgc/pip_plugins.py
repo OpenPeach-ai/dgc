@@ -1259,6 +1259,12 @@ class Session:
         # Its level let this change through where the plugin's own setting would have asked: Do it all (pip_levels).
         by_level = (not waits and not reads and pip_level == "full"
                     and asks(info["plugin"], info, row, unattended=self.unattended, arguments=arguments))
+        careful = False
+        if (not waits and not reads and not by_level and self.carries is not None
+                and self.carries(json.dumps(arguments, ensure_ascii=False))):
+            # Careful mode: a change the level would let through still asks when it carries what the Pip read from
+            # the user's apps (and the user didn't say themselves); the card shows it before it goes.
+            waits = careful = True
         said_yes = False
         from .pip_levels import does_it_all
         if waits and not reads and (pip_level == "full" or does_it_all(self.directory, self.pip_id)):
@@ -1270,18 +1276,14 @@ class Session:
                                                   user_turn=self.user_turn, unattended=self.unattended)
             why_not = why_not if args.get("confirm") is True else ""
             if not said_yes:
-                why = ("it is set to Always ask" if level(info["plugin"], info) == "always_ask"
+                why = ("careful mode: it carries what you read from the user's apps" if careful
+                       else "it is set to Always ask" if level(info["plugin"], info) == "always_ask"
                        else "it can move money, and this Pip may not pay this now" if pip_level == "full"
                        else "it has done 25 things on its own in the last hour")
                 held = pip_holds.hold(registry, self.pip_id, "plugin", step, what=f"{tool} in {info['display_name']}",
                                       why=why, run_id=self.run_id)
                 return (f"Not run: {why_not}. " if why_not else "") + held
             waits, by_level = False, True
-        if (not waits and not reads and not by_level and self.carries is not None
-                and self.carries(json.dumps(arguments, ensure_ascii=False))):
-            # Careful mode: a change the level would let through still asks when it carries what the Pip read from
-            # the user's apps (and the user didn't say themselves); the card shows it before it goes.
-            waits = True
         if not waits:
             # A read, or a change the plugin's level lets through while the user is here: it runs now.
             changed = not reads

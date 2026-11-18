@@ -322,6 +322,9 @@ _COMMAND_ARGS = {
     "accept_pip_handoff": {"handoff_id", "expected_revision"},
     "reject_pip_handoff": {"handoff_id", "expected_revision", "reason"},
 }
+# A folder Pip's runs with what its chat has (its box, apps, plugins, Library, images, videos): its chat and its scheduled
+# runs (his call, 18 Nov). Every other run of it keeps its reviewed tools.
+FOLDER_WORLD_RUNS = ("conversation", "audit", "draft")
 READ_TOOLS = frozenset({"read_file", "glob", "grep", "repo_map", "todo"})
 # What a chat may offer beside reading (13 Nov, one chat style for every Pip): buttons under its reply. It reads,
 # changes and reaches nothing; a folder Pip's chat is still READ_TOOLS plus only these.
@@ -925,8 +928,9 @@ class PipStore:
             result['commit_path_observation'] = path_observation(self.registry,pip_id)
         recent = self.db.execute("SELECT id FROM pip_runs WHERE pip_id=? ORDER BY created_at DESC,id DESC LIMIT 1", (pip_id,)).fetchone()
         result["latest_run"] = self._run(recent, full=False) if recent else None
-        result["pending_review_count"] = self.db.execute(
-            "SELECT count(*) FROM pip_approvals WHERE pip_id=? AND status='pending'", (pip_id,)).fetchone()[0]
+        result["pending_review_count"] = self.db.execute(       # one asked in its chat isn't a review (pip_holds.ask)
+            "SELECT count(*) FROM pip_approvals WHERE pip_id=? AND status='pending' AND NOT EXISTS (SELECT 1 FROM metadata m "
+            "WHERE m.key='pip_asked:approval:'||pip_approvals.proposal_id)", (pip_id,)).fetchone()[0]
         # A Pip with routines says how they are going, on its page and its row (Pips package 2): when they last ran and
         # how, when they run next, or that it can't run and what fixes it.
         from .pip_routine_care import health as routine_health
@@ -3235,6 +3239,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     routine_candidates = []            # routines it suggests in a chat reply (pip_routines.add_routine)
     note_candidates = []               # notes it keeps about the user in a chat reply (pip_notes.remember)
     undo_candidates = []               # changes the user asked it to put back (pip_project_copies.undo_asked)
+    answer_candidates = []             # the user's answers to what it asked in the chat (pip_holds.apply_answers)
+    helper_model = {}                  # its helpers' model by the user's words (pip_agents.commit_model)
+    helper_connections = ([c for c in manifest.get('helper_connections') or [] if isinstance(c, dict)
+                           and isinstance(c.get('id'), str) and isinstance(c.get('name'), str)][:20]
+                          if conversation is not None and manifest.get('user_turn') is True else [])
+    asked_waiting = ([a for a in manifest.get('pip_asks') or [] if isinstance(a, dict) and isinstance(a.get('id'), str)][:20]
+                     if conversation is not None and manifest.get('user_turn') is True else [])
     from . import pip_goals
     goal_candidate = None              # a goal's turn (pips-15): its update_goal, kept when the reply is saved
     cards_shown = []                   # Connect and plugin cards its tools put below this reply
@@ -3247,16 +3258,18 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_connector_drafts
     connector_context = pip_connector_drafts.pin(manifest)
     connector_candidate = None
-    from . import pip_computer, pip_app_links, pip_plugins, pip_notes, pip_sdk_apps, pip_images, pip_videos, pip_keys, pip_library, pip_research, image_keep, pip_project_copies
+    from . import pip_computer, pip_app_links, pip_plugins, pip_notes, pip_sdk_apps, pip_images, pip_videos, pip_keys, pip_library, pip_research, image_keep, pip_project_copies, pip_holds, pip_agents
     # It keeps notes about the user only in a reply to the user's own message: never in a routine's run or
     # a turn DGC wrote, whose text can carry an email or a page (pip_notes).
     keeps_notes = (conversation is not None and manifest.get('user_turn') is True      # every Pip (Q8, 14 Nov)
                    and isinstance(conversation.get('text'), str))
-    # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work.
+    # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work. A folder Pip's
+    # scheduled runs (an audit, a draft) have everything its chat has too (his call, 18 Nov): its box, apps, plugins,
+    # Library, images and videos. A reviewed execution, a handoff's run and live data keep their reviewed tools.
     computer_pin = (manifest.get('computer_socket') if (kind in ('personal_task', 'conversation') if personal
-                                                         else kind == 'conversation') else None)   # (a folder Pip's chat too)
+                                                         else kind in FOLDER_WORLD_RUNS) else None)
     apps_pin = manifest.get('app_socket') if (kind in ('personal_task', 'conversation') if personal
-                                              else kind == 'conversation') else None   # (a folder Pip's chat too)
+                                              else kind in FOLDER_WORLD_RUNS) else None
     # 'desktop' (optional): its computer shows a whole desktop on this machine, so a Pip that sees gets its steps.
     if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) - {'desktop'} != {'socket', 'token'}
                                      or computer_pin.get('desktop', False) not in (True, False)):
@@ -3634,7 +3647,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             # One kind of Pip (16 Nov): every Pip's chat has the Personal chat's tools; a Pip with a folder has its
             # project reads (the Agent's own, below) besides. A run that isn't a chat (an audit, a draft, a reviewed
             # execution) pins none of these, so it has only its reviewed tools.
-            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             if personal:
                 return own
             schemas = [*super()._tool_schemas(*args, **kwargs), *own]
@@ -3990,6 +4003,18 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 update, told = pip_goals.tool_result(call.arguments if isinstance(call.arguments, dict) else {})
                 if update is not None:
                     goal_candidate = update
+                return told
+            if helper_connections and call.name == pip_agents.MODEL_TOOL:
+                choice, told = pip_agents.model_tool_result(helper_connections, call.arguments)
+                if choice is not None:
+                    helper_model['choice'] = choice
+                return told
+            if asked_waiting and call.name == pip_holds.ANSWER_TOOL:
+                if len(answer_candidates) >= 5:
+                    return 'Not kept: one reply answers at most five.'
+                answer, told = pip_holds.answer_result(asked_waiting, call.arguments)
+                if answer is not None:
+                    answer_candidates[:] = [a for a in answer_candidates if a['id'] != answer['id']] + [answer]
                 return told
             if (conversation is not None and manifest.get('user_turn') is True and not personal
                     and call.name == pip_project_copies.UNDO_TOOL):
@@ -4500,7 +4525,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         'vision_model': eyes_pin['vision_model'], 'photos': conversation['images']}
         eyes_photo_card = True
     if conversation is not None and manifest.get('user_turn') is True and isinstance(manifest.get('pip_holds_note'), str):
-        prompt += "\n\n" + manifest['pip_holds_note'][:1500]          # what it still holds for the user (pip_holds)
+        prompt += "\n\n" + manifest['pip_holds_note'][:3000]          # what it still holds or asked (pip_holds)
     files_note = ""
     if conversation is not None and conversation.get('files'):
         files_note = _attached_files(config, manifest, conversation['files'], computer_pin is not None)
@@ -4674,6 +4699,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 result['memory_notes'] = note_candidates
             if undo_candidates:
                 result['undo_changes'] = undo_candidates
+            if answer_candidates:
+                result['answers'] = answer_candidates
+            if helper_model:
+                result['helper_model'] = helper_model['choice']
             if goal_candidate is not None:
                 result['goal_update'] = goal_candidate
             if working_notes is not None and working_notes.ops:
@@ -5288,7 +5317,7 @@ def _execute_run(registry, row, config):
     # A run with the outside world (apps, plugins, the web, its level said): a Personal Pip's task or chat, or (0.52,
     # pips-sandbox-design step 2b) a folder Pip's chat with its own box.
     world = (manifest.get('run_kind') in ('personal_task', 'conversation') if personal
-             else manifest.get('run_kind') == 'conversation' and manifest.get('computer') is not None)
+             else manifest.get('run_kind') in FOLDER_WORLD_RUNS and manifest.get('computer') is not None)
     if world or manifest.get('app_references'):
         # Careful mode remembers what every run of this Pip read from apps, with or without its computer:
         # a routine's run reads mail now, and the user's next run could carry it to a page. (A folder Pip's audit
@@ -5301,7 +5330,7 @@ def _execute_run(registry, row, config):
             from .pip_routines import split_turn
             taint.add(split_turn(registry, row['id'], turn_text)[1])    # the app items its turn carries
     if manifest.get('computer') is not None and (manifest.get('run_kind') in ('personal_task', 'conversation') if personal
-                                                 else manifest.get('run_kind') == 'conversation'):
+                                                 else manifest.get('run_kind') in FOLDER_WORLD_RUNS):
         from . import pip_careful
         careful = pip_careful.is_on(registry, row['pip_id'])
         # Every Personal Pip has its computer and the user's plugins, a routine's run too (0.52, D3): careful mode's
@@ -5408,6 +5437,8 @@ def _execute_run(registry, row, config):
             str(path) for path in file_paths(registry.directory, row['pip_id'], conversation_pin['files'])]}
     from . import pip_holds
     manifest = pip_holds.runtime(registry, row, manifest)     # what it still holds for the user, in a turn of theirs
+    from . import pip_agents
+    manifest = pip_agents.runtime(config, row, manifest)      # their saved connections, by name, for its helpers' model
     brain_pin = manifest["model_settings"].get("brain") if isinstance(manifest.get("model_settings"), dict) else None
     if brain_pin is not None:
         # API 55: the user's own Claude Code or Codex is this run's model (pip_brain). The worker gets where the CLI
@@ -5589,6 +5620,10 @@ def _execute_run(registry, row, config):
                 pip_project_copies.auto_apply(PipStore(registry), row['pip_id'])
             except Exception:                    # noqa: BLE001 - the reply stands; the card waits for the user
                 pass
+        if manifest.get("run_kind") in ("audit", "draft"):
+            # A folder Pip's scheduled run keeps its report's checked shape (the audit's checkpoint and the editor check
+            # it): what its computer did shows in its run's activity, not in the report.
+            result.pop("computer", None)
         # The plugins a chat reply took an answer from ("Used Aave" under it): what this controller saw, never the
         # worker's word for it.
         result.pop("plugins", None)
@@ -5717,9 +5752,14 @@ def _execute_run(registry, row, config):
 
 
 def _run_granted_actions(registry, config, run_id):
-    """Actions the finished run drafted that the user always allowed for its Pip, then the ones its level lets
-    through (pip_levels), then a review for each change on your own app that still asks (pip_sdk_app_approvals).
-    Never raises."""
+    """What the user answered in this reply to what was asked in the chat (pip_holds.apply_answers), then actions the
+    finished run drafted that the user always allowed for its Pip, then the ones its level lets through (pip_levels),
+    then a review for each change on your own app that still asks (pip_sdk_app_approvals). Never raises."""
+    try:
+        from .pip_holds import apply_answers
+        apply_answers(registry, config, run_id)
+    except Exception:
+        pass
     try:
         from .pip_action_grants import dispatch_for_run
         dispatch_for_run(registry, config, run_id)

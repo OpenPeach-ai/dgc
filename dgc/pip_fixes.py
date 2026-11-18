@@ -281,7 +281,10 @@ def listing(store, pip_id) -> dict:
     if row is not None and pip.get("source_policy") != {"mode": "personal"}:
         folder = _clip(row[0], 200)
     now = _now(registry)
-    fixes = [view(db, r) for r in reversed(_rows(db, pip_id))]
+    from .pip_holds import asked_refs
+    asked = {ref.split(":", 1)[1] for ref in asked_refs(db) if ref.startswith("fix:")}
+    # One asked in its chat at Do it all has no card there (pip_holds.ask); once answered it shows as it goes.
+    fixes = [view(db, r) for r in reversed(_rows(db, pip_id)) if not (r["state"] == "ask" and r["id"] in asked)]
     waiting = [_waiting_view(r, now) for r in db.execute(
         "SELECT * FROM pip_waiting WHERE pip_id=? AND (state IN ('waiting','later') OR updated_at>=?) "
         "ORDER BY since,id LIMIT ?", (pip_id, _iso(_instant(now) - timedelta(days=1)) if _instant(now) else now,
@@ -413,6 +416,15 @@ def after_check(store, run, result) -> str | None:
                     LEVEL_BY.get(level) if by_level else None, now, now))
         registry.event(run["workspace_id"], "pip_fix_" + ("queued" if by_level else "asked"), pip_id=run["pip_id"],
                        run_id=run["id"], payload={"fix_id": fix_id, "count": len(chosen)})
+        if not by_level and level == pip_levels.FULL:
+            # At Do it all, asked in its chat instead of a card (his rule, 17 Nov): what came back after a fix is never
+            # fixed again by itself. The supervisor's next pass sends the turn that asks (pip_holds.announce_due).
+            from . import pip_holds
+            title = " ".join(str(chosen[0].get("title") or "").split())[:120] if chosen else ""
+            pip_holds.ask(registry, run["pip_id"], "fix", fix_id, run_id=run["id"], announce=True,
+                          what=f"fix {len(chosen)} thing{'s' if len(chosen) != 1 else ''} again"
+                               + (f": {title}" if title else ""),
+                          why="it came back after an earlier fix, so I don't fix it again by myself")
         return fix_id
 
 
@@ -673,11 +685,15 @@ def attention_rows(db, pip_ids, now) -> list:
         return []
     marks = json.dumps(sorted(pip_ids))
     out = []
+    from .pip_holds import asked_refs
+    asked = {ref.split(":", 1)[1] for ref in asked_refs(db) if ref.startswith("fix:")}
     for row in db.execute("SELECT * FROM pip_fixes WHERE pip_id IN (SELECT value FROM json_each(?)) AND state IN ('ask','ended') "
                           "AND created_at>=? ORDER BY created_at DESC LIMIT 500",
                           (marks, _iso(_instant(now) - timedelta(days=30)) if _instant(now) else "")).fetchall():
         findings = _load(row["findings"], [])
         what = (findings[0].get("title") if findings else "") or ""
+        if row["state"] == "ask" and row["id"] in asked:
+            continue                                     # asked in its chat at Do it all (pip_holds.ask)
         if row["state"] == "ask":
             out.append({"kind": "fix_ask", "card": row["id"], "pip_id": row["pip_id"], "created_at": row["asked_at"] or row["created_at"],
                         "title": f"Fix {row['count']} thing{'s' if row['count'] != 1 else ''}?", "detail": what})

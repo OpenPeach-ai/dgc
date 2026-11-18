@@ -172,6 +172,40 @@ def commit(store, run, result):
     # A trusted event binds review provenance without accepting worker IDs.
     store.registry.event(job['workspace_id'], 'pip_chat_setup_proposed', pip_id=job['id'],
         run_id=run['id'], payload={'proposal_id': saved['id'], 'approval_id': saved['approval_id']})
+    from .pip_levels import at_full
+    if at_full(store.registry, job['id']):
+        # At Do it all, asked in its chat instead of a card (his call, 18 Nov): only the user's own next message says
+        # yes, never a routine's turn. The words are DGC's own summary of the change, not the model's.
+        from .pip_holds import ask
+        ask(store.registry, job['id'], 'approval', saved['id'], run_id=run['id'], version=version,
+            what='change ' + change_words(later)[:260],
+            why='only you change my setup' if own.user_started(store, run)
+                else "a routine's turn asked for it, and only you change my setup")
+
+
+_FIELD_WORDS = {'source_ref': 'what I read', 'model_choice': 'my model', 'adaptation_policy': 'how I change myself',
+                'event_trigger': 'what starts me', 'source_policy': 'what I may read', 'verification_plan': 'my checks',
+                'app_plan': 'my apps', 'web_plan': 'the sites I read', 'github_plan': 'my GitHub access',
+                'live_plan': 'my live updates'}
+
+
+def change_words(changes: dict) -> str:
+    """A change to a Pip's setup in DGC's own words (what the user says yes to in the chat, never the model's)."""
+    out = []
+    for key, value in changes.items():
+        if key == 'name':
+            out.append(f'my name to \u201c{str(value)[:60]}\u201d')
+        elif key == 'goal':
+            out.append(f'my goal to \u201c{" ".join(str(value).split())[:140]}\u201d')
+        elif key == 'schedule':
+            from .pip_routines import label
+            out.append('my schedule to ' + (label({'kind': 'schedule', 'schedule': value}) if isinstance(value, dict)
+                                              else 'none'))
+        elif key == 'computer_plan':
+            out.append('give me a computer of my own')
+        else:
+            out.append(_FIELD_WORDS.get(key, key.replace('_', ' ')))
+    return 'my setup' if not out else (', '.join(out[:-1]) + ' and ' + out[-1]) if len(out) > 1 else out[0]
 
 
 def task_reference(store, job, context_size, *, secrets=()):

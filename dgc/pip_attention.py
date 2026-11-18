@@ -115,10 +115,15 @@ def collect(registry, now, *, limit=MAX_ITEMS, projects=None) -> dict:
         personal = [row["id"] for row in db.execute("SELECT id FROM workspaces WHERE kind='personal'")]
         shown = personal + sorted({pip["workspace_id"] for pip in pips.values()} - set(personal))
         found = []
+        from .pip_holds import asked_refs
+        asked = asked_refs(db)          # asked in a Pip's chat at Do it all: no card (pip_holds.ask)
 
         def add(kind, origin, pip_id, created, expires, title, detail=""):
+            if f"{kind}:{origin}" in asked:
+                return False
             found.append({"id": f"{kind}:{origin}", "kind": kind, "card": origin, "pip_id": pip_id, "created_at": created,
                           "expires_at": expires, "title": _text(title, TITLE), "detail": _text(detail, DETAIL)})
+            return True
 
         def rows(sql, *params):
             try:
@@ -176,9 +181,9 @@ def collect(registry, now, *, limit=MAX_ITEMS, projects=None) -> dict:
                 f"Hand this to {pips[row['target_pip_id']]['name']}?", _json(row["payload"]).get("task", ""))
         for row in rows(f"SELECT proposal_id,pip_id,action_type,action_summary,created_at,expires_at FROM pip_approvals "
                         f"WHERE status='pending' AND expires_at>? AND {mine} ORDER BY created_at DESC", now, ids):
-            add("approval", row["proposal_id"], row["pip_id"], row["created_at"], row["expires_at"],
-                f"Change {pips[row['pip_id']]['name']}?", row["action_summary"])
-            found[-1]["review"] = row["action_type"]
+            if add("approval", row["proposal_id"], row["pip_id"], row["created_at"], row["expires_at"],
+                   f"Change {pips[row['pip_id']]['name']}?", row["action_summary"]):
+                found[-1]["review"] = row["action_type"]
         for workspace_id in shown:
             for row in rows("SELECT id,body,created_at,expires_at FROM pip_setup_proposals WHERE workspace_id=? AND status='pending' "
                             "AND expires_at>? ORDER BY created_at DESC", workspace_id, now):

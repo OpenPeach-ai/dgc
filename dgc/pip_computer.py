@@ -1518,8 +1518,26 @@ class Host:
         """The sites it may carry what it read from the user's apps to: begin's carry, and any a card allowed since."""
         return set(getattr(self, "carry_sites", None) or ())
 
-    def _careful_hold(self, kind, summary, text=None, carried=()) -> str:
-        """Record a careful hold: nothing is paused in the browser; Allow lets the Pip do it once."""
+    def _careful_hold(self, kind, summary, text=None, carried=()) -> str | None:
+        """Record a careful hold: nothing is paused in the browser; Allow lets the Pip do it once. At Do it all what it
+        read from the user's apps is asked in the chat instead (his call, 18 Nov; pip_holds): None when this step is the
+        user's yes to it, made again in their next own turn."""
+        if kind == "text" and getattr(self, "run_id", None) is not None and Host._does_it_all(self):
+            from . import pip_holds
+            from .pip_careful import _digest as text_digest
+            from .workspace_registry import WorkspaceRegistry
+            where = summary.get("host") or "a page"
+            step = {"method": summary.get("method"), "host": summary.get("host"), "path": summary.get("path"),
+                    "text": text_digest(text or json.dumps(summary.get("fields"), ensure_ascii=False))}
+            with WorkspaceRegistry(self.state_directory) as registry:
+                runs, _ = pip_holds.release(registry, self.pip_id, "careful", step, run_id=self.run_id,
+                                            user_turn=getattr(self, "user_turn", False),
+                                            unattended=getattr(self, "unattended", False))
+                if runs:
+                    return None
+                return pip_holds.hold(registry, self.pip_id, "careful", step, run_id=self.run_id,
+                                      what=f"putting what you read from the user's apps on {where}",
+                                      why="careful mode: it came from the user's apps, and this is a place you haven't used")
         from datetime import timedelta
         from .pip_schedules import _instant, timestamp
         from .workspace_registry import WorkspaceRegistry, identifier
@@ -1596,7 +1614,8 @@ class Host:
                 stopped = desk.stop_job(self.root, args.get("job"))
                 return f"{stopped['id']} is {stopped['state']}."
             if getattr(self, "run_id", None) is not None:
-                held = Host._floor(self, str(args.get("command") or ""), confirm=args.get("confirm") is True)
+                held = (Host._floor(self, str(args.get("command") or ""), confirm=args.get("confirm") is True)
+                        or Host._guard(self, str(args.get("command") or ""), confirm=args.get("confirm") is True))
                 if held:
                     return held
             careful = getattr(self, "careful", False) and self.run_id is not None
@@ -1656,6 +1675,51 @@ class Host:
         return self._careful_hold("floor", {"method": "RUN", "host": "Terminal", "path": "/",
                                             "fields": [{"name": "command", "value": _preview(command)}], "floor": found}, command)
 
+    def _guard(self, command: str, confirm: bool = False) -> str | None:
+        """Do it all: Work's safety check on the Pip's own Terminal, all six kinds (his call, 18 Nov): outside its
+        Files, credentials, destructive, sending data out, system changes and publishing. A step it stops is held and
+        asked in the chat; the user's own next message is the yes, and the same step then runs once. Below Do it all,
+        careful mode and the floor stay as they are. The rules read the box's own paths: its home and its Files."""
+        if not command.strip() or getattr(self, "run_id", None) is None or not Host._does_it_all(self):
+            return None
+        from . import pip_levels
+        if pip_levels.floor(command):
+            return None                                    # emptying its own Files is the floor's to ask (_floor)
+        from . import auto_guard, pip_holds
+        from .pip_careful import _digest as text_digest
+        vm = sys.platform == "darwin"
+        root = "/home/pip/Files" if vm else "/home/pip"   # the Terminal's working folder in the box (pip_computer_files)
+        try:
+            from . import pip_computer_files as desk
+            started = tuple(j["command"] for j in desk.jobs(self.root) if j.get("state") == "running")
+        except Exception:                                  # noqa: BLE001 - no jobs to stop, then
+            started = ()
+        block = auto_guard.check("bash", {"command": command}, root=root, home="/home/pip", temp=("/tmp", "/var/tmp"),
+                                 started=started)
+        if block is None:
+            return None
+        said = GUARD_WORDS.get(block.kind, block.kind.lower())
+        if not block.intent:
+            return (f"Not run: DGC's safety check never runs this ({said}: {block.reason}), at any level. If it is truly "
+                    "needed, tell the user in one plain sentence what it would do; carry on with the rest.")
+        from .workspace_registry import WorkspaceRegistry
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                kind = "guard:" + block.kind
+                step = {"command": text_digest(command)}
+                runs, why_not = pip_holds.release(registry, self.pip_id, kind, step, run_id=self.run_id,
+                                                  user_turn=getattr(self, "user_turn", False),
+                                                  unattended=getattr(self, "unattended", False), any_of_kind=True)
+                if runs:
+                    return None
+                why_not = why_not if confirm else ""
+                held = pip_holds.hold(registry, self.pip_id, kind, step, run_id=self.run_id,
+                                      what=f"the Terminal command `{_preview(command)[:120]}`",
+                                      why=f"{said}: {block.reason}"[:280])
+                return (f"Not run: {why_not}. " if why_not else "") + held
+        except (OSError, RegistryError, sqlite3.Error):
+            return f"Not run: DGC's safety check stopped it ({said}: {block.reason}) and couldn't ask the user now."
+
     # -- the whole desktop ---------------------------------------------------------------------
 
     def _desktop(self, op: str, args: dict) -> dict:
@@ -1669,7 +1733,8 @@ class Host:
         if op == "desktop_look":
             return self._desk_look()
         if op == "desktop_type" and getattr(self, "run_id", None) is not None:
-            held = Host._floor(self, str(args.get("text") or ""), confirm=args.get("confirm") is True)   # it would run
+            held = (Host._floor(self, str(args.get("text") or ""), confirm=args.get("confirm") is True)   # it would run
+                    or Host._guard(self, str(args.get("text") or ""), confirm=args.get("confirm") is True))
             if held:
                 return {"text": held}
         pointer, said = None, ""
@@ -2512,6 +2577,12 @@ def tick(registry, config) -> dict:
     # What the user approved while its chat was busy: its next turn, now the chat is free (pip_chat.send_owed_turns).
     from .pip_chat import send_owed_turns
     send_owed_turns(registry, config)
+    # What a Pip at Do it all asks in its chat, made where no turn could be sent (a fix a check found: pip_holds).
+    try:
+        from .pip_holds import announce_due
+        announce_due(registry, config)
+    except Exception:                                  # noqa: BLE001 - a pass never stops the supervisor
+        pass
     # A fix the level (or your Allow) started, whose chat is free now (pip_fixes, 0.52).
     try:
         from .pip_fixes import send_due
@@ -3021,6 +3092,10 @@ SIGN_IN_NO_PAGE = ("Open {site}'s sign-in page first (the page with its username
 SECRET_ON_PAGE = ("A saved password or code was just typed into this page, so that step waits: it could copy it from "
                   "there. Send the form (sign_in does) or open another page first; read and look work as usual.")
 HOLD_REFUSED = ("drag", "desktop_drag", "desktop_key", "desktop_type")
+# The safety check's six kinds (auto_guard), as a Pip says them about its own computer.
+GUARD_WORDS = {"Outside the project": "it writes outside my Files", "Credentials": "it reads saved passwords or keys",
+               "Destructive": "it can't be undone", "Sending data out": "it sends data out",
+               "System changes": "it changes the computer's system", "Publishing": "it publishes"}
 DECLINE_SECONDS = 24 * 3600
 
 

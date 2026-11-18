@@ -96,5 +96,58 @@ class RoutinesAndGoalsForEveryPip(FolderPipChat, unittest.TestCase):
         self.assertEqual(routine["routine"]["title"], "Morning check")
 
 
+class ItsScheduledRunsHaveWhatItsChatHas(FolderPipChat, unittest.TestCase):
+    """His call, 18 Nov: a folder Pip's scheduled runs (its audit, its draft) get everything its chat has: its box, its
+    apps and plugins, the Library, images and videos. A handoff's run and a reviewed execution keep their own tools."""
+
+    def handed_run(self):
+        self.reviewer = self.store.create(self.workspace["id"], "Shop reviewer", "Review the shop", "editor-user",
+                                          pip_type="scout")
+        with patch.object(pips, "folder_boxes", return_value=True):
+            run = self.control("run_pip", pip_id=self.reviewer["id"], idempotency_key="sched-1")["run"]
+        row = self.store.claim_next()
+        self.assertEqual(row["id"], run["id"])
+        self.assertEqual(json.loads(row["manifest"])["run_kind"] if isinstance(row["manifest"], str)
+                         else row["manifest"]["run_kind"], "audit")
+        given = {}
+
+        class Handed(Exception):
+            pass
+
+        def payload(value):
+            given.update(value)
+            raise Handed()
+        with patch.object(pips, "folder_boxes", return_value=True), patch.object(pips, "_worker_payload", side_effect=payload):
+            try:
+                pips._execute_run(self.registry, row, self.cfg)
+            except Handed:
+                pass
+        return given.get("manifest") or {}
+
+    def test_its_audit_gets_its_box_and_its_apps(self):
+        manifest = self.handed_run()
+        self.assertEqual(set(manifest["computer_socket"]) - {"desktop"}, {"socket", "token"})
+        self.assertIn("app_socket", manifest)
+
+    def test_its_worker_offers_images_videos_and_the_library_in_an_audit(self):
+        manifest = self.handed_run()
+        manifest["computer_socket"] = {"socket": str(self.base / "absent.sock"), "token": "t" * 32}
+        manifest["app_socket"] = {**manifest["app_socket"], "socket": str(self.base / "absent-apps.sock")}
+        seen = {}
+
+        def chat(client, messages, tools=None, on_text=None, **kwargs):
+            seen["tools"] = {t["function"]["name"] for t in tools}
+            return ChatResult(content='{"findings": [], "summary": "Nothing to report."}')
+        with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy())}), \
+             patch.object(LLMClient, "chat", chat), patch("dgc.agent.discover_skills", return_value={}), \
+             patch("requests.sessions.Session.request", side_effect=AssertionError("No network")):
+            try:
+                pips.execute_native(self.cfg, self.root, manifest, lambda event: None)
+            except Exception:                   # noqa: BLE001 - the tools it was offered are what this checks
+                pass
+        for tool in ("generate_image", "generate_video", "computer", "read_file"):
+            self.assertIn(tool, seen.get("tools", set()))
+
+
 if __name__ == "__main__":
     unittest.main()

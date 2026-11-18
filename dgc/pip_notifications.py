@@ -257,6 +257,10 @@ def sync(registry, *, limit=SYNC_LIMIT):
                     raise _error('Notification event names a different proposal.')
                 if source['status'] != ('failed' if kind=='run' else 'pending'):
                     continue  # Already resolved before notification observation.
+                if kind in ('approval','handoff') and registry.db.execute('SELECT 1 FROM metadata WHERE key=?', (
+                        'pip_asked:%s:%s' % ((kind, source['reference']['proposal_id']) if kind == 'approval'
+                                             else (kind, source_id)),)).fetchone():
+                    continue  # Asked in its Pip's chat at Do it all, not a card (pip_holds.ask).
                 occurred_at = _timestamp(source['occurred_at'])
                 actual_kind = source['source_kind']
                 if registry.db.execute('SELECT 1 FROM pip_notification_seen WHERE source_kind=? AND source_id=?',

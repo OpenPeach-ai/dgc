@@ -753,8 +753,14 @@ GOAL_KEY = "goal_"
 # A fix's turn (pip_fixes, 0.52): DGC asks the Pip to fix what its check found, in its own copy.
 FIX_KEY = "dgcfix_"
 AGENT_CHECK_KEY = "dgccheck_"           # the Pip checks its sub-agent's work (pip_agents.CHECK_KEY): a message from DGC
+# At Do it all, what would have been a card from outside a reply (a job another Pip handed it, which account sends an
+# email): DGC asks the Pip to ask the user in the chat (pip_holds.ask), under this key + the ask's id.
+ASK_KEY = "dgcask_"
 DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY, GOAL_KEY, FIX_KEY,
-            AGENT_CHECK_KEY)
+            AGENT_CHECK_KEY, ASK_KEY)
+ASKED = ("This message is from DGC, not the user. {what} waits on the user's answer ({why}). Nothing has happened yet, "
+         "and no card shows: at Do it all you ask in the chat. Ask them in one plain sentence in your reply{choices}, and "
+         "don't do it, or the same thing another way, until their own next message answers.")
 # The turns DGC writes so the Pip carries on with what the user asked: they see the photos of that ask again.
 FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY, BORROW_KEY, KEYS_KEY)
 KEY_SAVED = ("This message is from DGC, not the user. The user saved the {name} for {host}. Read the API with "
@@ -1154,6 +1160,26 @@ def continue_after_borrow_declined(store, pip_id, card, config):
     key = BORROW_NO_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
     text = BORROW_NOT_NOW.format(sites=", ".join(shown(o) for o in card.get("sites") or [])[:400])
     return _send_in(store, pip_id, text, key, "local-apps", config, conversation_of_run(store.db, card.get("run_id")))
+
+
+def ask_in_chat(store, pip_id, value, config, run_id=None):
+    """The DGC turn that asks the user in the Pip's chat (pip_holds.ask), in the conversation the ask came from. Kept
+    and sent once the chat is free when it is busy. Returns the turn's run id, or None."""
+    from . import pip_holds
+    text = ASKED.format(what=value["what"][:1].upper() + value["what"][1:], why=value["why"],
+                        choices=(" (which account: " + " or ".join(value["choices"]) + ")") if value.get("choices") else "")
+    try:
+        sent = _owed_turn(store, pip_id, text, pip_holds.turn_key(value), "local-apps", config,
+                          conversation_of_run(store.db, run_id))
+    except RegistryError as exc:
+        if exc.code == "conversation_busy":
+            return None                     # kept: sent as soon as the chat is free (send_owed_turns)
+        raise
+    run = (sent or {}).get("run") if isinstance(sent, dict) else None
+    if isinstance(run, dict) and run.get("id"):
+        pip_holds.announced(store.registry, value, run["id"])
+        return run["id"]
+    return None
 
 
 def continue_after_check(store, pip_id, host, at, config):
@@ -1661,7 +1687,7 @@ def validate_steers(value, text: str) -> list:
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing", "artifacts", "undo_changes"}:
+    if set(result) - {"text", "kept_document", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps", "goal_update", "steers", "output_missing", "artifacts", "undo_changes", "answers", "helper_model"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "artifacts" in result:
         from .pip_library import valid_reply_artifacts
@@ -1728,10 +1754,17 @@ def insert_reply(store, run, result, now):
     commit_notes(store, run, result)
     from .pip_project_copies import undo_asked               # a change the user asked it to put back (Do it all)
     undo_asked(store, run, result)
-    from .pip_holds import made_in, reply_line                # what it held for you says so, whatever it wrote
+    from .pip_holds import asked_in, ask_line, keep_answers, made_in, reply_line   # held or asked: it says so
+    keep_answers(store, run, result)                          # what the user answered: done after the run
+    from .pip_agents import commit_model                     # its helpers' model, by the user's words
+    commit_model(store, run, result)
     held = made_in(store.registry, run["pip_id"], run["id"])
     if held:
         result = {**result, "text": (str(result.get("text") or "").rstrip() + "\n\n" + reply_line(held)).strip()}
+    asked_by = store.db.execute("SELECT request_key FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
+    asked = asked_in(store.registry, run["pip_id"], run["id"], asked_by[0] if asked_by else None)
+    if asked:
+        result = {**result, "text": (str(result.get("text") or "").rstrip() + "\n\n" + ask_line(asked)).strip()}
     text = validate_text(result.get("text"), reply=True)
     row = store.db.execute("SELECT workspace_id,pip_id,conversation_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
     if not row or (row["workspace_id"], row["pip_id"]) != (run["workspace_id"], run["pip_id"]):

@@ -2962,6 +2962,20 @@ class Config:
         record = getattr(self, "_saved_providers", {}).get(str(provider_id or ""))
         return dict(record) if record else None
 
+    def saved_provider_names(self) -> list[dict[str, str]]:
+        """The saved providers by id, name and host only (no key, no address), as secrets.json has them now: what a
+        Pip's chat may name for its helpers (pip_agents.MODEL_TOOL)."""
+        self.saved_provider("")                     # read secrets.json afresh, as saved_provider does
+        from urllib.parse import urlsplit
+        out = []
+        for provider_id, record in getattr(self, "_saved_providers", {}).items():
+            try:
+                host = urlsplit(record.get("base_url", "")).hostname or ""
+            except ValueError:
+                host = ""
+            out.append({"id": provider_id, "name": str(record.get("name") or provider_id)[:80], "host": host[:120]})
+        return out
+
     def set_saved_provider(self, provider_id: str, record: dict | None) -> None:
         """Save a provider (the whole record, with its key), or with None forget it, in secrets.json."""
         provider_id = str(provider_id or "")

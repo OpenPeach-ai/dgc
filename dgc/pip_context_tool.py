@@ -296,7 +296,8 @@ def read(args, ctx):
                 if active:
                     item["active_run"]["run_kind"] = _run_kind(registry, active["id"])
                 item["pending_review_count"] = registry.db.execute(
-                    "SELECT count(*) FROM pip_approvals WHERE pip_id=? AND status='pending' AND expires_at>?",
+                    "SELECT count(*) FROM pip_approvals WHERE pip_id=? AND status='pending' AND expires_at>? AND NOT EXISTS "
+                    "(SELECT 1 FROM metadata m WHERE m.key='pip_asked:approval:'||pip_approvals.proposal_id)",
                     (item["id"], registry.clock())).fetchone()[0]
                 items.append(item)
             base.update(pips=items, next_offset=offset + len(items) if len(rows) > limit else None)

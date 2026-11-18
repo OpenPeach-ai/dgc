@@ -172,6 +172,9 @@ def history(store,pip_id,before_id=None,limit=20,*,kind='email'):
         prior=get(store,before_id,kind=kind)
         if prior['pip_id']!=pip_id:raise RegistryError('invalid_cursor','Draft cursor belongs to another Pip.')
         where+=' AND (created_at<? OR (created_at=? AND id<?))';params += [prior['created_at'],prior['created_at'],before_id]
+    if kind in ('email','calendar'):    # asked in its chat at Do it all (which account): no card (pip_holds.ask)
+        asked='event' if kind=='calendar' else 'email'
+        where+=f" AND (status<>'pending' OR NOT EXISTS (SELECT 1 FROM metadata m WHERE m.key='pip_asked:{asked}:'||{table}.id))"
     rows=store.db.execute(f'SELECT id FROM {table} WHERE '+where+' ORDER BY created_at DESC,id DESC LIMIT ?',(*params,limit+1)).fetchall()
     values=[]
     for row in rows[:limit]:

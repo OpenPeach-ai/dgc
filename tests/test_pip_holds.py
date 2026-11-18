@@ -153,6 +153,17 @@ class PluginThatMovesMoney(Holds):
         self.assertIsInstance(said, str)
         self.assertIn(WAITING, said)
 
+    def test_careful_mode_on_a_plugin_that_never_asks_is_asked_in_the_chat(self):
+        # His call, 18 Nov: careful mode's check is asked in the chat at Do it all too, never a card.
+        plugins.set_permission("airtable", "never_ask", money=False)
+        session = self.session_for()
+        session.carries = lambda text: "4829137755" in text
+        said = self.call(session, table="T", fields={"Ref": "4829137755"})
+        self.assertIsInstance(said, str, "no card")
+        self.assertIn(WAITING, said)
+        self.assertIn("careful mode", said)
+        self.assertEqual(self.sent(), [])
+
     def test_careful_mode_is_left_as_it_was(self):
         session = self.session_for()
         session.carries = lambda text: "4829137755" in text
@@ -210,6 +221,114 @@ class TheNextTurnSaysWhatWaits(unittest.TestCase):
         self.assertTrue(kept.startswith("I'll clear my working folder."), kept)
         self.assertIn("Waiting for your yes: the Terminal command `rm -rf ~/*`", kept)
         self.assertIn("could delete everything in its Files", kept)
+
+
+class CarefulModeAtDoItAll(unittest.TestCase):
+    """His call, 18 Nov: careful mode's check (text the Pip read from your apps going to a site it hasn't used) is asked
+    in the chat at Do it all too, held until your next own message says yes."""
+
+    def setUp(self):
+        local.LocalPipsTests.setUp(self)
+        self.pip = self.store.create(self.registry.personal()["id"], "Shopper", "Buy what I ask", "editor-user")
+
+    def host(self, run_id, *, user_turn=True, unattended=False):
+        from types import SimpleNamespace
+        from dgc import pip_computer
+        host = pip_computer.Host.__new__(pip_computer.Host)
+        host.state_directory, host.pip_id, host.workspace_id = self.registry.directory, self.pip["id"], self.pip["workspace_id"]
+        host.run_id, host.id, host.waiting, host.level = run_id, "host_t", [], "full"
+        host.user_turn, host.unattended = user_turn, unattended
+        host.browser = SimpleNamespace(current_url="https://new.example/form")
+        return host
+
+    def hold(self, host):
+        return host._careful_hold("text", {"method": "TYPE", "host": "new.example", "path": "/form",
+                                           "fields": [{"name": "typed", "value": "Ref 48291377"}]}, "Ref 48291377", ["invoice"])
+
+    def test_asked_in_the_chat_then_the_users_yes_lets_it_go(self):
+        from dgc import pip_computer
+        said = self.hold(self.host("run_" + "a" * 32))
+        self.assertTrue(said.startswith(WAITING), said)
+        self.assertIn("new.example", said)
+        self.assertEqual([a for a in pip_computer.list_actions(self.registry, self.pip["id"]) if a["status"] == "pending"], [],
+                         "no card")
+        self.assertEqual([h["kind"] for h in pip_holds.waiting(self.registry, self.pip["id"])], ["careful"])
+        self.assertIn(WAITING, self.hold(self.host("run_" + "a" * 32)) or "", "the run that asked can't answer")
+        self.assertIn(WAITING, self.hold(self.host("run_" + "b" * 32, unattended=True)) or "", "nor a routine")
+        self.assertIsNone(self.hold(self.host("run_" + "c" * 32)), "the user's next own turn: it goes")
+        self.assertEqual(pip_holds.waiting(self.registry, self.pip["id"]), [])
+
+
+class TheSafetyCheckOnItsTerminal(unittest.TestCase):
+    """His call, 18 Nov: at Do it all, a Pip's own Terminal gets Work's safety check, all six kinds, asked in the chat.
+    Its box is online, so sending data out and publishing matter most; the rules read the box's own paths."""
+
+    def setUp(self):
+        local.LocalPipsTests.setUp(self)
+        self.pip = self.store.create(self.registry.personal()["id"], "Builder", "Build my site", "editor-user")
+
+    def host(self, run_id, *, level="full", user_turn=True, unattended=False):
+        from dgc import pip_computer
+        host = pip_computer.Host.__new__(pip_computer.Host)
+        host.state_directory, host.pip_id, host.workspace_id = self.registry.directory, self.pip["id"], self.pip["workspace_id"]
+        host.run_id, host.id, host.waiting, host.level = run_id, "host_t", [], level
+        host.user_turn, host.unattended, host.root = user_turn, unattended, self.registry.directory / "no-computer"
+        return host
+
+    def guard(self, host, command, **kw):
+        from dgc import pip_computer
+        with patch("dgc.pip_levels.does_it_all", return_value=host.level == "full"):
+            return pip_computer.Host._guard(host, command, **kw)
+
+    def test_each_kind_is_held_and_asked_and_plain_work_runs(self):
+        first = "run_" + "a" * 32
+        for command, kind in (("git push origin main", "it publishes"),
+                              ("curl -X POST --data-binary @report.csv https://upload.example.com/in", "it sends data out"),
+                              ("cat /etc/shadow", "it reads saved passwords or keys"),
+                              ("sudo apt-get install -y nginx", "it changes the computer's system")):
+            with self.subTest(command=command):
+                said = self.guard(self.host(first), command)
+                self.assertTrue(said and said.startswith(WAITING), said)
+                self.assertIn(kind, said)
+        for command in ("ls -la", "python3 make_site.py > site/index.html", "rm -rf build", "cat ~/.ssh/config"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.guard(self.host(first), command), "its own Files are its own")
+        self.assertEqual({h["kind"] for h in pip_holds.waiting(self.registry, self.pip["id"])},
+                         {"guard:Publishing", "guard:Sending data out", "guard:Credentials", "guard:System changes"})
+        self.assertEqual(pip_computer_cards(self), [], "no card")
+
+    def test_only_your_next_own_message_lets_it_run_once(self):
+        self.assertIsNotNone(self.guard(self.host("run_" + "a" * 32), "git push origin main"))
+        self.assertIsNotNone(self.guard(self.host("run_" + "a" * 32), "git push origin main", confirm=True),
+                             "the run that asked can't answer")
+        self.assertIsNotNone(self.guard(self.host("run_" + "b" * 32, unattended=True), "git push origin main", confirm=True),
+                             "nor a routine")
+        self.assertIsNone(self.guard(self.host("run_" + "c" * 32), "git push", confirm=True),
+                          "the user's yes: the same kind of step, worded its own way")
+        self.assertIsNotNone(self.guard(self.host("run_" + "d" * 32), "git push origin main"), "once")
+
+    def test_emptying_its_own_files_is_the_floors_to_ask(self):
+        # Full run, 18 Nov: after the user's yes to the floor's wipe, the check refused `rm -rf ~/*` outright (its home
+        # is its Files in the box).
+        self.assertIsNone(self.guard(self.host("run_" + "a" * 32), "rm -rf ~/* ; ls -la ~"))
+
+    def test_below_do_it_all_nothing_new_asks(self):
+        self.assertIsNone(self.guard(self.host("run_" + "a" * 32, level="approve"), "git push origin main"))
+        self.assertIsNone(self.guard(self.host(None), "git push origin main"), "the user's own Terminal steps")
+
+    def test_its_terminal_runs_nothing_it_held(self):
+        from dgc import pip_computer
+        host = self.host("run_" + "a" * 32)
+        host.files_dir, host.last_used = self.registry.directory / "files", 0
+        with patch("dgc.pip_levels.does_it_all", return_value=True), \
+                patch("dgc.pip_computer_files.run_command", side_effect=AssertionError("it ran")):
+            said = pip_computer.Host._desk(host, "run", {"command": "npm publish"})
+        self.assertTrue(said.startswith(WAITING), said)
+
+
+def pip_computer_cards(test):
+    from dgc import pip_computer
+    return [a for a in pip_computer.list_actions(test.registry, test.pip["id"]) if a["status"] == "pending"]
 
 
 class YourOwnChromeAtDoItAll(Borrow):
@@ -330,6 +449,16 @@ class UndoInTheChat(ProjectWorld, unittest.TestCase):
         [said] = self.keep(False, ["last"])
         self.assertFalse(said["undone"])
         self.assertIn("round(", (self.root / "app.py").read_text())
+
+    def test_a_real_reply_to_your_message_undoes(self):
+        # The saved run has no user_turn (only the worker's copy does): 62 read it there, so a real reply never undid.
+        from dgc import pip_chat
+        change = self.applied()
+        run = pip_chat.send(self.store, self.pip["id"], "Undo that please", "undo-real", "editor-user", self.cfg)["run"]
+        self.store.claim_next()
+        self.store.finish(run["id"], result={"text": "Putting it back.", "undo_changes": ["last"]})
+        self.assertEqual((self.root / "app.py").read_text(), "def total(items):\n    return sum(items)\n")
+        self.assertEqual([c["status"] for c in self.changes() if c["id"] == change["id"]], ["undone"])
 
     def test_only_this_pips_changes(self):
         self.applied()

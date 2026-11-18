@@ -119,6 +119,9 @@ def history(registry, pip_id, before_id=None, limit=20):
             raise RegistryError('invalid_cursor', 'Approval cursor does not belong to this Pip.')
         where += ' AND (created_at,id)<(?,?)'
         params.extend(prior)
+    # One asked in its Pip's chat at Do it all has no card (pip_holds.ask).
+    where += (" AND (status<>'pending' OR NOT EXISTS (SELECT 1 FROM metadata m "
+              "WHERE m.key='pip_asked:approval:'||pip_approvals.proposal_id))")
     rows = registry.db.execute('SELECT * FROM pip_approvals WHERE ' + where + ' ORDER BY created_at DESC,id DESC LIMIT ?', (*params, limit + 1)).fetchall()
     result = [dict(row) for row in rows[:limit]]
     for row in result:

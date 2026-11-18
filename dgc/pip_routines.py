@@ -269,8 +269,10 @@ def listing(store, pip_id, app_events=False, webhooks=False) -> dict:
         raise RegistryError("invalid_request", "app_events is true or false.")
     if webhooks not in (None, True, False):
         raise RegistryError("invalid_request", "webhooks is true or false.")
-    rows = store.registry.db.execute("SELECT * FROM pip_routines WHERE pip_id=? AND status<>'declined' ORDER BY created_at",
-                                     (pip_id,)).fetchall()
+    # One it suggested that is asked in its chat at Do it all has no card (pip_holds.ask).
+    rows = store.registry.db.execute("SELECT * FROM pip_routines WHERE pip_id=? AND status<>'declined' AND (status<>'suggested' "
+                                     "OR NOT EXISTS (SELECT 1 FROM metadata m WHERE m.key='pip_asked:routine:'||pip_routines.id)) "
+                                     "ORDER BY created_at", (pip_id,)).fetchall()
     hidden = ({"app"} - ({"app"} if app_events else set())) | ({"webhook"} - ({"webhook"} if webhooks else set()))
     shown = [r for r in rows if json.loads(r["trigger"]).get("kind") not in hidden]
     return {"pip_id": pip_id, "workspace_id": job["workspace_id"], "routines": [projection(r) for r in shown]}
@@ -535,9 +537,16 @@ def commit(store, run, result) -> None:
                 continue
             own.record_routine(store, run, routine, registry.clock())
             continue
-        _insert(store, run["pip_id"], candidate["title"], candidate["prompt"], candidate["trigger"],
-                status="suggested", created_by="pip", run_id=run["id"])
+        routine = _insert(store, run["pip_id"], candidate["title"], candidate["prompt"], candidate["trigger"],
+                          status="suggested", created_by="pip", run_id=run["id"])
         waiting += 1
+        from .pip_levels import at_full
+        if at_full(registry, run["pip_id"]):
+            # At Do it all, asked in its chat instead of a card (his call, 18 Nov).
+            from .pip_holds import ask
+            ask(registry, run["pip_id"], "routine", routine["id"], run_id=run["id"],
+                what=f"add the routine \u201c{candidate['title'][:120]}\u201d, {label(candidate['trigger'])}",
+                why="a routine I suggest by myself starts only when you say so")
 
 
 # --------------------------------------------------------------------------- running them

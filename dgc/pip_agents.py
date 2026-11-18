@@ -709,3 +709,90 @@ def stop(store, pip_id, job_id, actor) -> dict:
         db.execute("UPDATE pip_agent_jobs SET state='stopped',updated_at=? WHERE id=?", (_now(registry), job_id))
     _job_ended(store, _row(db, job_id))
     return view(db, _row(db, job_id))
+
+
+# ---- its helpers' model, by the user's words (his call, 18 Nov) ------------------------------------------------------
+# "Fix it with GLM 5 flash on my Ollama Cloud": the Pip's chat sets what its helpers run on (the same setting as its
+# Sub-agents tab: its fixes and the helpers inside its runs), from the user's own message only, and only on one of the
+# user's saved connections (never a subscription CLI or DGC Router). "Back to your own model" undoes it.
+MODEL_TOOL = "set_helper_model"
+
+
+def runtime(config, run, manifest: dict) -> dict:
+    """In the supervisor, as a chat turn the user started begins: their saved connections, by name (no key), for the
+    worker's set_helper_model."""
+    if not isinstance(manifest.get("conversation"), dict) or manifest.get("user_turn") is not True:
+        return manifest
+    try:
+        named = config.saved_provider_names()[:20]
+    except Exception:                                   # noqa: BLE001 - no connections to name: no tool
+        named = []
+    return {**manifest, "helper_connections": named} if named else manifest
+
+
+def model_schema(connections) -> dict:
+    listing = ", ".join(c["name"] + (f" ({c['host']})" if c.get("host") else "") for c in connections)
+    return {"type": "function", "function": {"name": MODEL_TOOL, "description": (
+        "Only when the user asks in their own message for your helpers (the sub-agents that fix things for you, and "
+        "the helpers you start) to run on a model of theirs, like \"fix it with GLM 5 flash on my Ollama Cloud\": set "
+        "it here. connection is one of their saved connections: " + listing + ". Leave both empty to go back to your "
+        "own model. It stays until they change it (they see it on your Sub-agents tab)."),
+        "parameters": {"type": "object", "properties": {
+            "connection": {"type": "string", "description": "the saved connection's name, or \"\" for your own model"},
+            "model": {"type": "string", "description": "the model's id on that connection, or \"\""}},
+            "required": ["connection", "model"], "additionalProperties": False}}}
+
+
+def _norm(text) -> str:
+    text = re.sub(r"[^a-z0-9]+", " ", str(text or "").lower())
+    return " ".join(w for w in text.split() if w not in ("my", "the", "on", "connection", "account"))
+
+
+def connection_named(connections, said):
+    """The saved connection a name means ("my ollama cloud"), or None."""
+    want = _norm(said)
+    if not want:
+        return None
+    return next((c for c in connections if _norm(c["name"]) == want), None) or next(
+        (c for c in connections if want in _norm(c["name"]) or _norm(c["name"]) in want
+         or (c.get("host") and want.replace(" ", "") in c["host"].replace(".", ""))), None)
+
+
+def model_tool_result(connections, arguments) -> tuple[dict | None, str]:
+    """In the worker: (the choice to keep, what the tool says)."""
+    args = arguments if isinstance(arguments, dict) else {}
+    said, model = str(args.get("connection") or "").strip(), str(args.get("model") or "").strip()
+    if not said and not model:
+        return {"mode": "default"}, ("Your helpers go back to your own model as your reply is kept. Say so in one "
+                                     "short sentence.")
+    names = ", ".join(c["name"] for c in connections) or "none"
+    found = connection_named(connections, said)
+    if found is None:
+        return None, (f"Not set: no saved connection called {said[:60]}. The user's saved connections: {names}. Ask "
+                      "which they meant.")
+    if not model:
+        return None, f"Not set: say which model on {found['name']} (its id)."
+    try:
+        choice = _valid_choice({"mode": "provider", "provider": found["id"], "model": model[:200]})
+    except RegistryError as exc:
+        return None, "Not set: " + str(exc)
+    return choice, (f"Your helpers run on {model[:80]} on {found['name']} as your reply is kept. Say so in one short "
+                    "sentence; the user can change it on your Sub-agents tab.")
+
+
+def commit_model(store, run, result) -> None:
+    """In the supervisor, as a chat reply is kept: the helpers' model the user asked for. Only a reply to the user's
+    own message; only a saved connection's model or its own (checked again here, never the worker's word)."""
+    choice = result.get("helper_model") if isinstance(result, dict) else None
+    if choice is None:
+        return
+    choice = _valid_choice(choice)              # a bad one fails the reply's keep, as any forged result does
+    from .pip_notes import user_turn
+    if user_turn(store.registry, run) is None:
+        return
+    if choice["mode"] not in ("provider", "default"):
+        return                                  # a saved connection or its own model, nothing else
+    # A connection removed meanwhile is said in plain words when a helper starts on it (provider_view), as the tab's is.
+    chosen = agents_model(store.registry, run["pip_id"])
+    chosen["model_choice"] = choice
+    store.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (MODEL_KEY + run["pip_id"], json.dumps(chosen)))

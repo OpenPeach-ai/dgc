@@ -1043,7 +1043,11 @@ def undo_asked(store, run, result) -> list:
     manifest = run.get("manifest") if isinstance(run.get("manifest"), dict) else {}
     if not isinstance(asked, list) or len(asked) > 3 or not all(isinstance(a, str) for a in asked):
         raise RegistryError("invalid_reply", "What the reply asked to undo is not a short list of changes.")
-    if manifest.get("user_turn") is not True or not isinstance(manifest.get("conversation"), dict):
+    # The saved run has no user_turn (the worker's copy alone carries it, pip_notes.runtime): DGC reads who wrote the
+    # message the reply answers, as that runtime does. A hand-built run in a test may still say it.
+    from .pip_notes import user_turn
+    own = manifest.get("user_turn") is True if "user_turn" in manifest else user_turn(store.registry, run) is not None
+    if not own or not isinstance(manifest.get("conversation"), dict):
         return [{"change": a, "undone": False, "why": "only a reply to the user's own message can undo a change"} for a in asked]
     out = []
     for change_id in asked:
