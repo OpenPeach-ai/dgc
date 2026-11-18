@@ -206,7 +206,7 @@ export const tabsNow = (page) => page.evaluate(() => {
       controls: t.getAttribute("aria-controls"), icons: [...t.querySelectorAll("svg, img, .codicon, .library-iris")].filter((n) => n.checkVisibility({ opacityProperty: true })).length,   // (the ones seen: each tab holds its icon for a narrow side bar)
       color: getComputedStyle(t).color, weight: getComputedStyle(front || t).fontWeight,
       // (front, frontOpacity: the name itself, which once turned over under the pointer; copies: how many times the name is in the tab.)
-      glow: Number(getComputedStyle(t.querySelector(".dgc-tab-glow")).opacity), front: front ? getComputedStyle(front).transform : "", copies: t.querySelectorAll(".dgc-tab-word").length,
+      glow: ((g) => g ? Number(getComputedStyle(g).opacity) : 0)(t.querySelector(".dgc-tab-glow")), ground: getComputedStyle(t).backgroundColor, front: front ? getComputedStyle(front).transform : "", copies: t.querySelectorAll(".dgc-tab-word").length,
       frontOpacity: front ? Number(getComputedStyle(front).opacity) : 1,
       count: count && !count.hidden ? count.textContent : "", countBox: count && !count.hidden ? rect(count) : null, clipped: rect(flip).left < rect(t).left - 0.5 || (count && !count.hidden ? rect(count) : rect(flip)).right > rect(t).right + 0.5, words: rect(flip), ...rect(t) }; });
   const panel = ["home-hub", "work-home", "chats-home", "library-home"].map((id) => document.getElementById(id)).find((n) => n?.checkVisibility()) || (document.getElementById("pips-host").checkVisibility() ? document.getElementById("pips-host") : null);

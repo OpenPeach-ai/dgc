@@ -73,9 +73,9 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [640, 3
         assert.deepEqual([now.glow, now.moved, now.moving, now.shadow, now.filter, now.words], [0, [], [], "none", "none", rest.words], `${id} pointed at: no glow, no turn, no shimmer, its words where they were`);
         assert.equal(now.selected, false, "pointing chooses nothing");
       }
-      // The tab you are on keeps its accent and its glow, pointed at or not.
+      // The tab you are on keeps its accent, pointed at or not, with nothing behind it (18 Nov).
       const home = await tabPaint(x.page, "home");
-      assert.deepEqual([home.color, home.glow > 0.95], [accent, true], "the tab you are on is still lit");
+      assert.deepEqual([home.color, home.glow], [accent, 0], "the tab you are on keeps its name in the accent");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });

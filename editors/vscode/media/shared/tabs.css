@@ -2,8 +2,8 @@
    Core Pip's small face after its name; his call of 15 Nov: "the header tabs don't need to show icon for library, only
    Pips tab shows Core's face, not any other tab"), in one centred bar. A bar with the
    button family's corner (--btn-r, as New and the search field under it; asked 13 Nov: it was a pill) on a soft gradient
-   of the side bar's own grey, with a hairline and a low shadow. The tab you are on is lit in DGC's purple: its name
-   takes the accent's text tone and a soft radial glow sits behind it. Pointing at another tab only changes its name
+   of the side bar's own grey, with a hairline and a low shadow. The tab you are on has its name in DGC's purple, the
+   accent's text tone, with nothing behind it (his call, 18 Nov: the soft purple glow it had went). Pointing at another tab only changes its name
    from the quiet grey to the text colour (asked 13 Nov: it lit up, glowed and turned its name over): nothing glows,
    turns, grows or slides.
    Home shows how many things wait or are new. The five names, with the Pip's face, fit a 280 px side bar. Under 280 px each tab is an icon
@@ -25,13 +25,6 @@
 .dgc-tab:hover { color: var(--text); }
 .dgc-tab[aria-selected="true"] { color: var(--accent-text); }
 .dgc-tab:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
-/* The glow behind the tab you are on (never behind one that is only pointed at). */
-.dgc-tab-glow {
-  position: absolute; z-index: -1; left: 50%; top: 50%; width: min(100%, 84px); height: 46px; translate: -50% -50%; scale: .6; opacity: 0; border-radius: 50%;
-  background: radial-gradient(closest-side, var(--tabs-glow), var(--tabs-glow-far) 62%, transparent); pointer-events: none;
-  transition: opacity var(--dur-dialog) var(--ease-out), scale var(--dur-flip) var(--ease-spring);
-}
-.dgc-tab[aria-selected="true"] .dgc-tab-glow { opacity: 1; scale: 1; }
 /* The name. The bolder weight of the chosen tab is measured too (the unseen ::after), so choosing a tab never moves
    its neighbours. (The classes are from when the name turned over under the pointer: .dgc-tab-flip holds the name,
    .dgc-tab-front is the name.) */
@@ -89,16 +82,12 @@
   .dgc-tabs-bar { width: calc(100% - 2 * var(--sp-2)); }
   .dgc-tab-count { left: calc(50% - 2px); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .dgc-tab-glow { transition: none; }
-}
 /* Forced colours: his Library books (on Home's Library button) are drawn in the text's own system colour, so the icon
    never vanishes. */
 @media (forced-colors: active) {
   span.library-iris > i:nth-child(n) { forced-color-adjust: none; background: CanvasText; box-shadow: none; }
   span.library-iris > i:nth-child(n)::before, span.library-iris > i:nth-child(n)::after { content: none; }
   .dgc-tabs-bar { border: 1px solid CanvasText; box-shadow: none; background: Canvas; }
-  .dgc-tab-glow { display: none; }
   .dgc-tab[aria-selected="true"] { color: HighlightText; background: Highlight; forced-color-adjust: none; }
   .dgc-tab-count { background: CanvasText; color: Canvas; }
 }

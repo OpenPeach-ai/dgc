@@ -53,7 +53,7 @@ const barNow = (page) => page.evaluate(() => {
     const word = front.querySelector(".dgc-tab-word") || front, icon = front.querySelector(".codicon, .library-iris"), coloured = t.querySelectorAll(".library-iris, svg, img").length;
     const face = t.querySelector(".dgc-tab-face"), count = t.querySelector(".dgc-tab-count"), glyph = icon ? getComputedStyle(icon, "::before") : null;
     return { id: t.dataset.tab, box: rect(t), selected: t.getAttribute("aria-selected") === "true", tabIndex: t.tabIndex, title: t.getAttribute("title") || "", label: t.getAttribute("aria-label") || "",
-      color: getComputedStyle(t).color, ground: getComputedStyle(t).backgroundColor, glow: Number(getComputedStyle(t.querySelector(".dgc-tab-glow")).opacity),
+      color: getComputedStyle(t).color, ground: getComputedStyle(t).backgroundColor, glow: ((g) => g ? Number(getComputedStyle(g).opacity) : 0)(t.querySelector(".dgc-tab-glow")),
       // The word: its text is always in the page; it is "seen" when it has a box of its own to be read in.
       word: { text: word.textContent, seen: drawn(word), ...rect(word), inTree: word.checkVisibility() && getComputedStyle(word).visibility === "visible" && !word.closest('[aria-hidden="true"]'),
         fontSize: parseFloat(getComputedStyle(word).fontSize) },
@@ -267,7 +267,7 @@ test("the bar is the same height in both forms, the page keeps the same room und
         await sized(x, width); await settle(x.page, 80);
         const bar = await barNow(x.page);
         seen.push({ width, form: form(bar), nav: bar.nav.height, navTop: bar.nav.top, bar: bar.bar.height, barTop: bar.bar.top, tabs: [...new Set(bar.tabs.map((tab) => tab.box.height))], tabTop: [...new Set(bar.tabs.map((tab) => tab.box.top))], glass: bar.glassTop,
-          lit: bar.tabs.filter((tab) => tab.glow > 0.95).map((tab) => tab.id), chosen: bar.tabs.filter((tab) => tab.selected).map((tab) => tab.id) });
+          lit: bar.tabs.filter((tab) => tab.glow > 0 || tab.ground !== "rgba(0, 0, 0, 0)").map((tab) => tab.id), chosen: bar.tabs.filter((tab) => tab.selected).map((tab) => tab.id) });
       }
       assert.deepEqual(seen.map((s) => s.form), ["words", "words", "words", "icons", "icons", "icons", "icons", "words"], `${view}: the forms`);
       const first = seen[0];
@@ -280,14 +280,14 @@ test("the bar is the same height in both forms, the page keeps the same room und
         assert.deepEqual([s.navTop, s.barTop, s.tabTop], [first.navTop, first.barTop, first.tabTop], `${at}: nothing moved up or down`);
         // The room the page keeps under the glass is the strip's own height, as measured by the page (glassRoom).
         assert.equal(s.glass, `${Math.round(first.nav * 100) / 100}px`, `${at}: the page keeps the same room under the glass`);
-        assert.deepEqual([s.chosen, s.lit], [[view], [view]], `${at}: the tab you are on is still chosen and lit`);
+        assert.deepEqual([s.chosen, s.lit], [[view], []], `${at}: the tab you are on is still chosen, with nothing behind any tab (18 Nov)`);
       }
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   }
 });
 
-test("an icon tab: the one you are on is lit in the accent; pointing at another only changes its icon's colour (no glow, no turn: 13 Nov)", async (t) => {
+test("an icon tab: the one you are on has its icon in the accent and nothing behind it (18 Nov); pointing at another only changes its icon's colour (no glow, no turn: 13 Nov)", async (t) => {
   if (skipOrFail(t)) return;
   for (const theme of ["dark-modern", "light-modern"]) {
     const x = await openDock(browser, { tab: "home", theme, width: 200, height: 500 });
@@ -296,7 +296,7 @@ test("an icon tab: the one you are on is lit in the accent; pointing at another 
       const accent = await tone("--accent-text"), quiet = await tone("--text-2"), text = await tone("--text");
       let bar = await barNow(x.page);
       assert.equal(form(bar), "icons");
-      assert.deepEqual([by(bar, "home").icon.color, by(bar, "home").glow > 0.95], [accent, true], `${theme}: Home's icon is in the accent's text tone, with the glow behind it`);
+      assert.deepEqual([by(bar, "home").icon.color, by(bar, "home").glow, by(bar, "home").ground], [accent, 0, "rgba(0, 0, 0, 0)"], `${theme}: Home's icon is in the accent's text tone, with nothing behind it`);
       for (const id of ["work", "chat"]) assert.deepEqual([by(bar, id).icon.color, by(bar, id).glow, by(bar, id).icon.opacity, by(bar, id).copies], [quiet, 0, 1, 1], `${theme}: ${id} is quiet at rest, its icon in it once`);
       for (const id of ["work", "chat"]) {
         await x.page.mouse.move(...centre(by(bar, id).box), { steps: 3 });

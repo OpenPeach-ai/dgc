@@ -195,7 +195,7 @@ const pipsTab = (page) => page.evaluate(() => {
   const face = tab.querySelector(".dgc-tab-face"), flip = tab.querySelector(".dgc-tab-flip"), word = tab.querySelector(".dgc-tab-front .dgc-tab-word"), r = document.createRange(); r.selectNodeContents(word);
   const said = r.getBoundingClientRect(), other = document.getElementById("side-tab-work"), otherFlip = other.querySelector(".dgc-tab-flip");
   return { tab: box(tab), face: face.querySelector(".dgc-plush") && face.checkVisibility() ? box(face) : null, flip: box(flip), word: { left: said.left, right: said.right, top: said.top, bottom: said.bottom },
-    gap: parseFloat(getComputedStyle(tab).columnGap) || 0, selected: tab.getAttribute("aria-selected"), glow: Number(getComputedStyle(tab.querySelector(".dgc-tab-glow")).opacity), colour: getComputedStyle(tab).color,
+    gap: parseFloat(getComputedStyle(tab).columnGap) || 0, selected: tab.getAttribute("aria-selected"), glow: ((g) => g ? Number(getComputedStyle(g).opacity) : 0)(tab.querySelector(".dgc-tab-glow")), ground: getComputedStyle(tab).backgroundColor, colour: getComputedStyle(tab).color,
     // Another tab's name is centred in its tab: so is this pair.
     otherOff: Math.abs((box(otherFlip).left + box(otherFlip).right) / 2 - (box(other).left + box(other).right) / 2),
     order: [...tab.children].map((c) => c.className), name: tab.textContent.trim(), sideways: document.documentElement.scrollWidth > innerWidth };
@@ -216,7 +216,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
       };
       const rest = await pipsTab(x.page);
       held(rest, "at rest");
-      assert.deepEqual(rest.order, ["dgc-tab-glow", "dgc-tab-flip", "dgc-tab-face"], "in the page too: the word, then the face");
+      assert.deepEqual(rest.order, ["dgc-tab-flip", "dgc-tab-face"], "in the page too: the word, then the face (no glow behind it since 18 Nov)");
       // Pointed at (no glow since 13 Nov: only the name's colour changes), and chosen (lit): the same order and place.
       await x.page.hover("#side-tab-pips"); await x.page.waitForTimeout(450);
       const hover = await pipsTab(x.page);
@@ -225,7 +225,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
       await x.page.click("#side-tab-pips"); await x.page.mouse.move(width / 2, 400); await x.page.waitForTimeout(450);
       const chosen = await pipsTab(x.page);
       held(chosen, "chosen");
-      assert.deepEqual([chosen.selected, chosen.glow > 0.9, chosen.colour !== rest.colour], ["true", true, true], "chosen: lit, in the accent's words");
+      assert.deepEqual([chosen.selected, chosen.glow, chosen.ground, chosen.colour !== rest.colour], ["true", 0, "rgba(0, 0, 0, 0)", true], "chosen: its name in the accent, nothing behind it (his call, 18 Nov)");
       assert.ok(Math.abs(chosen.face.left - rest.face.left) <= 0.5 && Math.abs(chosen.tab.width - rest.tab.width) <= 0.5, "choosing it moves nothing");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
