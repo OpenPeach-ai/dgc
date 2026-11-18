@@ -89,9 +89,9 @@ export async function openThinking(browser, { width = 440, height = 760, theme =
   const x = await openWork(browser, { width, height, theme, turns: 1 });
   const state = (level, ultra = false) => x.send({ type: "state", state: { model: "deepseek-v4-pro:cloud", think: level, ultra, mode: "default", goal: { text: "", status: "none" } } });
   await state(think);
-  await x.page.click("#btn-model"); await x.send(modelsMessage()); await x.page.waitForSelector(".dgc-mp .dgc-mp-level"); await x.page.waitForTimeout(200);
-  const now = () => x.page.evaluate(() => { const on = document.querySelector('.dgc-mp-level[aria-checked="true"]');
-    return { button: document.getElementById("effortname").textContent, word: document.querySelector(".dgc-mp-think-now")?.textContent || "", value: on?.dataset.level || "", levels: [...document.querySelectorAll(".dgc-mp-level")].map((b) => b.dataset.level),
+  await x.page.click("#btn-model"); await x.send(modelsMessage()); await x.page.waitForSelector(".dgc-mp .dgc-mp-think .dgc-mp-effort"); await x.page.waitForTimeout(200);
+  const now = () => x.page.evaluate(() => { const on = document.querySelector(".dgc-mp-think .dgc-mp-effort");
+    return { button: document.getElementById("effortname").textContent, word: document.querySelector(".dgc-mp-think-now")?.textContent || "", value: on?.dataset.value || "", levels: [...document.querySelectorAll(".dgc-mp-think .dgc-mp-effort-stop")].map((b) => b.dataset.level),
       menu: !!document.querySelector(".dgc-mp-layer"), lines: [...document.querySelectorAll("#log .sys")].map((n) => n.textContent.trim()) }; });
   return { ...x, state, now, sent: () => x.posted("setReasoningProfile") };
 }

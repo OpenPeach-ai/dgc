@@ -220,14 +220,15 @@ test("the look: the chosen tab is the raised tile; Main and Fallback are tags wi
       const rows = v.connections[1].sections[0].rows; rows[0] = { ...rows[0], current: true, pills: [["Main", "main"]] }; rows[1] = { ...rows[1], pills: [["Fallback", "fallback"]] };
       v.selected = v.connections[1].id; window.openPicker(v); })()`);
     const look = await q(p, () => {
-      const on = document.querySelector('.dgc-mp-tab[aria-selected="true"]'), off = document.querySelector('.dgc-mp-tab[aria-selected="false"]'), level = document.querySelector('.dgc-mp-level[aria-checked="true"]');
+      const on = document.querySelector('.dgc-mp-tab[aria-selected="true"]'), off = document.querySelector('.dgc-mp-tab[aria-selected="false"]');
       const c = (n) => getComputedStyle(n);
-      return { tab: c(on).backgroundColor, level: c(level).backgroundColor, shadow: c(on).boxShadow, offBg: c(off).backgroundColor, tabsBg: c(document.querySelector(".dgc-mp-tabs")).backgroundColor, segBg: c(document.querySelector(".dgc-mp-seg")).backgroundColor,
+      return { tab: c(on).backgroundColor, card: c(document.querySelector(".dgc-mp-card")).backgroundColor, shadow: c(on).boxShadow, offBg: c(off).backgroundColor, tabsBg: c(document.querySelector(".dgc-mp-tabs")).backgroundColor,
         tags: [...document.querySelectorAll(".dgc-mp-tag")].map((n) => [n.textContent, parseFloat(c(n).borderTopLeftRadius), n.getBoundingClientRect().height]) };
     });
-    assert.equal(look.tab, look.level, `${theme}: the chosen tab is the chosen level's raised tile`);
+    // (Since 18 Nov Thinking under the list is a slider; the chosen tab is the card's own raised tile.)
+    assert.equal(look.tab, look.card, `${theme}: the chosen tab is a tile of the card's colour`);
     assert.notEqual(look.shadow, "none", `${theme}: raised`);
-    assert.equal(look.tabsBg, look.segBg, `${theme}: the tabs' ground is the levels' ground`);
+    assert.notEqual(look.tabsBg, "rgba(0, 0, 0, 0)", `${theme}: the tabs sit on a ground of their own`);
     assert.equal(look.offBg, "rgba(0, 0, 0, 0)");
     assert.deepEqual(look.tags.map((x) => x[0]), ["Main", "Fallback"]);
     for (const [word, r, h] of look.tags) { assert.equal(r, 6, `${theme} ${word}: the buttons' corner`); assert.ok(r < h / 2 - 1, `${theme} ${word}: no pill (${r}px on ${h}px)`); }

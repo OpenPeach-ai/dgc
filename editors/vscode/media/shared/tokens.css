@@ -74,6 +74,9 @@ html { scrollbar-color: auto; }
   --home-count-ink: var(--text);
   --home-quiet: var(--text-2);
   --accent:#7C5CFF; --accent-text:#A78BFA; --accent-fill:#7654F6;
+  /* The Thinking slider's fill where a page has no WebGL: its colours a level at a time, from the reference's own
+     palette (media/shared/modelpicker.js FILL_COLORS draws the same with WebGL). */
+  --effort-1:#3B82F6; --effort-2:#6366F1; --effort-3:#7C3AED; --effort-4a:#60A5FA; --effort-4b:#A855F7; --effort-4c:#F5D0FE;
   /* Links and their marks, which are body text and must clear 4.5:1 to be read comfortably.
      --accent cannot do that job: at 4.08:1 on this panel's dark ground and 4.09:1 on its light
      one it fails AA on BOTH, which is why a page of links read as harsh. No single purple fixes

@@ -11,7 +11,9 @@
 //     connections: [{ id, name, tip, mark, badge, current, loaded, error, disabled, reason, note,
 //                     sections: [{ title, rows: [row] }], footer: [{id, label, icon, input}] }],
 //     selected,                                              // the connection shown first (else the current one)
-//     thinking: { label, levels: [{value, label}], value, none, note, disabled, face },   // face: the page's own markup (a Pip's face)
+//     thinking: { label, levels: [{value, label, title}], value, none, note, disabled, face },   // a slider, Faster to
+//               Smarter; `note` behind its ? button;
+//               face: the page's own markup (a Pip's face)
 //     settings: [{ id, label, value, options: [{value, label}] }],
 //     footer: [{id, label, icon}], empty: { title, text } }
 //   row: { value, name, desc, caps: ["thinks", "images"], cloud, current, pills: [[label, tone]],
@@ -136,6 +138,7 @@
     more: '<circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/>',
     refresh: '<path d="M12.6 6.2A5 5 0 1 0 13 8.6M12.8 3v3.4H9.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
     back: '<path d="M13 8H3.5M7.5 3.8L3.3 8l4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    help: '<circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.25 6.3a1.8 1.8 0 0 1 3.5.55c0 1.25-1.75 1.5-1.75 2.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.55" r=".85" fill="currentColor"/>',
   };
   const glyph = (name, cls = "") => `<svg class="dgc-mp-glyph${cls ? ` ${cls}` : ""}" viewBox="0 0 16 16" aria-hidden="true" focusable="false">${GLYPH[name] || ""}</svg>`;
   /** One action, one icon: Add, Settings and Close are the shared ones (media/shared/icons.js) where that is loaded. */
@@ -234,6 +237,108 @@
     if (tokens > WINDOW_MAX) return "DGC takes up to 16,384K (16,777,216 tokens).";
     if (max > 0 && tokens > max) return `This model takes up to ${sizeWords(max)}: type that or less.`;
     return "";
+  }
+
+  // ---- Thinking's fill: a moving picture of how hard the model thinks --------------------------------------------------
+  // Drawn by the page's own graphics (WebGL) inside the slider's filled part: calm and grey at Off, quicker and bluer
+  // up the levels, and at Ultra its brightest colours with a sparkle. Where the page has no WebGL it is a plain
+  // gradient of the same colours; under reduced motion it is still.
+  const FILL_COLORS = [["#d4d4d8", "#a1a1aa", "#f4f4f5"], ["#93c5fd", "#3b82f6", "#dbeafe"], ["#a5b4fc", "#6366f1", "#e0e7ff"],
+    ["#a78bfa", "#7c3aed", "#ede9fe"], ["#60a5fa", "#a855f7", "#f5d0fe"]];
+  const FILL_VERTEX = "attribute vec2 position;void main(){gl_Position=vec4(position,0.0,1.0);}";
+  const FILL_FRAGMENT = `precision mediump float;
+uniform vec2 resolution; uniform float time; uniform float level; uniform float ultra;
+uniform vec3 start; uniform vec3 end; uniform vec3 glow;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float value = 0.0; float amplitude = 0.5;
+  for (int i = 0; i < 4; i++) { value += amplitude * noise(p); p = p * 2.02 + vec2(3.1, 1.7); amplitude *= 0.5; }
+  return value;
+}
+void main() {
+  vec2 uv = gl_FragCoord.xy / resolution;
+  float aspect = resolution.x / resolution.y;
+  float speed = 0.18 + 1.4 * level;
+  vec2 p = vec2(uv.x * aspect * 0.55, uv.y * 0.9);
+  vec2 warp = vec2(fbm(p + vec2(-time * speed, time * 0.15)), fbm(p + vec2(4.3, 2.1) - vec2(time * speed * 0.8, 0.0)));
+  float field = fbm(p * 1.4 + warp * 1.6 - vec2(time * speed * 1.2, 0.0));
+  vec3 color = mix(start, end, smoothstep(0.0, 1.0, uv.x));
+  float sheen = smoothstep(0.35, 0.95, field) * (0.35 + 0.65 * uv.x);
+  color = mix(color, glow, sheen * (0.35 + 0.45 * level));
+  float core = exp(-pow((1.0 - uv.x) * aspect * 1.6, 2.0)) * level;
+  color = mix(color, glow, core * 0.55);
+  float sparkle = 0.0;
+  if (ultra > 0.01) {
+    vec2 grid = vec2(uv.x * aspect * 7.0 - time * 0.6, uv.y * 7.0);
+    vec2 cell = floor(grid); float seed = hash(cell); vec2 local = fract(grid) - 0.5;
+    float twinkle = pow(0.5 + 0.5 * sin(time * (2.5 + seed * 5.0) + seed * 40.0), 4.0);
+    float dot = smoothstep(0.2, 0.0, length(local + (vec2(hash(cell + 3.1), hash(cell + 7.7)) - 0.5) * 0.5));
+    sparkle = step(0.55, seed) * dot * twinkle * ultra * smoothstep(0.15, 0.6, uv.x);
+  }
+  color = mix(color, vec3(1.0), sparkle);
+  float alpha = max(smoothstep(0.0, 0.45, uv.x) * (0.55 + 0.45 * level), sparkle);
+  gl_FragColor = vec4(color * alpha, alpha);
+}`;
+  const fillRgb = (hex) => { const v = parseInt(hex.slice(1), 16); return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255]; };
+  /** Which colours a level wears: Ultra alone the top ones; every other level at most the fourth. */
+  const fillTier = (level, ultra) => (ultra ? 4 : Math.round(Math.min(level, 0.75) * 4));
+  function startFill(host) {
+    const doc = host.ownerDocument, win = doc.defaultView || root;
+    const still = !!(win && win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    const flat = { set(level, ultra) { host.dataset.tier = String(fillTier(level, ultra)); }, stop() {} };
+    if (!win || typeof win.WebGLRenderingContext === "undefined") { host.classList.add("is-flat"); return flat; }   // (a page with no WebGL at all)
+    const canvas = doc.createElement("canvas");
+    canvas.className = "dgc-mp-effort-canvas";
+    let gl = null;
+    try { gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: false, powerPreference: "low-power" }); } catch { gl = null; }
+    const shader = (type, source) => { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null; };
+    const program = gl && gl.createProgram();
+    const vs = gl && shader(gl.VERTEX_SHADER, FILL_VERTEX), fs = gl && shader(gl.FRAGMENT_SHADER, FILL_FRAGMENT);
+    if (!gl || !program || !vs || !fs) { host.classList.add("is-flat"); return flat; }
+    gl.attachShader(program, vs); gl.attachShader(program, fs); gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) { host.classList.add("is-flat"); return flat; }
+    gl.useProgram(program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const position = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(position); gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    const u = {}; for (const name of ["resolution", "time", "level", "ultra", "start", "end", "glow"]) u[name] = gl.getUniformLocation(program, name);
+    host.append(canvas);
+    const goal = { level: 0, ultra: 0, colors: FILL_COLORS[0] }, now = { level: 0, ultra: 0, colors: FILL_COLORS[0].map(fillRgb) };
+    const offset = Math.random() * 50;
+    let frame = 0, before = 0, lost = false, first = true;
+    canvas.addEventListener("webglcontextlost", () => { lost = true; win.cancelAnimationFrame(frame); canvas.remove(); host.classList.add("is-flat"); flat.set(goal.level, goal.ultra > 0); });
+    function draw(at) {
+      frame = 0;
+      if (lost || !canvas.isConnected) return;
+      const ease = still || first ? 1 : 1 - Math.exp(-((at - before) / 1000) * 9);
+      before = at; first = false;
+      now.level += (goal.level - now.level) * ease;
+      now.ultra += (goal.ultra - now.ultra) * ease;
+      now.colors = now.colors.map((c, i) => { const to = fillRgb(goal.colors[i]); return c.map((v, k) => v + (to[k] - v) * ease); });
+      const ratio = Math.min(2, win.devicePixelRatio || 1), w = Math.round(canvas.clientWidth * ratio), h = Math.round(canvas.clientHeight * ratio);
+      if (w > 0 && h > 0) {                 // (a picker page over it leaves it no size: nothing to draw then)
+        if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
+        gl.uniform2f(u.resolution, w, h);
+        gl.uniform1f(u.time, still ? offset : offset + at / 1000);
+        gl.uniform1f(u.level, now.level); gl.uniform1f(u.ultra, now.ultra);
+        gl.uniform3fv(u.start, now.colors[0]); gl.uniform3fv(u.end, now.colors[1]); gl.uniform3fv(u.glow, now.colors[2]);
+        gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      if (!still) frame = win.requestAnimationFrame(draw);
+    }
+    return {
+      set(level, ultra) {
+        goal.level = level; goal.ultra = ultra ? 1 : 0; goal.colors = FILL_COLORS[fillTier(level, ultra)];
+        host.dataset.tier = String(fillTier(level, ultra));
+        if (!frame && !lost) frame = win.requestAnimationFrame(draw);
+      },
+      stop() { win.cancelAnimationFrame(frame); frame = 0; lost = true; const lose = gl.getExtension("WEBGL_lose_context"); if (lose) lose.loseContext(); canvas.remove(); },
+    };
   }
 
   // ---- the picker -----------------------------------------------------------------------------------------------------
@@ -352,28 +457,117 @@
       list.innerHTML = html;
       under.innerHTML = (conn.note || data.note ? `<p class="dgc-mp-note">${esc([data.note, conn.note].filter(Boolean).join(" "))}</p>` : "") + (conn.disabled ? "" : footHtml(conn.footer, conn));
     }
-    // The note under the levels is two lines at most, with Show more when there is more to read: a long one (a
-    // provider's own levels, spelled out) would take over the picker. (Its button says what it does in its words,
-    // Show more or Show less: it opens no layer, so it claims none.)
-    function noteHtml(note) {
-      if (!note) return "";
-      const long = String(note).length > 96;
-      return `<p class="dgc-mp-note dgc-mp-think-note${long && !state.noteOpen ? " is-clamped" : ""}">${esc(note)}</p>`
-        + (long ? `<button type="button" class="dgc-mp-more-note" data-k="n" data-note="1">${state.noteOpen ? "Show less" : "Show more"}</button>` : "");
-    }
+    // Thinking: one slider from Faster to Smarter (his reference, 18 Nov). Built once for its levels and then moved in
+    // place: its fill is a moving picture, which a rebuild on every paint would start again.
+    let effort = null;
+    function stopEffort() { if (effort && effort.fill) effort.fill.stop(); effort = null; }
     function paintThinking() {
       const node = $("think"), t = data.thinking;
       node.hidden = !t;
-      if (!t) { node.innerHTML = ""; return; }
+      if (!t) { stopEffort(); node.innerHTML = ""; return; }
       const levels = Array.isArray(t.levels) ? t.levels : [], at = Math.max(0, levels.findIndex((l) => l.value === t.value));
-      const label = t.label || "Thinking", none = levels.length < 2;
-      node.classList.toggle("is-ultra", !none && levels[at] && levels[at].value === "ultra");
-      node.innerHTML = `<div class="dgc-mp-think-head"><span class="dgc-mp-think-name" id="${id}-think">${esc(label)}</span>`
-        + (none ? "" : `<span class="dgc-mp-meter" aria-hidden="true">${levels.map((_, i) => `<i${i <= at && at > 0 ? ' class="on"' : ""} style="--mp-step:${i}"></i>`).join("")}</span>${t.face ? `<span class="dgc-mp-think-face" aria-hidden="true">${t.face}</span>` : ""}<span class="dgc-mp-think-now">${esc(levels[at].label)}</span>`) + `</div>`
-        + (none ? `<p class="dgc-mp-think-none">${esc(t.none || "Not available for this model")}</p>`
-          : `<div class="dgc-mp-seg" role="radiogroup" aria-labelledby="${id}-think" style="--mp-levels:${levels.length}">${levels.map((l, i) => `<button type="button" role="radio" class="dgc-mp-level" data-k="t:${esc(l.value)}" data-level="${esc(l.value)}" aria-checked="${i === at}" tabindex="${i === at ? 0 : -1}"${t.disabled || data.locked ? " disabled" : ""}${l.title ? ` title="${esc(l.title)}"` : ""}><span class="dgc-mp-level-word" data-short="${esc(l.short || SHORT[l.label] || l.label)}">${esc(l.label)}</span></button>`).join("")}</div>`)
-        + noteHtml(t.note);
+      const label = t.label || "Thinking";
+      if (levels.length < 2) {
+        stopEffort(); node.classList.remove("is-ultra");
+        node.innerHTML = `<div class="dgc-mp-think-head"><span class="dgc-mp-think-name" id="${id}-think">${esc(label)}</span></div>`
+          + `<p class="dgc-mp-think-none">${esc(t.none || "Not available for this model")}</p>`;
+        return;
+      }
+      const sig = JSON.stringify([levels.map((l) => [l.value, l.label, l.title || ""]), !!(t.disabled || data.locked), label, !!t.face, !!t.note]);
+      if (!effort || effort.sig !== sig || !node.contains(effort.track)) buildEffort(node, t, levels, sig, label);
+      moveEffort(t, at);
     }
+    function buildEffort(node, t, levels, sig, label) {
+      stopEffort();
+      const last = levels.length - 1, off = !!(t.disabled || data.locked);
+      node.innerHTML = `<div class="dgc-mp-think-head"><span class="dgc-mp-think-name" id="${id}-think">${esc(label)}</span>`
+        + `<span class="dgc-mp-think-now" aria-hidden="true"></span>`
+        + (t.face ? `<span class="dgc-mp-think-face" aria-hidden="true"></span>` : "")
+        + (t.note ? `<button type="button" class="dgc-mp-think-help" data-k="help" data-help="1" aria-controls="${id}-note" aria-expanded="false" aria-label="About ${esc(label.toLowerCase())}">${glyph("help")}</button>` : "")
+        + `</div><div class="dgc-mp-effort-ends" aria-hidden="true"><span>Faster</span><span>Smarter</span></div>`
+        + `<div class="dgc-mp-effort" role="slider" tabindex="0" data-k="effort" data-effort="1" aria-labelledby="${id}-think" aria-valuemin="0" aria-valuemax="${last}"${off ? ' aria-disabled="true"' : ""}>`
+        + `<div class="dgc-mp-effort-fill" aria-hidden="true"></div>`
+        + `<div class="dgc-mp-effort-stops" aria-hidden="true">${levels.map((l, i) => `<span class="dgc-mp-effort-stop" data-level="${esc(l.value)}" data-i="${i}" title="${esc(l.title || l.label)}"><i></i></span>`).join("")}</div>`
+        + `<div class="dgc-mp-effort-thumb" aria-hidden="true"></div></div>`
+        + (t.note ? `<div class="dgc-mp-think-more" id="${id}-note" hidden><p class="dgc-mp-note dgc-mp-think-note"></p></div>` : "");
+      const track = node.querySelector(".dgc-mp-effort");
+      effort = { sig, node, track, levels, last, at: -1, shown: -1, dragging: false, pick: -1, fill: null };
+      effort.fill = startFill(node.querySelector(".dgc-mp-effort-fill"));
+      const e = effort;
+      const shareAt = (x) => {
+        const b = track.getBoundingClientRect();
+        let s = (x - b.left - 16) / Math.max(1, b.width - 32);
+        if ((track.ownerDocument.defaultView || root).getComputedStyle(track).direction === "rtl") s = 1 - s;
+        return Math.min(1, Math.max(0, s));
+      };
+      const follow = (x) => { const s = shareAt(x); placeEffort(s); e.pick = Math.round(s * e.last); showEffort(e.pick); };
+      track.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0 || track.getAttribute("aria-disabled") === "true" || effort !== e) return;
+        event.preventDefault();
+        track.focus({ preventScroll: true });
+        try { track.setPointerCapture(event.pointerId); } catch { /* (a synthetic pointer has none to capture) */ }
+        e.dragging = true; track.dataset.dragging = "1";
+        // Pressed on a level's stop: that level; anywhere else on the track: the nearest one (and a drag from there).
+        const stop = event.target.closest ? event.target.closest(".dgc-mp-effort-stop") : null;
+        if (stop && track.contains(stop)) { e.pick = Number(stop.dataset.i); placeEffort(e.pick / Math.max(1, e.last)); showEffort(e.pick); }
+        else follow(event.clientX);
+      });
+      track.addEventListener("pointermove", (event) => { if (e.dragging) follow(event.clientX); });
+      // A drag is one choice: shown as it moves, told when it is let go.
+      const end = () => {
+        if (!e.dragging) return;
+        e.dragging = false; delete track.dataset.dragging;
+        const pick = e.pick; e.pick = -1;
+        if (pick >= 0 && pick !== e.at && typeof on.thinking === "function") { showEffort(pick); placeEffort(pick / Math.max(1, e.last)); on.thinking(e.levels[pick].value, { keys: false }); }
+        else { showEffort(e.at); placeEffort(e.at / Math.max(1, e.last)); }
+      };
+      for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) track.addEventListener(type, end);
+    }
+    function placeEffort(share) { if (effort) effort.track.style.setProperty("--mp-share", String(share)); }
+    /** The level shown: its name in the head, the stops it covers, the slider's value and the fill's colours. */
+    function showEffort(at) {
+      const e = effort, level = e.levels[at];
+      if (!level) return;
+      const ultra = level.value === "ultra", now = e.node.querySelector(".dgc-mp-think-now");
+      e.node.classList.toggle("is-ultra", ultra);
+      e.track.classList.toggle("is-top", at === e.last);
+      e.track.setAttribute("aria-valuenow", String(at)); e.track.setAttribute("aria-valuetext", level.label); e.track.dataset.value = level.value;
+      for (const stop of e.track.querySelectorAll(".dgc-mp-effort-stop")) {
+        const i = Number(stop.dataset.i);
+        stop.classList.toggle("on", i <= at);
+        if (i === at && e.shown >= 0 && at !== e.shown) { stop.classList.remove("is-pop"); void stop.offsetWidth; stop.classList.add("is-pop"); }
+      }
+      if (now && now.dataset.v !== level.value) flowWord(now, level.label, e.shown < 0 ? 0 : at > e.shown ? 1 : -1);
+      if (now) now.dataset.v = level.value;
+      if (e.fill) e.fill.set(ultra ? 1 : Math.min(at / Math.max(1, e.last), 0.75), ultra);
+      e.shown = at;
+    }
+    function moveEffort(t, at) {
+      const e = effort;
+      if (!e.dragging) { showEffort(at); placeEffort(at / Math.max(1, e.last)); }
+      e.at = at;
+      // (A Pip's face changes with what it is doing: drawn in place, the slider stays as it is.)
+      const face = e.node.querySelector(".dgc-mp-think-face");
+      if (face && face.dataset.drawn !== (t.face || "")) { face.innerHTML = t.face || ""; face.dataset.drawn = t.face || ""; }
+      const help = e.node.querySelector(".dgc-mp-think-help"), more = e.node.querySelector(".dgc-mp-think-more");
+      if (help) { help.title = t.note || ""; help.setAttribute("aria-expanded", state.noteOpen ? "true" : "false"); }
+      if (more) { more.hidden = !state.noteOpen; const p = more.firstElementChild; if (p && p.textContent !== (t.note || "")) p.textContent = t.note || ""; }
+    }
+    /** A level's name changes by sliding in from the side it moved to, letter by letter (still under reduced motion). */
+    function flowWord(node, word, direction) {
+      const win = node.ownerDocument.defaultView || root;
+      const still = !direction || !(win.matchMedia && !win.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      if (still || typeof node.animate !== "function") { node.textContent = word; return; }
+      node.textContent = "";
+      [...word].forEach((ch, i) => {
+        const span = node.ownerDocument.createElement("span");
+        span.textContent = ch;
+        node.append(span);
+        if (typeof span.animate === "function") span.animate([{ transform: `translateY(${direction * 70}%)`, opacity: 0, filter: "blur(2px)" }, { transform: "none", opacity: 1, filter: "blur(0)" }],
+          { duration: 320, delay: i * 18, easing: "cubic-bezier(.16, 1, .3, 1)", fill: "backwards" });
+      });
+    }
+
     // ---- the second page (the Sub-agents tab: a model chosen, then how they think and their window) ----
     // Its head: Back, the model's name and its connection's under it; then Their thinking (the Thinking row's control),
     // Their context window (Same, then only the sizes the model takes, then Custom…, typed right there), and Done.
@@ -495,6 +689,7 @@
     function close(reason = "") {
       if (!state.open) return;
       state.open = false;
+      stopEffort();
       layer.remove();
       doc.removeEventListener("keydown", onDocKey, true);
       const trigger = data.trigger;
@@ -556,18 +751,16 @@
         if (typeof on.pick === "function") on.pick(row, conn);
         return;
       }
-      if (t.dataset.level !== undefined) { if (typeof on.thinking === "function") on.thinking(t.dataset.level, { keys: false }); return; }
-      if (t.dataset.note !== undefined) { state.noteOpen = !state.noteOpen; paint(); byKey("n")?.focus(); return; }
+      if (t.dataset.help !== undefined) { state.noteOpen = !state.noteOpen; if (effort && data.thinking) moveEffort(data.thinking, effort.at); return; }
       if (t.dataset.foot !== undefined) {
         if (t.dataset.input) { state.typing = t.dataset.k; paint(); box.querySelector(".dgc-mp-input")?.focus(); return; }
         if (typeof on.action === "function") on.action(t.dataset.foot, { connection: conn, row: null });
       }
     });
-    // The focus leaving the thinking levels: a page that waits for arrow keys to rest is told they have.
+    // The focus leaving the thinking slider: a page that waits for arrow keys to rest is told they have.
     box.addEventListener("focusout", (event) => {
-      if (painting || !event.target.dataset || event.target.dataset.level === undefined) return;
-      const to = event.relatedTarget;
-      if (!(to && to.dataset && to.dataset.level !== undefined) && typeof on.thinkingRest === "function") on.thinkingRest();
+      if (painting || !event.target.dataset || event.target.dataset.effort === undefined) return;
+      if (typeof on.thinkingRest === "function") on.thinkingRest();
     });
     box.addEventListener("change", (event) => { const s = event.target; if (s && s.dataset && s.dataset.setting !== undefined && typeof on.setting === "function") on.setting(s.dataset.setting, s.value); });
     search.addEventListener("input", () => {
@@ -595,7 +788,7 @@
         close("escape"); return;
       }
       if (key === "Tab") {
-        const stops = [...box.querySelectorAll("button, input, select")].filter((n) => !n.disabled && n.tabIndex >= 0 && n.getClientRects().length);
+        const stops = [...box.querySelectorAll('button, input, select, [role="slider"]')].filter((n) => !n.disabled && n.tabIndex >= 0 && n.getClientRects().length);
         if (!stops.length) return;
         // A radio the arrows moved to (not the group's stop yet, until the page answers) stands for its group.
         const anchor = stops.includes(t) ? t : (t.getAttribute && t.getAttribute("role") === "radio" && t.parentElement ? [...t.parentElement.children].find((n) => stops.includes(n)) : null) || t;
@@ -658,15 +851,29 @@
         else if (key === "ArrowUp") { event.preventDefault(); event.stopPropagation(); if (at <= 0) byKey(`m:${state.more}`)?.focus(); else list[at - 1].focus(); }
         return;
       }
-      if ((t.dataset.level !== undefined || t.dataset.tab !== undefined) && !t.dataset.note) {
+      // The thinking slider: Right and Up are smarter, Left and Down faster (mirrored right to left), Home and End its
+      // ends. Each step is told as a key step (a page may wait for them to rest).
+      if (t.dataset.effort !== undefined) {
+        const th = data.thinking, levels = th && Array.isArray(th.levels) ? th.levels : [];
+        if (t.getAttribute("aria-disabled") === "true" || levels.length < 2) return;
+        const at = Math.max(0, levels.findIndex((l) => l.value === th.value)), last = levels.length - 1;
+        const rtl = (t.ownerDocument.defaultView || root).getComputedStyle(t).direction === "rtl";
+        const up = rtl ? "ArrowLeft" : "ArrowRight", down = rtl ? "ArrowRight" : "ArrowLeft";
+        const next = key === up || key === "ArrowUp" ? at + 1 : key === down || key === "ArrowDown" ? at - 1 : key === "Home" ? 0 : key === "End" ? last : null;
+        if (next === null) return;
+        event.preventDefault(); event.stopPropagation();
+        const to = Math.min(last, Math.max(0, next));
+        if (to !== at && typeof on.thinking === "function") on.thinking(levels[to].value, { keys: true });
+        return;
+      }
+      if (t.dataset.tab !== undefined) {
         const group = [...t.parentElement.querySelectorAll("button:not(:disabled)")], at = group.indexOf(t);
         const to = key === "ArrowRight" || key === "ArrowDown" ? group[Math.min(group.length - 1, at + 1)] : key === "ArrowLeft" || key === "ArrowUp" ? group[Math.max(0, at - 1)] : key === "Home" ? group[0] : key === "End" ? group[group.length - 1] : null;
         if (!to) return;
         event.preventDefault(); event.stopPropagation();
         if (to === t) return;
-        // A radio group and a tab list: the choice follows the focus.
-        if (t.dataset.level !== undefined) { if (typeof on.thinking === "function") on.thinking(to.dataset.level, { keys: true }); byKey(`t:${to.dataset.level}`)?.focus(); }
-        else { if (typeof on.tab === "function") on.tab(to.dataset.tab); byKey(`tab:${to.dataset.tab}`)?.focus(); }
+        // A tab list: the choice follows the focus.
+        if (typeof on.tab === "function") on.tab(to.dataset.tab); byKey(`tab:${to.dataset.tab}`)?.focus();
       }
     }
     box.addEventListener("keydown", onKey);

@@ -54,7 +54,7 @@ test("Sub-agents says what they run on and how many at once; nothing there prete
   assert.equal(x.requests("propose_pip_update").length + x.requests("accept_pip_update").length, before, "the row is what it is: pressing it changes nothing");
   assert.equal(x.p.open(), true);
   // Ultra: the tab says so at once.
-  await press(x, x.p.level("ultra"));
+  x.p.choose("ultra"); await x.drain();
   assert.deepEqual(x.requests("set_pip_agents").map((r) => r.slots), [4]);
   assert.deepEqual(x.p.tabs(), [["Main model", "false"], ["Sub-agents", "true"]], "the tab stays chosen while the level moves");
   assert.match(x.d.querySelector(".dgc-mp-under .dgc-mp-note").textContent, /Up to 4 at once \(Ultra\)\./);

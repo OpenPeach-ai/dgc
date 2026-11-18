@@ -31,6 +31,12 @@ const open = async (more = {}) => {
 const names = (x) => x.inPips((root) => [...root.querySelectorAll(".dgc-mp-list .dgc-mp-name")].map((n) => n.textContent));
 const focusKey = (x) => x.inPips((root) => root.activeElement?.dataset?.k || root.activeElement?.id || "");
 
+// A level's stop pressed with the real mouse, where it is drawn (inside the Pips view's shadow root).
+const pressStop = async (x, level) => {
+  const at = await x.inPips((root, v) => { const r = root.querySelector(`.dgc-mp-effort-stop[data-level="${v}"] > i`).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }, level);
+  await x.page.mouse.click(at.x, at.y);
+};
+
 test("in the side bar it covers the view with 16 px each side; in a Pips tab it is a 27 rem panel; its glyphs are inline drawings", async (t) => {
   if (skipOrFail(t)) return;
   for (const [width, where, wide] of [[300, "side", 268], [440, "side", 408], [700, "tab", 432], [1100, "tab", 432]]) {
@@ -69,7 +75,7 @@ test("a Pip's connections: the default provider under its own name, each saved p
     await x.click('.dgc-mp-conn[data-rail="subscription:claude"]');
     assert.deepEqual(await names(x), ["CLI default", "Fable (newest)", "Opus 5.5", "Sonnet (newest)", "Haiku (newest)", "Fable 5.2", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"]);
     assert.deepEqual(await x.inPips((root) => [...root.querySelectorAll(".dgc-mp-sec")].map((n) => n.textContent)), ["Fixed versions"]);
-    assert.deepEqual(await x.inPips((root) => [...root.querySelectorAll(".dgc-mp-level")].map((b) => b.dataset.level)), ["off", "low", "medium", "high", "xhigh", "ultra"], "a Pip has Ultra, as Work does");
+    assert.deepEqual(await x.inPips((root) => [...root.querySelectorAll(".dgc-mp-think .dgc-mp-effort-stop")].map((b) => b.dataset.level)), ["off", "low", "medium", "high", "xhigh", "ultra"], "a Pip has Ultra, as Work does");
     await x.inPips((root) => [...root.querySelectorAll(".dgc-mp-row")].find((r) => r.dataset.value === "subscription:claude:claude-sonnet-5-5").click());
     await x.page.waitForTimeout(300);
     assert.deepEqual((await x.requests("propose_pip_update")).map((r) => r.changes), [{ model_choice: { mode: "subscription", engine: "claude", model: "claude-sonnet-5-5" } }]);
@@ -127,11 +133,11 @@ test("with motion on it arrives once and stays through the page's redraws; Think
     assert.equal(layer, true);
     const face = await x.inPips((root) => { const f = root.querySelector(".dgc-mp-think-head .dgc-mp-think-face"), a = f?.firstElementChild, r = a?.getBoundingClientRect(); return a ? { w: Math.round(r.width), h: Math.round(r.height), key: a.dataset.avatarKey } : null; });
     assert.deepEqual(face, { w: 20, h: 20, key: `effort-${GST}` }, "this Pip's face beside its level, small");
-    await x.click('.dgc-mp-level[data-level="high"]'); await x.page.waitForTimeout(250);
+    await pressStop(x, "high"); await x.page.waitForTimeout(250);
     assert.deepEqual((await x.requests("set_pip_chat_options")).map((r) => r.chat_options.thinking), ["high"]);
-    assert.equal(await x.inPips((root) => root.querySelector('.dgc-mp-level[aria-checked="true"]').dataset.level), "high");
+    assert.equal(await x.inPips((root) => root.querySelector(".dgc-mp-think .dgc-mp-effort").dataset.value), "high");
     assert.equal(await x.inPips((root) => !!root.querySelector(".dgc-mp")), true, "a level keeps the picker open");
-    await x.click('.dgc-mp-level[data-level="ultra"]'); await x.page.waitForTimeout(250);
+    await pressStop(x, "ultra"); await x.page.waitForTimeout(250);
     assert.deepEqual((await x.requests("set_pip_agents")).map((r) => r.slots), [4]);
     assert.equal(await x.inPips((root) => root.querySelector(".dgc-mp-think").classList.contains("is-ultra")), true);
     // A click on the dim layer closes it.

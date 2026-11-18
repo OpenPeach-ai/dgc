@@ -22,9 +22,18 @@ export function pickerDom(doc) {
     choices: () => all(".dgc-mp-choices button"),
     sections: () => all(".dgc-mp-sec").map((s) => s.textContent),
     foot: (id) => all(".dgc-mp-action").find((b) => b.dataset.foot === id) || null,
-    levels: () => all(".dgc-mp-level").map((b) => b.dataset.level),
-    level: (value) => all(".dgc-mp-level").find((b) => b.dataset.level === value) || null,
-    levelNow: () => all(".dgc-mp-level").find((b) => b.getAttribute("aria-checked") === "true")?.dataset.level || "",
+    // Thinking is a slider (media/shared/modelpicker.js): a stop per level, its value on the track.
+    levels: () => all(".dgc-mp-think .dgc-mp-effort-stop").map((s) => s.dataset.level),
+    level: (value) => all(".dgc-mp-think .dgc-mp-effort-stop").find((s) => s.dataset.level === value) || null,
+    levelLabel: (value) => api.level(value)?.getAttribute("title") || "",
+    levelNow: () => doc.querySelector(".dgc-mp-think .dgc-mp-effort")?.dataset.value || "",
+    /** Presses a level's stop, as a pointer does: down and up on it. */
+    choose: (value) => {
+      const stop = api.level(value), win = stop && stop.ownerDocument.defaultView;
+      if (!stop) throw new Error(`no thinking level ${value}`);
+      const on = stop.firstElementChild || stop, make = (type) => new (win.PointerEvent || win.MouseEvent)(type, { bubbles: true, cancelable: true, button: 0 });
+      on.dispatchEvent(make("pointerdown")); on.dispatchEvent(make("pointerup"));
+    },
     thinkName: () => doc.querySelector(".dgc-mp-think-name")?.textContent || "",
     note: () => doc.querySelector(".dgc-mp-think-note")?.textContent || "",
     setting: (id) => all(".dgc-mp-select").find((s) => s.dataset.setting === id) || null,

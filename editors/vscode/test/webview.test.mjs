@@ -2969,7 +2969,7 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   assert.ok(p.levels().includes("ultra"));
   assert.equal(p.levels().includes("max"), false,
     "Codex uses xhigh; its selector must not offer an unsupported max value");
-  p.level("high").click();
+  p.choose("high");
   assert.equal(posted.at(-1).type, "setReasoningProfile");
   assert.equal(posted.at(-1).level, "high");
   assert.equal(p.open(), true, "choosing a level keeps the picker open");
@@ -2979,7 +2979,7 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   assert.equal(doc.getElementById("effortname").textContent, "High");
   send({ type: "event", event: { type: "command_rejected", command: "set_config", reason: "invalid_config_value", message: "Codex does not expose that effort" } });
   assert.equal(p.levelNow(), "off", "the open picker goes back too");
-  assert.equal(p.level("off").textContent, "Default");
+  assert.equal(p.levelLabel("off"), "Default");
   assert.ok(p.names().length > 0 && p.level("off"), "the models and the thinking levels are both in sight");
 
   p.box().dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -2998,7 +2998,7 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
     supportsEffort: true, label: "Codex" });
   assert.ok(doc.querySelector(".dgc-mp-think.is-ultra"));
   assert.equal(p.levelNow(), "ultra");
-  p.level("off").click();
+  p.choose("off");
   assert.equal(posted.at(-1).type, "setReasoningProfile");
   assert.equal(posted.at(-1).level, "off");
   assert.deepEqual(errors, []);
@@ -4797,7 +4797,7 @@ test("an answer offers Make this a Pip only when Pips can take it, and only draf
   assert.deepEqual(errors, []);
 });
 
-test("the model picker's thinking note is two lines with Show more, and Show more opens it in place", () => {
+test("the model picker's thinking note sits behind its ?, which opens it in place", () => {
   // Reported 2026-10-07: Ollama's note ("Off turns thinking off. Low, Medium and High are sent as
   // Ollama's thinking levels…") took over the model selector.
   const { dom, errors, send, doc } = makeDom();
@@ -4805,17 +4805,20 @@ test("the model picker's thinking note is two lines with Show more, and Show mor
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud" });
   const p = pickerDom(doc);
-  const note = () => doc.querySelector(".dgc-mp-think-note"), more = () => doc.querySelector(".dgc-mp-more-note");
+  // (Since 18 Nov the levels are a slider, Faster to Smarter, and the note is behind its ?, as in his reference.)
+  const note = () => doc.querySelector(".dgc-mp-think-note"), help = () => doc.querySelector(".dgc-mp-think-help");
+  const shown = () => !note().closest(".dgc-mp-think-more").hidden;
   assert.equal(p.open(), true);
   assert.match(note().textContent, /^Off turns thinking off\./);
-  assert.ok(note().classList.contains("is-clamped"), "two lines at first");
-  assert.equal(more().textContent, "Show more");
-  more().click();
-  assert.equal(note().classList.contains("is-clamped"), false, "the whole note, in place");
-  assert.equal(more().textContent, "Show less");
+  assert.equal(shown(), false, "behind its ? at first");
+  assert.match(help().title, /^Off turns thinking off\./, "and the ?'s hover label says it");
+  assert.equal(help().getAttribute("aria-expanded"), "false");
+  help().click();
+  assert.equal(shown(), true, "the whole note, in place");
+  assert.equal(help().getAttribute("aria-expanded"), "true");
   assert.equal(p.open(), true, "the picker stays open");
-  more().click();
-  assert.ok(note().classList.contains("is-clamped"));
+  help().click();
+  assert.equal(shown(), false);
   assert.deepEqual(errors, []);
   dom.window.close();
 });
@@ -4843,8 +4846,10 @@ test("Work's thinking levels: an arrow key steps them and is told once it rests;
     routes: [{ key: "native", label: "Ollama" }] });
   const p = pickerDom(doc), W = doc.defaultView;
   assert.equal(p.open(), true);
-  p.level("off").focus();
-  p.level("off").dispatchEvent(new W.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  const slider = doc.querySelector(".dgc-mp-think .dgc-mp-effort");
+  assert.equal(slider.getAttribute("role"), "slider");
+  slider.focus();
+  slider.dispatchEvent(new W.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
   assert.equal(p.levelNow(), "low", "the level follows the key at once");
   assert.equal(doc.getElementById("effortname").textContent, "Low", "and so does the button");
   // (Keys are one choice when they rest, or when the picker closes: W15. work-model-picker-browser.test.mjs times it.)
@@ -4854,7 +4859,7 @@ test("Work's thinking levels: an arrow key steps them and is told once it rests;
   assert.deepEqual(posted.filter((m) => m.type === "setReasoningProfile").map((m) => m.level), ["low"], "the step is chosen once the picker closes");
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud", routes: [{ key: "native", label: "Ollama" }] });
-  p.level("high").click();
+  p.choose("high");
   assert.deepEqual(posted.filter((m) => m.type === "setReasoningProfile").map((m) => m.level), ["low", "high"], "a click is one request, at once");
   assert.equal(p.open(), true);
   assert.deepEqual(errors, []);

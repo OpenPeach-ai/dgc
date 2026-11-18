@@ -186,49 +186,63 @@ test("Tab walks the picker's parts and never leaves it", async (t) => {
   const { page } = await scene(t, { width: 440 });
   const seen = [];
   for (let i = 0; i < 9; i++) { await page.keyboard.press("Tab"); seen.push(await focusKey(page)); }
-  assert.deepEqual(seen.slice(0, 5), ["f:claude:typed", "t:high", "c:claude", "f::settings", "q"], "the rail, then Add provider at its foot, then the search");
+  assert.deepEqual(seen.slice(0, 5), ["f:claude:typed", "effort", "c:claude", "f::settings", "q"], "Thinking's slider, the rail, then Add provider at its foot, then the search");
   assert.equal(seen[5], "r:claude:claude:opus", "one row of the list is a Tab stop: the chosen one");
   assert.ok(seen.every((k) => k && k !== "btn" && k !== "BODY"), `stayed inside: ${seen.join(" ")}`);
   await page.keyboard.press("Shift+Tab");
   assert.equal(await focusKey(page), seen[7]);
 });
 
-test("Thinking: a stepped meter and one segmented control of the model's levels; a model with none says so", async (t) => {
+test("Thinking: one slider from Faster to Smarter, a stop for each of the model's levels; a model with none says so", async (t) => {
   if (skipOrFail(t)) return;
   const { page } = await scene(t, { width: 440 });
-  const think = await page.evaluate(() => ({
-    name: document.querySelector(".dgc-mp-think-name").textContent, now: document.querySelector(".dgc-mp-think-now").textContent,
-    group: document.querySelector(".dgc-mp-seg").getAttribute("role"), labelled: !!document.getElementById(document.querySelector(".dgc-mp-seg").getAttribute("aria-labelledby")),
-    levels: [...document.querySelectorAll(".dgc-mp-level")].map((b) => [b.dataset.level, b.getAttribute("role"), b.getAttribute("aria-checked")]),
-    meter: [...document.querySelectorAll(".dgc-mp-meter i")].map((i) => i.classList.contains("on")), heights: [...document.querySelectorAll(".dgc-mp-meter i")].map((i) => i.offsetHeight) }));
-  assert.deepEqual([think.name, think.now, think.group, think.labelled], ["Thinking", "High", "radiogroup", true]);
-  assert.deepEqual(think.levels.map((l) => l[0]), ["off", "low", "medium", "high", "xhigh", "max", "ultra"]);
-  assert.deepEqual(think.levels.filter((l) => l[2] === "true").map((l) => l[0]), ["high"]);
-  assert.deepEqual(think.meter, [true, true, true, true, false, false, false], "the meter is filled up to the level");
-  assert.deepEqual(think.heights, [...think.heights].sort((a, b) => a - b), "its steps rise");
-  await page.click('.dgc-mp-level[data-level="low"]');
+  const think = () => page.evaluate(() => {
+    const s = document.querySelector(".dgc-mp-think .dgc-mp-effort");
+    return { name: document.querySelector(".dgc-mp-think-name").textContent, now: document.querySelector(".dgc-mp-think-now").textContent,
+      role: s.getAttribute("role"), labelled: !!document.getElementById(s.getAttribute("aria-labelledby")), value: [s.getAttribute("aria-valuenow"), s.getAttribute("aria-valuetext"), s.dataset.value],
+      ends: [...document.querySelectorAll(".dgc-mp-effort-ends span")].map((n) => n.textContent),
+      stops: [...s.querySelectorAll(".dgc-mp-effort-stop")].map((n) => [n.dataset.level, n.classList.contains("on")]) };
+  });
+  let seen = await think();
+  assert.deepEqual([seen.name, seen.now, seen.role, seen.labelled, seen.value, seen.ends], ["Thinking", "High", "slider", true, ["3", "High", "high"], ["Faster", "Smarter"]]);
+  assert.deepEqual(seen.stops.map((s) => s[0]), ["off", "low", "medium", "high", "xhigh", "max", "ultra"]);
+  assert.deepEqual(seen.stops.map((s) => s[1]), [true, true, true, true, false, false, false], "the stops it covers, up to the level");
+  // A press on a level's stop chooses it, told at once; the picker stays open.
+  await page.click('.dgc-mp-effort-stop[data-level="low"] > i');
   assert.deepEqual((await picked(page)).at(-1), ["thinking", "low", { keys: false }]);
   assert.equal(await page.evaluate(() => !!document.querySelector(".dgc-mp")), true, "choosing a level keeps the picker open");
-  // The page answers with the new level; the arrow keys step it, as a radio group's do.
+  // The page answers with the new level; the arrow keys step it, each a key step.
   await page.evaluate(() => { window.view = { ...window.view, thinking: { ...window.view.thinking, value: "low" } }; window.picker.update(window.view); });
-  assert.equal(await focusKey(page), "t:low");
+  assert.equal(await focusKey(page), "effort", "the slider has the focus after a press");
   await page.keyboard.press("ArrowRight");
   assert.deepEqual((await picked(page)).at(-1), ["thinking", "medium", { keys: true }]);
-  await page.evaluate(() => { window.view = { ...window.view, thinking: { ...window.view.thinking, value: "off" } }; window.picker.update(window.view); });
-  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-meter i")].map((i) => i.classList.contains("on"))), [false, false, false, false, false, false, false], "Off lights none");
+  await page.keyboard.press("End");
+  assert.deepEqual((await picked(page)).at(-1), ["thinking", "ultra", { keys: true }]);
+  // Dragged: shown as it moves, told once, when it is let go.
+  const before = (await picked(page)).length, track = await box(page, ".dgc-mp-think .dgc-mp-effort");
+  await page.mouse.move(track.x + 18, track.y + track.h / 2); await page.mouse.down();
+  await page.mouse.move(track.x + 16 + (track.w - 32) * (4 / 6), track.y + track.h / 2, { steps: 6 });   // (over Extra high's stop)
+  assert.equal((await picked(page)).length, before, "nothing told while it moves");
+  assert.equal(await page.evaluate(() => document.querySelector(".dgc-mp-think .dgc-mp-effort").dataset.value), "xhigh", "the level under the handle shows as it moves");
+  await page.mouse.up();
+  assert.deepEqual((await picked(page)).slice(before), [["thinking", "xhigh", { keys: false }]]);
+  await page.evaluate(() => { window.view = { ...window.view, thinking: { ...window.view.thinking, value: "ultra" } }; window.picker.update(window.view); });
+  assert.equal(await page.evaluate(() => document.querySelector(".dgc-mp-think").classList.contains("is-ultra")), true, "Ultra wears its own colours");
   await page.evaluate(() => { window.view = { ...window.view, thinking: { levels: [{ value: "off", label: "Off" }], value: "off" } }; window.picker.update(window.view); });
   assert.equal(await page.evaluate(() => document.querySelector(".dgc-mp-think-none")?.textContent), "Not available for this model");
-  assert.equal(await page.evaluate(() => document.querySelectorAll(".dgc-mp-level, .dgc-mp-meter").length), 0);
+  assert.equal(await page.evaluate(() => document.querySelectorAll(".dgc-mp-think .dgc-mp-effort, .dgc-mp-effort-canvas").length), 0, "and its slider (and its picture) are gone");
 });
 
-test("every level's word is whole at every width: said short where seven don't fit, on two lines in a narrow side bar", async (t) => {
+test("the slider fits the picker at every width: the level's name, its ends and its stops whole", async (t) => {
   if (skipOrFail(t)) return;
   for (const width of [300, 360, 440, 700]) {
     const { page } = await scene(t, { width });
-    const cut = await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-level")].filter((b) => b.scrollWidth > b.clientWidth + 0.5).map((b) => b.dataset.level));
-    assert.deepEqual(cut, [], `${width}px: no level is cut`);
-    const seg = await box(page, ".dgc-mp-seg"), dialog = await box(page, ".dgc-mp");
-    assert.ok(seg.x >= dialog.x && seg.right <= dialog.right, `${width}px: the control is inside the picker`);
+    const s = await box(page, ".dgc-mp-think .dgc-mp-effort"), dialog = await box(page, ".dgc-mp");
+    assert.ok(s.x >= dialog.x && s.right <= dialog.right, `${width}px: the slider is inside the picker`);
+    const cut = await page.evaluate(() => [".dgc-mp-think-now", ".dgc-mp-effort-ends span"].filter((q) => [...document.querySelectorAll(q)].some((n) => n.scrollWidth > n.clientWidth + 0.5)));
+    assert.deepEqual(cut, [], `${width}px: nothing cut`);
+    const stops = await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-effort-stop")].map((n) => n.getBoundingClientRect().x));
+    assert.deepEqual(stops, [...stops].sort((a, b) => a - b), `${width}px: the stops run left to right`);
   }
 });
 
@@ -236,13 +250,16 @@ test("nothing in it is a pill: every control has the buttons' 6 px corner", asyn
   if (skipOrFail(t)) return;
   const { page } = await scene(t, { width: 440 }, 12, { tabs: [{ id: "main", label: "Main model" }, { id: "agents", label: "Sub-agents" }], tab: "main",
     settings: [{ id: "context", label: "Context window", value: "0", options: [{ value: "0", label: "Same as the session" }, { value: "65536", label: "64K" }] }] });
-  const corners = await page.evaluate(() => [".dgc-mp-search", ".dgc-mp-conn", ".dgc-mp-seg", ".dgc-mp-tabs", ".dgc-mp-select", ".dgc-mp-level", ".dgc-mp-tab", ".dgc-mp-badge", ".dgc-mp-tile"].map((s) => {
+  const corners = await page.evaluate(() => [".dgc-mp-search", ".dgc-mp-conn", ".dgc-mp-tabs", ".dgc-mp-select", ".dgc-mp-tab", ".dgc-mp-badge", ".dgc-mp-tile"].map((s) => {
     const n = document.querySelector(s), c = getComputedStyle(n); return [s, parseFloat(c.borderTopLeftRadius), n.offsetHeight]; }));
   for (const [selector, radius, height] of corners) {
     assert.ok(radius <= 6, `${selector}: ${radius}px`);
     assert.ok(radius < height / 2 - 1, `${selector} is no pill (${radius}px on ${height}px)`);
   }
-  for (const s of [".dgc-mp-search", ".dgc-mp-conn", ".dgc-mp-seg", ".dgc-mp-tabs", ".dgc-mp-select"]) assert.equal(corners.find((c) => c[0] === s)[1], 6, s);
+  for (const s of [".dgc-mp-search", ".dgc-mp-conn", ".dgc-mp-tabs", ".dgc-mp-select"]) assert.equal(corners.find((c) => c[0] === s)[1], 6, s);
+  // The Thinking slider is the one exception, his call (18 Nov): the reference's own shapes, exactly.
+  assert.deepEqual(await page.evaluate(() => [".dgc-mp-effort", ".dgc-mp-effort-thumb"].map((s) => { const n = document.querySelector(s); return [parseFloat(getComputedStyle(n).borderTopLeftRadius), n.offsetWidth > 0 ? n.offsetHeight : 0]; })),
+    [[12.8, 28], [10.24, 24]], "a 28px track with 12.8px corners, a 24px handle with 10.24px corners");
   assert.deepEqual([(await box(page, ".dgc-mp-search")).h, (await box(page, ".dgc-mp-select")).h], [28, 28], "the buttons' height");
 });
 
@@ -330,7 +347,7 @@ test("both themes and high contrast: the words clear 4.5:1 on the picker's groun
       const rgba = (colour) => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = colour; ctx.fillRect(0, 0, 1, 1); return [...ctx.getImageData(0, 0, 1, 1).data]; };
       const over = (top, under) => { const a = top[3] / 255; return [0, 1, 2].map((i) => top[i] * a + under[i] * (1 - a)); };
       const ground = rgba(getComputedStyle(document.querySelector(".dgc-mp")).backgroundColor);
-      return [".dgc-mp-name", ".dgc-mp-desc", ".dgc-mp-conn-name", ".dgc-mp-conn-kind", ".dgc-mp-think-name", ".dgc-mp-think-now", '.dgc-mp-level[aria-checked="false"]', ".dgc-mp-sec"].map((s) => {
+      return [".dgc-mp-name", ".dgc-mp-desc", ".dgc-mp-conn-name", ".dgc-mp-conn-kind", ".dgc-mp-think-name", ".dgc-mp-think-now", ".dgc-mp-effort-ends span", ".dgc-mp-sec"].map((s) => {
         const ink = over(rgba(getComputedStyle(document.querySelector(s)).color), ground), a = lum(ink), b = lum(ground);
         return [s, Math.round((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) * 100) / 100];
       });
@@ -338,7 +355,7 @@ test("both themes and high contrast: the words clear 4.5:1 on the picker's groun
     for (const [selector, ratio] of ratios) assert.ok(ratio >= 4.5, `${theme} ${selector}: ${ratio}:1`);
   }
   const { page } = await scene(t, { width: 440, contrast: true });
-  const edges = await page.evaluate(() => [".dgc-mp", ".dgc-mp-search", ".dgc-mp-seg", '.dgc-mp-conn[aria-selected="true"]'].map((s) => [s, getComputedStyle(document.querySelector(s)).borderTopStyle, parseFloat(getComputedStyle(document.querySelector(s)).borderTopWidth)]));
+  const edges = await page.evaluate(() => [".dgc-mp", ".dgc-mp-search", ".dgc-mp-effort", '.dgc-mp-conn[aria-selected="true"]'].map((s) => [s, getComputedStyle(document.querySelector(s)).borderTopStyle, parseFloat(getComputedStyle(document.querySelector(s)).borderTopWidth)]));
   for (const [selector, style, width] of edges) assert.ok(style === "solid" && width >= 1, `high contrast: ${selector} has an edge`);
 });
 
@@ -358,7 +375,7 @@ test("in a short editor (the bottom panel open) it stays inside the page and its
   // Final check, 2026-11-07: a model menu ran past the top of the chat, where its first row sat under the tab bar.
   for (const [width, height] of [[500, 360], [300, 300]]) {
     const { page } = await scene(t, { width, height });
-    const facts = await page.evaluate(() => { const d = document.querySelector(".dgc-mp").getBoundingClientRect(), l = document.querySelector(".dgc-mp-list"), t = document.querySelector(".dgc-mp-seg").getBoundingClientRect(), q = document.querySelector(".dgc-mp-q").getBoundingClientRect();
+    const facts = await page.evaluate(() => { const d = document.querySelector(".dgc-mp").getBoundingClientRect(), l = document.querySelector(".dgc-mp-list"), t = document.querySelector(".dgc-mp-think .dgc-mp-effort").getBoundingClientRect(), q = document.querySelector(".dgc-mp-q").getBoundingClientRect();
       return { top: d.top, bottom: d.bottom, scrolls: l.scrollHeight > l.clientHeight && getComputedStyle(l).overflowY === "auto", list: l.clientHeight, thinking: t.bottom <= d.bottom && t.top >= d.top, search: q.top >= d.top }; });
     assert.ok(facts.top >= 16 - 0.5 && facts.bottom <= height - 16 + 0.5, `${width}×${height}: inside the page (${facts.top}–${facts.bottom})`);
     assert.equal(facts.scrolls, true, "the rest scrolls inside it");

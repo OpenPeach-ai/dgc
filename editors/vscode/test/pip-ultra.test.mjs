@@ -9,14 +9,14 @@ import {pickerDom} from './support/picker-dom.mjs';
 
 const windows=[];after(()=>windows.forEach(w=>w.close()));
 const chat=async(api=97,scene={})=>{const x=open({api,scene:{sub:true,waiting:false,fix:'none',...scene}});windows.push(x.w);await x.drain();await x.openPip(GST);await x.drain();x.$('#chat-model').click();await x.drain();return{...x,p:pickerDom(x.d)};};
-const pick=async(x,level)=>{x.p.level(level).click();await x.drain();};
+const pick=async(x,level)=>{x.p.choose(level);await x.drain();};
 const now=x=>x.d.querySelector('.dgc-mp-think-now').textContent;
 
 test('the levels end in Ultra; choosing it gives the Pip 4 sub-agents at once, and the picker and the chip say Ultra',async()=>{
  const x=await chat();
  assert.deepEqual(x.p.levels(),['off','low','medium','high','xhigh','ultra'],'five levels and Ultra, in the Pip\'s model picker');
- assert.equal(x.d.querySelector('.dgc-mp-seg').getAttribute('role'),'radiogroup');
- assert.equal(x.$('.effort-slider, #chat-thinking'),null,'the slider is gone: one segmented control');
+ assert.equal(x.d.querySelector('.dgc-mp-think .dgc-mp-effort').getAttribute('role'),'slider','one slider, Faster to Smarter');
+ assert.equal(x.$('.effort-slider, #chat-thinking'),null,'the old composer slider stays gone');
  await pick(x,'ultra');
  assert.deepEqual(x.requests('set_pip_agents').map(r=>[r.pip_id,r.slots]),[[GST,4]]);
  assert.equal(now(x),'Ultra');

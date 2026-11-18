@@ -50,16 +50,16 @@ for (const [tone, theme] of THEMES) for (const width of WIDTHS) {
   if (want(`slider-${tone}-${width}`)) {
     const shots = [];
     const s = await openMapScene(browser, { width, height: 760, theme, open: false, capabilities: { agents_model: 1, model_fallback: 1 } });
-    try { await s.page.click("#btn-model"); await s.post(modelsMessage()); await s.page.waitForSelector(".dgc-mp .dgc-mp-level"); await s.page.waitForTimeout(250);
-      for (let stop = 0; stop <= 5; stop++) { await s.page.evaluate((v) => document.querySelectorAll(".dgc-mp-level")[v].click(), stop); await s.page.waitForTimeout(350);
+    try { await s.page.click("#btn-model"); await s.post(modelsMessage()); await s.page.waitForSelector(".dgc-mp .dgc-mp-think .dgc-mp-effort"); await s.page.waitForTimeout(250);
+      for (let stop = 0; stop <= 5; stop++) { await s.page.evaluate((v) => { const n = document.querySelectorAll(".dgc-mp-think .dgc-mp-effort-stop > i")[v]; for (const type of ["pointerdown", "pointerup"]) n.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0 })); }, stop); await s.page.waitForTimeout(350);
         shots.push(["Work", stop, (await s.page.locator(".dgc-mp-think").screenshot()).toString("base64")]); }
     } finally { await s.page.context().close(); }
     for (const [name, pip] of [["Tile checker", GST], ["Mornings", MORNINGS]]) {
       const x = await openOnePips(browser, { api: 99, width, height: 760, theme, faces: true, scale: 2, scene: { sub: true, waiting: false, model: MODEL } });
-      try { await x.openPip(pip); await x.waitIn("#chat-model:not([disabled])"); await x.click("#chat-model"); await x.waitIn(".dgc-mp .dgc-mp-level"); await x.page.waitForTimeout(400);
-        for (let stop = 0; stop <= 5; stop++) { await x.inPips((root, v) => root.querySelectorAll(".dgc-mp-level")[v].click(), stop); await x.page.waitForTimeout(350);
+      try { await x.openPip(pip); await x.waitIn("#chat-model:not([disabled])"); await x.click("#chat-model"); await x.waitIn(".dgc-mp .dgc-mp-think .dgc-mp-effort"); await x.page.waitForTimeout(400);
+        for (let stop = 0; stop <= 5; stop++) { await x.inPips((root, v) => { const n = root.querySelectorAll(".dgc-mp-think .dgc-mp-effort-stop > i")[v]; for (const type of ["pointerdown", "pointerup"]) n.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0 })); }, stop); await x.page.waitForTimeout(350);
           shots.push([name, stop, (await x.page.locator(".dgc-mp-think").screenshot()).toString("base64")]); }
-        if (name === "Tile checker") { await x.inPips((root) => root.querySelector('.dgc-mp-level[aria-checked="true"]').focus()); await x.page.keyboard.press("ArrowLeft"); await x.page.waitForTimeout(400);
+        if (name === "Tile checker") { await x.inPips((root) => root.querySelector(".dgc-mp-think .dgc-mp-effort").focus()); await x.page.keyboard.press("ArrowLeft"); await x.page.waitForTimeout(400);
           shots.push([`${name}, by keyboard`, 4, (await x.page.locator(".dgc-mp-think").screenshot()).toString("base64")]);
           await x.page.screenshot({ path: `${out}/menu-${tone}-${width}.png` }); }
         console.log(`slider-${tone}-${width} ${name}`, x.errors.length ? x.errors : "ok");

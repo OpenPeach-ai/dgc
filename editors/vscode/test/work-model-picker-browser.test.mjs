@@ -59,7 +59,7 @@ test("the model button opens the one picker, centred over a dim page: the connec
       assert.ok(tabsBox.bottom <= mainBox.top + 1, "the tabs above the frame");
       assert.ok(railBox.bottom <= footBox.top + 1 && footBox.right <= listBox.left, "Add provider at the rail's foot, beside the card");
       assert.ok(listBox.bottom <= thinkBox.top + 1 && thinkBox.bottom <= mainBox.bottom + 1, "Thinking under the models, inside the card");
-      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-level")].map((b) => b.dataset.level)), ["off", "low", "medium", "high", "xhigh", "ultra"], "Work has Ultra");
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-think .dgc-mp-effort-stop")].map((b) => b.dataset.level)), ["off", "low", "medium", "high", "xhigh", "ultra"], "Work has Ultra");
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     } finally { await page.close(); }
   }
@@ -171,7 +171,7 @@ test("Claude Code's rows: each nickname with the version it last ran as, then th
       "Sonnet (newest) | Follows the newest Sonnet. Its version shows after its first use", "Haiku (newest) | Follows the newest Haiku. Its version shows after its first use", "# Fixed versions",
       "Fable 5.2 | claude-fable-5-2 · stays on this version", "Opus 5.5 | claude-opus-5-5 · stays on this version", "Sonnet 5.5 | claude-sonnet-5-5 · stays on this version", "Haiku 5.5 | claude-haiku-5-5 · stays on this version"]);
     assert.deepEqual(await here.page.evaluate(() => [...document.querySelectorAll('.dgc-mp-row[aria-selected="true"]')].map((r) => r.dataset.value)), ["opus"], "the nickname is the chosen one, not the version it runs as today");
-    assert.deepEqual(await here.page.evaluate(() => [...document.querySelectorAll(".dgc-mp-level")].map((b) => b.dataset.level)), ["off", "low", "medium", "high", "xhigh", "max", "ultra"], "Claude Code's levels, and Ultra");
+    assert.deepEqual(await here.page.evaluate(() => [...document.querySelectorAll(".dgc-mp-think .dgc-mp-effort-stop")].map((b) => b.dataset.level)), ["off", "low", "medium", "high", "xhigh", "max", "ultra"], "Claude Code's levels, and Ultra");
     await here.page.click('.dgc-mp-row[data-value="claude-sonnet-5-5"]');
     assert.deepEqual(await posted(here.page, "setModel"), [{ type: "setModel", model: "claude-sonnet-5-5" }], "a fixed version is sent by its full name: it stays on it");
     assert.equal(await here.page.locator(".dgc-mp-layer").count(), 0, "choosing a model closes the picker");
@@ -236,7 +236,7 @@ for (const [width, height] of [[300, 900], [300, 600], [220, 700]]) test(`the pi
     const rows = await page.evaluate(() => { const l = document.querySelector(".dgc-mp-list").getBoundingClientRect(); return [...document.querySelectorAll(".dgc-mp-list .dgc-mp-row")].filter((r) => { const b = r.getBoundingClientRect(); return b.top >= l.top - 1 && b.bottom <= l.bottom + 1; }).length; });
     assert.ok(rows >= 2, `${rows} whole rows show`);
     assert.ok(list.h >= 76, `the list keeps room (${list.h}px)`);
-    const cut = await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-level, .dgc-mp-tab, .dgc-mp-think-name, .dgc-mp-conn-name")].filter((n) => n.scrollWidth > n.clientWidth + 0.5).map((n) => n.textContent));
+    const cut = await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-think-now, .dgc-mp-effort-ends span, .dgc-mp-tab, .dgc-mp-think-name, .dgc-mp-conn-name")].filter((n) => n.scrollWidth > n.clientWidth + 0.5).map((n) => n.textContent));
     assert.deepEqual(cut, [], "no control's word is cut");
     assert.equal(await page.evaluate(() => document.querySelector(".dgc-mp").scrollWidth <= document.querySelector(".dgc-mp").clientWidth + 1), true, "nothing runs off its side");
     // The chosen model is in sight when it opens.
@@ -277,12 +277,12 @@ test("W15: arrow keys along the levels are one choice: the button follows at onc
   try {
     const start = await x.now();
     assert.equal(start.value, "low"); assert.equal(start.button, "Low");
-    await x.page.focus('.dgc-mp-level[aria-checked="true"]');
+    await x.page.focus('.dgc-mp-think .dgc-mp-effort');
     const seen = [];
     for (let i = 0; i < 3; i++) { await x.page.keyboard.press("ArrowRight"); await x.page.waitForTimeout(150); const n = await x.now(); seen.push([n.value, same(n.button, n.word), await focusKey(x.page)]); }
     assert.deepEqual(seen.map(([v]) => v), start.levels.slice(start.levels.indexOf("low") + 1, start.levels.indexOf("low") + 4), "each key is one level");
     assert.ok(seen.every(([, same]) => same), "the button says the picker's level at every step, at once");
-    assert.deepEqual(seen.map(([, , k]) => k), seen.map(([v]) => `t:${v}`), "the focus follows the level");
+    assert.deepEqual(seen.map(([, , k]) => k), seen.map(() => "effort"), "the focus stays on the slider");
     assert.deepEqual(await x.sent(), [], "nothing is sent while the keys are still moving");
     assert.equal((await x.now()).menu, true, "the picker stays open for the next step");
     // DGC says the level it had (an answer on its way): the button keeps the level just chosen.
@@ -302,29 +302,29 @@ test("W15: back where it started sends nothing; leaving the levels sends at once
   if (skipOrFail(t)) return;
   const back = await openThinking(browser, { think: "medium" });
   try {
-    await back.page.focus('.dgc-mp-level[aria-checked="true"]');
+    await back.page.focus('.dgc-mp-think .dgc-mp-effort');
     await back.page.keyboard.press("ArrowRight"); await back.page.waitForTimeout(120); await back.page.keyboard.press("ArrowLeft"); await back.page.waitForTimeout(900);
     assert.deepEqual(await back.sent(), [], "the level it already had is not asked for again: no line in the session");
     assert.equal((await back.now()).button, "Medium");
     // Tab away right after a key: the choice is sent then, not after the wait.
-    await back.page.focus('.dgc-mp-level[aria-checked="true"]'); await back.page.keyboard.press("ArrowRight"); await back.page.keyboard.press("Tab"); await back.page.waitForTimeout(80);
+    await back.page.focus('.dgc-mp-think .dgc-mp-effort'); await back.page.keyboard.press("ArrowRight"); await back.page.keyboard.press("Tab"); await back.page.waitForTimeout(80);
     assert.deepEqual((await back.sent()).map((m) => m.level), ["high"]);
   } finally { await back.page.close(); }
   const closed = await openThinking(browser, { think: "medium" });
   try {
-    await closed.page.focus('.dgc-mp-level[aria-checked="true"]'); await closed.page.keyboard.press("ArrowLeft"); await closed.page.keyboard.press("Escape"); await closed.page.waitForTimeout(60);
+    await closed.page.focus('.dgc-mp-think .dgc-mp-effort'); await closed.page.keyboard.press("ArrowLeft"); await closed.page.keyboard.press("Escape"); await closed.page.waitForTimeout(60);
     assert.deepEqual((await closed.sent()).map((m) => m.level), ["low"], "closing the picker right after a key sends it then");
   } finally { await closed.page.close(); }
   const click = await openThinking(browser, { think: "off" });
   try {
-    await click.page.click('.dgc-mp-level[data-level="high"]'); await click.page.waitForTimeout(60);
+    await click.page.click('.dgc-mp-effort-stop[data-level="high"] > i'); await click.page.waitForTimeout(60);
     const sent = await click.sent(), after = await click.now();
     assert.deepEqual(sent.map((m) => m.level), ["high"], "a click is the one request, at once");
     assert.equal(after.menu, true, "and the picker stays open"); assert.equal(after.button, "High", "the button says it at once");
     // What DGC says on the way (the level before) never shows; its own answer settles it.
     await click.state("off"); assert.equal((await click.now()).button, "High"); assert.equal((await click.now()).value, "high");
     await click.state("high"); assert.equal((await click.now()).button, "High");
-    await click.page.click('.dgc-mp-level[data-level="ultra"]'); await click.page.waitForTimeout(60);
+    await click.page.click('.dgc-mp-effort-stop[data-level="ultra"] > i'); await click.page.waitForTimeout(60);
     assert.deepEqual((await click.sent()).map((m) => m.level), ["high", "ultra"]);
     assert.equal(await click.page.evaluate(() => document.querySelector(".dgc-mp-think").classList.contains("is-ultra")), true);
   } finally { await click.page.close(); }
@@ -335,7 +335,7 @@ test("W15: a level DGC never takes goes back to what DGC last said", async (t) =
   const x = await openThinking(browser, { think: "low" });
   try {
     await x.page.evaluate(() => { const real = window.setTimeout; window.setTimeout = (fn, ms, ...a) => real(fn, ms >= 5000 ? 300 : ms, ...a); });   // (the six seconds DGC is given, shortened)
-    await x.page.click('.dgc-mp-level[data-level="medium"]'); await x.page.waitForTimeout(60);
+    await x.page.click('.dgc-mp-effort-stop[data-level="medium"] > i'); await x.page.waitForTimeout(60);
     assert.equal((await x.now()).button, "Medium");
     await x.page.waitForTimeout(500);
     assert.equal((await x.now()).button, "Low", "DGC said nothing: the button says the level it is really at");

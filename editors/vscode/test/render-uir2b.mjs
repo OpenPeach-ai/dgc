@@ -122,7 +122,7 @@ sections.library = async () => {
 sections.thinking = async () => {
   for (const theme of PAIR) for (const width of WIDTHS) {
     const x = await S.openThinking(browser, { theme, width, think: "low" });
-    await x.page.focus('.dgc-mp-level[aria-checked="true"]');
+    await x.page.focus('.dgc-mp-think .dgc-mp-effort');
     for (let i = 0; i < 3; i++) { await x.page.keyboard.press("ArrowRight"); await x.page.waitForTimeout(150); }
     await shot(x.page, `thinking-keys-${theme}-${width}`);
     await x.page.waitForTimeout(900);

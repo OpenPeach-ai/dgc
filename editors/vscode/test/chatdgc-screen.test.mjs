@@ -129,7 +129,7 @@ test("a new chat: the question and the box together, and a message goes out with
     await s.page.locator(".dgc-mp-row", { hasText: "qwen3:32b" }).click();
     assert.equal(await s.page.locator(".dgc-mp-layer").count(), 0, "choosing a model closes the picker");
     await s.page.locator("#cd-model-pill").click();
-    await s.page.locator('.dgc-mp-level[aria-checked="true"]').focus();
+    await s.page.locator(".dgc-mp-think .dgc-mp-effort").focus();
     for (let i = 0; i < 3; i++) await s.page.keyboard.press("ArrowRight");
     await s.page.keyboard.press("Escape");
     await s.page.locator("#cd-input").fill("What's the capital of France?");
@@ -166,14 +166,14 @@ test("a new ChatDGC chat uses the saved provider default and changes providers w
     assert.deepEqual(await picker.locator(".dgc-mp-list .dgc-mp-name").allInnerTexts(), ["CLI default", "gpt-5.6-sol"]);
     assert.deepEqual(await picker.locator('.dgc-mp-row[aria-selected="true"] .dgc-mp-name').allInnerTexts(), ["CLI default"]);
     await picker.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));   // at rest: it opens over 180 ms
-    const before = await picker.locator(".dgc-mp-seg").boundingBox();
+    const before = await picker.locator(".dgc-mp-think .dgc-mp-effort").boundingBox();
     await picker.locator('.dgc-mp-conn[data-rail="' + nativeId + '"]').click();
     assert.deepEqual((await s.posted("models")).at(-1), { type: "models", provider: nativeId });
     await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: nativeId,
                    current: codex, ids: ["deepseek-v4.1-flash:cloud", "qwen3:32b"] });
     assert.deepEqual(await picker.locator(".dgc-mp-list .dgc-mp-name").allInnerTexts(), ["qwen3:32b", "deepseek-v4.1-flash:cloud"]);
     assert.deepEqual(await picker.locator(".dgc-mp-sec").allInnerTexts(), ["On this computer", "Cloud"], "Ollama's list in two sections");
-    const after = await picker.locator(".dgc-mp-seg").boundingBox();
+    const after = await picker.locator(".dgc-mp-think .dgc-mp-effort").boundingBox();
     assert.ok(Math.abs(before.y - after.y) < 2 && Math.abs(before.height - after.height) < 1, "Thinking stays fixed while the connection and its rows change");
     await picker.locator(".dgc-mp-row", { hasText: "deepseek-v4.1-flash:cloud" }).click();
     assert.equal(await s.page.locator("#cd-model").inputValue(), native);
@@ -2269,7 +2269,8 @@ test("the picker keeps its height and its place at every thinking level, though 
       const picker = s.page.locator(".dgc-mp");
       // Measured at rest: it opens over 180 ms from 98% (the shared dialog's motion), which a box measures mid-way.
       await picker.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));
-      await picker.locator('.dgc-mp-level[aria-checked="true"]').focus();
+      await picker.locator(".dgc-mp-think-help").click();                      // (the levels' words, behind the ?, open)
+      await picker.locator(".dgc-mp-think .dgc-mp-effort").focus();
       await s.page.keyboard.press("Home");
       const seen = [];
       for (let level = 0; level < 5; level++) {
@@ -2284,7 +2285,7 @@ test("the picker keeps its height and its place at every thinking level, though 
       assert.equal(new Set(seen.map(([, , y]) => y)).size, 1, `${width}px: and the picker never moves`);
       if (width === 300) assert.ok(seen.some(([, , , lines]) => lines === 2), "at this width a description does wrap: the case this guards");
       assert.equal(await s.page.locator("#cd-thinking").inputValue(), "xhigh");
-      assert.deepEqual(await picker.locator(".dgc-mp-level").evaluateAll((all) => all.map((b) => b.dataset.level)), ["off", "low", "medium", "high", "xhigh"], "ChatDGC has no Ultra");
+      assert.deepEqual(await picker.locator(".dgc-mp-think .dgc-mp-effort-stop").evaluateAll((all) => all.map((b) => b.dataset.level)), ["off", "low", "medium", "high", "xhigh"], "ChatDGC has no Ultra");
       assert.deepEqual(s.errors, []);
     } finally { await s.page.close(); }
   }
@@ -2317,18 +2318,19 @@ test("the box as main DGC's: no accent ring, one button for the model opening th
     assert.equal(await pill.getAttribute("aria-expanded"), "true");
     assert.deepEqual(await picker.locator(".dgc-mp-list .dgc-mp-name").allInnerTexts(), ["deepseek-v4.1-flash:cloud", "qwen3:32b"]);
     assert.deepEqual(await picker.locator('.dgc-mp-row[aria-selected="true"] .dgc-mp-name').allInnerTexts(), ["deepseek-v4.1-flash:cloud"]);
-    const seg = picker.locator(".dgc-mp-seg");
-    assert.deepEqual([await seg.getAttribute("role"), await picker.locator('.dgc-mp-level[aria-checked="true"]').getAttribute("data-level"), await picker.locator(".dgc-mp-think-now").textContent(),
-                      await picker.locator(".dgc-mp-think-note").textContent()], ["radiogroup", "medium", "Medium", "Medium: thinks it through."]);
+    const seg = picker.locator(".dgc-mp-think .dgc-mp-effort");
+    assert.deepEqual([await seg.getAttribute("role"), await seg.getAttribute("data-value"), await picker.locator(".dgc-mp-think-now").textContent(),
+                      await picker.locator(".dgc-mp-think-note").textContent(), await picker.locator(".dgc-mp-think-help").getAttribute("title")],
+                     ["slider", "medium", "Medium", "Medium: thinks it through.", "Medium: thinks it through."], "the level's note behind its ?");
     if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-composer-picker.png") });
     // A click on a level: that level.
-    await picker.locator('.dgc-mp-level[data-level="xhigh"]').click();
+    await picker.locator('.dgc-mp-effort-stop[data-level="xhigh"] > i').click();
     assert.equal(await s.page.locator("#cd-thinking").inputValue(), "xhigh");
     assert.equal(await picker.locator(".dgc-mp-think-now").textContent(), "Extra high");
     assert.equal(await pill.getAttribute("data-level"), "xhigh", "the button's arc follows");
     assert.equal(await picker.isVisible(), true, "still open, for the model next");
     // Keys: step, ends.
-    await picker.locator('.dgc-mp-level[aria-checked="true"]').focus();
+    await picker.locator(".dgc-mp-think .dgc-mp-effort").focus();
     await s.page.keyboard.press("Home");
     assert.equal(await s.page.locator("#cd-thinking").inputValue(), "off");
     await s.page.keyboard.press("End");
@@ -2348,17 +2350,17 @@ test("the box as main DGC's: no accent ring, one button for the model opening th
     await s.send({ type: "models", ids: Array.from({ length: 22 }, (_, i) => `model-${String(i).padStart(2, "0")}:latest`), current: "model-17:latest" });
     await s.page.evaluate(() => { const pick = document.getElementById("cd-model"); pick.value = "model-17:latest"; pick.dispatchEvent(new Event("change")); });
     await pill.click();
-    const [box, segBox, view] = [await picker.boundingBox(), await picker.locator(".dgc-mp-seg").boundingBox(), s.page.viewportSize()];
+    const [box, segBox, view] = [await picker.boundingBox(), await picker.locator(".dgc-mp-think .dgc-mp-effort").boundingBox(), s.page.viewportSize()];
     assert.ok(segBox.y >= box.y && segBox.y + segBox.height <= box.y + box.height && box.y >= 0 && box.y + box.height <= view.height, "Thinking is in view, inside the page");
     assert.equal(await picker.locator(".dgc-mp-list").evaluate((n) => n.scrollHeight > n.clientHeight), true, "the models scroll");
     const chosen = await picker.locator('.dgc-mp-row[aria-selected="true"]').boundingBox(), list = await picker.locator(".dgc-mp-list").boundingBox();
     assert.ok(chosen.y >= list.y && chosen.y + chosen.height <= list.y + list.height + 1, "the chosen model shown in its list");
-    await picker.locator('.dgc-mp-level[data-level="high"]').click();
+    await picker.locator('.dgc-mp-effort-stop[data-level="high"] > i').click();
     assert.equal(await s.page.locator("#cd-thinking").inputValue(), "high");
     await s.page.keyboard.press("Escape");
     await s.send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "qwen3:32b"], current: "qwen3:32b" });
     await s.page.evaluate(() => { const pick = document.getElementById("cd-model"); pick.value = "qwen3:32b"; pick.dispatchEvent(new Event("change")); });
-    await pill.click(); await picker.locator('.dgc-mp-level[data-level="low"]').click();
+    await pill.click(); await picker.locator('.dgc-mp-effort-stop[data-level="low"] > i').click();
     await s.page.keyboard.press("Escape");
     // The window's size, in the meter's details, as main DGC's.
     await s.send({ type: "context", window: 32768, limit: 262144, used: 5200, preset: "32k", source: "reported", parts: { conversation: 5200 }, compactable: true });
