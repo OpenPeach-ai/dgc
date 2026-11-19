@@ -525,8 +525,9 @@ class TheCommandLineKeepsEachProvidersKey(_Isolated):
                 return []
 
         def select(title, labels, hints=None):
-            if title == "Provider":
-                return 0
+            if title == "Provider":                         # the first preset, by its label, not its place
+                from dgc.config import PROVIDERS
+                return labels.index(PROVIDERS[next(iter(PROVIDERS))]["label"])
             return list(SEARCH_PROVIDERS).index("tavily")
 
         prompts = []

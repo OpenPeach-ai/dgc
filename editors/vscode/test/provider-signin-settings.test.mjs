@@ -126,3 +126,50 @@ test("OpenRouter's key box says it is for pasting a key", () => {
  assert.equal(box.getAttribute('placeholder'),'Or paste a key');
  assert.equal(box.nextElementSibling?.dataset.providerConnect,'openrouter','Connect sits on the right of the box');
 });
+
+// ---- ChatGPT · your plan (17 Nov) ----
+const PLAN_PRESETS=[...PRESETS,{id:'openai',label:'OpenAI',url:'https://api.openai.com/v1',needsKey:true,keys:true},
+ {id:'chatgpt',label:'ChatGPT · your plan',url:'https://api.openai.com/v1',needsKey:false,connect:true,plan:true}];
+const PLAN='provider_'+'c'.repeat(32);
+
+test('ChatGPT · your plan in Add provider: only Connect, no host, key or Save', () => {
+ const x=setup();x.message({type:'providers',providers:PLAN_PRESETS});
+ x.click('[data-nav=models]');x.click('details[data-more=saved-providers] summary');x.pick('chatgpt');
+ const connect=x.d.querySelector('[data-provider-connect="chatgpt"]');
+ assert.equal(connect?.textContent,'Connect');
+ assert.match(connect.closest('.field').textContent,/chatgpt\.com.*Plus or Pro/);
+ for(const gone of ['#saved_provider_url','#saved_provider_key','#saved_provider_mode','#saved-provider-add'])assert.equal(x.d.querySelector(gone),null,gone);
+ connect.click();
+ assert.deepEqual(x.sent.at(-1),{type:'connectProvider',preset:'chatgpt',model:''});
+});
+
+test('a saved plan says it is connected, as whom, with Manage usage and Sign out; signed out, Connect again', () => {
+ const x=setup();x.message({type:'providers',providers:PLAN_PRESETS});
+ x.message({type:'providerProfiles',defaultId:PLAN,profiles:[{id:PLAN,kind:'native',name:'ChatGPT · your plan',base_url:'https://api.openai.com/v1',model:'gpt-6.1-sol',api_mode:'responses'}]});
+ x.click('[data-nav=models]');
+ x.message({type:'providerStates',states:{[PLAN]:{state:'plan',plan:'connected',name:'Tile Maker'}}});
+ let row=rowOf(x,'ChatGPT · your plan');
+ assert.match(row.textContent,/Connected as Tile Maker/);
+ row.querySelector('[data-plan-usage]').click();
+ assert.deepEqual(x.sent.at(-1),{type:'openProviderKeys',id:'chatgpt',page:'usage'});
+ row.querySelector('[data-plan-signout]').click();
+ assert.deepEqual(x.sent.at(-1),{type:'signOutPlan'});
+ x.message({type:'providerStates',states:{[PLAN]:{state:'plan',plan:'signed_out',name:''}}});
+ row=rowOf(x,'ChatGPT · your plan');
+ assert.match(row.querySelector('.provider-problem').textContent,/Signed out of ChatGPT/);
+ row.querySelector(`[data-provider-reconnect="${PLAN}"]`).click();
+ assert.deepEqual(x.sent.at(-1),{type:'reconnectProvider',id:PLAN});
+});
+
+test('OpenAI and the plan share an address, and saving one never hides the other', () => {
+ const x=setup();x.message({type:'providers',providers:PLAN_PRESETS});
+ x.message({type:'providerProfiles',defaultId:PLAN,profiles:[{id:PLAN,kind:'native',name:'ChatGPT · your plan',base_url:'https://api.openai.com/v1',model:'m',api_mode:'responses'}]});
+ x.click('[data-nav=models]');x.click('details[data-more=saved-providers] summary');
+ const choices=()=>[...x.d.querySelectorAll('#saved_provider_preset option')].map(o=>o.value);
+ assert.ok(choices().includes('openai'),'OpenAI can still be added');
+ assert.ok(!choices().includes('chatgpt'),'the plan is already here');
+ x.message({type:'providerProfiles',defaultId:'p',profiles:[{id:'provider_'+'d'.repeat(32),kind:'native',name:'OpenAI',base_url:'https://api.openai.com/v1',model:'m',api_mode:'auto'}]});
+ x.click('details[data-more=saved-providers] summary');
+ assert.ok(choices().includes('chatgpt'),'the plan can still be added');
+ assert.ok(!choices().includes('openai'));
+});

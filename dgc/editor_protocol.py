@@ -657,6 +657,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "all_tokens": _I(), "totals": _O(), "by_pip": _A(), "by_model": _A(), "omitted": _I(),
         "error": _S(False),
     },
+    # 0.52: how much of a plan's usage limits is used, as each connection reports it (capability usage_limits; the
+    # usage meter on the prompt box). Said on get_usage_limits (request_id set), and whenever this process keeps a
+    # new report (no request_id). ``limits`` [{source "chatgpt_plan"|"codex"|"claude", windows [{id, used_percent
+    # 0-100, window_minutes|null, resets_at epoch s|null}], at epoch ms, limited}]: every source's latest, from DGC's
+    # home (a Pip's runner reports there too). ``route``: the source this backend's own model draws on, "" for none.
+    "usage_limits": {"request_id": _S(False), "limits": _A(), "route": _S(False)},
     # ---- v14: sub-agents (the agents indicator) -----------------------------------------------
     # Every task sub-agent started in this chat, at any depth. ``id`` is sub-<12 hex>, the same id
     # every ``agent`` field carries; ``parent_id`` is null for a child of the main agent;
@@ -1041,6 +1047,8 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "system": _S(False),
     },
     # ---- end v13 token usage -------------------------------------------------------------------
+    # 0.52 (capability usage_limits): read-only and allowed while a turn runs; answered by one usage_limits.
+    "get_usage_limits": {"request_id": _S()},
     # ---- v14 --------------------------------------------------------------------------------------
     # Read-only and allowed while a turn runs. list_agents is answered by `agents`; get_image by
     # exactly one `image` event carrying this request_id (``ref`` is "img_" + 32 hex).

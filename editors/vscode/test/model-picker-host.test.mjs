@@ -112,3 +112,37 @@ test("a Pip's list: each saved provider with its mark and badge, and the host DG
   x.provider.state.baseUrl = "https://llm.example.com/v1";
   assert.deepEqual(x.provider.pipHostMark(), { name: "Custom host", mark: "", badge: "key" });
 });
+
+// ChatGPT · your plan (0.52): Work's routes say a saved plan row's sign-in state (its key is the plan's marker); with
+// none saved and a DGC that has the plan, the rail offers it; a DGC without the plan offers nothing.
+test("Work's models answer: the plan's saved row says its state, and with none saved the rail offers ChatGPT · your plan", async () => {
+  const PLAN = `provider_${"e".repeat(32)}`;
+  const x = world({ capabilities: { chatgpt_plan: { version: 1, state: "signed_out" } } });
+  x.provider.constructor.planSaid = "";
+  await x.provider.listModels();
+  assert.deepEqual(x.models().routes.filter((r) => r.kind === "plan_offer").map((r) => [r.key, r.label, r.plan]), [["chatgpt_plan", "ChatGPT · your plan", "signed_out"]]);
+  const saved = [...SAVED, { id: PLAN, name: "ChatGPT · your plan", base_url: "https://api.openai.com/v1", model: "", api_mode: "responses" }];
+  x.provider.context.globalState.update("dgc.modelProviders.v1", saved);
+  x.provider.context.secrets.get = async (key) => (String(key).includes(PLAN) ? "dgc-chatgpt-plan" : "key");
+  await x.provider.listModels();
+  const routes = x.models().routes;
+  assert.equal(routes.find((r) => r.key === PLAN).plan, "signed_out");
+  assert.equal(routes.filter((r) => r.kind === "plan_offer").length, 0);
+  assert.equal(routes.filter((r) => r.plan).length, 1, "only the plan's row: OpenAI's own key at the same address would not be it");
+  const old = world();
+  await old.provider.listModels();
+  assert.equal(old.models().routes.filter((r) => r.plan || r.kind === "plan_offer").length, 0, "a DGC without the plan offers nothing");
+});
+
+// A Pip's chat in the side bar (0.52): its usage meter's and its picker's ChatGPT plan messages are passed to the Pips
+// bridge (which answers them through the panel's usePlan), only from this page's own document.
+test("the side bar's Pip page: its meter and plan messages reach the Pips bridge, only from its own document", async () => {
+  const x = world();
+  x.provider.pipsDocumentId = "doc1";
+  const bridge = x.provider.ensurePipsBridge();
+  const got = [];
+  bridge.receive = (message) => got.push(message.type);
+  for (const type of ["pipUsageMeter", "pipOpenUsagePage", "pipPlanConnect", "pipPlanCancel"]) await x.provider.onMessage({ type, documentId: "doc1", pip_id: `pip_${"a".repeat(32)}` });
+  await x.provider.onMessage({ type: "pipUsageMeter", documentId: "someone-else", pip_id: `pip_${"a".repeat(32)}` });
+  assert.deepEqual(got, ["pipUsageMeter", "pipOpenUsagePage", "pipPlanConnect", "pipPlanCancel"]);
+});

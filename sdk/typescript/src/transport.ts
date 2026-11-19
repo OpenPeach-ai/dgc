@@ -44,7 +44,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "steering_update", "stream_end", "subagent_settings", "agents_model", "text_delta", "think_changed", "thinking_delta",
   "thinking_end", "todos", "tool_call", "tool_denied", "tool_images", "tool_progress", "trace_usage", "reply_trace",
   "tool_result", "troupe_finished", "troupe_progress", "troupe_started", "troupes",
-  "turn_activity", "turn_end", "turn_eta", "turn_files", "turn_interrupted", "turn_start", "undo_result", "usage_report",
+  "turn_activity", "turn_end", "turn_eta", "turn_files", "turn_interrupted", "turn_start", "undo_result", "usage_limits", "usage_report",
   "video_job", "video_jobs", "videos_library",
   "voice_audio", "voice_error", "voice_progress", "voice_state", "voice_text",
   "workspace_change", "workspace_changes", "workspace_roots",

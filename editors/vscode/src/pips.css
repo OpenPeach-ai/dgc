@@ -668,6 +668,12 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .ctx-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),var(--lav))}
 .ctx-split{display:flex;justify-content:space-between;gap:8px;margin:4px 0 10px;color:var(--muted);font:500 10px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
 .composer-chip.with-text{width:auto;padding:0 6px}
+/* "Using ChatGPT plan" beside the model chip while this Pip's requests use the plan (0.52), and the usage meter's chip
+   (media/shared/usagemeter.js) in its tone. */
+.composer-plan-note{flex:0 1 auto;min-width:0;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--composer-faint);font:500 11px/1 var(--vscode-font-family,system-ui)}
+.composer-plan-note .plan-short{display:none}
+@container pip-composer (max-width:520px){.composer-plan-note .plan-long{display:none}.composer-plan-note .plan-short{display:inline}}
+@container pip-composer (max-width:340px){.composer-plan-note{display:none}}
 /* The context window part by part (media/breakdown.js draws it; main.css styles it in DGC's own panel, where this
    menu also shows, so each rule here sets every property main.css does and wins by scope in both places). */
 .composer-context-menu .bd{margin:10px 0 0}

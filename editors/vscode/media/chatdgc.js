@@ -4165,7 +4165,7 @@
     }
     $("cd-pill-arc-fill").setAttribute("d", level ? arc(angleOf(level), 6, 8, 9) : "");
     pill.dataset.level = LEVELS[level][0];
-    pill.title = `${name || "No model"} · thinking: ${LEVELS[level][1]}. Click to change`;
+    pill.title = `${name || "No model"} · thinking: ${LEVELS[level][1]}${pill.classList.contains("on-plan") ? " · Using ChatGPT plan" : ""}. Click to change`;
     pill.setAttribute("aria-label", `Model ${name || "not chosen"}, thinking ${LEVELS[level][1]}. Change model and thinking`);
     // D14: its model didn't answer and its fallback does: the pill names the fallback, in red, with the word.
     const on = state.fallbackOn && state.fallbackOffered ? modelName(state.fallbackOn.model) : "";
@@ -4178,6 +4178,35 @@
       pill.title = `${name || "Its model"} didn’t answer, so its fallback ${on} is answering. It tries ${name || "its model"} again with your next message.`;
       pill.setAttribute("aria-label", `${on}, its fallback, is answering. Change model and thinking`);
     } else word?.remove();
+    askUsage(false);
+    fitModelName();
+  }
+  // ---- the usage meter (media/shared/usagemeter.js, window.DgcUsageMeter: the one Work, ChatDGC and a Pip's chat share,
+  // 0.52): the host says what this chat's model draws on and what that reported, asked when the model changes and when
+  // a reply finishes; "Using ChatGPT plan" sits beside the model pill while requests use the plan.
+  const UM = window.DgcUsageMeter;
+  let usageView = null, usageAskedFor = null;
+  function askUsage(fresh) {
+    const model = String(modelPick.value || state.model || state.defaultModel || "");
+    if (!fresh && model === usageAskedFor) return;
+    usageAskedFor = model;
+    vscode.postMessage({ type: "usageFor", model, fresh: fresh === true });
+  }
+  function onUsageMeter(msg) {
+    usageView = UM ? UM.view(msg.meter) : null;
+    const slot = $("cd-usage-slot");
+    if (slot && UM) {
+      slot.innerHTML = state.noProvider ? "" : UM.buttonHtml(usageView, { cls: "cd-meter cd-usage", id: "cd-usage" });
+      $("cd-usage")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        $("cd-context-pop").hidden = true; $("cd-context").setAttribute("aria-expanded", "false");
+        UM.toggle($("cd-usage"), usageView, { anchor: () => $("cd-usage"),
+          link: (link) => { vscode.postMessage({ type: "openUsagePage", source: usageView?.source || "", page: link.page }); UM.close("link"); } });
+      });
+      if (UM.isOpen()) UM.update(state.noProvider ? null : usageView);
+    }
+    $("cd-plan-note").hidden = msg.plan !== true || state.noProvider;
+    pill.classList.toggle("on-plan", msg.plan === true);
     fitModelName();
   }
   // The model's name stays readable: when the row is too full for it, the chips give up their words first, a step at a
@@ -4253,7 +4282,18 @@
     const plain = (profile, ids) => ids.filter(Boolean).map((id) => dress({ id, value: valueOf(profile, id), name: id, caps: MP.facts(id) }));
     const sections = (conn, rows) => (conn.mark === "ollama" && conn.badge !== "cloud" ? MP.ollamaSections(rows) : [{ title: "", rows }]);
     const typed = { id: "typed", label: "Enter another model…", icon: "edit", input: { placeholder: "A model’s name, as its host knows it", label: "Model name" } };
+    // ChatGPT · your plan (0.52): the shared rail entry (MP.planConnection). Not connected, it offers Connect; connected,
+    // its models in the plan's own order, and "Using ChatGPT plan" while this chat uses it.
+    const planConn = (profile, conn) => {
+      const st = String(profile.plan || "none"), here = !!conn && conn.current;
+      if (profile.kind === "plan_offer" || st !== "connected" || state.planWaiting) {
+        return { ...MP.planConnection({ id: profile.id || "chatgpt_plan", state: profile.kind === "plan_offer" && st === "connected" ? "ready" : st, waiting: state.planWaiting, error: state.planError, current: here }), profile: profile.kind === "plan_offer" ? null : profile, planProfile: profile };
+      }
+      const rows = (conn.sections || []).flatMap((section) => section.rows || []);
+      return { ...conn, ...MP.planConnection({ id: conn.id, state: st, rows, loaded: conn.loaded !== false, current: here, using: here }), error: conn.error, footer: conn.footer, profile, planProfile: profile };
+    };
     const connections = state.modelProfiles.length ? state.modelProfiles.map((profile) => {
+      if (profile.kind === "plan_offer") return planConn(profile, null);
       const conn = { id: profile.id || "host", name: MP.tipOf(String(profile.name || "").replace(/^Current host · /, ""), ""), profile, loaded: true, sections: [], current: profile.id === at,
         ...(typeof profile.mark === "string" ? { mark: profile.mark, badge: String(profile.badge || "") } : MP.markOf(profile.kind === "subscription" ? { engine: profile.engine } : { name: profile.name })) };
       if (!profile.id) { conn.sections = sections(conn, plain(null, [...new Set([...(conn.current && current ? [current] : []), ...(state.hostModels || [])])])); return conn; }
@@ -4280,7 +4320,7 @@
       conn.loaded = !!listed || ids.some(Boolean);
       if (listed && state.providerErrors[profile.id] && !ids.some(Boolean)) conn.error = "Couldn’t list its models.";
       conn.footer = [typed];
-      return conn;
+      return profile.plan ? planConn(profile, conn) : conn;
     }) : [...modelPick.options].length ? [(() => {
       const host = state.host || { name: "Models", mark: "", badge: "" };
       const conn = { id: "host", name: MP.tipOf(host.name, ""), mark: host.mark, badge: host.badge, profile: null, loaded: true, current: true };
@@ -4308,6 +4348,8 @@
       search: () => { for (const profile of state.modelProfiles) if (profile.id && !state.providerModels[profile.id]) askModels(profile.id); },
       action: (id, { connection, row, text }) => {
         if (id === "settings") { picker.close("silent"); vscode.postMessage({ type: "openModels" }); return; }
+        if (id === "planConnect") { state.planWaiting = true; state.planError = ""; refreshPicker(); vscode.postMessage({ type: "connectPlan", id: connection?.profile?.id || "" }); return; }
+        if (id === "planCancel") { vscode.postMessage({ type: "cancelPlanConnect" }); return; }
         if (id === "main" && row) { chooseModel(row.value); picker.close("picked"); return; }
         if (id === "fallback" && row) { setFallback(row.value === state.fallback ? "" : row.value); return; }
         if (id === "typed" && connection?.profile) {
@@ -4381,13 +4423,20 @@
       fix.addEventListener("click", () => vscode.postMessage({ type: "openModels" }));
       nodes.push(fix);
     }
+    if (words.usage) {
+      // A plan's limit used up: Manage usage is the way out (its page, named by the host).
+      const go = el("button", "cd-notice-link cd-notice-usage", "Manage usage");
+      go.type = "button";
+      go.addEventListener("click", () => vscode.postMessage({ type: "openUsagePage", source: words.usage, page: "usage" }));
+      nodes.push(go);
+    }
     if (words.detail) {
       const open = el("button", "cd-notice-link", "Details");
       open.type = "button"; open.setAttribute("aria-expanded", "false");
       const raw = el("span", "cd-notice-detail", words.detail);
       raw.hidden = true;
       open.addEventListener("click", () => { raw.hidden = !raw.hidden; open.setAttribute("aria-expanded", String(!raw.hidden)); });
-      nodes.push(document.createTextNode(words.fix ? " · " : " "), open, raw);
+      nodes.push(document.createTextNode(words.fix || words.usage ? " · " : " "), open, raw);
     }
     return nodes;
   }
@@ -4655,6 +4704,7 @@
           for (const m of state.messages) delete m.waiting;
           announce("Reply finished.");
           render();
+          askUsage(true);                       // what the reply used of the plan's limits, if it reports them
         }
         controls();
         voiceMode?.check(state.busy);
@@ -4976,6 +5026,14 @@
         return;
       case "wakeups":
         setWakeups(msg.items);
+        return;
+      case "usageMeter":
+        onUsageMeter(msg);
+        return;
+      case "planConnecting":
+        state.planWaiting = msg.waiting === true;
+        state.planError = typeof msg.error === "string" ? msg.error.slice(0, 300) : "";
+        refreshPicker();
         return;
       case "models":
         state.models = Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string").slice(0, 500) : [];

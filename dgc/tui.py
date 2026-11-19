@@ -9081,6 +9081,9 @@ class TUI:
             commit_engine()
 
         if rest:                                       # /connect <engine|preset|url>
+            if not subagent and rest.strip().lower() in ("chatgpt", "chatgpt-plan", "plan"):
+                self._connect_chatgpt_plan()
+                return
             if not subagent and subs.get_engine(rest) is not None:
                 selected_engine(rest.strip().lower())
             elif rest in PROVIDERS:
@@ -9100,13 +9103,19 @@ class TUI:
                       for s in sub_status]
         n_sub = len(sub_status)
         keys = list(PROVIDERS)
-        labels = sub_labels + [f"{PROVIDERS[k]['label']}  ({PROVIDERS[k]['base_url']})" for k in keys]
+        # ChatGPT · your plan (dgc/chatgpt_plan.py), after the subscription apps; a main-model choice like them.
+        plan_rows = [] if subagent else ["ChatGPT · your plan — DGC's own agent on your Plus or Pro plan"]
+        labels = sub_labels + plan_rows + [f"{PROVIDERS[k]['label']}  ({PROVIDERS[k]['base_url']})" for k in keys]
         labels.append("Custom host — enter a URL (e.g. a machine on your LAN)")
 
         def pick(i):
             if i < n_sub:                               # a subscription engine
                 selected_engine(sub_status[i]["key"]); return
             i -= n_sub
+            if plan_rows:
+                if i == 0:
+                    self._connect_chatgpt_plan(); return
+                i -= 1
             if i == len(keys):                          # custom host
                 self._ask_input("host URL (e.g. http://192.168.1.50:11434/v1) then Enter",
                                 lambda url: self._set_host(url.strip(), subagent))
@@ -9172,6 +9181,32 @@ class TUI:
             self._run_setup_cmd(cmd, hint)
         self._show_picker(f"Sign in to {eng.short_label} now? (opens your browser)",
                           ["Yes, sign in", "No"], pick)
+
+    def _connect_chatgpt_plan(self) -> None:
+        """ChatGPT · your plan: sign in with ChatGPT in the browser (on a thread of its own, so the screen keeps working)
+        when not signed in yet, then run on the plan: the public API, the marker for a key, the Responses API, and the
+        first of the plan's models unless the model already chosen is one of them."""
+        from . import chatgpt_plan
+
+        def work() -> None:
+            try:
+                if chatgpt_plan.status()["state"] != "connected":
+                    self._flash("Opening ChatGPT in your browser…", 30)
+                    chatgpt_plan.sign_in(say=lambda text: self._flash(text, 30))
+                models = [row["slug"] for row in chatgpt_plan.models()]
+            except chatgpt_plan.PlanError as exc:
+                self._flash(str(exc), 8)
+                return
+            self.config.set("subscription_engine", "")
+            self.config.set("base_url", chatgpt_plan.API)
+            self.config.set("api_key", chatgpt_plan.PLAN_KEY)
+            self.config.set("api_mode", "responses")
+            if models and self.config.model not in models:
+                self.config.set("model", models[0])
+            self.agent.refresh_client()
+            self._flash(f"Using your ChatGPT plan · {self.config.model}", 6)
+
+        threading.Thread(target=work, daemon=True, name="dgc-chatgpt-plan-connect").start()
 
     def _connect_openrouter(self, done) -> None:
         """OpenRouter's sign-in (dgc.provider_connect) on a thread of its own, so the screen keeps working: the browser

@@ -3571,7 +3571,9 @@ test("Ollama Cloud is one of the providers to add: ollama.com, a key needed, its
   assert.deepEqual(opened, ["https://ollama.com/settings/keys", "https://platform.openai.com/api-keys", "https://openrouter.ai/settings/credits"],
     "only a preset's own keys or credits page, never a URL from the page; no credits page, nothing opens");
   const providers = x.posted.find((m) => m.type === "providers").providers;
-  assert.deepEqual(providers.filter((p) => p.connect).map((p) => p.id), ["openrouter"], "OpenRouter alone signs in");
+  assert.deepEqual(providers.filter((p) => p.connect).map((p) => p.id), ["openrouter", "chatgpt"],
+    "OpenRouter signs in for a key; ChatGPT · your plan signs in with no key at all (0.52)");
+  assert.deepEqual(providers.filter((p) => p.plan).map((p) => p.id), ["chatgpt"]);
   assert.deepEqual(providers.filter((p) => p.needsKey && !p.keys).map((p) => p.id), [], "every host that needs a key has Get a key");
 });
 
@@ -3871,5 +3873,228 @@ test("Ollama as the default from before saved providers is checked for its ollam
     const before = x.posted.length;
     await x.provider.postOllamaAccount();
     assert.equal(x.posted.length, before, "a subscription default isn't Ollama: nothing asked, nothing said");
+  } finally { x.restore(); }
+});
+
+// ---- ChatGPT · your plan (17 Nov): Connect through `dgc chatgpt-plan connect --json`, its state, Sign out ----
+async function fakePlanCli(script) {
+  const { EventEmitter } = await import("node:events");
+  const { PassThrough } = await import("node:stream");
+  const runs = [];
+  return { runs, runOnce(args) {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    const written = [];
+    child.stdin = { write(text) { written.push(text); child.emit("stdin", text); return true; }, end() {} };
+    child.kill = () => { child.killed = true; setImmediate(() => child.emit("close", null)); };
+    runs.push({ args, written, child });
+    setImmediate(() => script(args, child, (value) => child.stdout.write(JSON.stringify(value) + "\n"), () => { child.stdout.end(); setImmediate(() => child.emit("close", 0)); }));
+    return child;
+  } };
+}
+
+test("ChatGPT plan Connect: the CLI signs in, the port is forwarded, only auth.openai.com opens, the plan is saved with its marker", async () => {
+  const x = openRouterWorld();
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  vs.env.asExternalUri = async (uri) => ({ toString: () => String(uri.toString()).replace(":5050", ":6060") });
+  const cli = await fakePlanCli((args, child, say, end) => {
+    if (args[1] === "connect") {
+      say({ event: "listening", port: 5050 });
+      child.once("stdin", () => { say({ event: "open", url: "https://auth.openai.com/oauth/authorize?x=1" }); say({ event: "connected", name: "Tile Maker", email: "t@example.com" }); end(); });
+    } else { say({ state: "connected", name: "Tile Maker" }); end(); }
+  });
+  x.world.provider.ensureBackend().runOnce = cli.runOnce;
+  try {
+    await x.provider.onSettingsMessage({ type: "connectProvider", preset: "chatgpt", model: "" });
+    const connect = cli.runs.find((run) => run.args[1] === "connect");
+    assert.deepEqual(connect.args, ["chatgpt-plan", "connect", "--json"]);
+    assert.deepEqual(JSON.parse(connect.written[0]), { redirect_port: 6060 }, "the editor's forwarded port");
+    assert.deepEqual(x.opened, ["https://auth.openai.com/oauth/authorize?x=1"]);
+    const { listProfiles, profileCredential } = await providerProfiles();
+    const rows = listProfiles(x.provider.context);
+    assert.deepEqual(rows.map((r) => [r.name, r.base_url, r.api_mode]), [["ChatGPT · your plan", "https://api.openai.com/v1", "responses"]]);
+    assert.equal((await profileCredential(x.provider.context, rows[0].id)).api_key, "dgc-chatgpt-plan", "a marker, not a secret");
+    assert.match(x.posted.filter((m) => m.type === "providerProfiles" && m.saved).at(-1)?.note || "", /Connected to your ChatGPT plan as Tile Maker/);
+  } finally { x.restore(); }
+});
+
+test("ChatGPT plan Connect never opens a page off auth.openai.com, and an error says why", async () => {
+  const x = openRouterWorld();
+  const cli = await fakePlanCli((args, child, say, end) => {
+    say({ event: "listening", port: 5050 });
+    child.once("stdin", () => { say({ event: "open", url: "https://evil.example/phish" }); say({ event: "error", code: "plan_use_declined", message: "You're signed in, but plan use wasn't allowed." }); end(); });
+  });
+  x.world.provider.ensureBackend().runOnce = cli.runOnce;
+  try {
+    await x.provider.onSettingsMessage({ type: "connectProvider", preset: "chatgpt", model: "" });
+    assert.deepEqual(x.opened, []);
+    assert.match(x.posted.filter((m) => m.type === "providerProfileError").at(-1)?.message || "", /plan use wasn't allowed/);
+    const { listProfiles } = await providerProfiles();
+    assert.deepEqual(listProfiles(x.provider.context), []);
+  } finally { x.restore(); }
+});
+
+test("a saved plan's state comes from the CLI, and Sign out signs out and looks again", async () => {
+  const x = openRouterWorld();
+  let state = "connected";
+  const cli = await fakePlanCli((args, child, say, end) => {
+    if (args[1] === "sign-out") state = "none";
+    say(args[1] === "status" ? { state, name: "Tile Maker" } : { state: "none" }); end();
+  });
+  x.world.provider.ensureBackend().runOnce = cli.runOnce;
+  try {
+    const row = await addProviderProfile(x.world, { name: "ChatGPT · your plan", base_url: "https://api.openai.com/v1", model: "m", api_mode: "responses", api_key: "dgc-chatgpt-plan" });
+    await x.provider.postProviderStates();
+    assert.deepEqual(x.posted.filter((m) => m.type === "providerStates").at(-1).states[row.id], { state: "plan", plan: "connected", name: "Tile Maker" });
+    await x.provider.onSettingsMessage({ type: "signOutPlan" });
+    assert.ok(cli.runs.some((run) => run.args[1] === "sign-out"));
+    assert.equal(x.posted.filter((m) => m.type === "providerStates").at(-1).states[row.id].plan, "none");
+    await x.provider.onSettingsMessage({ type: "openProviderKeys", id: "chatgpt", page: "usage" });
+    assert.equal(x.opened.at(-1), "https://chatgpt.com/settings/usage");
+  } finally { x.restore(); }
+});
+
+// ---- the usage meter's numbers and ChatGPT · your plan in the model pickers (0.52, src/usageLimits.ts) ----
+const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+const PLAN_ROW = { name: "ChatGPT · your plan", base_url: "https://api.openai.com/v1", model: "", api_mode: "responses", api_key: "dgc-chatgpt-plan" };
+
+test("usage meter: a backend's usage_limits reaches Work's page for the limits its own model draws on, the plan's saying so", async () => {
+  const x = openRouterWorld();
+  const posted = [];
+  x.provider.post = (message) => posted.push(JSON.parse(JSON.stringify(message)));
+  x.provider.view = {};
+  try {
+    const later = Math.floor(Date.now() / 1000) + 3600;
+    x.provider.onEvent({ type: "usage_limits", route: "chatgpt_plan", limits: [
+      { source: "chatgpt_plan", at: 2, limited: false, windows: [{ id: "primary", used_percent: 61, window_minutes: 300, resets_at: later }] },
+      { source: "codex", at: 1, limited: false, windows: [{ id: "primary", used_percent: 5, window_minutes: 300, resets_at: later }] },
+      { source: "nope", at: 1, limited: false, windows: [] }] });
+    await tick();
+    const said = posted.filter((m) => m.type === "usageMeter").at(-1);
+    assert.equal(said.plan, true, "Using ChatGPT plan");
+    assert.deepEqual(said.meter, { source: "chatgpt_plan", at: 2, limited: false, windows: [{ id: "primary", used_percent: 61, window_minutes: 300, resets_at: later }] });
+    // The route moves to Codex: its own numbers.
+    x.provider.routeState.subscriptionEngine = "codex";
+    x.provider.onEvent({ type: "usage_limits", route: "codex", limits: [{ source: "codex", at: 3, limited: false, windows: [{ id: "primary", used_percent: 9, window_minutes: 300, resets_at: later }] }] });
+    await tick();
+    const codex = posted.filter((m) => m.type === "usageMeter").at(-1);
+    assert.deepEqual([codex.meter.source, codex.meter.windows[0].used_percent, codex.plan], ["codex", 9, false]);
+    // A connection that reports nothing has no meter.
+    x.provider.routeState.subscriptionEngine = "";
+    x.provider.onEvent({ type: "usage_limits", route: "", limits: [] });
+    await tick();
+    assert.deepEqual(posted.filter((m) => m.type === "usageMeter").at(-1), { type: "usageMeter", meter: null, plan: false });
+  } finally { x.restore(); }
+});
+
+test("usage meter: an OpenRouter key with a credit limit has a meter (its share, its reset), asked of OpenRouter at most once a minute", async () => {
+  const x = openRouterWorld({ keyInfo: [200, { data: { usage: 7.5, limit: 10, limit_remaining: 2.5, limit_reset: "daily" } }] });
+  try {
+    const row = await addProviderProfile(x.world, { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1", model: "m", api_mode: "auto", api_key: "sk-or-v1-key" });
+    const first = await x.provider.usageFor(row.id, { fresh: true });
+    assert.equal(first.meter.source, "openrouter");
+    assert.deepEqual(first.meter.windows.map((w) => [w.id, w.used_percent]), [["daily", 75]]);
+    assert.ok(first.meter.windows[0].resets_at > Date.now() / 1000, "midnight UTC next");
+    await x.provider.usageFor(row.id, { fresh: true });
+    assert.equal(x.fetched.filter((f) => f.url === "https://openrouter.ai/api/v1/key").length, 1, "once a minute at most");
+    assert.equal(x.fetched.find((f) => f.url === "https://openrouter.ai/api/v1/key").auth, "Bearer sk-or-v1-key", "its own key, only to OpenRouter");
+    x.keyInfo = [200, { data: { usage: 1, limit: null, limit_remaining: null } }];
+    const other = await addProviderProfile(x.world, { name: "OpenRouter two", base_url: "https://openrouter.ai/api/v1", model: "m2", api_mode: "auto", api_key: "sk-or-v1-other" });
+    assert.equal((await x.provider.usageFor(other.id, { fresh: true })).meter, null, "no credit limit: nothing to measure");
+  } finally { x.restore(); }
+});
+
+test("usage meter: the link opens only each source's own page, by its name", async () => {
+  const x = openRouterWorld();
+  try {
+    for (const [source, page] of [["chatgpt_plan", "usage"], ["codex", "usage"], ["claude", "usage"], ["openrouter", "credits"], ["openrouter", "usage"], ["nope", "usage"], ["chatgpt_plan", "https://evil.example"]]) {
+      await x.provider.onMessage({ type: "openUsagePage", source, page, url: "https://evil.example" });
+    }
+    assert.deepEqual(x.opened, ["https://chatgpt.com/settings/usage", "https://chatgpt.com/codex/settings/usage", "https://claude.ai/settings/usage", "https://openrouter.ai/settings/credits", "https://chatgpt.com/settings/usage"]);
+  } finally { x.restore(); }
+});
+
+test("ChatGPT plan in the pickers: a saved plan row says its state; none saved, the rail offers it; Connect from Work signs in and lists again", async () => {
+  const x = openRouterWorld();
+  const posted = [];
+  x.provider.post = (message) => posted.push(JSON.parse(JSON.stringify(message)));
+  const cli = await fakePlanCli((args, child, say, end) => {
+    if (args[1] === "connect") { say({ event: "listening", port: 5050 }); child.once("stdin", () => { say({ event: "open", url: "https://auth.openai.com/oauth/authorize?x=1" }); say({ event: "connected", name: "Tile Maker", email: "" }); end(); }); }
+    else { say({ state: "connected", name: "Tile Maker" }); end(); }
+  });
+  x.world.provider.ensureBackend().runOnce = cli.runOnce;
+  x.provider.lastReadyEvent.capabilities.chatgpt_plan = { version: 1, state: "none" };
+  x.provider.constructor.planSaid = "";        // (the window's own word on the plan: none yet in this test)
+  try {
+    const { profiles } = await x.provider.chatdgcModels("");
+    assert.deepEqual(profiles.filter((p) => p.kind === "plan_offer").map((p) => [p.id, p.name, p.plan, p.mark, p.badge]), [["chatgpt_plan", "ChatGPT · your plan", "none", "openai", "plan"]]);
+    await x.provider.onMessage({ type: "connectPlan", id: "" });
+    assert.deepEqual(posted.filter((m) => m.type === "planConnecting").map((m) => m.waiting), [true, false]);
+    assert.deepEqual(x.opened, ["https://auth.openai.com/oauth/authorize?x=1"]);
+    const { listProfiles } = await providerProfiles();
+    const plan = listProfiles(x.provider.context).find((r) => r.name === "ChatGPT · your plan");
+    assert.ok(plan, "saved as a provider with the plan's marker");
+    assert.equal(x.provider.planState(), "connected");
+    const after = await x.provider.chatdgcModels("");
+    assert.deepEqual(after.profiles.filter((p) => p.id === plan.id).map((p) => [p.plan, p.mark, p.badge]), [["connected", "openai", "plan"]]);
+    assert.equal(after.profiles.filter((p) => p.kind === "plan_offer").length, 0, "saved: no offer");
+    const pips = await x.provider.pipSavedProviders();
+    assert.deepEqual(pips.filter((p) => p.id === plan.id).map((p) => [p.plan, p.badge]), [["connected", "plan"]]);
+    // A Pip's meter by its choice: the plan's.
+    const hooks = x.provider.pipPlanHooks();
+    assert.equal(await hooks.offer(), "", "a saved plan: no offer in a Pip's picker either");
+    assert.equal((await hooks.usage({ mode: "provider", provider: plan.id, model: "gpt-6-luna" }, false)).plan, true);
+    assert.deepEqual(await hooks.usage({ mode: "router" }, false), { type: "usageMeter", meter: null, plan: false });
+    // ChatDGC by its model's value.
+    assert.equal((await x.provider.chatdgcUsage(`provider:${plan.id}:gpt-6-luna`, false)).plan, true);
+    assert.deepEqual(await x.provider.chatdgcUsage("subscription:qwen", false), { type: "usageMeter", meter: null, plan: false });
+  } finally { x.restore(); }
+});
+
+test("ChatGPT plan Connect from a picker that fails says why to that page, and nothing is saved", async () => {
+  const x = openRouterWorld();
+  const said = [];
+  const cli = await fakePlanCli((args, child, say, end) => {
+    say({ event: "listening", port: 5050 });
+    child.once("stdin", () => { say({ event: "error", code: "plan_use_declined", message: "You're signed in, but plan use wasn't allowed." }); end(); });
+  });
+  x.world.provider.ensureBackend().runOnce = cli.runOnce;
+  try {
+    assert.equal(await x.provider.connectPlanFrom((m) => said.push(m)), false);
+    assert.deepEqual(said.at(-1), { type: "planConnecting", waiting: false, error: "You're signed in, but plan use wasn't allowed." });
+    const { listProfiles } = await providerProfiles();
+    assert.deepEqual(listProfiles(x.provider.context), []);
+  } finally { x.restore(); }
+});
+
+test("ChatGPT plan already signed in (from the terminal): the picker's Use ChatGPT plan adds it with no new sign-in", async () => {
+  const x = openRouterWorld();
+  const said = [];
+  const cli = await fakePlanCli((args, child, say, end) => { say({ state: "connected", name: "Tile Maker" }); end(); });
+  x.world.provider.ensureBackend().runOnce = cli.runOnce;
+  x.provider.lastReadyEvent.capabilities.chatgpt_plan = { version: 1, state: "connected" };
+  x.provider.constructor.planSaid = "";
+  try {
+    assert.equal(await x.provider.connectPlanFrom((m) => said.push(m)), true);
+    assert.deepEqual(cli.runs.map((run) => run.args[1]), ["status"], "no browser sign-in: only its state is read");
+    assert.deepEqual(x.opened, []);
+    assert.deepEqual(said.map((m) => m.waiting), [true, false]);
+    const { listProfiles, profileCredential } = await providerProfiles();
+    const rows = listProfiles(x.provider.context);
+    assert.deepEqual(rows.map((r) => [r.name, r.api_mode]), [["ChatGPT · your plan", "responses"]]);
+    assert.equal((await profileCredential(x.provider.context, rows[0].id)).api_key, "dgc-chatgpt-plan");
+  } finally { x.restore(); }
+});
+
+test("ChatGPT plan offered with nothing saved: ChatDGC still lists the host it is on, first, so its models stay offered", async () => {
+  const x = openRouterWorld();
+  x.provider.lastReadyEvent.capabilities.chatgpt_plan = { version: 1, state: "none" };
+  x.provider.lastReadyEvent.capabilities.model_chosen = true;
+  x.provider.state.baseUrl = "http://localhost:11434/v1"; x.provider.state.model = "qwen3.8:27b";
+  x.provider.constructor.planSaid = "";
+  try {
+    const { profiles } = await x.provider.chatdgcModels("");
+    assert.deepEqual(profiles.map((p) => [p.id, p.kind]), [["", "native"], ["chatgpt_plan", "plan_offer"]]);
+    assert.match(profiles[0].name, /^Current host · /);
   } finally { x.restore(); }
 });

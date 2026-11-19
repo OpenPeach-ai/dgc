@@ -1,0 +1,39 @@
+/* The usage meter (media/shared/usagemeter.js): ONE meter for Work, ChatDGC and a Pip's chat. Its button takes the
+   surface's own chip class (so it sits like the context meter beside it); this file adds its tone and its pop-up.
+   Amber (--need) from 80% used, red (--err) above 95%. 6px corners, no pills. */
+.dgc-um-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.dgc-um-btn .dgc-um-glyph { width: 16px; height: 16px; flex: none; }
+.dgc-um-btn[data-tone="need"] { color: var(--need-text, var(--need)); }
+.dgc-um-btn[data-tone="err"] { color: var(--err-text, var(--err)); }
+
+.dgc-um-pop { position: fixed; z-index: 60; box-sizing: border-box; max-height: calc(100vh - 16px); overflow-y: auto;
+  padding: var(--sp-3, 12px); border: 1px solid var(--border-strong, var(--border)); border-radius: var(--btn-r, 6px);
+  background: var(--menu-bg, var(--vscode-menu-background, var(--surface))); color: var(--text, inherit);
+  box-shadow: var(--shadow-2, 0 4px 16px rgba(0,0,0,.18)); font: var(--t-sm, 12px)/1.4 var(--sans, inherit); text-align: start; }
+.dgc-um-pop:focus { outline: none; }
+.dgc-um-head { display: flex; align-items: baseline; gap: var(--sp-2, 8px); margin-bottom: var(--sp-2, 8px); min-width: 0; }
+.dgc-um-kicker { color: var(--muted, var(--vscode-descriptionForeground)); font-size: var(--t-xs, 11px); text-transform: none; }
+.dgc-um-name { font-weight: var(--w-bold, 600); font-size: var(--t-base, 13px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgc-um-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3, 12px); }
+.dgc-um-row { min-width: 0; }
+.dgc-um-line { display: flex; justify-content: space-between; gap: var(--sp-2, 8px); }
+.dgc-um-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgc-um-pct { flex: none; font-variant-numeric: tabular-nums; }
+.dgc-um-bar { height: 4px; margin: 5px 0 4px; border-radius: 2px; background: var(--hair, rgba(127,127,127,.25)); overflow: hidden; }
+.dgc-um-fill { display: block; height: 100%; border-radius: 2px; background: var(--muted, var(--vscode-descriptionForeground)); }
+.dgc-um-row[data-tone="need"] .dgc-um-fill { background: var(--need); }
+.dgc-um-row[data-tone="need"] .dgc-um-pct { color: var(--need-text, var(--need)); }
+.dgc-um-row[data-tone="err"] .dgc-um-fill { background: var(--err); }
+.dgc-um-row[data-tone="err"] .dgc-um-pct { color: var(--err-text, var(--err)); }
+.dgc-um-left { color: var(--muted, var(--vscode-descriptionForeground)); font-size: var(--t-xs, 11px); font-variant-numeric: tabular-nums; }
+.dgc-um-reached { margin: 0 0 var(--sp-2, 8px); }
+.dgc-um-reached[data-tone="err"] { color: var(--err-text, var(--err)); }
+.dgc-um-foot { display: flex; justify-content: flex-end; margin-top: var(--sp-3, 12px); }
+.dgc-um-link { height: var(--control, 28px); padding: 0 var(--sp-3, 12px); border: 1px solid var(--border-strong, var(--border)); border-radius: var(--btn-r, 6px);
+  background: transparent; color: var(--accent-text, var(--vscode-textLink-foreground)); font: inherit; cursor: pointer; }
+.dgc-um-link:hover { background: var(--hover, var(--vscode-list-hoverBackground)); }
+.dgc-um-link:focus-visible { outline: var(--btn-ring, 2px solid var(--vscode-focusBorder)); outline-offset: 1px; }
+@media (forced-colors: active) {
+  .dgc-um-fill, .dgc-um-row[data-tone] .dgc-um-fill { background: CanvasText; }
+  .dgc-um-bar { border: 1px solid CanvasText; }
+}

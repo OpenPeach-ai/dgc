@@ -49,6 +49,7 @@ import { homePages, homePagesAttr, homeShowAttr, noteHomePage, pipHomeDismissedA
 import modelPicker from "../media/shared/modelpicker.js";
 import { addProfile, adoptWorkingRoute, defaultProfileId, firstTakesDefault, keepWorkingRoute, hasRunnableProfile, listProfiles, markDefaultProfile, profileCredential, removeProfile, replaceKey, startingModel } from "./providerProfiles.js";
 import { connectOpenRouter, keyState, OPENROUTER, type KeyState } from "./providerConnect.js";
+import { UsageLimits, usagePage, type UsageMeterMessage } from "./usageLimits";
 
 function isSlashCommandText(text: string): boolean {
   if (!text.startsWith("/")) { return false; }
@@ -189,7 +190,7 @@ const THINK = [
 ];
 // keysPage: where Get a key sends you to make one (checked 17 Nov). connect: the preset signs in instead (OpenRouter's
 // Connect, src/providerConnect.js); creditsPage: where Top up goes.
-const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string; apiKey?: string; keysPage?: string; connect?: boolean; creditsPage?: string }> = {
+const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string; apiKey?: string; keysPage?: string; connect?: boolean; creditsPage?: string; plan?: boolean; usagePage?: string }> = {
   ollama: { url: "http://localhost:11434/v1", needsKey: false, label: "Ollama (local)", apiKey: "ollama" },
   // Ollama's cloud models with no Ollama installed (0.52): its own API, one key from its keys page.
   ollamacloud: { url: "https://ollama.com", needsKey: true, label: "Ollama Cloud", keysPage: "https://ollama.com/settings/keys" },
@@ -199,11 +200,17 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string;
   openai: { url: "https://api.openai.com/v1", needsKey: true, label: "OpenAI", keysPage: "https://platform.openai.com/api-keys" },
   anthropic: { url: "https://api.anthropic.com/v1", needsKey: true, label: "Anthropic", keysPage: "https://platform.claude.com/settings/keys" },
   openrouter: { url: "https://openrouter.ai/api/v1", needsKey: true, label: "OpenRouter", keysPage: OPENROUTER.keysPage, connect: true, creditsPage: OPENROUTER.creditsPage },
+  // ChatGPT · your plan (dgc/chatgpt_plan.py): DGC's own agent on a Plus or Pro plan. Its route's key is a marker
+  // (PLAN_KEY), never a secret: each request asks DGC's sign-in for a live token.
+  chatgpt: { url: "https://api.openai.com/v1", needsKey: false, label: "ChatGPT · your plan", connect: true, plan: true,
+             usagePage: "https://chatgpt.com/settings/usage" },
   groq: { url: "https://api.groq.com/openai/v1", needsKey: true, label: "Groq", keysPage: "https://console.groq.com/keys" },
   deepseek: { url: "https://api.deepseek.com/v1", needsKey: true, label: "DeepSeek", keysPage: "https://platform.deepseek.com/api_keys" },
   together: { url: "https://api.together.xyz/v1", needsKey: true, label: "Together AI", keysPage: "https://api.together.ai/settings/api-keys" },
   mistral: { url: "https://api.mistral.ai/v1", needsKey: true, label: "Mistral", keysPage: "https://console.mistral.ai/api-keys" },
 };
+/** What a ChatGPT plan route carries where a key would be (dgc/chatgpt_plan.py PLAN_KEY). */
+const PLAN_KEY = "dgc-chatgpt-plan";
 /** ollama.com itself (Ollama Cloud), as dgc/model_watch.py is_hosted_ollama says. */
 function isOllamaCloud(base: string): boolean {
   try { const host = new URL(base).hostname.toLowerCase().replace(/\.$/, ""); return host === "ollama.com" || host.endsWith(".ollama.com"); }
@@ -1193,6 +1200,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       videosLibrary: (cmd) => this.videosLibrary(cmd),
       mcpAppsOffered: () => this.mcpAppsSupported,
       chatdgcModels: (providerId) => this.chatdgcModels(providerId),
+      usageFor: (model, fresh) => this.chatdgcUsage(model, fresh === true) as Promise<any>,
+      openUsagePage: (source, page) => this.openUsagePage(source, page),
+      watchUsage: (changed) => DgcViewProvider.usageLimits.watch(changed),
+      connectPlan: (say, id) => this.connectPlanFrom(say, id || ""),
+      cancelPlanConnect: () => this.cancelPlanConnect(),
       chatdgcOpenFile: (path, line, endLine, folder) => this.openFile(path, line, endLine, folder ? [folder] : []),
       chatdgcProviderRoute: (model) => this.chatdgcProviderRoute(model),
       postHome: (message) => { if (this.home && this.webviewReady) this.post(message); },
@@ -1376,17 +1388,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const saved = listProfiles(this.context);
     const defaultId = defaultProfileId(this.context);
     // (mark, badge: which mark the model picker draws for it, decided here: no address reaches the page.)
-    const profiles = saved.map(row => ({ id: row.id, name: row.name,
+    // ChatGPT · your plan (0.52): its saved row says its sign-in's state; with none saved, the picker offers Connect.
+    const planState = this.planState(), planIds = planState ? await this.planRowIds() : new Set<string>();
+    const profiles: any[] = saved.map(row => ({ id: row.id, name: row.name,
       kind: row.kind === "subscription" ? "subscription" : "native",
       model: startingModel(this.context, row), ...(row.kind === "subscription" ? { engine: row.engine } : {}),
-      ...modelPicker.markOf(row.kind === "subscription" ? { engine: String(row.engine || "") } : { base_url: row.base_url, name: row.name }) }));
+      ...modelPicker.markOf(row.kind === "subscription" ? { engine: String(row.engine || "") } : { base_url: row.base_url, name: row.name, plan: planIds.has(row.id) }),
+      ...(planIds.has(row.id) ? { plan: planState } : {}) }));
+    const planOffer = !!planState && !planIds.size;
     const hostLabel = Object.values(PROVIDERS).find(p => sameHost(p.url, this.state.baseUrl))?.label || "Custom host";
     const host = { name: hostLabel, ...modelPicker.markOf({ base_url: this.state.baseUrl, name: hostLabel }) };
     const defaultProfile = saved.find(row => row.id === defaultId);
     // The default isn't a saved provider (an upgrade on a host with a key): it stays in the list, as in Work's menu.
-    if (!defaultProfile && saved.length && !this.noProvider() && !this.routeState.subscriptionEngine) {
+    // (With the plan offered and nothing saved, the host is listed too: an offer alone would hide its models.)
+    if (!defaultProfile && (saved.length || planOffer) && !this.noProvider() && !this.routeState.subscriptionEngine) {
       profiles.unshift({ id: "", name: `Current host · ${hostLabel}`, kind: "native", model: String(this.state.model || ""), mark: host.mark, badge: host.badge });
     }
+    if (planOffer) profiles.push({ id: "chatgpt_plan", name: PROVIDERS.chatgpt.label, kind: "plan_offer", model: "", plan: planState, ...modelPicker.markOf({ plan: true }) });
     const current = defaultProfile
       ? defaultProfile.kind === "subscription"
         ? `subscription:${defaultProfile.engine}${defaultProfile.model ? `:${defaultProfile.model}` : ""}`
@@ -4896,6 +4914,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         || (ev.type === "command_rejected" && ["get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change", "get_pip_fix_change"].includes(ev.command))) return;
     // Account setup replies may contain single-use consent links. Never send them to chat.
     if (ev.type === "composio_connection") return;
+    // The usage meter's numbers (0.52): kept for the whole window; every page shows its own connection's.
+    if ((ev as any).type === "usage_limits") { this.usageArrived(ev); return; }
     const openImageAnswer = this.noteImageEvent(ev);
     this.noteReply(ev);
     switch (ev.type) {
@@ -5209,6 +5229,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.state.mode = String(ev.mode || this.state.mode);
         this.syncActiveRouteState();
         this.postState();
+        this.askUsage();                         // which limits this chat's model draws on, as it may have changed
         break;
       case "mcp_input_request":
         if (ev.kind === "elicitation" && ev.payload?.mode === "url") {
@@ -5354,6 +5375,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "turn_end": {
         this.mcpUrls.clear();
         (this.tab?.host ?? this).usageMoved();
+        this.askUsage(true);                     // the usage meter, after the turn (OpenRouter's key at most once a minute)
         this.activeSlot().announced = false;
         const monitorTurn = this.monitorTurnActive;
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
@@ -5961,6 +5983,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.view = view;
     this.viewType = view.viewType || "dgc.chat";
     this.webviewReady = false;
+    this.usageSaid = "";
+    this.usageWatcher ??= DgcViewProvider.usageLimits.watch(() => { void this.postUsageMeter(); });
     // A replaced/adopted webview is a new control client. Retire all old reply
     // correlations and reject queued commands from the previous document.
     this.pipsDocumentId = randomBytes(16).toString("hex");
@@ -6266,6 +6290,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // side bar passed neither on, so neither did anything there).
       case "pipsProjectFolderChoose":
       case "pipsPickFolder":
+      // A Pip's chat's usage meter and its picker's ChatGPT plan Connect (0.52): the panel's own, through usePlan.
+      case "pipUsageMeter":
+      case "pipOpenUsagePage":
+      case "pipPlanConnect":
+      case "pipPlanCancel":
         if (msg.documentId !== this.pipsDocumentId) return;
         this.ensurePipsBridge().receive(msg);
         return;
@@ -6678,6 +6707,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             validateInput: (value) => (value.trim().length > 256 ? "Use up to 256 characters." : undefined) });
           if (typed?.trim()) await this.selectSubscription(msg.id, typed.trim());
         }
+        break;
+      case "connectPlan":
+        // The model picker's Connect for ChatGPT · your plan: once connected, the picker lists the plan's models.
+        if (await this.connectPlanFrom((message) => this.post(message), String(msg.id || ""))) await this.listModels();
+        break;
+      case "cancelPlanConnect":
+        this.cancelPlanConnect();
+        break;
+      case "openUsagePage":
+        // The usage meter's one link (Manage usage, Top up), by the source's name: never an address the page sends.
+        await this.openUsagePage(msg.source, msg.page);
         break;
       case "providerModels":
         // Work's menu, an All models provider: what its host offers, before anything moves.
@@ -8888,6 +8928,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const routes: { key: string; label: string; allModels?: boolean; kind?: string; base_url?: string; model?: string; engine?: string; [more: string]: unknown }[] = saved.map(row => ({ key: row.id, label: row.name,
       kind: row.kind, ...(row.kind !== "subscription" ? { base_url: row.base_url, model: startingModel(this.context, row) } : cliFacts(String(row.engine || ""))),
       ...(row.kind !== "subscription" && !startingModel(this.context, row) ? { allModels: true } : {}) }));
+    // ChatGPT · your plan (0.52): its saved row says its sign-in's state; with none saved, the rail offers Connect.
+    const planState = this.planState(), planIds = planState ? await this.planRowIds() : new Set<string>();
+    for (const route of routes) if (planIds.has(route.key)) route.plan = planState || "connected";
+    if (planState && !planIds.size) routes.push({ key: "chatgpt_plan", label: PROVIDERS.chatgpt.label, kind: "plan_offer", plan: planState });
     if (!this.routeState.subscriptionEngine && !currentProfile) {
       routes.unshift({ key: "native", label: `Current host · ${nativeLabel}` });
     } else if (this.routeState.subscriptionEngine && !currentSubscription) {
@@ -9290,6 +9334,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
       this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider(), () => this.pipHostMark());
       this.pipsEditor.useModelWindow((choice) => this.pipModelWindow(choice));      // a Pip's Sub-agents page (Pips API 104)
+      this.pipsEditor.usePlan(this.pipPlanHooks());                                  // ChatGPT · your plan, the usage meter (0.52)
+      this.context.subscriptions.push(DgcViewProvider.usageLimits.watch(() => this.pipsEditor?.usageChanged()));
       // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
       this.pipsEditor.useArtifacts(() => this.artifacts);
       // Continue in Work on what a Pip changed in its copy of a project (Pips API 91).
@@ -9325,11 +9371,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // One after another: the CLI lists one host at a time (modelsAtProvider).
     // (mark, badge: which mark the model picker draws for it, decided here: no address reaches the page.)
     const rows: { id: string; name: string; default: boolean; models: string[]; mark: string; badge: string }[] = [];
+    const planState = this.planState(), planIds = planState ? await this.planRowIds() : new Set<string>();
     for (const row of saved) {
       rows.push({ id: row.id, name: row.name, default: row.id === defaultId, models: (await this.chatdgcModels(row.id)).ids.filter(Boolean),
-        ...modelPicker.markOf({ base_url: row.base_url, name: row.name }) });
+        ...modelPicker.markOf({ base_url: row.base_url, name: row.name, plan: planIds.has(row.id) }), ...(planIds.has(row.id) ? { plan: planState } : {}) });
     }
     return rows;
+  }
+  /** A Pip's chat: ChatGPT · your plan's Connect, and the usage meter by the Pip's model choice (src/pipsView.ts usePlan). */
+  private pipPlanHooks(): Parameters<PipsEditor["usePlan"]>[0] {
+    return {
+      offer: async () => { const state = this.planState(); return state && !(await this.planRowIds()).size ? state : ""; },
+      connect: (say, id) => this.connectPlanFrom(say, id),
+      cancel: () => this.cancelPlanConnect(),
+      usage: async (choice: any, fresh) => {
+        if (fresh) this.askUsage(false);          // (a Pip's runner reports to DGC's home: read again; a change re-asks)
+        if (choice?.mode === "provider" && typeof choice.provider === "string") return this.usageFor(choice.provider, { fresh });
+        if (choice?.mode === "subscription" && ["claude", "codex"].includes(choice.engine)) return { type: "usageMeter", meter: DgcViewProvider.usageLimits.row(choice.engine), plan: false };
+        if (!choice || choice.mode === "default" || choice.mode === "model") return this.usageFor("", { fresh });
+        return { type: "usageMeter", meter: null, plan: false };
+      },
+      openUsage: (source, page) => { void this.openUsagePage(source, page); },
+    };
   }
   /** The host DGC itself is on, for a Pip's model picker when it isn't one of the saved providers: its name and mark. */
   private pipHostMark(): { name: string; mark: string; badge: string } | undefined {
@@ -9420,6 +9483,228 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** A saved provider is the ChatGPT plan when its key is the plan's marker (only the host can read keys). */
+  private async isPlanRow(id: string): Promise<boolean> {
+    return (await profileCredential(this.context, id).catch(() => null))?.api_key === PLAN_KEY;
+  }
+
+  /** ChatGPT · your plan's sign-in, for the model pickers: what this window last learnt (a Connect, a Sign out,
+   *  Settings' status), else what the backend said as it started; "" when this DGC has no plan. */
+  private static planSaid = "";
+  planState(): string {
+    const offered: any = (this.lastReadyEvent?.capabilities as any)?.chatgpt_plan;
+    if (!offered || typeof offered !== "object") return "";
+    return DgcViewProvider.planSaid || (["connected", "signed_out"].includes(offered.state) ? offered.state : "none");
+  }
+  /** The saved providers that are the plan (their key is its marker): only OpenAI-address rows are read. */
+  async planRowIds(): Promise<Set<string>> {
+    const ids = new Set<string>();
+    for (const row of listProfiles(this.context)) {
+      if (row.kind !== "subscription" && sameHost(row.base_url, PROVIDERS.chatgpt.url) && await this.isPlanRow(row.id)) ids.add(row.id);
+    }
+    return ids;
+  }
+  /** Connect from a model picker (Work, ChatDGC, a Pip's chat): the same sign-in as Settings', its steps said to that
+   *  page as planConnecting {waiting, error}. `id`: Connect again for the saved plan row. */
+  async connectPlanFrom(say: (message: Record<string, unknown>) => void, id = ""): Promise<boolean> {
+    // Signed in already (from the terminal, say) but not one of this editor's connections: added, with no new sign-in.
+    if (!/^provider_[a-f0-9]{32}$/.test(id) && this.planState() === "connected") {
+      say({ type: "planConnecting", waiting: true });
+      const said = await this.runPlanJson(["status"]).catch(() => null);
+      if (said?.state === "connected") {
+        try {
+          await this.saveProvider({ name: PROVIDERS.chatgpt.label, base_url: PROVIDERS.chatgpt.url, model: "", api_mode: "responses", api_key: PLAN_KEY },
+            this.ensureBackend(), `Using your ChatGPT plan as ${String(said.name || said.email || "your account")}.`);
+          say({ type: "planConnecting", waiting: false });
+          return true;
+        } catch (error: any) { say({ type: "planConnecting", waiting: false, error: String(error?.message || "DGC couldn't add your plan.") }); return false; }
+      }
+      DgcViewProvider.planSaid = typeof said?.state === "string" ? said.state : "";
+    }
+    let error = "";
+    const sink = (message: Record<string, unknown>) => {
+      if (message.type === "providerConnecting") say({ type: "planConnecting", waiting: message.waiting === true, ...(message.waiting ? {} : error ? { error } : {}) });
+      else if (message.type === "providerProfileError") error = String(message.message || "");
+      else if (message.type === "providerStates") error = String(((message.states as any) || {})[id]?.error || "");
+      void this.settingsEditor?.webview.postMessage(message);
+    };
+    const ok = await this.connectChatgptPlan({ id: /^provider_[a-f0-9]{32}$/.test(id) ? id : "" }, this.ensureBackend(), sink);
+    if (!ok) say({ type: "planConnecting", waiting: false, error: error || "ChatGPT didn't connect DGC." });
+    return ok;
+  }
+  cancelPlanConnect(): void { this.providerConnect?.abort(); }
+
+  /** `dgc chatgpt-plan <args> --json` once, through the backend's own launcher; its last JSON line. */
+  private runPlanJson(args: string[], be = this.ensureBackend()): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const child = (be as any).runOnce?.(["chatgpt-plan", ...args, "--json"]);
+      if (!child) { reject(new Error("Update DGC CLI to use your ChatGPT plan.")); return; }
+      let out = "";
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => { out += chunk; });
+      child.on("error", (error: Error) => reject(error));
+      child.on("close", () => {
+        const last = out.trim().split("\n").filter(Boolean).pop() || "";
+        try { resolve(JSON.parse(last)); } catch { reject(new Error("DGC CLI didn't answer about your ChatGPT plan.")); }
+      });
+      child.stdin?.end();
+    });
+  }
+
+  /** ChatGPT · your plan's Connect (dgc/chatgpt_plan.py): DGC's CLI signs in (its loopback is where DGC runs) and
+   *  says each step as a JSON line. The port it listens on is forwarded the editor's way (Remote-SSH), and the address
+   *  stays 127.0.0.1 as ChatGPT requires; only a page on auth.openai.com is opened. Then the plan becomes a saved
+   *  provider whose key is the marker. `id`: Connect again for a saved plan row (only the sign-in is renewed). */
+  private planRun?: { kill(): void };
+  private async connectChatgptPlan(options: { id?: string; model?: string }, be = this.ensureBackend(),
+                                   post = (message: Record<string, unknown>) => { void this.settingsEditor?.webview.postMessage(message); }): Promise<boolean> {
+    this.providerConnect?.abort();
+    this.planRun?.kill();
+    const stop = new AbortController();
+    this.providerConnect = stop;
+    const id = options.id || "";
+    post({ type: "providerConnecting", preset: "chatgpt", id, waiting: true });
+    try {
+      const account = await new Promise<{ name: string; email: string }>((resolve, reject) => {
+        const child = (be as any).runOnce?.(["chatgpt-plan", "connect", "--json"]);
+        if (!child) { reject(new Error("Update DGC CLI to connect your ChatGPT plan.")); return; }
+        this.planRun = child;
+        let buffer = "", settled = false;
+        const done = (fn: () => void) => { if (!settled) { settled = true; fn(); } };
+        stop.signal.addEventListener("abort", () => { try { child.kill(); } catch { /* gone */ } done(() => reject(new Error("Connecting was cancelled."))); }, { once: true });
+        child.stdout.setEncoding("utf8");
+        child.stdout.on("data", async (chunk: string) => {
+          buffer += chunk;
+          let at: number;
+          while ((at = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, at);
+            buffer = buffer.slice(at + 1);
+            let event: any;
+            try { event = JSON.parse(line); } catch { continue; }
+            if (event?.event === "listening" && Number.isInteger(event.port)) {
+              let port = event.port;
+              try {
+                const outside = await vscode.env.asExternalUri(vscode.Uri.parse(`http://127.0.0.1:${event.port}`));
+                const forwarded = Number(new URL(outside.toString(true)).port);
+                if (forwarded > 0 && forwarded < 65536) port = forwarded;
+              } catch { /* the same port */ }
+              child.stdin.write(JSON.stringify({ redirect_port: port }) + "\n");
+            } else if (event?.event === "open" && typeof event.url === "string" && /^https:\/\/auth\.openai\.com\//.test(event.url)) {
+              await vscode.env.openExternal(vscode.Uri.parse(event.url));
+            } else if (event?.event === "connected") {
+              done(() => resolve({ name: String(event.name || ""), email: String(event.email || "") }));
+            } else if (event?.event === "error") {
+              done(() => reject(new Error(String(event.message || "ChatGPT didn't connect DGC."))));
+            }
+          }
+        });
+        child.on("error", (error: Error) => done(() => reject(new Error(`DGC couldn't start the sign-in: ${error.message}`))));
+        child.on("close", () => done(() => reject(new Error("The sign-in ended before ChatGPT connected DGC."))));
+      });
+      const who = account.name || account.email || "your account";
+      DgcViewProvider.planSaid = "connected";
+      this.providerStateCache.clear();
+      if (id) {
+        post(this.providerProfilesMessage({ note: `Connected to your ChatGPT plan again, as ${who}.` }));
+        this.savedProvidersChanged();
+        await this.postProviderStates();
+      } else {
+        await this.saveProvider({ name: PROVIDERS.chatgpt.label, base_url: PROVIDERS.chatgpt.url, model: options.model || "",
+          api_mode: "responses", api_key: PLAN_KEY }, be, `Connected to your ChatGPT plan as ${who}.`);
+      }
+      return true;
+    } catch (error: any) {
+      const message = String(error?.message || "Could not connect.");
+      if (id) { if (!stop.signal.aborted) post({ type: "providerStates", states: { ...this.cachedStates(), [id]: { state: "plan", plan: "signed_out", error: message } as any } }); }
+      else post({ type: "providerProfileError", message });
+      return false;
+    } finally {
+      if (this.providerConnect === stop) this.providerConnect = undefined;
+      this.planRun = undefined;
+      post({ type: "providerConnecting", preset: "chatgpt", id, waiting: false });
+    }
+  }
+
+  /** Sign out of the ChatGPT plan: DGC's sign-in is revoked and forgotten; the saved row stays, with Connect again. */
+  private async signOutChatgptPlan(be = this.ensureBackend()): Promise<void> {
+    try { await this.runPlanJson(["sign-out"], be); DgcViewProvider.planSaid = "none"; }
+    catch (error: any) { this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not sign out.") }); }
+    this.providerStateCache.clear();
+    this.settingsEditor?.webview.postMessage(this.providerProfilesMessage({ note: "Signed out of your ChatGPT plan." }));
+    await this.postProviderStates();
+  }
+
+  // ---- the usage meter (0.52): src/usageLimits.ts keeps the numbers, media/shared/usagemeter.js draws them ----
+  /** Every connection's latest report, for the whole window (each backend's usage_limits, OpenRouter's key check). */
+  static readonly usageLimits = new UsageLimits();
+  /** Which limits this chat's own model draws on, as its backend says (usage_limits.route): "" for none. */
+  private usageRoute = "";
+  private usageWatcher?: { dispose(): void };
+  private usageSaid = "";
+  private usageArrived(ev: any): void {
+    if (typeof ev.route === "string") this.usageRoute = ev.route;
+    DgcViewProvider.usageLimits.arrived(ev.limits);     // (a change tells every page; this one says its own at once)
+    void this.postUsageMeter();
+  }
+  /** Ask this chat's backend for every source's latest (it reads DGC's home: a Pip's runner reports there too). */
+  private askUsage(fresh = false, be: ChatBackend | undefined = this.backend): void {
+    this.askUsageLimits(be);
+    void this.postUsageMeter(fresh);
+  }
+  private usageLimitsCapable(): boolean { return Number((this.lastReadyEvent?.capabilities as any)?.usage_limits) >= 1; }
+  /** get_usage_limits, only to a CLI that declared it (ready.capabilities.usage_limits). */
+  private askUsageLimits(be: ChatBackend | undefined): void {
+    if (!this.usageLimitsCapable() || !be?.ready) return;
+    be.send({ type: "get_usage_limits", request_id: this.nextRequestId("usage") } as any);
+  }
+  /** What a saved connection's limits are: the ChatGPT plan's (its key is the plan's marker), a subscription CLI's, or an
+   *  OpenRouter key's. `id` "" is the default connection. */
+  async usageFor(id: string, { fresh = false } = {}): Promise<UsageMeterMessage> {
+    const none: UsageMeterMessage = { type: "usageMeter", meter: null, plan: false };
+    const saved = listProfiles(this.context);
+    const row = saved.find((r) => r.id === (id || defaultProfileId(this.context)));
+    if (!row) return id ? none : this.workUsage(fresh);
+    if (row.kind === "subscription") return { type: "usageMeter", meter: DgcViewProvider.usageLimits.row(String(row.engine)), plan: false };
+    if (await this.isPlanRow(row.id)) return { type: "usageMeter", meter: DgcViewProvider.usageLimits.row("chatgpt_plan"), plan: true };
+    if (sameHost(row.base_url, PROVIDERS.openrouter.url)) {
+      const key = (await profileCredential(this.context, row.id).catch(() => null))?.api_key || "";
+      return { type: "usageMeter", meter: await DgcViewProvider.usageLimits.openRouter(row.id, key, { fresh }), plan: false };
+    }
+    return none;
+  }
+  /** This Work chat's: what its backend says its route draws on, else its saved provider's (an OpenRouter key). */
+  private async workUsage(fresh = false): Promise<UsageMeterMessage> {
+    const route = this.routeState.subscriptionEngine ? (["codex", "claude"].includes(this.routeState.subscriptionEngine) ? this.routeState.subscriptionEngine : "") : this.usageRoute;
+    if (route) return { type: "usageMeter", meter: DgcViewProvider.usageLimits.row(route), plan: route === "chatgpt_plan" };
+    const saved = listProfiles(this.context).filter((r) => r.kind !== "subscription");
+    const current = saved.find((r) => r.base_url === this.state.baseUrl && r.model === this.routeState.nativeModel)
+      ?? saved.find((r) => r.base_url === this.state.baseUrl && !r.model);
+    return current ? this.usageFor(current.id, { fresh }) : { type: "usageMeter", meter: null, plan: false };
+  }
+  private async postUsageMeter(fresh = false): Promise<void> {
+    if (!this.view) return;
+    const message = await this.workUsage(fresh).catch(() => null);
+    if (!message) return;
+    const said = JSON.stringify(message);
+    if (said === this.usageSaid) return;
+    this.usageSaid = said;
+    try { this.post(message); } catch { this.usageSaid = ""; /* a view on its way out: the next one says it again */ }
+  }
+  /** A ChatDGC chat's, by its model's value: a saved provider's, a subscription CLI's, or the host's own. */
+  private async chatdgcUsage(model: string, fresh: boolean): Promise<UsageMeterMessage> {
+    const provider = /^provider:(provider_[a-f0-9]{32}):/.exec(model);
+    if (provider) return this.usageFor(provider[1], { fresh });
+    const sub = /^subscription:(claude|codex)(?::|$)/.exec(model);
+    if (sub) return { type: "usageMeter", meter: DgcViewProvider.usageLimits.row(sub[1]), plan: false };
+    if (/^subscription:/.test(model)) return { type: "usageMeter", meter: null, plan: false };
+    return this.usageFor("", { fresh });
+  }
+  /** The usage meter's link: the source's own page, named here. */
+  async openUsagePage(source: unknown, page: unknown): Promise<void> {
+    const url = usagePage(source, page);
+    if (url) await vscode.env.openExternal(vscode.Uri.parse(url));
+  }
+
   private cachedStates(): Record<string, KeyState> {
     return Object.fromEntries([...this.providerStateCache].map(([id, entry]) => [id, entry.state]));
   }
@@ -9428,9 +9713,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  minute per key. The key goes only to OpenRouter's own key check. */
   private async postProviderStates(): Promise<void> {
     if (!this.settingsEditor) return;
-    const rows = listProfiles(this.context).filter((row) => row.kind !== "subscription" && sameHost(row.base_url, PROVIDERS.openrouter.url));
-    if (!rows.length) return;
+    const saved = listProfiles(this.context).filter((row) => row.kind !== "subscription");
+    const rows = saved.filter((row) => sameHost(row.base_url, PROVIDERS.openrouter.url));
+    const plans: string[] = [];
+    for (const row of saved) if (await this.isPlanRow(row.id)) plans.push(row.id);
+    if (!rows.length && !plans.length) return;
     const states: Record<string, KeyState> = {};
+    if (plans.length) {
+      // The plan's sign-in, as DGC's CLI says it (no token, no network): Connected as … or Signed out.
+      const said = await this.runPlanJson(["status"]).catch(() => null);
+      if (typeof said?.state === "string") DgcViewProvider.planSaid = said.state;
+      for (const id of plans) states[id] = { state: "plan", plan: String(said?.state || "none"), name: String(said?.name || said?.email || "") } as any;
+    }
     await Promise.all(rows.map(async (row) => {
       const cached = this.providerStateCache.get(row.id);
       if (cached && Date.now() - cached.at < 60_000) { states[row.id] = cached.state; return; }
@@ -9587,6 +9881,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsTab.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsTab.usePluginLogos(plugin => this.replyPluginLogo(plugin));
       this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider(), () => this.pipHostMark());
+      this.pipsTab.usePlan(this.pipPlanHooks());
+      this.context.subscriptions.push(DgcViewProvider.usageLimits.watch(() => this.pipsTab?.usageChanged()));
       this.pipsTab.useModelWindow((choice) => this.pipModelWindow(choice));
       // A Pip's reply in this tab: its links and "Settings → Models" go where the side bar's do.
       this.pipsTab.usePageActions((message) => { void this.onMessage(message); });
@@ -10121,7 +10417,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private refreshEditorSettings(): void {
     const providers = Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, url: p.url, needsKey: p.needsKey,
                                                                       ...(p.keysPage ? { keys: true, keysHost: new URL(p.keysPage).hostname } : {}),
-                                                                      ...(p.connect ? { connect: true } : {}) }));
+                                                                      ...(p.connect ? { connect: true } : {}), ...(p.plan ? { plan: true } : {}) }));
     this.settingsEditor?.webview.postMessage({ type: "providers", providers });
     // An upgrade's working model shows here as a saved provider from the first look (adoptWorkingRoute).
     void adoptWorkingRoute(this.context, this.lastReadyEvent, PROVIDERS).catch(() => null).then((adopted) => {
@@ -10289,7 +10585,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } else if (msg?.type === "openProviderKeys") {
       // A preset's own keys page (or, page "credits", its credits page for Top up), by its id: never a URL the page sends.
       const preset = PROVIDERS[String(msg.id || "")];
-      const page = msg.page === "credits" ? preset?.creditsPage : preset?.keysPage;
+      const page = msg.page === "credits" ? preset?.creditsPage : msg.page === "usage" ? preset?.usagePage : preset?.keysPage;
       if (page) await vscode.env.openExternal(vscode.Uri.parse(page));
     } else if (msg?.type === "addProviderProfile") {
       try {
@@ -10298,9 +10594,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not save provider.") });
       }
     } else if (msg?.type === "connectProvider" || msg?.type === "reconnectProvider") {
-      // OpenRouter's Connect (a new provider) or Connect again (a saved one's key, replaced in place).
+      // Connect (a new provider) or Connect again (a saved one): OpenRouter's key, replaced in place, or the ChatGPT plan's
+      // sign-in (a saved plan row keeps its marker; only the sign-in is renewed).
       const id = msg.type === "reconnectProvider" ? String(msg.id || "") : "";
-      await this.connectProvider(id ? "openrouter" : String(msg.preset || ""), { id, model: String(msg.model || "") }, be);
+      const preset = id ? (await this.isPlanRow(id) ? "chatgpt" : "openrouter") : String(msg.preset || "");
+      if (preset === "chatgpt") await this.connectChatgptPlan({ id, model: String(msg.model || "") }, be);
+      else await this.connectProvider(preset, { id, model: String(msg.model || "") }, be);
+    } else if (msg?.type === "signOutPlan") {
+      await this.signOutChatgptPlan(be);
     } else if (msg?.type === "cancelProviderConnect") {
       this.providerConnect?.abort();
     } else if (msg?.type === "signInApp") {
@@ -11496,6 +11797,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       void DgcViewProvider.askAboutClosedTab(asked, (this.currentSessionName || this.chatLabel()).slice(0, 80));
     }
     if (this.sessionsTimer) { clearTimeout(this.sessionsTimer); this.sessionsTimer = undefined; }
+    this.usageWatcher?.dispose(); this.usageWatcher = undefined;      // (the usage meter: this page says no more)
     if (this.tab) {
       // The status bar and the log are the side bar's: a closing tab hands the bar back.
       this.tab.host.tabProviders.delete(this);
@@ -11582,6 +11884,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const ageJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "age.js"));
     // The model picker, the one Work, ChatDGC and a Pip's chat share (media/shared/modelpicker.js, window.DgcModelPicker).
     const modelPickerJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "modelpicker.js"));
+    // The usage meter, the one Work, ChatDGC and a Pip's chat share (media/shared/usagemeter.js, window.DgcUsageMeter).
+    const usageMeterJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "usagemeter.js"));
     const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
@@ -11869,6 +12173,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           <button type="button" id="ctx-compact" class="context-action" title="Summarise the conversation now so the model has room to keep working">Compact now</button>
         </section>
       </div>
+      <!-- The usage meter (0.52, media/shared/usagemeter.js): only for a connection that reports its usage limits. -->
+      <div class="picker usage-picker" id="usage-slot"></div>
       <!-- The prompt cache's clock (0.48, Work only): always here; dimmed, with no minutes, where the provider doesn't say how long its cache lasts. -->
       <div class="picker cache-picker">
         <button type="button" id="cache-clock" class="fbtn cache-clock" title="Prompt cache" aria-haspopup="dialog" aria-expanded="false" data-cache-window="unknown"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5C14.1421 2.5 17.5 5.85786 17.5 10C17.5 14.1421 14.1421 17.5 10 17.5C5.85786 17.5 2.5 14.1421 2.5 10C2.5 5.85786 5.85786 2.5 10 2.5ZM10 3.5C6.41015 3.5 3.5 6.41015 3.5 10C3.5 13.5899 6.41015 16.5 10 16.5C13.5899 16.5 16.5 13.5899 16.5 10C16.5 6.41015 13.5899 3.5 10 3.5ZM10 5C10.2761 5 10.5 5.22386 10.5 5.5V9.66895L13.6973 11.04L13.7852 11.0898C13.9763 11.2224 14.0552 11.4751 13.96 11.6973C13.8647 11.9193 13.6272 12.0372 13.3994 11.9902L13.3027 11.96L9.80273 10.46C9.61896 10.3811 9.5 10.2 9.5 10V5.5C9.5 5.22386 9.72386 5 10 5Z" fill="currentColor"/></svg><span id="cache-clock-left" class="cache-clock-left"></span></button>
@@ -11894,7 +12200,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <div class="picker agents-picker" id="agents-picker" hidden>
         <button type="button" id="agents-pill" class="fbtn agents-pill" data-state="idle" title="No agents working · Click to open the agent map" aria-label="0 agents · No agents working · Click to open the agent map" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-map"><span class="agents-dot" aria-hidden="true"></span><span class="agents-label"><span class="agents-text">0 agents</span><span class="agents-short">0</span><span class="agents-need" hidden> · needs you</span></span></button>
       </div>
-      <div class="picker">
+      <div class="picker model-picker">
+        <span id="plan-note" class="plan-note" title="Requests use your ChatGPT plan's allowance" hidden>Using ChatGPT plan</span>
         <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-zap model-icon" aria-hidden="true"></span><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
       </div>
       <button type="button" id="queue-send" class="fbtn" title="Queue for the next turn — Alt+Enter" aria-label="Queue for next turn" hidden><span class="codicon codicon-list-ordered queue-icon" aria-hidden="true"></span><span class="queue-word">Queue</span></button>
@@ -11911,7 +12218,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script><script nonce="${nonce}" src="${pipJobJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${usageMeterJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

@@ -27,6 +27,9 @@ __all__ = ("MODEL_FAILURE_KINDS", "FailureCause", "classify_exception", "classif
            "eof_cause", "stall_cause", "scrub_urls", "hint_for", "short_cause", "CONNECT_KINDS",
            "BUSY_KINDS", "TERMINATORS")
 
+# The ways out a cause can name besides Settings (FailureCause.action).
+ACTIONS = ("manage_usage",)
+
 # The kinds a "Reconnecting" line describes; the rest retry an answered request.
 CONNECT_KINDS = frozenset(("connect", "dns", "tls", "proxy", "reset", "connect_timeout", "stream_cut"))
 BUSY_KINDS = frozenset(("rate_limited", "overloaded"))
@@ -65,6 +68,10 @@ class FailureCause:
     # All of the provider's answer in the failure's sentence, when the sentence itself stops short (llm._with_cause). Only
     # for what an editor's Details draws: the sentence, the summary and `detail` stay as every other reader has them.
     full: str = ""
+    # What a surface offers as the way out, when it isn't Settings: "manage_usage" (a plan's limit is used up: its usage
+    # page), and when the limit resets (epoch seconds), when the provider said. Inside error.cause, an open object.
+    action: str = ""
+    resets_at: int = 0
 
     def with_context(self, *, endpoint: str = "", model: str = "", api_mode: str = "",
                      hint: str | None = None) -> "FailureCause":
@@ -82,6 +89,10 @@ class FailureCause:
                 out[key] = value
         if self.http_status:
             out["http_status"] = int(self.http_status)
+        if self.action in ACTIONS:
+            out["action"] = self.action
+        if self.resets_at and self.resets_at > 0:
+            out["resets_at"] = int(self.resets_at)
         return out
 
 

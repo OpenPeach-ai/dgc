@@ -285,6 +285,16 @@ export class DgcBackend extends EventEmitter {
   /** What the child wrote on stderr before `ready` (bounded): wsl.exe's own complaint when DGC isn't set up. */
   private earlyStderr = "";
 
+  /** A one-shot `dgc <args>` (ChatGPT · your plan's sign-in, 17 Nov), started the way this backend is: the same
+   *  command, folder and route (WSL included), outside the session. The caller reads its stdout and ends it. */
+  runOnce(args: string[]): ChildProcessWithoutNullStreams {
+    if (this.route) {
+      const spec = this.route.launch(this.cwd, args, { ...editorEnv });
+      return spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, windowsHide: true });
+    }
+    return spawn(this.command, args, { cwd: this.cwd, env: { ...process.env, ...editorEnv }, windowsHide: true });
+  }
+
   start(): void {
     if (this.proc) {
       return;

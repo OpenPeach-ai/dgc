@@ -319,6 +319,19 @@ def _error_body(response, limit: int = 600) -> str:
         _close_response(response)
 
 
+class _ReplayedError:
+    """An error answer whose body was already read (the ChatGPT plan's check), handed on to the handlers after it."""
+
+    def __init__(self, status_code: int, text: str, headers):
+        self.status_code, self.text, self.headers = status_code, text, headers
+
+    def close(self) -> None:
+        pass
+
+    def json(self):
+        return json.loads(self.text)
+
+
 class _ReadStopped(Exception):
     """An ``on_line`` reader stopping the read on purpose (a Stop, or reasoning past its budget)."""
 
@@ -1482,6 +1495,15 @@ def _repair_for_retry(messages: list[dict]) -> list[dict]:
 _REASONING_OFF = {None, "", "off", "none"}
 _REASONING_KEYS = ("reasoning_effort", "chat_template_kwargs", "thinking", "reasoning")
 _SAMPLING_KEYS = ("temperature", "top_p", "top_k", "min_p")
+# What a ChatGPT plan's requests never carry (Sign in with ChatGPT's rules, 17 Nov): sampling, an output cap, a
+# server-kept conversation, server compaction.
+_PLAN_REFUSES = frozenset({"sampling", "max_output_tokens", "stateful_responses", "response_compaction"})
+
+
+def _plan_error_code(text: str) -> str:
+    """The plan's own error code in an error body or event (subscription_sharing_…), or ""."""
+    found = re.search(r"subscription_sharing(?:_v2)?_[a-z_]+", str(text or ""))
+    return found.group(0) if found else ""
 # Legacy (non-adaptive) Anthropic extended-thinking budgets DGC requests per level, in tokens.
 _ANTHROPIC_THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576}
 
@@ -1728,6 +1750,12 @@ class LLMClient:
         except Exception:                        # noqa: BLE001 -- the request then says what it can't reach
             pass
         self.api_key = api_key
+        # ChatGPT · your plan (dgc.chatgpt_plan): the key is a marker; each request carries a live sign-in token, and the
+        # request follows the plan's rules (store off, no sampling, no output cap, no server-kept state).
+        from .chatgpt_plan import PLAN_KEY
+        self.chatgpt_plan = api_key == PLAN_KEY
+        if self.chatgpt_plan:
+            api_mode, provider_state = "responses", "stateless"
         self.model = model
         self.adapter = provider_adapter(self.base_url)
         self.family = self.adapter.family                 # picks the reasoning wire format
@@ -2192,6 +2220,8 @@ class LLMClient:
         return _bounded_model_tokens(metadata.get("max_output_tokens"))
 
     def _feature_supported(self, feature: str) -> bool:
+        if getattr(self, "chatgpt_plan", False) and feature in _PLAN_REFUSES:
+            return False
         supported = bool(getattr(self.capabilities, feature, False))
         _, metadata = self._cached_model_metadata()
         if (feature not in self._capability_overrides
@@ -2340,7 +2370,40 @@ class LLMClient:
         return f"{self._ollama_root}/api/chat"
 
     def _headers(self) -> dict:
+        if getattr(self, "chatgpt_plan", False):
+            from . import chatgpt_plan
+            try:
+                token = chatgpt_plan.access_token()
+            except chatgpt_plan.PlanError as exc:
+                raise LLMError(str(exc)) from None
+            return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+
+    def _plan_headers(self, headers) -> None:
+        """A plan response's usage headers, kept for the usage meter (dgc.usage_limits) when the API sends them."""
+        from . import usage_limits
+        found = usage_limits.from_headers(headers)
+        if found:
+            usage_limits.record("chatgpt_plan", found)
+
+    def _plan_refusal(self, code: str, status: int = 0) -> LLMError:
+        """One of the plan's own refusals, in words, never retried. A used-up limit is kept for the usage meter and
+        names its way out (Manage usage) and, when the plan said, when it resets."""
+        from .chatgpt_plan import error_words
+        if not code.endswith("usage_limit_exceeded"):
+            return LLMError(error_words(code))
+        from . import usage_limits
+        from .model_errors import FailureCause
+        row = usage_limits.record("chatgpt_plan", None, limited=True) or {}
+        windows = [w for w in row.get("windows", []) if w.get("resets_at")]
+        full = [w for w in windows if w["used_percent"] >= 100] or windows
+        resets = max((w["resets_at"] for w in full), default=0) if full else 0
+        words = error_words(code, resets_at=resets)
+        cause = FailureCause(kind="rate_limited", summary="Your ChatGPT plan's limit for DGC is used up",
+                             detail=code, http_status=status if 100 <= status <= 599 else 0, retryable=False,
+                             endpoint=f"{self.base_url}/responses", model=self.model, api_mode="responses",
+                             action="manage_usage", resets_at=resets)
+        return _with_cause(LLMError(words), cause, 1)
 
     def _anthropic_headers(self) -> dict:
         return {
@@ -2364,6 +2427,13 @@ class LLMClient:
         """The model ids this host lists. ``redirects=False`` asks only the host as given: a redirect is refused
         (ModelListRedirect) rather than followed, so a key sent with the request can't go on to another host --
         requests drops Authorization on a cross-host redirect, but not Anthropic's x-api-key."""
+        if getattr(self, "chatgpt_plan", False):
+            from . import chatgpt_plan
+            try:
+                return [row["slug"] for row in chatgpt_plan.models()]
+            except chatgpt_plan.PlanError as exc:
+                raise LLMError(str(exc)) from None
+
         def get(url, headers, **kwargs):
             r = requests.get(url, headers=headers, allow_redirects=redirects, **kwargs)
             if not redirects and 300 <= r.status_code < 400:
@@ -4967,6 +5037,8 @@ class LLMClient:
                     return ChatResult(finish_reason="cancelled")
                 continue
             watch.attach_response(response)
+            if self.chatgpt_plan:
+                self._plan_headers(response.headers)
             if response.status_code != 200:
                 watch.disarm()
             if response.status_code == 404:
@@ -4978,6 +5050,15 @@ class LLMClient:
                     self.api_mode = "chat_completions"
                     return self._chat_completions(messages, tools, reasoning_effort,
                                                   on_text, on_thinking, cancel)
+            if self.chatgpt_plan and response.status_code in (400, 401, 403, 429):
+                # The plan's own refusals are said in words and never retried (a used-up limit stays used up).
+                plan_body = _error_body(response, ERROR_DETAIL_CHARS)
+                code = _plan_error_code(plan_body)
+                if code:
+                    raise self._plan_refusal(code, response.status_code)
+                if response.status_code in (401, 403):
+                    raise LLMError("ChatGPT refused DGC's sign-in to your plan. Connect again: Settings › Models, or dgc chatgpt-plan connect.")
+                response = _ReplayedError(response.status_code, plan_body, response.headers)
             if response.status_code == 429 or response.status_code >= 500:
                 status = response.status_code
                 headers = response.headers
@@ -5251,7 +5332,16 @@ class LLMClient:
                         slot["_output_index"] = output_index
                     slot["arguments"] = _merge_stream_arguments(
                         slot.get("arguments", ""), event.get("delta"))
+                elif typ == "codex.rate_limits":
+                    if getattr(self, "chatgpt_plan", False):
+                        from . import usage_limits
+                        found = usage_limits.from_rate_limits(event.get("rate_limits"))
+                        if found:
+                            usage_limits.record("chatgpt_plan", found)
                 elif typ in ("response.completed", "response.incomplete"):
+                    if getattr(self, "chatgpt_plan", False):
+                        from . import usage_limits
+                        usage_limits.record("chatgpt_plan", None, limited=False)    # it went through: not used up
                     obj = event.get("response") or {}
                     if not isinstance(obj, dict):
                         raise LLMError("Responses API emitted a malformed terminal response")
@@ -5274,6 +5364,9 @@ class LLMClient:
                                              if isinstance(details, dict) else "")
                 elif typ in ("error", "response.failed"):
                     err = event.get("error") or (event.get("response") or {}).get("error") or {}
+                    code = _plan_error_code(json.dumps(err) if isinstance(err, dict) else str(err))
+                    if code:
+                        raise self._plan_refusal(code)
                     raise LLMError(str(err.get("message") or err or "Responses API stream failed"))
         except Exception as exc:
             if cancel is not None and cancel.is_set() and not terminal:

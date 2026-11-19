@@ -11,7 +11,7 @@ export function oneTimeCallback(state: string): {
   wait(ms: number, signal?: AbortSignal): Promise<string>;
   close(): void;
 };
-export type KeyState = { state: "ok" | "signed_out" | "no_credit" | "unreachable"; label?: string; usage?: number; limit?: number | null; limit_remaining?: number | null };
+export type KeyState = { state: "ok" | "signed_out" | "no_credit" | "unreachable"; label?: string; usage?: number; limit?: number | null; limit_remaining?: number | null; limit_reset?: string | null };
 export function exchange(code: string, verifier: string, options?: { url?: string; fetchImpl?: typeof fetch }): Promise<string>;
 export function keyState(key: string, options?: { url?: string; fetchImpl?: typeof fetch }): Promise<KeyState>;
 export function connectOpenRouter(options: {

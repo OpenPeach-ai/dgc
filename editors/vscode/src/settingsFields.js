@@ -228,6 +228,16 @@ export function renderFields(section, main, config, providers, ui) {
         // What a row adds after its usual words, and the buttons it adds before Remove.
         const rowExtras = (row, state) => {
             if (state?.signIn) return { words: "", buttons: signInButton(row.engine, row.name) };
+            // ChatGPT · your plan (its state from the host, which alone can tell a plan row by its key's marker).
+            const planState = (ui.providerStates || {})[row.id];
+            if (planState?.state === "plan") {
+                const waiting = connecting && connecting.id === row.id;
+                // "Connected", as OpenAI's sign-in asks; "Using ChatGPT plan" is said beside each chat's model picker.
+                if (planState.plan === "connected") return { words: `Connected${planState.name ? ` as ${String(planState.name)}` : ""}`,
+                    buttons: `<button type="button" class="secondary" data-plan-usage>Manage usage</button><button type="button" class="secondary" data-plan-signout>Sign out</button>` };
+                return { problem: String(planState.error || "Signed out of ChatGPT"),
+                    buttons: `<button type="button" class="secondary" data-provider-reconnect="${escapeHtml(row.id)}"${waiting ? " disabled" : ""}>${waiting ? "Waiting…" : "Connect again"}</button>${waiting ? cancelButton : ""}` };
+            }
             if (isOpenRouter(row)) {
                 const key = (ui.providerStates || {})[row.id];
                 const waiting = connecting && connecting.id === row.id;
@@ -282,18 +292,27 @@ export function renderFields(section, main, config, providers, ui) {
         const directExtra = direct && isLocalOllama({ base_url: direct.base_url }) ? rowExtras({ base_url: direct.base_url }, null) : { words: "", buttons: "" };
         const directRow = direct ? `<div class="field provider-direct"><span class="words"><span class="name-line"><span class="name">${escapeHtml(direct.name)}</span></span><span class="hint">${escapeHtml(direct.model)} · ${escapeHtml(direct.base_url)}${directExtra.words ? ` · ${escapeHtml(directExtra.words)}` : ""}</span></span><span class="host-control">${directExtra.buttons}<span class="provider-default-only">Default</span></span></div>` : "";
         const configuredUrls = new Set(savedProviders.map(row => String(row.base_url || '').replace(/\/+$/, '').toLowerCase()));
-        const availableHosts = providers.filter(row => !configuredUrls.has(String(row.url || '').replace(/\/+$/, '').toLowerCase()));
+        // OpenAI's API and ChatGPT · your plan share an address: each is taken only by a saved row that is itself (the plan
+        // is saved under its own name), never by the other.
+        const planLabel = (providers.find(row => row.plan) || {}).label || "";
+        const urlOf = (url) => String(url || '').replace(/\/+$/, '').toLowerCase();
+        const availableHosts = providers.filter(row => !savedProviders.some(saved => urlOf(saved.base_url) === urlOf(row.url)
+            && (row.plan ? saved.name === row.label : saved.name !== planLabel || !planLabel)));
         const savedEngines = new Set(savedProviders.filter(row => row.kind === "subscription").map(row => row.engine));
         const addChoices = [["", "Choose a provider"], ...availableHosts.map(row => [row.id, row.label]),
             ...[["claude", "Claude Code"], ["codex", "Codex"]].filter(([id]) => !savedEngines.has(id)),
             ["custom", "Custom model host"]];
         const addingSubscription = providerDraft.kind === "subscription";
+        const addingPlan = !!providers.find(row => row.id === providerDraft.preset && row.plan);
         const keysPreset = providers.find(row => row.id === providerDraft.preset && row.keys && row.url);
         // A preset that signs in (OpenRouter): Connect opens its page and its key comes back here; pasting one still works.
         const connectPreset = providers.find(row => row.id === providerDraft.preset && row.connect && row.url);
         const addWaiting = !!(connecting && !connecting.id);
         const keysHost = (row) => escapeHtml(row.keysHost || new URL(row.url).hostname);
-        const keyField = connectPreset
+        const keyField = connectPreset && connectPreset.plan
+            ? field("Account", "Connect opens chatgpt.com: sign in and allow DGC to use your plan (ChatGPT Plus or Pro). No key needed.",
+                `<span class="host-control"><button type="button" class="secondary" data-provider-connect="${escapeHtml(connectPreset.id)}"${addWaiting ? " disabled" : ""}>Connect</button></span>`)
+            : connectPreset
             ? field("Account", `Connect opens ${keysHost(connectPreset)}: sign in and approve DGC, and its key comes back here. Or paste a key.`,
                 // The box says what it is for (it sits empty beside Connect); Connect on the right, where Get a key sits.
                 `<span class="host-control">${inp("saved_provider_key", providerDraft.api_key || "", "password").replace("<input ", '<input placeholder="Or paste a key" aria-label="Or paste an OpenRouter key" ')}`
@@ -308,12 +327,13 @@ export function renderFields(section, main, config, providers, ui) {
         const addSaved = `<details class="more" data-more="saved-providers"><summary>+ Add provider</summary><div class="rows">`
             + field("Provider", "Choose the connection to add.", sel("saved_provider_preset", addChoices, providerDraft.preset || ""))
             + (addingSubscription ? field("Model", "Blank uses the signed-in CLI's default.", inp("saved_provider_model", providerDraft.model || ""))
+                : addingPlan ? model("saved_provider_model", "Model", "Each session or chat can choose, or name one.", providerDraft.model || "All models") + keyField
                 : field("Name", "Shown in the model menu.", inp("saved_provider_name", providerDraft.name || ""))
                 + field("Host", "Reachable from this computer.", inp("saved_provider_url", providerDraft.base_url || ""))
                 + model("saved_provider_model", "Model", "Each session or chat can choose, or name one.", providerDraft.model || "All models")
                 + field("Transport", "Auto works for most hosts.", sel("saved_provider_mode", TRANSPORTS, providerDraft.api_mode || "auto"))
                 + keyField)
-            + `<div class="field"><span class="words"><span class="hint" id="saved-provider-status" role="status">${waitingWords}</span></span><span class="host-control">${addWaiting ? cancelButton : ""}<button type="button" class="secondary" id="saved-provider-add">Save provider</button></span></div></div></details>`;
+            + `<div class="field"><span class="words"><span class="hint" id="saved-provider-status" role="status">${waitingWords}</span></span><span class="host-control">${addWaiting ? cancelButton : ""}${addingPlan ? "" : `<button type="button" class="secondary" id="saved-provider-add">Save provider</button>`}</span></div></div></details>`;
         const engine = String(c.subscription_engine || "");
         const subscription = (Array.isArray(c.subscription_engines) ? c.subscription_engines : [])
             .find(row => row && row.key === engine);

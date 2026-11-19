@@ -2267,6 +2267,12 @@ class HeadlessUI:
         attempts = cls._bounded_int(cause.get("attempts"), 0, MAX_SAFE_INTEGER)
         if attempts:
             out["attempts"] = attempts
+        from .model_errors import ACTIONS
+        if cause.get("action") in ACTIONS:
+            out["action"] = cause["action"]           # (a plan's used-up limit: Manage usage is its way out)
+        resets = cls._bounded_int(cause.get("resets_at"), 1, MAX_SAFE_INTEGER)
+        if resets:
+            out["resets_at"] = resets
         return out
     # ---- end reconnecting: model_retry ------------------------------------------------------------
 
@@ -2853,6 +2859,19 @@ def _agent_shell_pips_read(cmd) -> bool:
     return kind.startswith(("get_", "list_", "inspect_")) or kind in ("stop_pips", "export_pip")
 
 
+def _plan_capability() -> dict:
+    """{version, state}: ChatGPT · your plan's sign-in, "connected", "signed_out" or "none". Its keychain or file is read
+    only when it was ever signed in here (its folder exists)."""
+    try:
+        from . import chatgpt_plan
+        from .plugin_credentials import folder
+        if not folder(chatgpt_plan.TOKENS).exists():
+            return {"version": 1, "state": "none"}
+        return {"version": 1, "state": str(chatgpt_plan.status().get("state") or "none")}
+    except Exception:                              # noqa: BLE001 -- the picker then offers Connect
+        return {"version": 1, "state": "none"}
+
+
 class Backend:
     # Step 3: the first two per-chat names. Everything else stays a plain attribute until its own
     # step, so each move is verified alone.
@@ -3045,6 +3064,10 @@ class Backend:
                           # carries match (dgc/session_index).
                           "session_paging": True,
                           "session_attachments": 1,     # list/get_session_attachment: Work's attachments in the Library
+                          "usage_limits": 1,            # get_usage_limits / usage_limits: the usage meter (0.52)
+                          # ChatGPT · your plan (dgc/chatgpt_plan.py, `dgc chatgpt-plan`): its sign-in's state as this
+                          # process started, for the model picker's rail entry (no token, no network).
+                          "chatgpt_plan": _plan_capability(),
                           "library_picture": 1,         # library_picture: Save to Library on a picture in the chat (18 Nov)
                           # list_sessions {scope: "all"}: every project's sessions, each with its folder (12 Nov).
                           "session_scopes": True,
@@ -3792,6 +3815,18 @@ class Backend:
             goal=self._goal_snapshot(),
             session_name=str(self.agent.session_name or ""),
             context_size=self._context_window_size())
+
+    def _usage_route(self) -> str:
+        """Which usage limits this chat's own model draws on (the usage meter): a subscription CLI's, the ChatGPT plan's
+        (its route's key is the plan's marker, dgc.chatgpt_plan.PLAN_KEY), or none."""
+        config = getattr(self, "config", None)
+        if config is None:
+            return ""
+        engine = str(config.get("subscription_engine", "") or "")
+        if engine in ("codex", "claude"):
+            return engine
+        from .chatgpt_plan import PLAN_KEY
+        return "chatgpt_plan" if not engine and str(config.get("api_key", "") or "") == PLAN_KEY else ""
 
     def start(self) -> None:
         self.em.emit("ready", **self._ready_payload())
@@ -9154,6 +9189,12 @@ class Backend:
                 threading.Thread(target=self._serve_library_picture, args=(picture_request, dict(cmd)),
                                  name="dgc-library-picture", daemon=True).start()
 
+        elif t == "get_usage_limits":
+            # The usage meter's numbers (dgc/usage_limits.py): every source's latest, read from DGC's home.
+            from . import usage_limits
+            self.em.emit("usage_limits", request_id=str(cmd["request_id"])[:128], limits=usage_limits.snapshot(),
+                         route=self._usage_route())
+
         elif t in ("get_usage", "get_pip_usage_report"):
             usage_request = str(cmd.get("request_id") or "")
             usage_system = str(cmd.get("system") or "").strip()
@@ -12378,6 +12419,16 @@ class Host:
 
     def start(self) -> None:
         self.default.start()
+        # A usage report this process keeps (a model request, a delegated turn) is said at once, for the usage meter.
+        from . import usage_limits
+        if getattr(self, "_usage_stop", None) is None:
+            self._usage_stop = usage_limits.listen(self._usage_heard)
+
+    def _usage_heard(self, rows: list[dict]) -> None:
+        try:
+            self.em.emit("usage_limits", limits=rows, route=self.default._usage_route())
+        except Exception:                        # noqa: BLE001 -- a meter never costs a request
+            pass
 
     def attach_liveness(self, liveness) -> None:
         self._editor_liveness = liveness
@@ -12650,6 +12701,9 @@ class Host:
     def close(self, grace_s: float = 0.0) -> str:
         """Close every chat AT ONCE -- each gets the whole grace window, not a turn of it -- then
         the process's own state. Returns the worst outcome: idle, landed, or cancelled."""
+        stop_usage = self.__dict__.pop("_usage_stop", None)
+        if stop_usage is not None:
+            stop_usage()                      # (the usage meter's listener: this process says no more)
         with self._chats_lock:
             self._shutting_down = True        # a chat still being built closes itself
             chats = list(self.chats.values())

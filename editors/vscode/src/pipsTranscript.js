@@ -272,7 +272,8 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const unsent=user&&m.steer_status==='missed',again=user&&m.steered&&m.status==='failed'?` <button type="button" class="message-send-again" data-chat-action="resend" data-message-id="${esc(m.id)}"${canSend?'':' disabled'}>Send again</button>`:'';
   // A failed model request in a person's words, with what fixes it and the provider's own answer one click away.
   const failed=m.status==='failed'&&m.error?globalThis.DgcMarkdown?.modelFailure?.(m.error):null;
-  const failure=failed?` · ${esc(failed.headline)} ${esc(failed.next)}${failed.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}`:'';
+  // (A plan's used-up limit: Manage usage is its way out, its page named by the editor, 0.52.)
+  const failure=failed?` · ${esc(failed.headline)} ${esc(failed.next)}${failed.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}${failed.usage?` <button type="button" class="message-send-again" data-usage-page="${esc(failed.usage)}">Manage usage</button>`:''}`:'';
   // All of it (API's error_detail), when the short line had to cut it; a DGC from before has only the line.
   const rawFailure=typeof m.error_detail==='string'&&m.error_detail?(globalThis.DgcMarkdown?.editorAdvice?.(m.error_detail)??m.error_detail):failed?.detail;
   const failureDetail=failed?`<details class="message-failure" data-details="failure-${esc(m.id)}"><summary>Details</summary><span>${esc(rawFailure)}</span></details>`:'';

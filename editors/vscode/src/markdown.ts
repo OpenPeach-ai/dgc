@@ -64,11 +64,15 @@ export function linkOf(dataset: { target?: string; line?: string; endLine?: stri
 // What a failed model request means, for a person: the words Work, ChatDGC and a Pip's chat all use, with the provider's
 // own answer (a status, a URL, its JSON) one click away and never in the sentence. `fix`: Settings -> Models is where it
 // is put right. Reads either the kind the backend named (error.cause.kind), or the text a surface was handed.
-export type ModelWords = { kind: string; headline: string; next: string; fix: boolean };
+// `usage`: the way out is that source's usage page (Manage usage), not Settings: a plan's limit is used up (0.52).
+export type ModelWords = { kind: string; headline: string; next: string; fix: boolean; usage?: string };
 const REACH_KINDS = new Set(["connect", "dns", "tls", "proxy", "reset", "connect_timeout"]);
 export function modelWords(kind: string, model = ""): ModelWords {
   const say = (headline: string, next: string, fix = false): ModelWords => ({ kind, headline, next, fix });
   if (kind === "no_provider") return say("No model provider yet.", "Add one to start.", true);
+  // ChatGPT · your plan's share is used up (dgc/chatgpt_plan.py error_words): Manage usage is the way out. `model`
+  // carries when it resets, when the plan said ("at 14:05", "on 21 Nov at 09:00").
+  if (kind === "plan_limit") return { ...say("Your ChatGPT plan's limit for DGC is used up for now.", model ? `It resets ${model}.` : "See how much is left in ChatGPT."), usage: "chatgpt_plan" };
   if (kind === "model_not_found") {
     return say(model ? `The model ${model} isn't available.` : "That model isn't available.",
       "Choose another one, or add a provider.", true);
@@ -104,6 +108,9 @@ export function modelFailure(text: string): (ModelWords & { detail: string }) | 
   // "HTTP 404 from ...". Anything else is someone else's sentence (a plugin's, a page's), whatever it mentions.
   const body = detail.replace(/^the model didn't answer: /i, "");
   const prefixed = body !== detail, said = body.toLowerCase();
+  if (/your chatgpt plan's limit for dgc is used up/.test(said)) {
+    return { ...modelWords("plan_limit", /It resets ((?:at|on) [^.]{1,40})\./.exec(body)?.[1] || ""), detail };
+  }
   const status = Number(/^HTTP (\d{3})\b/.exec(body)?.[1] || 0);
   const unreachable = /cannot connect|connection refused|max retries|failed to establish|name or service not known|getaddrinfo|certificate verify failed|connection reset|could not connect|is not answering/.test(said);
   let kind = "";

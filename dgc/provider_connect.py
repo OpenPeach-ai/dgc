@@ -73,23 +73,30 @@ _DONE_PAGE = ("<!doctype html><meta charset=utf-8><title>DGC</title>"
 
 
 class OneTimeCallback:
-    """The address the browser comes back to: http://localhost:<port>/callback on this computer only.
+    """The address the browser comes back to: http://localhost:<port>/callback on this computer only (OpenRouter), or
+    as a service asks (Sign in with ChatGPT: http://127.0.0.1:<port>/auth/callback, dgc.chatgpt_plan).
 
-    It answers one request that carries the right ``state`` and a code (or OpenRouter's refusal), then stops listening.
-    It listens on the loopback addresses only, and answers only when the browser asked for it by a loopback name, so a
-    page elsewhere that points a name of its own at this computer gets nothing (421)."""
+    It answers one request that carries the right ``state`` and a code (or the service's refusal), then stops
+    listening. It listens on the loopback addresses only, and answers only when the browser asked for it by one of
+    ``hosts``, so a page elsewhere that points a name of its own at this computer gets nothing (421). ``fields`` holds
+    what came back with the code (a service may send more, as ChatGPT sends the client id it issued)."""
 
-    def __init__(self, state: str):
+    def __init__(self, state: str, *, path: str = "/callback", hosts: tuple = ("localhost", "127.0.0.1", "[::1]"),
+                 service: str = "OpenRouter"):
         self.state = state
+        self.path = path
+        self.hosts = tuple(hosts)
+        self.service = service
         self._code = ""
         self._error = ""
+        self.fields: dict = {}
         self._done = threading.Event()
         self._servers: list[http.server.HTTPServer] = []
         self.port = 0
 
     @property
     def url(self) -> str:
-        return f"http://localhost:{self.port}/callback"
+        return f"http://{self.hosts[0]}:{self.port}{self.path}"
 
     def _handler(self):
         owner = self
@@ -110,13 +117,13 @@ class OneTimeCallback:
 
             def do_GET(self):
                 host = (self.headers.get("Host") or "").lower()
-                if host not in {f"localhost:{owner.port}", f"127.0.0.1:{owner.port}", f"[::1]:{owner.port}"}:
+                if host not in {f"{name}:{owner.port}" for name in owner.hosts}:
                     self.send_response(421)
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
                 parts = urlsplit(self.path)
-                if parts.path != "/callback":
+                if parts.path != owner.path:
                     self._page(404, "Not here", "This address only finishes connecting DGC.")
                     return
                 query = parse_qs(parts.query)
@@ -126,11 +133,12 @@ class OneTimeCallback:
                     return
                 code = query.get("code", [""])[0].strip()
                 if not code:
-                    owner._error = "OpenRouter didn't connect DGC: the sign-in was cancelled or refused there."
+                    owner._error = f"{owner.service} didn't connect DGC: the sign-in was cancelled or refused there."
                     self._page(200, "Not connected", "DGC wasn't connected. You can close this tab and try again from DGC.")
                 else:
                     owner._code = code
-                    self._page(200, "DGC is connected to OpenRouter", "You can close this tab and go back to DGC.")
+                    owner.fields = {name: values[0] for name, values in query.items() if values}
+                    self._page(200, f"DGC is connected to {owner.service}", "You can close this tab and go back to DGC.")
                 owner._done.set()
 
         return Handler
@@ -140,7 +148,7 @@ class OneTimeCallback:
         first = http.server.HTTPServer(("127.0.0.1", 0), self._handler())
         self.port = first.server_address[1]
         self._servers.append(first)
-        if socket.has_ipv6:
+        if socket.has_ipv6 and ("localhost" in self.hosts or "[::1]" in self.hosts):
             class V6(http.server.HTTPServer):
                 address_family = socket.AF_INET6
             try:
@@ -155,7 +163,7 @@ class OneTimeCallback:
         """The code, once the browser is back; ConnectError when OpenRouter refused or nothing came in time."""
         try:
             if not self._done.wait(timeout):
-                raise ConnectError("OpenRouter didn't send DGC back in time. Choose Connect again when you're ready.")
+                raise ConnectError(f"{self.service} didn't send DGC back in time. Choose Connect again when you're ready.")
             if self._error:
                 raise ConnectError(self._error)
             return self._code

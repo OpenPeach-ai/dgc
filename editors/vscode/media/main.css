@@ -32,6 +32,7 @@
 @import url("./shared/inline.css");
 @import url("./shared/picturepop.css");
 @import url("./shared/modelpicker.css");
+@import url("./shared/usagemeter.css");
 @import url("./shared/askcard.css");
 @import url("./pips/wordmark.css");
 /* DGC panel — a quiet editor hierarchy with a restrained DGC accent. */
@@ -1823,7 +1824,17 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
   width: min(310px, calc(100vw - 20px)); min-width: min(280px, calc(100vw - 20px));
   max-height: min(440px, calc(100vh - 96px)); overflow-y: auto; z-index: 20; }
 /* (The model picker is not one of these: it is the shared dialog of media/shared/modelpicker.css.) */
+/* The usage meter's slot (media/shared/usagemeter.js), empty for a connection that reports no usage limits; and
+   "Using ChatGPT plan" beside the model picker while requests use the plan (narrow: the picker's own word says it). */
+.usage-picker:empty { display: none; }
+/* (It sits in the model picker's own slot, and gives way first: a crowded row keeps the model button whole.) */
+.model-picker { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.model-picker > #btn-model { flex: 0 1 auto; min-width: 0; }
+.model-picker > .plan-note { flex: 0 1000 auto; min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); }
 @media (max-width: 640px) {
+  .model-picker > .plan-note { display: none; }
+  .model-control.on-plan .model-copy::before { content: "ChatGPT plan"; }
   #btn-ctx span:not(.codicon) { display: none; }
   #btn-output .output-label, #btn-output .output-prefix { display: none; }
   .model-control #modelname, .model-control #effortname { display: none; }
@@ -1860,7 +1871,7 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
   #queue-send .queue-icon { display: inline-block; }
 }
 @media (max-width: 320px) {
-  .context-picker { display: none; }
+  .context-picker, .usage-picker { display: none; }     /* (the usage meter goes with the context meter it sits beside) */
   /* 24px, as VS Code's own toolbar buttons: at 300px, with the Artifact button, the cache clock, the microphone,
      Queue and Stop all showing, a 26px row was 8px wider than the box (measured live, 10 Nov). */
   #cfooter .fbtn { min-width: 24px; }
@@ -2879,6 +2890,10 @@ button.link.model-retry-copy { display: inline-flex; align-items: center; gap: v
   color: var(--link, var(--accent-text)); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .model-error .model-error-fix:hover { background: transparent; color: var(--link, var(--accent-text)); }
 .model-error .model-error-fix:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+/* Manage usage (a plan's limit used up, 0.52): the row's one way out, a button. */
+.model-error .model-error-fix.model-error-usage { height: var(--control); margin-top: var(--sp-1); padding: 0 var(--sp-3); border: 1px solid var(--border-strong);
+  border-radius: var(--btn-r, 6px); color: var(--accent-text); text-decoration: none; }
+.model-error .model-error-fix.model-error-usage:hover { background: var(--hover, var(--vscode-list-hoverBackground)); }
 /* No provider: the button says so and goes to Settings, so nothing here suggests a menu of models. */
 #btn-model.no-provider .model-chevron, #btn-model.no-provider #effortname { display: none; }
 .model-error-plain { display: flex; min-height: 22px; align-items: center; gap: var(--sp-2); color: var(--text); }

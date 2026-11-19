@@ -44,6 +44,8 @@ import '../media/shared/composer.css';
 import '../media/shared/composer.js';
 import '../media/shared/modelpicker.css';   // the model picker, the one Work and ChatDGC open too (window.DgcModelPicker)
 import '../media/shared/modelpicker.js';
+import '../media/shared/usagemeter.css';    // the usage meter, the one Work and ChatDGC show too (window.DgcUsageMeter)
+import '../media/shared/usagemeter.js';
 // The bar for what is going on above the prompt box, as in Work and ChatDGC (window.DgcTray).
 import '../media/shared/dialog.css';   // every popover's and dialog's lift and arrival, as in Work and ChatDGC (ui-08)
 import '../media/shared/tray.css';
@@ -532,7 +534,7 @@ const errorMarkup = value => {
  if(String(value)===SLOW_READ)return `<p class="notice error" role="alert">DGC took over a minute to answer. <button type="button" class="message-send-again" data-pips-retry>Try again</button></p>`;
  const failed=window.DgcMarkdown?.modelFailure?.(String(value));
  if(!failed)return `<p class="notice error" role="alert">${esc(value)}</p>`;
- return `<p class="notice error" role="alert">${esc(failed.headline)} ${esc(failed.next)}${failed.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}</p><details class="message-failure"><summary>Details</summary><span>${esc(failed.detail)}</span></details>`;
+ return `<p class="notice error" role="alert">${esc(failed.headline)} ${esc(failed.next)}${failed.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}${failed.usage?` <button type="button" class="message-send-again" data-usage-page="${esc(failed.usage)}">Manage usage</button>`:''}</p><details class="message-failure"><summary>Details</summary><span>${esc(failed.detail)}</span></details>`;
 };
 function setError(error) { S.error=errorText(error); render(); }
 // The page's own lines (what went wrong, what was done) each have a × to close them: a line pinned on the page until
@@ -767,7 +769,7 @@ function modelPicker(id,label,value,personal=false,short=false) {   // short: a 
 }
 async function loadModels(){
   if(!usable()||S.modelsLoading)return;const epoch=S.epoch;S.modelsLoading=true;S.modelsError='';render();
-  try{const result=pipModels(await send('list_pip_models'));if(epoch!==S.epoch)return;S.models=result.models;S.defaultModel=result.default_model;S.subscriptions=result.subscriptions;S.defaultEngine=result.default_engine;S.router=pipRouter(result.router);S.providers=result.providers;S.hostMark=pipHost(result.host);S.noProvider=result.no_provider===true;S.modelsError=S.noProvider?'':result.error?errorText(result.error):'';}
+  try{const result=pipModels(await send('list_pip_models'));if(epoch!==S.epoch)return;S.models=result.models;S.defaultModel=result.default_model;S.subscriptions=result.subscriptions;S.defaultEngine=result.default_engine;S.router=pipRouter(result.router);S.providers=result.providers;S.planOffer=result.plan_offer||'';S.hostMark=pipHost(result.host);S.noProvider=result.no_provider===true;S.modelsError=S.noProvider?'':result.error?errorText(result.error):'';}
   catch(error){if(epoch===S.epoch)S.modelsError=errorText(error);}
   finally{if(epoch===S.epoch){S.modelsLoading=false;render();}}
 }
@@ -880,12 +882,18 @@ function pipPickerView(){
   else if(current&&!S.modelsLoading&&!S.models.some(m=>m.id===current))conn.note='The current model is absent from this list. Its saved choice remains unchanged.';
   connections.push(conn);
  }
+ const atNow=currentChatProvider(selected);
  for(const p of named){
   if(p.default&&hostKept)continue;
   const conn={id:'provider:'+p.id,name:p.name,...from(p),loaded:true};
   conn.sections=listed(conn,(p.models||[]).map(id=>row(`provider:${p.id}:${id}`,id,'',{id})));
+  // ChatGPT · your plan (0.52): the shared rail entry; not connected it offers Connect, connected it lists the plan's
+  // models in the plan's own order and says "Using ChatGPT plan" while this Pip uses it.
+  if(p.plan&&(p.plan!=='connected'||S.planWaiting)){connections.push({...MP.planConnection({id:conn.id,state:p.plan,waiting:S.planWaiting,error:S.planError}),planProvider:p.id});continue;}
+  if(p.plan)Object.assign(conn,MP.planConnection({id:conn.id,state:'connected',rows:conn.sections.flatMap(x=>x.rows||[]),using:atNow===conn.id}));
   connections.push(conn);
  }
+ if(S.planOffer)connections.push(MP.planConnection({id:'chatgpt_plan',state:S.planOffer==='connected'?'ready':S.planOffer,waiting:S.planWaiting,error:S.planError}));
  if(routed.length)connections.push({id:'router',name:'DGC Router',mark:'dgc',badge:'',loaded:true,
   sections:[{title:'',rows:[...followsDefault('router'),...routed.map(([value,label])=>row(value,label,value==='router'?'Any computer with the Pips job':'',{caps:[]}))]}]});
  for(const x of subs){
@@ -968,6 +976,8 @@ function openPipPicker(){
   action:(id,{connection,row,text})=>{
    if(id==='settings'){closePipPicker();vscode.postMessage({type:'openSettings',section:'models'});return;}
    if(id==='refresh'){void loadModels();return;}
+   if(id==='planConnect'){S.planWaiting=true;S.planError='';refreshPipPicker();vscode.postMessage({type:'pipPlanConnect',id:connection?.planProvider||''});return;}
+   if(id==='planCancel'){vscode.postMessage({type:'pipPlanCancel'});return;}
    if(id==='main'&&row){closePipPicker();reviewChatModel(row.value);focusChip();return;}
    if(id==='fallback'&&row){void setPipBackup(row.value===fallbackValue(pipFallback())?null:fallbackChoice(row.value));return;}
    if(id==='agentsFallback'&&row){const c=ownChoiceOf(row.value);if(!c||c.mode==='default')return;void setOwnAgents({fallback:row.agentsFallback?{provider:'',model:''}:{provider:c.mode==='provider'?c.provider:'',model:c.model}});return;}
@@ -979,6 +989,19 @@ function openPipPicker(){
  void loadPipBackup();
  if(!S.models.length)void loadModels();
 }
+// ---- the usage meter (media/shared/usagemeter.js, globalThis.DgcUsageMeter: the one Work and ChatDGC show too, 0.52) ----
+// The editor says what this Pip's model draws on and what that reported (pipUsageMeter), asked as the chat draws and
+// when its messages load again (a reply finished); the meter sits beside the context chip only while there is
+// something to show, and "Using ChatGPT plan" sits beside the model chip while requests use the plan.
+const usageMeterNow={pip:'',key:'',meter:null,plan:false};
+function askPipUsage(fresh,force=false){
+ if(!S.pip)return;                       // (the runner needn't be running: what the Pip is set to run on is known)
+ const choice=S.pip.model_choice||{mode:'default'},key=S.pip.id+JSON.stringify(choice);
+ if(!fresh&&!force&&key===usageMeterNow.key)return;
+ usageMeterNow.key=key;vscode.postMessage({type:'pipUsageMeter',pip_id:S.pip.id,model_choice:choice,fresh:fresh===true});
+}
+function pipUsageView(){const UM=globalThis.DgcUsageMeter;return UM&&usageMeterNow.pip===S.pip?.id?UM.view(usageMeterNow.meter):null;}
+function pipUsageMarkup(){askPipUsage(false);const UM=globalThis.DgcUsageMeter;return UM?UM.buttonHtml(pipUsageView(),{cls:'composer-chip',id:'chat-usage'}):'';}
 function chatControlsMarkup(canSend,busy){
  // Dictating: the bottom row is the voice bar (media/voicebar.js), which draws itself into whatever is rendered here.
  if(voiceMode?.active)return `<div class="composer-controls pip-voice">${talkBar.markup('conversation')}</div>`;
@@ -1014,7 +1037,7 @@ function chatControlsMarkup(canSend,busy){
  const addMenu=S.composerPanel==='add'&&canAttachImages()?`<div class="composer-add-menu dgc-menu" role="menu" aria-label="Add">${globalThis.DgcMenu?.html([{name:'Add to the message',rows:[{id:'upload',label:'Pictures and files',hint:'From this computer'},{id:'mention',label:personalPip()?'A Pip or an app':'A file in this project',hint:'@'}]},...(goalsOn()?[{name:'This chat',rows:[{id:'goal',label:'Set a goal',hint:'It keeps going until it is done'}]}]:[])],{data:'pip-add'})||''}</div>`:'';
  // The model's chip has what room the row leaves (.model-slot): its name is cut to fit there with "…", never swapped
  // for the word "Model" (15 Nov), and the whole name is its title; with no room for a few letters it is its icon.
- return `${contextMenu}${addMenu}${levelMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add pictures, files and more" aria-label="Add pictures, files and more" aria-haspopup="menu" aria-expanded="${S.composerPanel==='add'}"${S.busy||archived()?' disabled':''}>${composerIcon('add')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}${S.noProvider?'':`<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="${cliName?`${esc(cliName)} manages its own context window`:`Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}`}" aria-label="Context window${cliName?`: ${esc(cliName)} manages its own`:pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>`}${routineChip}${levelChip}</div><div class="composer-right">${convOn()?pillMarkup(agentsNow(),{esc,open:agentsUi.map}):''}<span class="model-slot"><button type="button" id="chat-model" class="model-control${onFallback?' on-fallback':''}" aria-label="Change model and thinking${onFallback?`. ${esc(onFallback.model)}, its fallback, is answering`:''}" aria-haspopup="dialog" aria-expanded="${pipPickerOpen()}" title="${esc(onFallback?`${chip.text} didn’t answer, so its fallback ${onFallback.model} is answering. It tries ${chip.text} again with your next message.`:chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="composer-model-icon" aria-hidden="true">${composerIcon('zap')}</span><span class="model-copy"><span class="composer-model-name">${esc(onFallback?onFallback.model:shownModel)}</span>${onFallback?'<span class="composer-fallback-word">fallback</span>':''}${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button></span>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
+ return `${contextMenu}${addMenu}${levelMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add pictures, files and more" aria-label="Add pictures, files and more" aria-haspopup="menu" aria-expanded="${S.composerPanel==='add'}"${S.busy||archived()?' disabled':''}>${composerIcon('add')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}${S.noProvider?'':`<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="${cliName?`${esc(cliName)} manages its own context window`:`Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}`}" aria-label="Context window${cliName?`: ${esc(cliName)} manages its own`:pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>`}${S.noProvider?'':pipUsageMarkup()}${routineChip}${levelChip}</div><div class="composer-right">${convOn()?pillMarkup(agentsNow(),{esc,open:agentsUi.map}):''}${usageMeterNow.plan&&usageMeterNow.pip===S.pip?.id&&!S.noProvider?'<span class="composer-plan-note" title="Using ChatGPT plan: requests use your plan’s allowance"><span class="plan-long">Using ChatGPT plan</span><span class="plan-short">ChatGPT plan</span></span>':''}<span class="model-slot"><button type="button" id="chat-model" class="model-control${onFallback?' on-fallback':''}" aria-label="Change model and thinking${onFallback?`. ${esc(onFallback.model)}, its fallback, is answering`:''}" aria-haspopup="dialog" aria-expanded="${pipPickerOpen()}" title="${esc(onFallback?`${chip.text} didn’t answer, so its fallback ${onFallback.model} is answering. It tries ${chip.text} again with your next message.`:chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="composer-model-icon" aria-hidden="true">${composerIcon('zap')}</span><span class="model-copy"><span class="composer-model-name">${esc(onFallback?onFallback.model:shownModel)}</span>${onFallback?'<span class="composer-fallback-word">fallback</span>':''}${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button></span>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
 function fitChatInput(){const input=$('chatText');if(!input)return;
  // (Send alone is lit by what there is to send. The voice button, drawn where Send is while the box is empty, keeps its
@@ -1106,7 +1129,7 @@ function failedHiddenMarkup(m){
  const failed=window.DgcMarkdown?.modelFailure?.(m.error),raw=typeof m.error_detail==='string'&&m.error_detail?(window.DgcMarkdown?.editorAdvice?.(m.error_detail)??m.error_detail):failed?.detail;
  const onlyHello=S.messages.every(x=>x.role==='user'&&x.intro===true&&x.status==='failed')&&!S.chatActiveRun;
  const again=onlyHello&&S.apiVersion>=43&&!remoteHost?` <button type="button" class="message-send-again" data-hello-again${S.busy||!usable()||!S.runner?.online?' disabled':''}>Try again</button>`:'';
- return `<div class="pip-failed-turn" data-failed-turn="${esc(m.id)}"><p class="message-status" role="alert" data-status="failed">Failed · ${esc(failed?`${failed.headline} ${failed.next}`:m.error)}${failed?.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}${again}</p>${failed?`<details class="message-failure" data-details="failure-${esc(m.id)}"><summary>Details</summary><span>${esc(raw)}</span></details>`:''}</div>`;
+ return `<div class="pip-failed-turn" data-failed-turn="${esc(m.id)}"><p class="message-status" role="alert" data-status="failed">Failed · ${esc(failed?`${failed.headline} ${failed.next}`:m.error)}${failed?.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}${failed?.usage?` <button type="button" class="message-send-again" data-usage-page="${esc(failed.usage)}">Manage usage</button>`:''}${again}</p>${failed?`<details class="message-failure" data-details="failure-${esc(m.id)}"><summary>Details</summary><span>${esc(raw)}</span></details>`:''}</div>`;
 }
 async function helloAgain(){
  const pip=S.selected;if(!pip||S.busy||!usable())return;
@@ -1486,6 +1509,7 @@ async function introduceOnFirstOpen(id){
  }
 }
 async function loadMessages(more=false){
+ if(!more)askPipUsage(true);
  if(!more){void loadFlow();void loadGoal();void loadConversations();void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadLevel();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
   const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null,optionsEpoch=chatOptionsEpoch;S.messagesLoading=true;
@@ -7685,6 +7709,9 @@ document.addEventListener('pointerover',event=>{
  if(!event.target.closest?.('aside'))shell.classList.remove('sidebar-dismissed');
 });
 document.addEventListener('click',event=>{
+  {const meter=event.target.closest?.('[data-usage-meter]'),UM=globalThis.DgcUsageMeter;
+   if(meter&&UM&&!meter.closest?.('.dgc-um-pop')){event.preventDefault();event.stopPropagation();if(S.composerPanel){S.composerPanel='';render();}
+    UM.toggle($('chat-usage')||meter,pipUsageView(),{anchor:()=>$('chat-usage'),link:link=>{vscode.postMessage({type:'pipOpenUsagePage',source:pipUsageView()?.source||'',page:link.page});UM.close('link');}});return;}}
   {const more=event.target.closest?.('[data-pip-more]');
    if(more){event.preventDefault();event.stopPropagation();const id=more.dataset.pipMore,keyboard=event.detail===0;rowMenuFor=rowMenuFor===id?'':id;render();
     if(rowMenuFor){placeRowMenu(keyboard);if(!keyboard)[...document.querySelectorAll('[data-pip-more]')].find(b=>b.dataset.pipMore===id)?.focus({preventScroll:true});}return;}
@@ -7870,6 +7897,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.pluginUseRemove){void pipsSettingsCall('decline_pip_plugin',{pip_id:target.dataset.pluginUsePip,grant_id:target.dataset.pluginUseRemove},'Removed. That Pip no longer uses the plugin.');return;}
   if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
   if(target.dataset.openModels!==undefined){vscode.postMessage({type:'openSettings',section:'models'});return;}
+  if(target.dataset.usagePage){vscode.postMessage({type:'pipOpenUsagePage',source:target.dataset.usagePage,page:'usage'});return;}   // a plan's limit used up: Manage usage
   if(target.dataset.pipsRetry!==undefined){S.error='';render();refresh(true);return;}
   // Fix on a Pip whose routines can't run because its Claude Code or Codex is signed out: a terminal to sign it in.
   if(target.dataset.healthSignIn!==undefined){if(['claude','codex'].includes(target.dataset.healthSignIn)&&!remoteHost)vscode.postMessage({type:'pipsSignIn',engine:target.dataset.healthSignIn});return;}
@@ -8453,6 +8481,10 @@ const stopMessages=options.onMessage(message=>{
     void loadFolders().then(()=>{void loadAttention();render();});}
    return;}
   if(message.type==='pipsFolderPicked'){const done=folderPicks.get(message.id);if(done){folderPicks.delete(message.id);done(typeof message.folder==='string'&&message.folder?message.folder:null);}return;}   // a new-Pip card decided in a chat: Needs attention follows
+  // ChatGPT · your plan's Connect from this page's picker, and the usage meter of the chat on screen (0.52).
+  if(message.type==='pipPlanConnecting'){S.planWaiting=message.waiting===true;S.planError=typeof message.error==='string'?message.error.slice(0,300):'';refreshPipPicker();return;}
+  if(message.type==='pipUsageMeter'){if(message.pip_id===S.selected){usageMeterNow.meter=message.meter||null;usageMeterNow.plan=message.plan===true;usageMeterNow.pip=message.pip_id;render();if(globalThis.DgcUsageMeter?.isOpen())globalThis.DgcUsageMeter.update(pipUsageView());}return;}
+  if(message.type==='pipUsageChanged'){askPipUsage(false,true);return;}
   if(message.type==='pipsModelsChanged'){if(usable()&&(S.models.length||S.defaultModel||S.router)&&!S.modelsLoading)void loadModels();return;}
   if(message.type==='pipsVisibility'){const back=S.focused===false&&message.focused!==false;if(typeof message.focused==='boolean')S.focused=message.focused;S.visible=message.visible===true;motion();if(S.visible)void refresh(false);if(back)maybeMarkRead();return;}
   if(message.type==='pipsConnection'){

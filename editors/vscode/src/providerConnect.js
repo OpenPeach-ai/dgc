@@ -102,7 +102,7 @@ export async function exchange(code,verifier,{url=OPENROUTER.exchange,fetchImpl=
 }
 
 /** Whether a key works: {state: ok|signed_out|no_credit|unreachable, and when OpenRouter says: label, usage, limit,
- *  limit_remaining}. Settings shows signed_out as "Connect again" and no_credit as "Top up". */
+ *  limit_remaining, limit_reset (daily, weekly, monthly or null: the usage meter's reset)}. Settings shows signed_out as "Connect again" and no_credit as "Top up". */
 export async function keyState(key,{url=OPENROUTER.keyInfo,fetchImpl=fetch}={}){
  let response;
  try{response=await withTimeout(fetchImpl,url,{headers:{Authorization:`Bearer ${key}`}});}catch{return {state:'unreachable'};}
@@ -111,7 +111,7 @@ export async function keyState(key,{url=OPENROUTER.keyInfo,fetchImpl=fetch}={}){
  if(response.status!==200)return {state:'unreachable'};
  let data={};try{data=(await response.json())?.data||{};}catch{}
  const out={state:'ok'};
- for(const name of ['label','usage','limit','limit_remaining'])if(name in data)out[name]=data[name];
+ for(const name of ['label','usage','limit','limit_remaining','limit_reset'])if(name in data)out[name]=data[name];
  if(data.limit!=null&&typeof data.limit_remaining==='number'&&data.limit_remaining<=0)out.state='no_credit';
  return out;
 }

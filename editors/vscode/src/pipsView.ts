@@ -697,6 +697,15 @@ export class PipsEditor implements vscode.Disposable {
   private modelWindow?: (choice: { mode: 'model' | 'provider'; model: string; provider?: string }) => Promise<number>;
   useModelWindow(ask: (choice: { mode: 'model' | 'provider'; model: string; provider?: string }) => Promise<number>): void { this.modelWindow = ask; }
   useSavedProviders(list: () => Promise<unknown[]>, save: (id: string, model: string) => Promise<void>, none: () => boolean = () => false, host: () => unknown = () => undefined): void { this.savedProviders = { list, save, none, host }; }
+  /** ChatGPT · your plan and the usage meter in a Pip's chat (0.52), the panel's: the plan's sign-in state when no saved
+   *  provider is the plan (`offer`, "" for none: the picker then offers Connect); Connect and Cancel from the picker
+   *  (its steps said to the page as planConnecting); and the meter for a Pip's model choice. Page messages, never Pip
+   *  controls: none reaches DGC's Pips. */
+  private planHooks?: { offer: () => Promise<string>; connect: (say: (message: Record<string, unknown>) => void, id: string) => Promise<boolean>; cancel: () => void;
+    usage: (choice: unknown, fresh: boolean) => Promise<Record<string, unknown>>; openUsage: (source: unknown, page: unknown) => void };
+  usePlan(hooks: NonNullable<PipsEditor['planHooks']>): void { this.planHooks = hooks; }
+  /** A new usage report: each Pip's chat asks for its meter again. */
+  usageChanged(): void { this.postPages({ type: 'pipUsageChanged' }); }
   /** A reply's links and Settings → Models, on the page in its own tab. The side bar's page shares the panel's own. */
   private pageActions?: (message: any) => void;
   usePageActions(act: (message: any) => void): void { this.pageActions = act; }
@@ -1393,8 +1402,8 @@ export class PipsEditor implements vscode.Disposable {
       return true;
     }
     if (owner.command === 'list_pip_models' && event.type === 'pips_result' && event.ok === true && this.savedProviders) {
-      void this.savedProviders.list().catch(() => [] as unknown[]).then(providers =>
-        this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { ...event.result, providers, ...(this.savedProviders?.host() ? { host: this.savedProviders.host() } : {}), ...(this.savedProviders?.none() ? { no_provider: true } : {}) } }, owner.surface));
+      void Promise.all([this.savedProviders.list().catch(() => [] as unknown[]), this.planHooks?.offer().catch(() => '') ?? Promise.resolve('')]).then(([providers, planOffer]) =>
+        this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { ...event.result, providers, ...(planOffer ? { plan_offer: planOffer } : {}), ...(this.savedProviders?.host() ? { host: this.savedProviders.host() } : {}), ...(this.savedProviders?.none() ? { no_provider: true } : {}) } }, owner.surface));
       return true;
     }
     if (event.type === 'pips_status') this.state.enabled = event.enabled === true;
@@ -1959,6 +1968,19 @@ export class PipsEditor implements vscode.Disposable {
       if (computer || !this.foldersOn || !this.projectFolderHook) return;
       const folder = message.folder === '' ? '' : fullFolder(message.folder);
       if (message.folder === '' || folder && this.listedFolders.has(folder)) this.projectFolderHook.choose(folder);
+      return;
+    }
+    // ChatGPT · your plan's Connect and the usage meter, from a Pip's chat (the panel's, through usePlan).
+    if (!computer && this.planHooks && ['pipPlanConnect', 'pipPlanCancel', 'pipUsageMeter', 'pipOpenUsagePage'].includes(String(message?.type))) {
+      const hooks = this.planHooks;
+      if (message.type === 'pipPlanCancel') hooks.cancel();
+      else if (message.type === 'pipOpenUsagePage') hooks.openUsage(message.source, message.page);
+      else if (message.type === 'pipPlanConnect') {
+        void hooks.connect((said) => this.post({ ...said, type: 'pipPlanConnecting' }, surface), typeof message.id === 'string' && /^provider_[a-f0-9]{32}$/.test(message.id) ? message.id : '')
+          .then((ok) => { if (ok) this.modelsChanged(); });
+      } else if (typeof message.pip_id === 'string' && /^pip_[a-f0-9]{32}$/.test(message.pip_id)) {
+        void hooks.usage(message.model_choice, message.fresh === true).then((said) => this.post({ ...said, type: 'pipUsageMeter', pip_id: message.pip_id }, surface), () => undefined);
+      }
       return;
     }
     if (message?.type === 'pipsPickFolder') {

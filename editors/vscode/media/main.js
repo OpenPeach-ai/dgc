@@ -3122,6 +3122,32 @@
     vscode.postMessage({ type: "contextBreakdown" });            // what fills it, part by part, as it opens
     $("ctx-compact").focus();
   }
+  // ---- the usage meter (media/shared/usagemeter.js, window.DgcUsageMeter: the one Work, ChatDGC and a Pip's chat share,
+  // 0.52). The extension says which connection this chat's model draws on and what it reported (usageMeter); the meter
+  // sits beside the context meter only while there is something to show, and "Using ChatGPT plan" sits beside the model
+  // picker while requests use the plan.
+  const UM = window.DgcUsageMeter;
+  let usageView = null, usagePlan = false;
+  function onUsageMeter(msg) {
+    usageView = UM ? UM.view(msg.meter) : null;
+    usagePlan = msg.plan === true;
+    const slot = $("usage-slot");
+    if (slot && UM) {
+      slot.innerHTML = UM.buttonHtml(usageView, { cls: "fbtn", id: "btn-usage" });
+      $("btn-usage")?.addEventListener("click", (e) => { e.stopPropagation(); hideContextMenu(); toggleUsageMeter(); });
+      if (UM.isOpen()) UM.update(usageView);
+    }
+    $("plan-note").hidden = !usagePlan;
+    updateModelControl();
+    refreshModelPicker();
+  }
+  function toggleUsageMeter() {
+    const button = $("btn-usage");
+    if (!button || !usageView) return;
+    UM.toggle(button, usageView, { anchor: () => $("btn-usage"),
+      link: (link) => { vscode.postMessage({ type: "openUsagePage", source: usageView?.source || "", page: link.page }); UM.close("link"); } });
+  }
+
   // ---- the model picker (media/shared/modelpicker.js, window.DgcModelPicker: the one Work, ChatDGC and a Pip's chat
   // share, 17 Nov). It opens centred over the page: the connections down its rail, the chosen one's models beside it,
   // Thinking under both. Work puts in it what DGC's `models` answer says: this session's route and the saved providers,
@@ -3355,7 +3381,7 @@
   /** A route as a connection of the rail: its mark and badge by what it is (never by its name alone). */
   function routeConn(row) {
     const sub = row.kind === "subscription";
-    const from = sub ? { engine: String(row.engine || row.key) } : { base_url: row.key === "native" ? lastModelMenu.base : String(row.base_url || ""), name: agentsHostLabel(row) };
+    const from = sub ? { engine: String(row.engine || row.key) } : row.plan ? { plan: true } : { base_url: row.key === "native" ? lastModelMenu.base : String(row.base_url || ""), name: agentsHostLabel(row) };
     return { id: row.key, name: connName(row), ...MP.markOf(from), route: row, loaded: true, sections: [] };
   }
   const plainRows = (ids, current) => ids.map((id) => ({ id, value: id, name: id, caps: MP.facts(id), current: id === current }));
@@ -3387,9 +3413,28 @@
     return { fb: target, pills: set ? (isMain ? [["Main", "main"]] : isFallback ? [["Fallback", "fallback"]] : []) : [],
       actions: [...(isMain ? [] : [{ id: "main", label: "Use as main" }]), { id: "fallback", label: isFallback ? "Stop using as fallback" : "Use as fallback", disabled: isMain }] };
   }
+  // ChatGPT · your plan (0.52): its rail entry is the shared one (MP.planConnection). Signed out, or not yet connected,
+  // it offers Connect; connected, it lists the plan's models in the plan's own order; while this session uses it, it
+  // says "Using ChatGPT plan".
+  let planWaiting = false, planError = "";
+  function onPlanConnecting(msg) {
+    planWaiting = msg.waiting === true;
+    planError = typeof msg.error === "string" ? msg.error.slice(0, 300) : "";
+    refreshModelPicker();
+  }
+  function planConn(row, conn, here) {
+    const state = String(row.plan || "none");
+    if (row.kind === "plan_offer" || state !== "connected" || planWaiting) {
+      return { ...MP.planConnection({ id: row.key, state: row.kind === "plan_offer" && state === "connected" ? "ready" : state, waiting: planWaiting, error: planError, current: here }), route: row };
+    }
+    const rows = (conn.sections || []).flatMap((section) => section.rows || []);
+    return { ...conn, ...MP.planConnection({ id: row.key, state, rows, loaded: conn.loaded !== false, current: here, using: here && usagePlan }),
+      error: conn.error, footer: conn.footer, route: row };
+  }
   function mainConnections() {
     const m = lastModelMenu, fb = fbView();
     return m.routes.map((row) => {
+      if (row.kind === "plan_offer") return planConn(row, null, false);
       const conn = routeConn(row), here = row.key === m.currentRouteKey;
       conn.current = here;
       if (row.kind === "subscription") {
@@ -3405,16 +3450,17 @@
         const isFallback = !isMain && !!fb.model && fb.model === r.value && (here ? !fb.base_url || fb.base_url === fb.route_base || fb.base_url === base : fb.base_url === base);
         return { ...r, ...fbParts({ provider: here ? "" : row.key, model: r.value, base_url: here ? "" : base }, isMain, isFallback) }; });
       if (here) {
-        if (m.err || !m.ids.length) { conn.error = m.err ? "Can’t reach its host." : "It lists no models."; conn.footer = [{ id: "connect", label: "Connect…", icon: "plug" }]; return conn; }
+        if (row.plan && row.plan !== "connected") return planConn(row, conn, here);
+        if (m.err || !m.ids.length) { conn.error = m.err ? "Can’t reach its host." : "It lists no models."; conn.footer = [{ id: "connect", label: "Connect…", icon: "plug" }]; return row.plan ? planConn(row, conn, here) : conn; }
         conn.sections = listed(conn, withFb(plainRows(m.ids, m.current)));
-        return conn;
+        return row.plan ? planConn(row, conn, here) : conn;
       }
       const list = pickerLists.get(row.key);
-      if (!list) { conn.loaded = false; return conn; }
+      if (!list) { conn.loaded = false; return row.plan ? planConn(row, conn, here) : conn; }
       if (list.error && !list.ids.length) conn.error = "Couldn’t list its models.";
       conn.sections = listed(conn, withFb(plainRows(list.ids, null)));
       conn.footer = [{ id: "typedFor", label: "Enter another model…", icon: "edit" }];
-      return conn;
+      return row.plan ? planConn(row, conn, here) : conn;
     });
   }
   // The Sub-agents tab: Settings' choice first, then every connection the main model has.
@@ -3424,7 +3470,7 @@
     const sameWhat = agentsModel.router ? "Now: DGC Router, which picks a free worker for each sub-agent" : settings ? `Now: ${settings}` : "Now: same as this session’s model";
     const first = { id: "agents:settings", name: "Settings’ choice", tip: "Settings’ choice", mark: "dgc", badge: "", current: same, loaded: true,
       sections: [{ title: "", rows: [{ value: "same", name: "Settings’ choice", desc: sameWhat, title: `Settings’ choice. ${sameWhat}`, current: same }] }] };
-    return [first, ...m.routes.map((row) => {
+    return [first, ...m.routes.filter((row) => row.kind !== "plan_offer").map((row) => {
       const conn = routeConn(row), on = agentsOn(row);
       conn.current = on;
       if (row.kind === "subscription") return { ...conn, disabled: true, reason: `${AGENTS_CLI_REASON}.` };
@@ -3489,6 +3535,8 @@
     const route = connection?.route;
     if (id === "settings") { vscode.postMessage({ type: "openSettings", section: "models" }); hideModelMenu(); return; }
     if (id === "connect") { vscode.postMessage({ type: "connect" }); hideModelMenu(); return; }
+    if (id === "planConnect") { planWaiting = true; planError = ""; refreshModelPicker(); vscode.postMessage({ type: "connectPlan", id: route && route.kind !== "plan_offer" ? route.key : "" }); return; }
+    if (id === "planCancel") { vscode.postMessage({ type: "cancelPlanConnect" }); return; }
     if (id === "typed") { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); return; }
     if (id === "typedFor" && route) { vscode.postMessage(route.kind === "subscription" ? { type: "subscriptionModelTyped", id: route.key } : { type: "providerModelTyped", id: route.key }); hideModelMenu(); return; }
     if (id === "agentsTyped" && route) { vscode.postMessage({ type: "agentsModelTyped", id: route.key }); hideModelMenu(); return; }
@@ -3533,7 +3581,9 @@
     $("effortname").textContent = effort;
     $("btn-model").classList.toggle("ultra", curUltra);
     $("btn-model").title = `${model} · ${effort} reasoning — click to change`;
-    $("btn-model").setAttribute("aria-label", `Change model and reasoning. Current model: ${model}. Profile: ${effort}.`);
+    $("btn-model").setAttribute("aria-label", `Change model and reasoning. Current model: ${model}. Profile: ${effort}.${usagePlan ? " Using ChatGPT plan." : ""}`);
+    $("btn-model").classList.toggle("on-plan", usagePlan);
+    if (usagePlan) $("btn-model").title += " · Using ChatGPT plan";
     // D14: its model didn't answer and its fallback does: the button names the fallback, in red, with the word.
     $("btn-model").classList.toggle("on-fallback", !!fallbackActive);
     let word = $("btn-model").querySelector(".model-fallback-word");
@@ -14457,7 +14507,9 @@ function permissionChoices(ev) {
     // pipsProjectFolder: the Project Folder choice changed; pipsFolderPicked: the folder the editor's picker gave (Add a folder…).
     // pipsChatDraft, pipsChatChanged: a Pip's chat is open in another page too (its editor tab, the Pips tab): what was
     // typed there, and that something was sent or answered there (15 Nov, "Open in editor").
-    if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked", "pipsChatDraft", "pipsChatChanged", "pipsFileData"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
+    // pipUsageMeter, pipUsageChanged, pipPlanConnecting: a Pip's chat's usage meter and its picker's ChatGPT plan Connect (0.52).
+    if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked", "pipsChatDraft", "pipsChatChanged", "pipsFileData",
+      "pipUsageMeter", "pipUsageChanged", "pipPlanConnecting"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     // pipSetupChanged: a new-Pip card was created or turned down somewhere else; this chat's copy and the Pips page read it again.
     if (msg.type === "pipSetupChanged") { pipSetupCards?.receive(msg); for (const listener of pipsListeners) listener(msg); return; }
     if (msg.type === "pipJobReply") { pipJobReply(msg); return; }
@@ -14521,6 +14573,8 @@ function permissionChoices(ev) {
       joinGoal(msg.state.goal);                 // a goal already running when this window opened: its end is said too
     }
     else if (msg.type === "agentsModel") onAgentsModel(msg);
+    else if (msg.type === "usageMeter") onUsageMeter(msg);
+    else if (msg.type === "planConnecting") onPlanConnecting(msg);
     else if (msg.type === "agentsWindow") onAgentsWindow(msg);
     else if (msg.type === "providerModels") { if (modelPickerOpen() && typeof msg.id === "string") { pickerLists.set(msg.id, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: !!msg.error }); refreshModelPicker(); } }
     else if (msg.type === "models" && modelPickerOpen()) { if ("agents" in msg) { setAgentsModel(msg.agents); updateModelControl(); } onModels(msg); }
@@ -19044,6 +19098,14 @@ function permissionChoices(ev) {
   function fillModelFix(line, words) {
     line.textContent = words?.next ? `${words.next} ` : "";
     line.hidden = !words?.next;
+    if (words?.usage) {
+      // A plan's limit used up (0.52): Manage usage is the way out, its page named by the extension.
+      const go = el("button", "model-error-fix model-error-usage", "Manage usage");
+      go.type = "button";
+      go.addEventListener("click", () => vscode.postMessage({ type: "openUsagePage", source: words.usage, page: "usage" }));
+      line.appendChild(go);
+      return;
+    }
     if (!words?.fix) return;
     const link = el("button", "model-error-fix", "Settings → Models");
     link.type = "button";
@@ -19080,7 +19142,9 @@ function permissionChoices(ev) {
     const message = advice(whole ? whole + (hintAt >= 0 ? said.slice(hintAt) : "") : said);
     // A person's words, and the way to what fixes it. The provider's own answer (its status, its address, its JSON) and
     // the hint are one click away, under the row.
-    const words = window.DgcMarkdown.modelWords(kind, model);
+    // A plan's used-up limit (cause.action "manage_usage"): its own words, when it resets, and Manage usage.
+    const usageWords = cause.action === "manage_usage" ? window.DgcMarkdown.modelFailure?.(said) : null;
+    const words = usageWords?.usage ? usageWords : window.DgcMarkdown.modelWords(kind, model);
     const headline = words.headline;
     const split = message.indexOf("\n  → ");
     const rawHint = split >= 0 ? message.slice(split + 5).trim() : advice(retryText(cause.hint, 300));

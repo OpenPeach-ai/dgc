@@ -334,8 +334,9 @@ class SettingsSurfacesTests(unittest.TestCase):
 
         def select(title, labels, hints=None):
             menus.append((title, list(labels)))
-            if title == "Provider":
-                return 0                                    # the first preset: Ollama (local), no key
+            if title == "Provider":                         # Ollama (local), no key: by its label, not its place
+                from dgc.config import PROVIDERS
+                return labels.index(PROVIDERS["ollama"]["label"])
             return [SEARCH_PROVIDERS[k]["label"] for k in SEARCH_PROVIDERS].index(SEARCH_PROVIDERS["ollama"]["label"])
 
         cfg = SetupCfg(context_size=32768)

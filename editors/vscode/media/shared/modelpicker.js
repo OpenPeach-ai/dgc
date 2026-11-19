@@ -95,7 +95,8 @@
   /** A connection's mark and corner badge: {mark, badge}. `engine`: a subscription app's key; else `base_url` and `name`.
    *  badge: "cli" a subscription app, "key" an API key at its company's own host, "cloud" ollama.com's hosted models,
    *  "" a local server or anything else. mark "" draws a lettered tile. */
-  function markOf({ engine = "", base_url = "", name = "" } = {}) {
+  function markOf({ engine = "", base_url = "", name = "", plan = false } = {}) {
+    if (plan) return { mark: "openai", badge: "plan" };      // ChatGPT · your plan: OpenAI's mark, the plan's own word
     if (engine) return { mark: ENGINE_MARKS[String(engine)] || "", badge: "cli" };
     let host = "", port = "";
     try { const url = new URL(String(base_url || "")); host = url.hostname.toLowerCase(); port = url.port; } catch { /* no address: by name */ }
@@ -110,6 +111,34 @@
   function tipOf(name, badge) {
     const words = String(name || "").replace(/\s*\((?:[^)]*)\)\s*$/, "");
     return badge === "cli" ? `${words} · your subscription` : badge === "key" ? `${words} · your key` : badge === "cloud" ? `${words} · cloud` : words;
+  }
+  // ---- ChatGPT · your plan (0.52): one connection, the same in Work, ChatDGC and a Pip's chat ----
+  const PLAN_NAME = "ChatGPT · your plan";
+  /** The plan's connection for the rail. `state`: "connected" (its models are `rows`), "signed_out" or "none" (Connect),
+   *  "ready" (DGC is signed in, from the terminal say, but the plan isn't one of this editor's connections yet: Use it);
+   *  `waiting`: its sign-in is open in the browser (Cancel); `using`: requests use the plan now ("Using ChatGPT plan",
+   *  as OpenAI asks); `error`: what the last Connect said. `id`: the page's own id for it. */
+  function planConnection({ id = "chatgpt_plan", state = "none", rows = [], loaded = true, current = false, using = false, waiting = false, error = "", who = "" } = {}) {
+    const conn = { id, name: PLAN_NAME, tip: PLAN_NAME, mark: "openai", badge: "plan", plan: state, current, loaded: true, sections: [] };
+    if (waiting) {
+      conn.reason = "Sign in on the ChatGPT page that opened in your browser, and allow DGC to use your plan.";
+      conn.footer = [{ id: "planCancel", label: "Cancel", icon: "close" }];
+      conn.disabled = false; conn.waiting = true;
+      return conn;
+    }
+    if (state !== "connected") {
+      conn.signedOut = true;
+      conn.reason = state === "signed_out" ? "Signed out of ChatGPT. Connect again to use your plan here."
+        : state === "ready" ? "DGC is signed in with ChatGPT. Use your Plus or Pro plan here too: no key needed."
+        : "Use your ChatGPT Plus or Pro plan here: sign in with ChatGPT. No key needed.";
+      if (error) conn.error = error;
+      conn.footer = [{ id: "planConnect", label: state === "signed_out" ? "Connect again" : state === "ready" ? "Use ChatGPT plan" : "Connect", icon: "plug" }];
+      return conn;
+    }
+    conn.loaded = loaded;
+    conn.sections = [{ title: "", rows }];
+    conn.note = using ? `Using ChatGPT plan${who ? ` · ${who}` : ""}` : "";
+    return conn;
   }
   // A lettered tile, for a connection with no mark of its own: one of our palette's hues, kept by its name. (Never one
   // of the purples: purple is DGC's own.)
@@ -443,11 +472,13 @@ void main() {
         return;
       }
       const conn = connOf(state.sel) || all[0];
-      const kind = conn.badge === "cli" ? "your subscription" : conn.badge === "key" ? "your key" : conn.badge === "cloud" ? "cloud" : "";
+      const kind = conn.badge === "cli" ? "your subscription" : conn.badge === "key" ? "your key" : conn.badge === "cloud" ? "cloud" : "";   // (the plan's name says "your plan" itself)
       head.innerHTML = `<span class="dgc-mp-conn-name" title="${esc(conn.name)}">${esc(conn.name)}</span>${kind ? `<span class="dgc-mp-conn-kind">${kind}</span>` : ""}`;
       const sections = Array.isArray(conn.sections) ? conn.sections.filter((s) => s.rows && s.rows.length) : [];
       let html = "";
       if (conn.disabled) html = `<p class="dgc-mp-say">${esc(conn.reason || "Not available here.")}</p>`;
+      else if (conn.signedOut || conn.waiting) html = `<p class="dgc-mp-say" data-state="${conn.waiting ? "loading" : "signin"}">${esc(conn.reason || "")}</p>`
+        + (conn.error ? `<p class="dgc-mp-say" data-state="error">${esc(conn.error)}</p>` : "");
       else if (conn.loaded === false && !conn.error) html = `<p class="dgc-mp-say" data-state="loading">Listing its models…</p>`;
       else {
         html = sections.map((s) => (s.title ? `<div class="dgc-menu-head dgc-mp-sec" role="presentation"><span>${esc(s.title)}</span></div>` : "") + s.rows.map((row) => rowHtml(conn, row, false)).join("")).join("");
@@ -925,5 +956,5 @@ void main() {
   }
 
   return { open, markOf, tipOf, markHtml, glyph, facts, versionLabel, claudeRows, ollamaSections, isCloudModel, sizeWords, windowSizes, parseSize, sizeProblem,
-    WINDOW_STEPS, MARK_NAMES, PROVIDER_MARKS, CAP_WORDS };
+    planConnection, PLAN_NAME, WINDOW_STEPS, MARK_NAMES, PROVIDER_MARKS, CAP_WORDS };
 });

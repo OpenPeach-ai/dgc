@@ -93,6 +93,15 @@ export interface ChatDGCHost {
   postHome(message: Record<string, unknown>): void;
   /** Settings at a section (Memory, from "Manage memory" under a reply). */
   openSettings?(section: string): void;
+  /** The usage meter (0.52, src/usageLimits.ts): what a chat's model draws on and what that reported, by the model's
+   *  value (`provider:<id>:<model>`, `subscription:<engine>…`, or the host's own); its page by name; and a call on
+   *  every new report. */
+  usageFor?(model: string, fresh?: boolean): Promise<Record<string, unknown>>;
+  openUsagePage?(source: unknown, page: unknown): Promise<void>;
+  watchUsage?(changed: () => void): { dispose(): void };
+  /** ChatGPT · your plan's Connect from a chat's model picker (its steps said as planConnecting); Cancel. */
+  connectPlan?(say: (message: Record<string, unknown>) => void, id?: string): Promise<boolean>;
+  cancelPlanConnect?(): void;
   /** Who made a Library item, pressed in the Library's editor tab: that Work session in its tab, or that Pip's chat. */
   openMaker?(maker: { kind: string; id: string; name: string }): void;
   /** What its backend offers ChatDGC (ready.capabilities.chatdgc), or {} before it's ready. */
@@ -185,6 +194,8 @@ interface Tab {
   take?: boolean;
   /** The folder its chat reads, as the process last said (chatdgc_folder): where the picker starts next time. */
   folder?: string;
+  /** The model its page last said it is on, for the usage meter (usageFor). */
+  usageModel?: string;
 }
 
 type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel; path?: string; offset?: number;
@@ -376,7 +387,7 @@ function chatdgcPage(asset: (name: string) => string, cspSource: string): string
 <span class="cd-output cd-folder" id="cd-folder-wrap" hidden><button type="button" id="cd-folder" class="cd-tool" data-changes="1" aria-pressed="false" aria-label="Folder: give this chat a folder to read" title="Folder: give this chat a folder to read. It reads the files there and never changes them"><span id="cd-folder-icon" class="codicon codicon-folder" aria-hidden="true"></span><span id="cd-folder-label" class="cd-tool-label">Folder</span></button><span id="cd-folder-menu" class="cd-output-menu cd-folder-menu dgc-menu" role="menu" aria-label="Folder" hidden></span></span>
 <label id="cd-temp-toggle" class="cd-toggle" title="Incognito: this chat isn't saved, listed or remembered"><input type="checkbox" id="cd-temporary" aria-label="Incognito chat" data-changes="1"><svg class="cd-ghost" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19.5V10a7 7 0 0 1 14 0v9.5c-1.17 1.17-2.33 1.17-3.5 0s-2.33-1.17-3.5 0-2.33 1.17-3.5 0-2.33-1.17-3.5 0Z"/><path d="M9.5 10.5h.01" stroke-width="2.6"/><path d="M14.5 10.5h.01" stroke-width="2.6"/></svg><span class="cd-tool-label">Incognito</span></label>
 <span class="cd-spacer"></span>
-<div class="cd-tools-end"><button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-pie-chart" aria-hidden="true"></span><span id="cd-context-pct">0%</span></button>
+<div class="cd-tools-end"><button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-pie-chart" aria-hidden="true"></span><span id="cd-context-pct">0%</span></button><span id="cd-usage-slot" class="cd-usage-slot"></span><span id="cd-plan-note" class="cd-plan-note" title="Requests use your ChatGPT plan's allowance" hidden>Using ChatGPT plan</span>
 <div class="cd-picker"><button type="button" id="cd-model-pill" class="cd-model-pill" data-changes="1" aria-haspopup="dialog" aria-expanded="false" hidden><span id="cd-model-name" class="cd-model-name">Model</span><svg class="cd-pill-arc" viewBox="0 0 16 10" aria-hidden="true"><path class="cd-arc-track" d="M2 9 A6 6 0 0 1 14 9"></path><path id="cd-pill-arc-fill" class="cd-arc-fill" d=""></path></svg><span class="codicon codicon-chevron-up cd-model-chevron" aria-hidden="true"></span></button>
 </div>
 <button type="button" id="cd-mic" class="cd-icon cd-mic" data-changes="1" title="Dictate" aria-label="Dictate"><span class="codicon codicon-mic" aria-hidden="true"></span></button>
@@ -389,7 +400,7 @@ function chatdgcPage(asset: (name: string) => string, cspSource: string): string
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys dgc-dialog" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("media/shared/picturepop.js"))}"></script><script src="${attr(asset("media/shared/modelpicker.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/inline.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/pipjob.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("media/shared/picturepop.js"))}"></script><script src="${attr(asset("media/shared/modelpicker.js"))}"></script><script src="${attr(asset("media/shared/usagemeter.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/inline.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/pipjob.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library in its own editor tab. The page holds only where it goes: the ONE Library module (media/library.js, the
@@ -448,7 +459,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
-  attach(host: ChatDGCHost): void { this.host = host; }
+  attach(host: ChatDGCHost): void {
+    this.host = host;
+    // A new usage report (any backend, OpenRouter's key): each tab's meter is drawn again for its own model.
+    this.usageWatch?.dispose();
+    this.usageWatch = host.watchUsage?.(() => { for (const tab of this.tabs) if (tab.usageModel !== undefined) void this.usageMeter(tab, tab.usageModel); });
+  }
+  private usageWatch?: { dispose(): void };
+  /** The usage meter of one tab: what its model draws on and what that reported ("Using ChatGPT plan" too). */
+  private async usageMeter(tab: Tab, model: string, fresh = false): Promise<void> {
+    tab.usageModel = model;
+    const message = await this.host?.usageFor?.(model, fresh).catch(() => null);
+    if (message && this.tabs.has(tab)) this.post(tab, message);
+  }
 
   /** The "Open" pop-up (artifactNotice.ts): a widget a reply made while no tab shows its chat is offered there. */
   private madeNotice?: { offer(item: { key: string; version: number; title: string; updated: boolean; open: () => void }): void };
@@ -3021,6 +3044,21 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       case "openModels":
         this.host?.openSettings?.("models");
+        return;
+      case "usageFor":
+        // The page's model changed, or a reply finished (fresh: OpenRouter's key is asked again, at most once a minute).
+        if (typeof message.model === "string" && message.model.length <= 512) void this.usageMeter(tab, message.model, message.fresh === true);
+        return;
+      case "openUsagePage":
+        void this.host?.openUsagePage?.(message.source, message.page);
+        return;
+      case "connectPlan":
+        // Connected: the picker lists the plan's models (its list comes again, with the plan saved).
+        void this.host?.connectPlan?.((said) => this.post(tab, said), typeof message.id === "string" ? message.id : "")
+          .then((ok) => { if (ok && this.tabs.has(tab)) void this.models(tab, ""); });
+        return;
+      case "cancelPlanConnect":
+        this.host?.cancelPlanConnect?.();
         return;
       case "codePreview":
         openCodePreview(message);  // a reply's HTML or SVG, drawn in a tab beside that runs nothing (src/codePreview.ts)

@@ -459,6 +459,12 @@ body.cd-blank .cd-fine { display: none; }
   border: 0; border-radius: var(--btn-r, 6px); background: transparent; color: var(--muted); cursor: pointer;
   font: var(--w-med) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; --meter: var(--accent-text, var(--accent)); }
 .cd-meter:hover { background: var(--surface); color: var(--text); }
+/* The usage meter (media/shared/usagemeter.js) beside the context meter, and "Using ChatGPT plan" beside the model pill. */
+.cd-usage-slot:empty { display: none; }
+.cd-meter.cd-usage { padding: 0 var(--sp-1); }
+.cd-plan-note { min-width: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted);
+  font: var(--w-med) var(--t-xs)/1 var(--sans); }
+.cd-box.cd-fit-4 .cd-plan-note { display: none; }
 .cd-meter[data-level="mid"] { --meter: var(--warn); color: var(--warn); }
 .cd-meter[data-level="high"] { --meter: var(--del-text); color: var(--del-text); }
 .cd-meter .codicon { font-size: var(--t-lg); }

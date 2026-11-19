@@ -481,6 +481,8 @@ function render() {
         main.querySelectorAll('[data-provider-reconnect]').forEach(button=>button.addEventListener('click',()=>send({type:'reconnectProvider',id:button.dataset.providerReconnect})));
         main.querySelectorAll('[data-provider-topup]').forEach(button=>button.addEventListener('click',()=>send({type:'openProviderKeys',id:'openrouter',page:'credits'})));
         main.querySelectorAll('[data-app-signin]').forEach(button=>button.addEventListener('click',()=>send({type:'signInApp',app:button.dataset.appSignin})));
+        main.querySelectorAll('[data-plan-signout]').forEach(button=>button.addEventListener('click',()=>send({type:'signOutPlan'})));
+        main.querySelectorAll('[data-plan-usage]').forEach(button=>button.addEventListener('click',()=>send({type:'openProviderKeys',id:'chatgpt',page:'usage'})));
         main.querySelector('#saved-provider-add')?.addEventListener('click',()=>{
             const status=main.querySelector('#saved-provider-status');if(status)status.textContent='Saving provider…';
             if(!providerForm.preset){if(status)status.textContent='Choose a provider first.';return;}

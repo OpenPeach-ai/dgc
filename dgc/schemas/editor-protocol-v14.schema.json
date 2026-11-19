@@ -5898,6 +5898,39 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "usage_limits"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "limits": {
+              "type": "array"
+            },
+            "route": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "limits"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "agent_started"
             },
             "seq": {
@@ -13737,6 +13770,27 @@
             "type",
             "request_id",
             "range"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_usage_limits"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
           ],
           "additionalProperties": false
         },

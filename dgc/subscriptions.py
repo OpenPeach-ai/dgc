@@ -673,6 +673,16 @@ def _events_claude(obj: dict, state: dict | None = None) -> list[dict]:
     t = obj.get("type")
     if t == "stream_event":
         return _claude_piece(obj, state)
+    if t == "rate_limit_event":
+        # How much of the subscription's usage limits is used, as Claude Code reports it: the usage meter's numbers
+        # (dgc/usage_limits.py), kept by run_turn and never shown as a step.
+        from .usage_limits import from_claude
+        info = obj.get("rate_limit_info")
+        windows = from_claude(info)
+        if not windows:
+            return []
+        return [{"kind": "limits", "source": "claude", "windows": windows,
+                 "limited": isinstance(info, dict) and info.get("status") == "rejected"}]
     if t == "system":
         if obj.get("subtype") == "api_retry":
             return _claude_retry(obj)
@@ -724,6 +734,31 @@ def _events_claude(obj: dict, state: dict | None = None) -> list[dict]:
     if t in ("error", "fatal"):
         return _text_event("error", _error_text(obj) or "delegated turn failed")
     return []
+
+
+# ---- the usage meter's numbers (dgc/usage_limits.py) ----------------------------------------------------------------
+def _shown_kind(kind: str) -> bool:
+    """Whether an engine's event is for the person (a step, words) rather than DGC's own keeping (usage limits)."""
+    return kind != "limits"
+
+
+def _keep_limits(ev: dict) -> None:
+    """Keep the usage windows an engine reported (Claude Code's rate_limit_event)."""
+    from . import usage_limits
+    if ev.get("source") in usage_limits.SOURCES:
+        usage_limits.record(ev["source"], ev.get("windows") or [], limited=ev.get("limited") is True)
+
+
+def _keep_codex_limits(thread_id: str, env: dict | None) -> None:
+    """After a Codex turn: the usage windows its own session record holds for that thread (only ever read)."""
+    from . import usage_limits
+    try:
+        home = (env or {}).get("CODEX_HOME") or os.environ.get("CODEX_HOME")
+        windows = usage_limits.codex_session_limits(thread_id, codex_home=Path(home) if home else None)
+        if windows:
+            usage_limits.record("codex", windows)
+    except Exception:                            # noqa: BLE001 -- a meter never costs the turn
+        pass
 
 
 def _codex_tool_name(item: dict) -> str:
@@ -1481,6 +1516,9 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
                 if not is_json:
                     _diagnostic(line)
             for ev in events:
+                if not _shown_kind(ev["kind"]):
+                    _keep_limits(ev)            # (the usage meter's numbers: kept, never shown)
+                    continue
                 n += 1
                 if ev["kind"] in ("text", "thinking", "result"):
                     streamed_chars += len(str(ev.get("text") or ""))
@@ -1568,6 +1606,8 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
     if callback_error is not None:
         raise EngineError(
             f"delegated output renderer failed: {type(callback_error).__name__}: {callback_error}")
+    if getattr(engine, "key", "") == "codex" and vendor_session:
+        _keep_codex_limits(vendor_session, env)
 
     try:
         deliver({"kind": "_flush"})

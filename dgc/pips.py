@@ -4924,6 +4924,30 @@ def _run_fallbacks(registry, config, row, manifest):
     return backup, agents, pips_own
 
 
+def _keep_run_limits(limits) -> None:
+    """What a run's model reported of its usage limits (its worker's home is its own): kept in DGC's home, for the meter."""
+    from . import usage_limits
+    for row in (limits if isinstance(limits, list) else [])[:8]:
+        if isinstance(row, dict) and row.get("source") in usage_limits.SOURCES:
+            usage_limits.record(row["source"], row.get("windows") if isinstance(row.get("windows"), list) else [],
+                                limited=row.get("limited") is True)
+
+
+def _plan_token_for(payload: dict) -> dict | None:
+    """When a run's model (or its backup, its eyes, its helpers) is ChatGPT · your plan (its key is the plan's marker):
+    a live token for the worker, good for longer than a run lasts ({token, expires_at}); None otherwise, or when DGC
+    isn't signed in (the worker's request then says so)."""
+    from .chatgpt_plan import PLAN_KEY, PlanError, for_run
+    keys = [payload.get("api_key"), *(part.get(name) for part in (payload.get("backup"), payload.get("eyes_route"), payload.get("agents"))
+                                      if isinstance(part, dict) for name in ("api_key", "subagent_api_key", "subagent_fallback_api_key"))]
+    if PLAN_KEY not in keys:
+        return None
+    try:
+        return for_run(MAX_WALL_SECONDS + 1500)
+    except PlanError:
+        return None
+
+
 def _worker_config_overrides(payload: dict, backup: dict) -> dict:
     """What a Pip run's worker sets over its config, whatever the snapshot's: its key, its backup as its fallback, its
     Pip's sub-agents' settings for DGC's own helpers (payload["agents"], pip_agents.for_worker), and nothing of the
@@ -4978,6 +5002,12 @@ def _worker_main():
         action = validate_manifest(manifest.get("handoff"), manifest)["payload"]["action"]
     config = Config(snapshot)
     config._persist = False
+    held = payload.get("chatgpt_plan")
+    if isinstance(held, dict) and isinstance(held.get("token"), str):
+        # ChatGPT · your plan: the token the runner handed this run, held in memory and kept out of everything said.
+        from . import chatgpt_plan
+        chatgpt_plan.hold(held["token"], held.get("expires_at") or 0)
+        config._session_secret_values = (*getattr(config, "_session_secret_values", ()), held["token"])
     global _EYES_ROUTE
     _EYES_ROUTE = payload.get("eyes_route") if isinstance(payload.get("eyes_route"), dict) else None
     settings = payload["manifest"]["model_settings"]
@@ -5024,6 +5054,11 @@ def _worker_main():
         sys.stdout.write(_json(safe) + "\n")
         sys.stdout.flush()
 
+    # The usage meter's numbers this run's model reported (dgc/usage_limits.py): this worker's home is its own, so they
+    # go to the runner, which keeps them where every DGC reads them; said once, as the run ends.
+    from . import usage_limits
+    reported: list = []
+    stop_usage = usage_limits.listen(lambda rows: reported.__setitem__(slice(None), [rows]))
     try:
         emit({"kind": "policy_ready", "digest": hashlib.sha256(_json(native_policy(action, personal=manifest.get("source_policy",{}).get("mode")=="personal")).encode()).hexdigest()})
         result = execute_native(config, snapshot, payload["manifest"], emit)
@@ -5035,6 +5070,9 @@ def _worker_main():
                                                **({"full_message": exc.full_message[:2400]} if getattr(exc, "full_message", "") else {})}})
         return 1
     finally:
+        stop_usage()
+        if reported:
+            emit({"kind": "usage_limits", "limits": reported[0]})
         finished.set()
 
 
@@ -5636,6 +5674,9 @@ def _execute_run(registry, row, config):
             backup = None
     if backup is not None:
         payload["backup"] = backup
+    held = _plan_token_for(payload)
+    if held is not None:
+        payload["chatgpt_plan"] = held       # ChatGPT · your plan: the worker's home has no sign-in of its own
     backup_model = ""
     payload_bytes = _worker_payload(payload)
     if time.monotonic() >= deadline:
@@ -5733,6 +5774,8 @@ def _execute_run(registry, row, config):
                         pip_backup.used(registry, row, backup, backup_model)   # from now its chat says the fallback answers
                     except Exception:            # noqa: BLE001 - the run goes on either way
                         pass
+            elif kind == "usage_limits":
+                _keep_run_limits(event.get("limits"))
             elif kind == 'steer_applied' and manifest.get('run_kind') == 'conversation':
                 from .pip_steering import applied
                 applied(PipStore(registry), row['id'], event.get('ids'))

@@ -2889,8 +2889,13 @@ def run_setup(config: Config) -> None:
                         f"not signed in · run: {s['login_cmd']}" if s["installed"]
                         else "CLI not installed")) for s in subs_status]
     keys = list(PROVIDERS)
-    prov_labels = sub_labels + [PROVIDERS[k]["label"] for k in keys] + ["custom endpoint (enter your own URL)"]
-    prov_hints = sub_hints + [PROVIDERS[k]["base_url"] for k in keys] + [""]
+    # ChatGPT · your plan (dgc/chatgpt_plan.py): DGC's own agent on a Plus or Pro plan, after the subscription apps.
+    from . import chatgpt_plan as _plan
+    plan_state = _plan.status()["state"]
+    plan_label = ["ChatGPT · your plan (Plus or Pro): DGC's own agent on your plan"]
+    plan_hint = ["✓ connected" if plan_state == "connected" else "sign in with ChatGPT in your browser"]
+    prov_labels = sub_labels + plan_label + [PROVIDERS[k]["label"] for k in keys] + ["custom endpoint (enter your own URL)"]
+    prov_hints = sub_hints + plan_hint + [PROVIDERS[k]["base_url"] for k in keys] + [""]
     idx = select("Provider", prov_labels, prov_hints)
     if idx is None:
         c.print("[dim]cancelled[/dim]"); return
@@ -2924,7 +2929,16 @@ def run_setup(config: Config) -> None:
                 "[bold]dgc doctor[/bold] to verify\n")
         return
     idx -= n_sub                          # shift back into the direct-model provider list
-    if idx < len(keys):
+    on_plan = idx == 0
+    if on_plan:
+        if plan_state != "connected" and _plan.cli(["connect"]) != 0:
+            c.print("  [dim]not connected — provider unchanged[/dim]\n")
+            return
+        base_url, api_key = _plan.API, _plan.PLAN_KEY
+    idx -= 1
+    if on_plan:
+        pass
+    elif idx < len(keys):
         prov = PROVIDERS[keys[idx]]
         base_url, api_key = prov["base_url"], prov["api_key"]
         if prov["needs_key"]:
@@ -2940,7 +2954,9 @@ def run_setup(config: Config) -> None:
         api_key = getpass("  API key (blank for local) › ").strip() or "sk-local"
     config.set("subscription_engine", "")     # a direct model turns delegation back off
     config.set("base_url", base_url)
-    if idx < len(keys):
+    if on_plan:
+        config.set("api_mode", "responses")
+    elif idx < len(keys):
         config.set("api_mode", "auto")
     config.set("api_key", api_key)
     client = LLMClient(config.base_url, config.api_key, config.model,
@@ -3092,6 +3108,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "skills": "dgc skills [list|reload|show NAME|enable NAME|disable NAME|create NAME [--user]|install DIR [--user] [--allow-external]]",
     "plugin": "dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME [--scopes A,B|none]|show NAME|key NAME [--remove]|installed",
     "pips": "dgc pips enable|workspaces|workspace|list|create|show|run|runs|report|cancel|pause|resume-job|archive|restore|propose|accept|reject|versions|context|session-outcome|memory|notifications|activity|serve|status|health|stop|resume  (dgc pips COMMAND --help)",
+    "chatgpt-plan": "dgc chatgpt-plan connect|status|sign-out [--json]  ChatGPT · your plan: DGC on your Plus or Pro plan",
     "router": "dgc router status|add|edit|remove|test|on|off|find|hardware|suggest [--json]  DGC Router: your other computers that run models (dgc router COMMAND --help)",
     "node": "dgc node serve|token|stats|install-service|uninstall-service  read-only hardware stats for DGC Router on another computer",
     "images": "dgc images list|add|edit|remove|test|default|generate [--json]  your image generators (dgc images COMMAND --help)",
@@ -3271,6 +3288,10 @@ def main(argv: list[str] | None = None) -> int | None:
         if raw_argv[0] == "pips":
             from .pip_daemon import handle_command
             return handle_command(Config(), raw_argv[1:])
+        if raw_argv[0] == "chatgpt-plan":
+            # ChatGPT · your plan (dgc/chatgpt_plan.py): sign in with ChatGPT; --json is how the editor asks.
+            from .chatgpt_plan import cli as plan_cli
+            return plan_cli(raw_argv[1:])
         if raw_argv[0] == "router":
             # DGC Router (dgc/router_cli.py): no model, no session; --json for scripts.
             from .router_cli import main as router_main
