@@ -25,6 +25,10 @@ _HEADER = "# DGC Pips managed user service, format "
 FORMAT = 2
 MAX_COMMAND_OUTPUT = 16384
 COMMAND_TIMEOUT = 15.0
+# Changing what the user service manager runs (a reload, enable, start, stop) waits for it to finish, and on a busy
+# computer that can take longer than a status read: a reload of ~3,400 short-lived units took 17 s (live, 19 Nov).
+CHANGE_TIMEOUT = 60.0
+_CHANGES = frozenset({"daemon-reload", "enable", "disable", "start", "stop", "restart"})
 _BOOTSTRAP = "import os, sys; sys.path.insert(0, sys.argv.pop(1)); os.chdir(os.environ['DGC_HOME']); from dgc.cli import main; raise SystemExit(main())"
 _PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "UnitFileState", "FragmentPath", "DropInPaths")
 
@@ -335,8 +339,14 @@ def _check_file(spec, *, required=True, upgrade=False, other=None):
     return True
 
 
+def _limit(arguments) -> float:
+    """How long one systemctl call may take: a change waits for the manager, a read doesn't."""
+    return CHANGE_TIMEOUT if arguments and arguments[0] in _CHANGES else COMMAND_TIMEOUT
+
+
 def _systemctl(arguments):
     """Bounded, no-shell invocation. Never include manager output in public errors."""
+    limit = _limit(arguments)
     argv = ["/usr/bin/systemctl", "--user", "--no-pager", *arguments]
     env = {"PATH": "/usr/bin:/bin", "HOME": str(Path.home()), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
            "XDG_RUNTIME_DIR": "/run/user/" + str(os.getuid())}
@@ -345,13 +355,13 @@ def _systemctl(arguments):
     try:
         process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, env=env, start_new_session=True)
-        deadline = time.monotonic() + COMMAND_TIMEOUT
+        deadline = time.monotonic() + limit
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             while selector.get_map():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    _error("service_manager_timeout", "The user service manager did not respond within 15 seconds; inspect the scoped unit status before retrying.")
+                    _error("service_manager_timeout", f"The system's user service manager was busy and didn't answer within {int(limit)} seconds. Try again in a moment.")
                 for key, _ in selector.select(min(remaining, 0.25)):
                     chunk = os.read(key.fileobj.fileno(), 4096)
                     if not chunk:
@@ -365,7 +375,7 @@ def _systemctl(arguments):
             _error("service_manager_error", "The user systemd operation failed. Inspect this unit with systemctl --user status; no credentials or raw manager output are returned here.")
         return output.decode("utf-8", errors="replace")
     except subprocess.TimeoutExpired:
-        _error("service_manager_timeout", "The user service manager did not respond within 15 seconds; inspect the scoped unit status before retrying.")
+        _error("service_manager_timeout", f"The system's user service manager was busy and didn't answer within {int(limit)} seconds. Try again in a moment.")
     except OSError:
         _error("service_manager_unavailable", "The Linux user systemd manager is unavailable. Use dgc pips serve in the foreground, or start a user systemd session.")
     finally:
@@ -470,6 +480,8 @@ def install(dgc_home=None, *, upgrade=False, server=None, **options):
         try:
             _systemctl(["daemon-reload"])
         except RegistryError as exc:
+            if exc.code == "service_manager_timeout":
+                raise                                   # busy, not broken: its own words say to try again
             raise RegistryError(exc.code, "The scoped unit file is installed, but the user service manager reload failed. It was not started; inspect status and retry install.") from None
         return _public(spec, installed=True, changed=not present or replacement, started=False)
 

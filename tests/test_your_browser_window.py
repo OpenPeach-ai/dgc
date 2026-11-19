@@ -165,8 +165,25 @@ class OpenCommand(Base):
         self.assertIn("Install Google Chrome", out["error"]["message"])
         self.assertEqual(self.waiting(), [])
 
-    def test_open_needs_the_pips_runner_and_says_so(self):
-        with patch.object(your_browser, "_runner_live", return_value=False):
+    def test_opening_it_starts_the_pips_runner_when_it_isnt_running(self):
+        # Opening it is the person's own ask (as a job a chat hands a Pip is): the runner it opens with starts by itself.
+        live = {"on": False}
+        with patch.object(your_browser, "_runner_live", side_effect=lambda registry: live["on"]), \
+             patch("dgc.pip_jobs.ensure_runner", side_effect=lambda config: live.update(on=True)) as started:
+            self.ok("open_your_browser", url="example.com")
+        started.assert_called_once()
+        self.assertEqual(self.waiting()[0]["url"], "https://example.com")
+
+    def test_an_emergency_stop_is_never_cleared_by_opening_it(self):
+        with patch.object(your_browser, "_runner_live", return_value=False), \
+             patch("dgc.pip_jobs.ensure_runner", side_effect=pips.RegistryError(
+                 "runtime_paused", "Global stop is set. Review and explicitly resume the runner locally.")):
+            out = self.control("open_your_browser", url="example.com")
+        self.assertEqual(out["error"]["code"], "runtime_paused")
+        self.assertEqual(self.waiting(), [])
+
+    def test_a_runner_that_still_isnt_there_is_said_plainly(self):
+        with patch.object(your_browser, "_runner_live", return_value=False), patch("dgc.pip_jobs.ensure_runner"):
             out = self.control("open_your_browser", url="example.com")
         self.assertEqual(out["error"]["code"], "runner_required")
         self.assertIn("runner", out["error"]["message"])

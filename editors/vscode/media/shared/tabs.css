@@ -36,7 +36,9 @@
 /* The Pips tab wears the Core Pip's face after its name, as the header's Pips button does (asked 12 Nov night: it was
    before it; media/main.js draws it with the plush renderer): the height of
    the word's line, always there, so choosing a tab moves nothing. Empty (no renderer), it takes no room. */
-.dgc-tab-face { flex: none; display: block; width: 16px; height: 16px; line-height: 0; pointer-events: none; }
+/* Core's face beside "Pips": its box centred on the line put its round body a pixel above the middle of the lowercase
+   letters (his eye, 19 Nov; measured: body centre 14.0 against the letters' 15-16). One pixel down sits it on them. */
+.dgc-tab-face { flex: none; display: block; width: 16px; height: 16px; line-height: 0; pointer-events: none; transform: translateY(1px); }
 .dgc-tab-face:empty { display: none; }
 .dgc-tab-face > * { width: 100%; height: 100%; }
 /* Home's number: what needs you. The text colour, never the accent (as the dock's number). */

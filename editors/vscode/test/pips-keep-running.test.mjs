@@ -212,3 +212,23 @@ test('sharing: export opens the file for Save As, import reads the picked file a
  bridge.receive({type:'pipsRequest',id:'i3',request:{type:'import_pip_file'}});await flush();await flush();
  assert.equal(sent.length,before);assert.match(posted.at(-1).error.message,/at most 24 KiB/);
 });
+
+test('while it turns on, the switch says so; a slow manager is a closable line, not a stuck switch', async()=>{
+ // Live (19 Nov, Remote-SSH): the system's service manager took 17 s, the switch looked stuck, and the red line it left
+ // stayed on the page with no way to close it.
+ const x=setup();await x.drain();
+ x.change(true);await flush();
+ const box=x.d.getElementById('keep-running');
+ assert.equal(box.checked,true,'it shows what was asked while it works');
+ assert.equal(box.getAttribute('aria-busy'),'true');
+ assert.match(x.d.querySelector('.keep-running-note').textContent,/Turning on… The system’s service manager can take a minute/);
+ x.answer(x.requests('set_pips_keep_running')[0],"The system's user service manager was busy and didn't answer within 60 seconds. Try again in a moment.",false);await x.drain();
+ assert.equal(x.d.getElementById('keep-running').checked,false,'back to what is true');
+ assert.equal(x.d.getElementById('keep-running').hasAttribute('aria-busy'),false);
+ const line=x.d.querySelector('.page-note .notice.error');assert.ok(line,'the reason is on the page');
+ assert.match(line.textContent,/was busy and didn't answer within 60 seconds/);
+ const close=line.parentElement.querySelector('[data-dismiss-note="error"]');
+ assert.ok(close,'it has a ×');assert.equal(close.getAttribute('title'),'Dismiss');
+ close.click();await x.drain();
+ assert.equal(x.d.querySelector('.page-note .notice.error'),null,'and it goes');
+});

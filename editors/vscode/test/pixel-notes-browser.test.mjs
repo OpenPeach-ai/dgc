@@ -209,7 +209,10 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
         assert.ok(m.face, `${said}: the face is drawn`);
         assert.ok(m.face.left >= m.word.right - 0.5, `${said}: the face's left edge is after the word's right edge (${m.word.right} then ${m.face.left})`);
         assert.ok(Math.abs(m.face.left - m.flip.right - m.gap) <= 0.5, `${said}: the tab's own gap between them, as it was before the word (${m.face.left - m.flip.right} for ${m.gap})`);
-        assert.ok(Math.abs((m.face.top + m.face.bottom) / 2 - (m.word.top + m.word.bottom) / 2) <= 1, `${said}: the face is centred on the word (${(m.face.top + m.face.bottom) / 2} against ${(m.word.top + m.word.bottom) / 2})`);
+        // Centred box on box, the face's round body read a pixel high against the lowercase "ips" (his eye, 19 Nov): it sits
+        // one pixel below the word's box centre, so its body is level with the letters.
+        const low = (m.face.top + m.face.bottom) / 2 - (m.word.top + m.word.bottom) / 2;
+        assert.ok(low >= 0 && low <= 2, `${said}: the face is level with the word's letters (${(m.face.top + m.face.bottom) / 2} against ${(m.word.top + m.word.bottom) / 2})`);
         assert.ok(Math.abs((m.flip.left + m.face.right) / 2 - (m.tab.left + m.tab.right) / 2) <= 1, `${said}: the pair is centred in the tab (${(m.flip.left + m.face.right) / 2} in ${(m.tab.left + m.tab.right) / 2})`);
         assert.ok(m.flip.left >= m.tab.left - 0.5 && m.face.right <= m.tab.right + 0.5, `${said}: neither is cut by the tab`);
         assert.deepEqual([m.name, m.sideways], ["Pips", false], `${said}: the tab is still named Pips (once: the copy that rose under the pointer went on 13 Nov)`);

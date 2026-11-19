@@ -6783,6 +6783,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # supervisor to the right of the editor, a Pip's tab streamed, Home's last visited links, your own tab
                 # streamed where there is no screen, and Install Google Chrome. Local only.
                 from . import your_browser
+                if command == 'open_your_browser' and actor in ('editor-user', 'local-console') \
+                        and not your_browser._runner_live(registry):
+                    # Opening it is the person's own ask: the runner it opens with starts by itself (as it does for a
+                    # job a chat hands a Pip). An emergency stop is never cleared; it says so in its own words.
+                    from .pip_jobs import ensure_runner
+                    ensure_runner(config)
                 result = your_browser.control(registry, command, request, actor)
             elif command in ('list_pip_logins', 'save_pip_login', 'remove_pip_login', 'grant_pip_login'):
                 # Saved logins (pip_logins): kept sealed on this computer, typed into a page by DGC when the Pip signs

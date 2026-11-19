@@ -489,6 +489,12 @@ const pipJobsOwn=globalThis.DgcPipJob?globalThis.DgcPipJob.store({ask:(type,fiel
   if(!pipJobRender)pipJobRender=requestAnimationFrame(()=>{pipJobRender=0;render();});
   if(moved&&!pipJobOwnLoad)pipJobOwnLoad=setTimeout(()=>{pipJobOwnLoad=0;if(!disposed&&usable())void loadMessages();},300);}}):null;
 const pipJobOwnSeen=new Map();let pipJobOwnLoad=0;
+// A page line's ×: that line goes; the focus moves to the page's heading so it isn't lost with the button.
+document.addEventListener('click',event=>{
+ const which=event.target?.closest?.('[data-dismiss-note]')?.dataset.dismissNote;if(!which)return;
+ event.preventDefault();if(which==='error')S.error='';else S.notice='';render();
+ document.querySelector('h1,h2,[role="heading"]')?.focus?.({preventScroll:true});
+});
 document.addEventListener('click',event=>{
  const target=event.target;if(!target?.closest?.('[data-pipjob-act]'))return;
  const own=!!target.closest('.pipjob-asking,.pipjob-from');
@@ -531,6 +537,12 @@ const errorMarkup = value => {
  return `<p class="notice error" role="alert">${esc(failed.headline)} ${esc(failed.next)}${failed.fix?` <button type="button" class="message-send-again" data-open-models>Settings → Models</button>`:''}</p><details class="message-failure"><summary>Details</summary><span>${esc(failed.detail)}</span></details>`;
 };
 function setError(error) { S.error=errorText(error); render(); }
+// The page's own lines (what went wrong, what was done) each have a × to close them: a line pinned on the page until
+// something else happens reads as stuck (his call, 19 Nov). Closing one forgets it; the next one shows again.
+function pageNotesMarkup(where){
+ const close=(which,label)=>`<button type="button" class="pop-close page-note-close" data-dismiss-note="${which}" aria-label="${label}" title="Dismiss">${window.DgcIcons.html('close',{size:14})}</button>`;
+ return `${S.error?`<div class="page-note ${where}">${errorMarkup(S.error)}${close('error','Dismiss this message')}</div>`:''}${S.notice?`<div class="page-note ${where}"><p class="notice" role="status">${esc(S.notice)}</p>${close('notice','Dismiss this note')}</div>`:''}`;
+}
 // DGC's queue of Pip controls was full for a moment: nothing ran, and DGC said to wait. The line goes as soon as a
 // later control gets through, which shows there is room again (release check, 2026-11-03: it stayed on the Pips
 // home and in Core's chat until a window reload).
@@ -542,7 +554,7 @@ function contextEntries(entries,archivable=false) {
   return entries.length ? entries.map(e=>`<article class="entry"><span class="badge">${e.kind==='session_outcome'?'Session statement':e.kind==='execution'?'Accepted run outcome':e.kind==='finding'?'Finding':esc(e.kind[0].toUpperCase()+e.kind.slice(1))}</span><h3>${esc(e.title)}</h3><div class="goal">${esc(e.kind==='session_outcome'?e.provenance.proposal.statement:e.kind==='execution'?executionContextWords(e.provenance):e.content)}</div><p class="muted">${e.kind==='session_outcome'?'You wrote this. It wasn’t checked against anything that ran.':e.kind==='execution'?'What the run did when you accepted it. It doesn’t prove the code is correct now.':e.kind==='finding'?'The quoted code was checked; the model’s conclusion wasn’t.':'Added by you.'} ${e.kind==='command'?'A note only: it doesn’t let any Pip run this command.':''}</p>${e.kind==='finding'&&e.provenance.schema_version===2?`<dl class="meta">${pinnedSourceMarkup(e.provenance)}</dl>${pinnedSourceNotice(e.provenance)}`:''}${e.kind==='session_outcome'?sessionStatementDetails(e.provenance.proposal,e.provenance.proposal_digest):''}${e.kind==='execution'?`<details><summary>Saved record</summary><div class="goal">${esc(e.content)}</div></details>`:''}${e.provenance?.run_id?`<small>Version ${esc(e.provenance.job_version)} · ${esc(e.provenance.model)}</small>`:''}${archivable?`<div class="actions"><button type="button" data-archive="${esc(e.id)}"${S.busy||!usable()?' disabled':''}>Archive record</button></div>`:''}</article>`).join('') : '<p class="muted">No context yet.</p>';
 }
 // Keep Pips running (API 41): one switch that starts the runner at login and after a restart.
-let keepState={value:null,loading:false,error:'',asked:false};
+let keepState={value:null,loading:false,error:'',asked:false,busy:''};
 async function loadKeepRunning(){
  if(remoteHost||S.apiVersion<41||!usable()||keepState.loading)return;
  const token=S.epoch;keepState={...keepState,loading:true,asked:true};   // runner-wide: not tied to a selected Pip
@@ -551,11 +563,13 @@ async function loadKeepRunning(){
  finally{keepState.loading=false;if(token!==S.epoch)keepState.asked=false;render();}
 }
 async function setKeepRunning(enabled,refresh=false){
- if(S.busy||!usable())return;const token=scope();S.busy=true;render();
- try{const value=pipsKeepRunning((await send('set_pips_keep_running',{enabled})).keep_running);if(token!==scope())return;keepState.value=value;keepState.error='';
+ if(S.busy||!usable())return;const token=scope();S.busy=true;keepState.busy=enabled?'on':'off';render();
+ // Writing, registering and starting the service can take the system's service manager a while on a busy computer:
+ // the switch says what it is doing, and waits up to a few minutes rather than DGC's usual one.
+ try{const value=pipsKeepRunning((await broker.request({type:'set_pips_keep_running',enabled},150000)).keep_running);if(token!==scope())return;keepState.value=value;keepState.error='';
   S.notice=refresh&&value.on&&!value.outdated?'Keep Pips running now starts this DGC.':value.on?(value.while_logged_out?'Pips keep running: they start when you log in, restart if they fail, and run while you are logged out.':'Pips keep running: they start when you log in and restart if they fail.'):'Pips no longer start on their own. They keep running now until you stop them.';}
  catch(error){if(token===scope()){keepState.error=errorText(error);setError(error);}}
- finally{if(token===scope()){S.busy=false;render();}}
+ finally{keepState.busy='';if(token===scope()){S.busy=false;render();}}
 }
 let desktopState={value:null,loading:false,error:'',asked:false};
 async function loadDesktopNotifications(){
@@ -661,7 +675,8 @@ function keepRunningMarkup(){
  // restarts the runner on Linux and macOS, so it waits while a Pip is working.
  const c=S.runner?.counts,working=!!c&&(c.queued+c.running+(c.cancelling||0))>0;
  const older=k.on&&k.outdated?`<p class="muted keep-running-note keep-running-older">${esc(working?'It still starts an older DGC. Refresh moves it to this one once no Pip is working.':'It still starts an older DGC. Refresh moves it to this one.')} ${button('keep-running-refresh','Refresh',S.busy||!usable()||working,'quiet')}</p>`:'';
- return `<label class="keep-running"><input type="checkbox" id="keep-running"${k.on?' checked':''}${S.busy||!usable()?' disabled':''}> Keep Pips running</label><p class="muted keep-running-note">${esc(note)}</p>${older}`;
+ const doing=keepState.busy?(keepState.busy==='on'?'Turning on… The system\u2019s service manager can take a minute.':'Turning off…'):'';
+ return `<label class="keep-running"><input type="checkbox" id="keep-running"${(keepState.busy?keepState.busy==='on':k.on)?' checked':''}${S.busy||!usable()?' disabled':''}${keepState.busy?' aria-busy="true"':''}> Keep Pips running</label><p class="muted keep-running-note" role="status">${esc(doing||note)}</p>${doing?'':older}`;
 }
 // more: on the Pips home's bar, Controls is a "…" button (ui-07); its menu is the same.
 function runnerMarkup(more=false) {
@@ -6052,10 +6067,10 @@ function simplePipHeader(){
 function simpleMarkup(){
  // The header row every page of the side bar wears (media/shared/pagehead.js): "Pips" at the left, its status dot beside it, ⋯ (the Controls) at the right, the line under it.
  const bar=`${window.DgcPageHead.html({title:'Pips',level:1,cls:'simple-bar',rest:runnerMarkup(true)})}${scopeTabsMarkup()}`;
- const notes=`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}${undoRejectMarkup()}`;
+ const notes=`${pageNotesMarkup('simple-note')}${undoRejectMarkup()}`;
  if(pipsSettings.view&&(!S.selected||S.overview)&&!S.create)return `${pipsSettingsMarkup()}${notes}`;
  // Needs attention's View all: a page of its own. A new Pip rejected there says so in its own place, not in a line above.
- if(attentionAllShown())return attentionAllPageMarkup(`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}`);
+ if(attentionAllShown())return attentionAllPageMarkup(pageNotesMarkup('simple-note'));
  // (With the Project Folder dropdown that page is the Project tab's list: a Pip that is open shows over it.)
  if(S.projectEmpty&&scopeTabs()&&(!foldersOn()||(!S.selected||S.overview)&&!S.create))return `${bar}${notes}${projectEmptyMarkup()}`;
  const project=projectHome(),back=(id,label)=>`<button type="button" id="${id}" class="topbar-icon" aria-label="${esc(label)}" title="${esc(label)}">${simpleIcon('back')}</button>`;
@@ -6099,7 +6114,7 @@ function render() {
   shell.classList.toggle('chat-open',!intro&&!S.create&&!S.overview&&!!S.pip&&S.tab==='chat');
   shell.classList.toggle('simple-pips',!intro&&simpleMode());
   const header=(embedded?`<header class="embedded-header${!intro&&scopeTabs()?' scoped':''}"><span class="workspace-name" title="${esc(S.workspace?.name||'Current workspace')}">${esc(S.workspace?.name||'Pips')}</span>${runnerMarkup()}</header>`:`<header><div class="heading"><div>${options.close?button('return-main','Back to DGC',false,'back-control'):''}<h1><span class="pips-wordmark">Pips</span></h1><p class="muted">${esc(S.workspace?.kind==='personal'?'Personal':S.workspace?.name||'Current workspace')}</p></div></div>${runnerMarkup()}</header>`)+(intro?'':scopeTabsMarkup());
-  const markup=!intro&&simpleMode()?simpleMarkup():`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${chatView?'':undoRejectMarkup()}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
+  const markup=!intro&&simpleMode()?simpleMarkup():`${header}${chatView?'':pageNotesMarkup('page-note-pad')}${chatView?'':undoRejectMarkup()}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
   if(markup===lastMarkup){syncChatBox();tellInsidePip();sayShown();drawQuestionCards();return;}   // (a card's own state isn't in the markup)
   lastMarkup=markup;
   const allAnchor=attentionAllAnchor();

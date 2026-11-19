@@ -78,6 +78,8 @@ body.vscode-light .pip-approval-dock>:is(.allow-card,.app-link),body.vscode-ligh
 .pop-close:hover{background:var(--wash,var(--surface2));color:var(--text,var(--vscode-foreground))}
 .pop-close:focus-visible{outline:var(--btn-ring,1px solid var(--vscode-focusBorder));outline-offset:1px}
 .pop-close>svg{display:block}
+/* A page line with its ×: the × sits in the line's top right; the words keep clear of it. */
+.page-note{position:relative}.page-note>.notice{padding-right:40px}.page-note>.page-note-close{position:absolute;top:7px;right:7px}.page-note-pad{padding:0 20px}.page-note-pad>.page-note-close{right:27px}
 @media(forced-colors:active){.pop-close{color:ButtonText}.pop-close:hover{background:Highlight;color:HighlightText;forced-color-adjust:none}}
 /* (In a narrow chat a routine's button goes under its words: beside them it left the words a 60px column, and
    "Asia/Kolkata" broke inside the word.) */

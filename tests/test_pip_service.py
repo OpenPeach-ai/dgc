@@ -56,6 +56,30 @@ class ServiceTests(unittest.TestCase):
     def install(self):
         return service.install(self.home, **self.options)
 
+    def test_a_busy_service_manager_says_so_and_a_real_failure_keeps_its_words(self):
+        # Live (19 Nov): a reload took 17 s while the manager cleared thousands of short-lived units; DGC then said the
+        # reload failed. Busy is not broken: its own words say to try again.
+        def manager(error):
+            def answer(args):
+                if args[0] == "daemon-reload":
+                    raise error
+                return self.systemctl(args)
+            return answer
+        with patch.object(service, "_systemctl", side_effect=manager(RegistryError("service_manager_timeout", "busy, try again"))):
+            with self.assertRaises(RegistryError) as busy:
+                self.install()
+        self.assertEqual((busy.exception.code, str(busy.exception)), ("service_manager_timeout", "busy, try again"))
+        with patch.object(service, "_systemctl", side_effect=manager(RegistryError("service_manager_error", "x"))):
+            with self.assertRaises(RegistryError) as broken:
+                self.install()
+        self.assertIn("reload failed", str(broken.exception))
+
+    def test_a_change_waits_a_minute_for_the_manager_and_a_read_does_not(self):
+        for change in ("daemon-reload", "enable", "disable", "start", "stop", "restart"):
+            self.assertEqual(service._limit([change, self.spec["unit_name"]]), 60.0, change)
+        self.assertEqual(service._limit(["show", self.spec["unit_name"]]), 15.0)
+        self.assertEqual(service._limit([]), 15.0)
+
     def test_preview_and_uninstalled_status_are_read_only(self):
         before = list(self.base.rglob("*"))
         value = service.status(self.home, **self.options)

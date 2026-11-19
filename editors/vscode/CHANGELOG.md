@@ -2,11 +2,18 @@
 
 ## Unreleased
 
+- **Your Browser opens from the dock and Home's card, also over Remote-SSH.** The editor now passes their requests to
+  DGC (it answered "Unknown Pips command." before), and a click starts the Pips runner when it isn't running.
+- **Keep Pips running says what it's doing**: "Turning on…" while the system's service manager works (up to a few
+  minutes), and plain words when that manager was busy, never a switch that looks stuck.
+- **Every line on the Pips page has a ×** to close it; the next one shows again.
+- **Errors and blocked steps are red**, the red removed lines use; olive is the SDK's colour alone. Auto mode stays purple.
+- **Core's face on the Pips tab sits level with the word**, a pixel lower than before.
 - **@ a Pip hands it a job, and its answer is one card.** Work's @ menu lists every Pip (each with the folder it works in), and ChatDGC's and a Pip's chat list every Pip too. The job is a card in the turn that handed it, drawn by one shared module in Work, ChatDGC and a Pip's chat: the Pip's face and name, where it stands (Waiting for you in its chat, Starts after its current reply, On it, Answered), its answer, and its change with Apply, Review (each file's diff in place), Discard and Undo, plus Open its chat. In the Pip's own chat the job is a "From …" line above its answer that opens where it was asked, and a job waiting at Ask me first is a card with Start and Not now. The turn that tells the asking chat is the Pip's own quiet note ("Tile checker answered"), never a bubble of yours. Needs Pips API 111.
 - **Give it a folder… and Remove its folder…, on a Pip's page and in its ⋯ menu.** A Pip for anything (never Core) has Give it a folder… at the end of its "Works in" row; a folder Pip has Remove its folder… there. Both are in its chat's and its page's ⋯ menu too, each with its own folder glyph. The folder comes from the picker New Pip uses (the folders DGC knows, this window's, Add a folder…). DGC says first what stays (its chat, notes, routines, computer, level, model) and what changes, in a confirmation; then the Pip opens again where it works now, on the page it was on, its header naming its folder. When DGC can't (it is working, the folder isn't a Git project with a commit), the dialog says why. Needs Pips API 110.
 - **Work's plan looks like a plan**: the Tasks pill shows the step being worked on; it opens the plan's section (its time, a progress bar, a mark per step that turns, draws its check or is struck); in the conversation one card per turn updates in place as the plan changes.
 - **Thinking is one slider, Faster to Smarter**, in Work, ChatDGC and a Pip's chat: a moving fill, Ultra's own colours and sparkles, the note behind its ?; press a stop, drag, or use the arrow keys.
-- **DGC's products named and coloured**: VIBE after the side bar's and ChatDGC's wordmark, in Geist; the SDK's mark in olive (olive is the SDK's alone: errors and blocked steps are red now); Home's GitHub, Docs, DGC-SDK and Settings always live in its ⋯.
+- **DGC's products named and coloured**: VIBE after the side bar's and ChatDGC's wordmark, in Geist; the SDK's mark in olive; Home's GitHub, Docs, DGC-SDK and Settings always live in its ⋯.
 - **The side bar's chosen tab is its name in purple**, with nothing behind it.
 - **A question card in a Pip's chat** (Work's card): one question at a time, Next, Skip, Submit, Something else…
 - **Your Browser** on the dock and Home: Install Google Chrome, and your own tab streamed over Remote-SSH.
