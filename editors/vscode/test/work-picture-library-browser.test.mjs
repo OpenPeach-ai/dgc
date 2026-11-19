@@ -6,7 +6,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
@@ -24,7 +24,7 @@ const skipOrFail = (t) => {
   t.skip(reason);
   return true;
 };
-const PICTURES = process.env.DGC_PICTURES_DIR || `${homedir()}/dgc-work/052-plan/image-popup-build/pictures`;
+const PICTURES = process.env.DGC_PICTURES_DIR || `${tmpdir()}/dgc-test-pictures`;
 const LIGHT = `--vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF; --vscode-input-background:#FFFFFF; --vscode-panel-border:#E5E5E5;
   --vscode-widget-border:#E5E5E5; --vscode-input-border:#CECECE; --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#1F1F1F;
   --vscode-descriptionForeground:#616161; --vscode-disabledForeground:#6E6E6E; --vscode-list-activeSelectionBackground:#E8E8E8; --vscode-focusBorder:#005FB8;`;

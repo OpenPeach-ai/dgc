@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dgc import auto_guard  # noqa: E402
 from dgc.auto_guard import CREDENTIALS, DESTRUCTIVE, OUTSIDE, PUBLISHING, SENDING, SYSTEM  # noqa: E402
 
-HOME = Path("/home/dgc-guard-tester")          # never created: the rules only read paths
+HOME = Path("/home/someone")          # never created: the rules only read paths
 ROOT = HOME / "proj"
 TEMP = (Path("/tmp"),)
 
@@ -65,7 +65,7 @@ class Credentials(Base):
         self.blocks("echo `cat ~/.netrc`", CREDENTIALS)
         self.blocks('bash -c "cat ~/.docker/config.json"', CREDENTIALS)
         self.blocks("diff <(cat ~/.ssh/id_rsa) /dev/null", CREDENTIALS)
-        self.blocks("python3 -c \"print(open('/home/dgc-guard-tester/.ssh/id_rsa').read())\"", CREDENTIALS)
+        self.blocks("python3 -c \"print(open('/home/someone/.ssh/id_rsa').read())\"", CREDENTIALS)
 
     def test_keychains_and_sign_in_tokens(self):
         self.blocks("security find-generic-password -s github -w", CREDENTIALS)

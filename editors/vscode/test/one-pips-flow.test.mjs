@@ -1,5 +1,5 @@
-// What a Pip found, and what became of it, as cards in its own chat (the Pips flow design of 14 Nov,
-// ~/dgc-work/052-plan/pips-flow-design.md, pictures 1 to 4 and 6). A Pip's chat is its home. No "Ask DGC to fix" and no
+// What a Pip found, and what became of it, as cards in its own chat (0.52).
+// A Pip's chat is its home. No "Ask DGC to fix" and no
 // "Fix it" card: the level decides. Ask me first: the ordinary Allow card ("Fix 3 things in lime_tiles" · Allow ·
 // Not now). While it fixes: one live card with Steps, Watch its computer and Stop. Ready: the change card, Apply ·
 // Review · Discard. Do it all: fixed and applied, Review · Undo · Commit these files. What only you can do is kept

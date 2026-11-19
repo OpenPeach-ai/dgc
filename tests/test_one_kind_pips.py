@@ -1,6 +1,6 @@
 """One kind of Pip (his decision 13 Nov; finishing it 15 Nov): every Pip gets everything, a folder if it was given one,
 and the safety is the wall of its box, its level and Allow cards. What was left of "Personal" vs "Project" Pips that
-kept something from a Pip with a folder goes, gate by gate (the audit: ~/dgc-work/052-plan/one-kind-audit.md)."""
+kept something from a Pip with a folder goes, gate by gate."""
 import unittest
 from unittest.mock import patch
 

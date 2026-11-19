@@ -1,4 +1,4 @@
-/* Home as cards (media/shared/homecards.js draws it; the look approved 13 Nov, ~/dgc-work/052-plan/home-cards/mockup).
+/* Home as cards (media/shared/homecards.js draws it).
    One scrolling page: a head with the Cards button at its right, then a grid of cards. The side bar's width picks the
    grid's form (homecards.js sets data-form): "s" two squares to a row, "m" one column of cards as tall as they need, "l"
    four columns (six in a very wide side bar) of 150 px rows packed densely, a Medium card two columns wide and a Large

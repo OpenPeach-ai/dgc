@@ -99,7 +99,7 @@ test("H6: two folders with one name each say where they are, under their count",
       cut: t.querySelector(".hc-tile-sub").scrollHeight > t.querySelector(".hc-tile-sub").clientHeight + 1, title: t.querySelector(".hc-tile-open").title })));
     assert.deepEqual(tiles.map((t) => [t.name, t.sub]), [["lime_tiles", "2 sessions · in usertest"], ["lime_tiles", "9 sessions · in pipshot"], ["garden-notes", "6 sessions"]]);
     assert.ok(tiles.every((t) => !t.cut), "each tile's line is whole");
-    assert.match(tiles[1].title, /~\/pipshot\/home\/projects\/lime_tiles/, "and a pointer reads the whole path");
+    assert.match(tiles[1].title, /~\/pipshot\/projects\/lime_tiles/, "and a pointer reads the whole path");
   } finally { await x.page.close(); }
 });
 

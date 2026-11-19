@@ -1,4 +1,4 @@
-// His Library icon, Iris (0.52, brief item 10; ~/evolving-fungi/outputs/library-iris/): three books, hue 247,
+// The Library icon, Iris (0.52): three books, hue 247,
 // saturation 87%, lightness 65%, used exactly as he made it: its stylesheet (namespaced .library-iris) and its PNGs are
 // copied into the extension byte for byte (media/icons/library-iris/), and its README's markup is what the page holds:
 // <span class="library-iris" aria-hidden="true"><i></i><i></i><i></i></span> beside the visible word "Library", and

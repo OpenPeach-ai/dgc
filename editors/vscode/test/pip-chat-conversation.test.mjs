@@ -1,5 +1,5 @@
-// A Pip's chat reads as a conversation, with its sub-agents (0.52, his approved pictures of 14 Nov:
-// ~/dgc-work/052-plan/pip-chat-look/ and /bw/; Pips API 97, dgc/pip_agents.py). The Pip's face and name once per run
+// A Pip's chat reads as a conversation, with its sub-agents (0.52; Pips API 97,
+// dgc/pip_agents.py). The Pip's face and name once per run
 // of its messages; what a check found is a list inside its message, each file a link, with a quiet "Open report"; it
 // asks in its own words above the ordinary permission card (Not now · Allow); while its sub-agent works: its one line,
 // the sub-agent's row with the Pip's face in black and white, what it is doing, how long, "try n of 3", Steps · Watch

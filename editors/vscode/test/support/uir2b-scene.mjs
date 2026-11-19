@@ -103,9 +103,9 @@ const AR = (n) => "ar_" + String(n).padStart(16, "0");
 export const MADE = () => JSON.stringify([["dashboard", "Lime Tiles orders dashboard"], ["sheet", "Lime Tiles product line budget"], ["slides", "Lime Tiles billing - team pitch"], ["doc", "Billing in lime_tiles — one-page guide"]]
   .map(([type, title], k) => ({ id: AR(k + 1), type, title, version: k % 2 ? 2 : 1, op: k % 2 ? "changed" : "made", surface: "work", where: "", at: Date.now() - k * 60000 })));
 /** Two folders with one name, as a copied project has them, and one that is alone with its name. */
-export const TWINS = { choice: "", window: { folder: "/home/me/usertest/home/projects/lime_tiles", shown: "~/usertest/home/projects/lime_tiles", name: "lime_tiles" }, rows: [
-  { folder: "/home/me/usertest/home/projects/lime_tiles", shown: "~/usertest/home/projects/lime_tiles", name: "lime_tiles", here: true, exists: true, sessions: 2, pips: 0, workspace_id: null },
-  { folder: "/home/me/pipshot/home/projects/lime_tiles", shown: "~/pipshot/home/projects/lime_tiles", name: "lime_tiles", here: false, exists: true, sessions: 9, pips: 0, workspace_id: null },
+export const TWINS = { choice: "", window: { folder: "/home/me/usertest/projects/lime_tiles", shown: "~/usertest/projects/lime_tiles", name: "lime_tiles" }, rows: [
+  { folder: "/home/me/usertest/projects/lime_tiles", shown: "~/usertest/projects/lime_tiles", name: "lime_tiles", here: true, exists: true, sessions: 2, pips: 0, workspace_id: null },
+  { folder: "/home/me/pipshot/projects/lime_tiles", shown: "~/pipshot/projects/lime_tiles", name: "lime_tiles", here: false, exists: true, sessions: 9, pips: 0, workspace_id: null },
   { folder: "/home/me/garden-notes", shown: "~/garden-notes", name: "garden-notes", here: false, exists: true, sessions: 6, pips: 0, workspace_id: null }] };
 /** Home, as cards (the real side bar page), with what the tester's had: things made, a dock, the cards asked for. */
 export async function openHomeCards(browser, { width = 300, height = 760, theme = "dark-modern", layout = grid.DEFAULT, quiet = false, made = true, pins = PINS.slice(0, 2), ...rest } = {}) {

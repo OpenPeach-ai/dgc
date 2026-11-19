@@ -1,5 +1,5 @@
-// What a Pip found, and what became of it, as cards in its own chat (0.52, the Pips flow design of 14 Nov:
-// ~/dgc-work/052-plan/pips-flow-design.md). A Pip's chat is its home: everything it finds, asks, fixes and reports
+// What a Pip found, and what became of it, as cards in its own chat (0.52).
+// A Pip's chat is its home: everything it finds, asks, fixes and reports
 // lives there. No "Fix it" card and no card in a Work session: the level decides.
 //   Ask me first      the ordinary Allow card ("Fix 3 things in lime_tiles" · Allow · Not now)
 //   Approve for me    it fixes in its own copy and the change waits at Apply

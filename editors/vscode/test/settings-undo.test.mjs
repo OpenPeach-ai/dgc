@@ -1,4 +1,4 @@
-// A settings change DGC made, in a Work chat (0.52; dgc/settings_tool.py, 052-plan/settings-tool-plan.md): the
+// A settings change DGC made, in a Work chat (0.52; dgc/settings_tool.py): the
 // dgc_settings result that ends "Undo: setchg_…" draws as one quiet line, what changed in DGC's words without the id,
 // and Undo. Undo sends undo_setting_change; setting_undone settles the line ("Undone", or DGC's reason and no Undo).
 // Only for a DGC whose ready.capabilities.settings_undo is 1; a reload draws the same line.

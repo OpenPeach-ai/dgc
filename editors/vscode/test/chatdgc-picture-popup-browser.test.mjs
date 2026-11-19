@@ -6,7 +6,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
@@ -26,7 +26,7 @@ const skipOrFail = (t) => {
 };
 before(async () => { if (!chromium) return; try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] }); } catch { browser = null; } });
 after(async () => { await browser?.close(); });
-const PICTURES = process.env.DGC_PICTURES_DIR || `${homedir()}/dgc-work/052-plan/image-popup-build/pictures`;
+const PICTURES = process.env.DGC_PICTURES_DIR || `${tmpdir()}/dgc-test-pictures`;
 
 const ID = `chat_${"a".repeat(32)}`;
 const M = (n) => `msg_${String(n).repeat(32).slice(0, 32)}`;

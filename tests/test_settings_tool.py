@@ -1,4 +1,4 @@
-"""DGC's settings tool, its guard and Router's rule (0.52; his calls 13 Nov evening; 052-plan/settings-tool-plan.md).
+"""DGC's settings tool, its guard and Router's rule (0.52).
 
 "A general settings tool first, for ordinary settings" — "no we don't want any allow cards in auto mode" — "DGC can
 never turn on Dev Mode itself, or its own Dev Mode tools" — Router "same rule as settings". A change goes through the

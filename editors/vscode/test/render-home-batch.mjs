@@ -5,10 +5,11 @@
 // Usage: node test/render-home-batch.mjs <out folder> [clock,weather,folder] [a prefix for the names: "before-"]
 import { mkdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
+import { tmpdir } from "node:os";
 import { openGrid, LISBON, THIRTY_FOLDERS } from "./support/home-grid-scene.mjs";
 import { openDock, DOCK_SESSIONS } from "./support/dock-scene.mjs";
 
-const out = process.argv[2] || "/tmp/claude-1000/home-batch-pictures";
+const out = process.argv[2] || `${tmpdir()}/home-batch-pictures`;
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] });
 const only = process.argv[3] || "", pre = process.argv[4] || "";

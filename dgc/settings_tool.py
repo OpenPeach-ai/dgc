@@ -1,4 +1,4 @@
-"""DGC's own settings, changed by asking (0.52; his calls 13 Nov; 052-plan/settings-tool-plan.md).
+"""DGC's own settings, changed by asking (0.52).
 
 `dgc_settings_read` (read-only) lists what DGC may change with its value now and one line each, the permission rules,
 and Dev Mode with its limits and what raising each costs. `dgc_settings` changes one: an ordinary setting, a permission

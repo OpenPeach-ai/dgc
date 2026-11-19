@@ -4,11 +4,12 @@
 // Usage: node test/render-home-cards-more.mjs <out folder>
 import { mkdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
+import { tmpdir } from "node:os";
 import { openGrid, LISBON, NOTES, FOLDERS } from "./support/home-grid-scene.mjs";
 import { openDock, DOCK_SESSIONS } from "./support/dock-scene.mjs";
 import { CHATS, homeState } from "./support/home-scene.mjs";
 
-const out = process.argv[2] || "/tmp/claude-1000/home-cards-more-pictures";
+const out = process.argv[2] || `${tmpdir()}/home-cards-more-pictures`;
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] });
 const shot = (x, name) => x.page.screenshot({ path: `${out}/${name}.png` });

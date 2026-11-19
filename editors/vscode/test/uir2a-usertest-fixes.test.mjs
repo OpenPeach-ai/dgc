@@ -1,4 +1,4 @@
-// User-test round 1, section A of the triage (~/dgc-work/usertest/findings.md): the Work and Chat transcript bugs the
+// User-test round 1, section A of the triage: the Work and Chat transcript bugs the
 // tester met, each reproduced as it was seen and then held fixed. In real Chromium on the real pages
 // (test/support/uir2a-scene.mjs). One test for each: W3, W10, W25, W27, W28, W30, W36, W21, C10, W34.
 import { after, before, test } from "node:test";

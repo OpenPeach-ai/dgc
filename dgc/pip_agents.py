@@ -1,4 +1,4 @@
-"""Sub-agents in a Pip's chat (0.52, his calls of 14 Nov; 052-plan/pip-subagents-plan.md).
+"""Sub-agents in a Pip's chat (0.52).
 
 A Pip hands a job (first: a fix) to a sub-agent and keeps talking with you. The sub-agent works in a copy of its own,
 made from the Pip's copy of its folder when the job starts (files/agents/<job>/<folder> in the Pip's computer), with

@@ -1,5 +1,5 @@
-// A Pip's chat as a conversation, with its sub-agents (0.52, his approved pictures of 14 Nov:
-// ~/dgc-work/052-plan/pip-chat-look/ and /bw/; Pips API 97, dgc/pip_agents.py). The parts are Work's, drawn by the
+// A Pip's chat as a conversation, with its sub-agents (0.52; Pips API 97,
+// dgc/pip_agents.py). The parts are Work's, drawn by the
 // Pips view itself so they are the same in the side bar and when Pips is an editor tab, styled in src/pipChat.css to
 // Work's measures (media/main.css) and checked against Work's own nodes in test/pip-chat-conversation-browser:
 //   the Pip's words            Work's reply prose (.text.final): no bubble, its face and name once per run of messages

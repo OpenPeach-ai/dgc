@@ -1,4 +1,4 @@
-"""Sub-agents in a Pip's chat (0.52, his calls of 14 Nov; 052-plan/pip-subagents-plan.md, Phase 1).
+"""Sub-agents in a Pip's chat (0.52).
 
 A fix is a sub-agent's job: Allow (or the level) starts it in a copy of its own made from the Pip's copy; its turns are
 runs with no chat rows that run beside the Pip's chat, at most the Pip's slots at once; when it ends the Pip checks its

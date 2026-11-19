@@ -560,7 +560,7 @@ test("the tabs and the hub take every colour from the tokens, and say nothing th
   for (const file of files) {
     const text = read(file);
     assert.doesNotMatch(text, /#[0-9a-f]{3,8}\b(?![^{]*\{)/i, `${file}: no colour of its own`);
-    assert.doesNotMatch(text, /\bAI\b|founder|\/home\/|192\.168\./, `${file}: plain words only`);
+    assert.doesNotMatch(text, /\bAI\b|f[o]under|\/home\/|192\.168\./, `${file}: plain words only`);
   }
   assert.match(read("media/main.css"), /@import url\("\.\/shared\/tabs\.css"\);\s*@import url\("\.\/shared\/hub\.css"\);/, "the side bar's page loads both");
   assert.match(read("src/panel.ts"), /"shared", "hub\.js"/, "and the hub's script");

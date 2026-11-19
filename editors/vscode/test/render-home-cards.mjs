@@ -3,10 +3,11 @@
 // Home arranged). Usage: node test/render-home-cards.mjs <out folder>
 import { mkdirSync, renameSync, readdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
+import { tmpdir } from "node:os";
 import { openGrid, EVERY, LISBON, NOTES } from "./support/home-grid-scene.mjs";
 import { DOCK_SESSIONS } from "./support/dock-scene.mjs";
 
-const out = process.argv[2] || "/tmp/claude-1000/home-cards-pictures";
+const out = process.argv[2] || `${tmpdir()}/home-cards-pictures`;
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] });
 const SETTINGS = { weather: { place: LISBON, unit: "c" }, clock: { zone: "Asia/Tokyo" } };

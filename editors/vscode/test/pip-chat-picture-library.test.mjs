@@ -7,7 +7,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { chromiumOrNull } from "./support/look-probe.mjs";
 import { openChat } from "./support/pip-chat-scene.mjs";
 
@@ -22,7 +22,7 @@ const skipOrFail = (t) => {
 };
 before(async () => { if (!chromium) return; try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] }); } catch { browser = null; } });
 after(async () => { await browser?.close(); });
-const PICTURES = process.env.DGC_PICTURES_DIR || `${homedir()}/dgc-work/052-plan/image-popup-build/pictures`;
+const PICTURES = process.env.DGC_PICTURES_DIR || `${tmpdir()}/dgc-test-pictures`;
 // The chat of a Pip that sends what it made (Pips API 101's scene): its reply "a1" carries a picture.
 const open = (opts = {}) => openChat(browser, { width: 700, height: 820, api: 108, convs: true, details: true, sent: true, library: { held: [] }, ...opts });
 const sent = (x, type) => x.p.evaluate((t) => (window.__sent || []).filter((r) => r.type === t), type);

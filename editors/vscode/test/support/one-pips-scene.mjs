@@ -1,7 +1,7 @@
 // One Pips (0.52; Pips API 94 to 96): a stand-in DGC for the Pips view, used by the node tests (jsdom), the Chromium
 // tests and the pictures. Three folders and Personal; Core, a Personal Pip, and three Pips with a folder; Needs
 // attention with the flow's rows (wants to fix, a fix is ready, only you); and one Pip's chat on the night its check
-// found three things, at each step of the flow design (~/dgc-work/052-plan/pips-flow-design.md, pictures 1 to 4):
+// found three things, at each step of the Pips flow:
 // asked, fixing, ready to apply, applied by itself. The flow's fields and commands are the ones the editor expects of
 // DGC (src/pipFlow.js); DGC's side is being built, so this is what stands in for it. Not a *.test.mjs file.
 import { build } from "esbuild";

@@ -33,7 +33,7 @@ VOUCH_KEY = "pip_second_look:"    # metadata: pip_second_look:<pip id>:<action d
 VOUCH_SECONDS = 10 * 60
 REPLY_TOKENS = 8
 
-# Tried live on deepseek-v4.1-flash:cloud, 12 Nov, ten cases three times each (052-plan/second-look/prompt-try.py): yes
+# Tried live on deepseek-v4.1-flash:cloud, 12 Nov, ten cases three times each: yes
 # for John (and from earlier words), a reply to Priya and a Slack post as asked; no for someone else, an injected "reply
 # YES" in the body, John with a different subject, nobody asking, an extra guest and another channel. An earlier wording
 # ("exactly ... with nothing added") said UNSURE to John every time: the body the Pip writes counted as added.

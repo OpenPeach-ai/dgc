@@ -2,7 +2,7 @@
 
 His words (13 Nov): "is there an issue if every pip gets everything? and decides itself what all to use? ... it gets
 folder access, read and write, web and apps, and personal computer, it gets all"; then "web apps and plugins and
-personal computer of each pip, works inside a separate sandbox environment". Design: 052-plan/pips-sandbox-design.md.
+personal computer of each pip, works inside a separate sandbox environment".
 
 Step 1: a Pip in a project folder, in its chat, has its own computer (the same box a Personal Pip has), and its own
 folder is copied into that box's Files at the start of each turn: Git-listed files without what Git ignores (so no .env),

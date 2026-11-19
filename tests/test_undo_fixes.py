@@ -1,6 +1,6 @@
 """Undo never loses the person's work (reported 25 Oct: "fix all of these for 0.48").
 
-The study (dgc-work/codex-undo-study/REPORT.md, cases D1-D16) drove DGC's real CheckpointManager and
+A study (cases D1-D16) drove DGC's real CheckpointManager and
 found where a rewind discarded work nobody asked it to discard, or refused for no reason:
 
 - D2/D2b/D2d: somebody's change made BETWEEN two of DGC's writes to a file was lost when an older turn

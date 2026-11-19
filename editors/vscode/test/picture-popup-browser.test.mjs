@@ -7,7 +7,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { chromiumOrNull } from "./support/look-probe.mjs";
 import { THEMES } from "./support/pip-chat-scene.mjs";
 
@@ -24,7 +24,7 @@ const skipOrFail = (t) => {
 };
 before(async () => { if (!chromium) return; try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] }); } catch { browser = null; } });
 after(async () => { await browser?.close(); });
-const PICTURES = process.env.DGC_PICTURES_DIR || `${homedir()}/dgc-work/052-plan/image-popup-build/pictures`;
+const PICTURES = process.env.DGC_PICTURES_DIR || `${tmpdir()}/dgc-test-pictures`;
 
 /** A picture of `w`×`h` drawn by the page (a gradient with a mark), as a PNG data URI. */
 const drawn = (w, h, hue) => `(() => { const c = document.createElement("canvas"); c.width = ${w}; c.height = ${h}; const g = c.getContext("2d");

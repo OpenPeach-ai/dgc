@@ -4,12 +4,13 @@
 // 700 px (What's new also in high contrast). Usage: node test/render-editor-batch1.mjs <out folder>
 import { mkdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
+import { tmpdir } from "node:os";
 import { openRunning, openSettings, DEV_TABLE } from "./support/settings-scene.mjs";
 import { openWorkTab } from "./support/work-tab-scene.mjs";
 import { openHome } from "./support/home-scene.mjs";
 import { artifactsModule } from "./support/artifact-scene.mjs";
 
-const out = process.argv[2] || "/tmp/claude-1000/editor-batch1-pictures";
+const out = process.argv[2] || `${tmpdir()}/editor-batch1-pictures`;
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] });
 const WIDTHS = [300, 700];

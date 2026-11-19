@@ -40,7 +40,7 @@ _ROOT_DIRS = {'.dgc', '.github', 'deploy', 'dgc', 'docs', 'editors', 'examples',
               'tests'}
 # Home folders tests and docs use as examples. A path under any other name is someone's real home folder.
 _EXAMPLE_HOMES = {'u', 'pip', 'me', 'Me', 'dgc', 'someone', 'ana', 'anabel', 'you', 'user', 'bob', 'alice', 'x',
-                  'private', 'fixture', 'Public', 'runner', 'ubuntu', '...'}
+                  'private', 'fixture', 'Public', 'runner', 'ubuntu', 'linuxbrew', '...'}
 _HOME = re.compile(rb'(?:/home|/Users)/([A-Za-z0-9_.-]+)/')
 # A coding agent's scratch folder (Claude Code's /tmp/claude-<uid>/): a default that names a session.
 _AGENT_SCRATCH = re.compile(rb'/tmp/claude-\d+/')

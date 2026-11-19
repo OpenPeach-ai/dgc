@@ -3542,8 +3542,8 @@ class Agent(GoalLifecycle):
             hidden = _PIPS_TOOL_NAMES
         else:
             # Reading the Pips (pips_context) is offered every turn: a session can always see what its Pips found and
-            # did (14 Nov: a Work chat asked about a Pip's card couldn't read its history and guessed; 052-plan/
-            # pips-flow-design Q2). The tools that act still load with use_pips, for their tokens.
+            # did (14 Nov: a Work chat asked about a Pip's card couldn't read its history and
+            # guessed). The tools that act still load with use_pips, for their tokens.
             hidden = _PIPS_MUTATION_TOOL_NAMES
         schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in hidden]
         if getattr(self, "_turn_output", "") in ("document", "slides", "spreadsheet", "dashboard"):

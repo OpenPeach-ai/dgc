@@ -1,6 +1,6 @@
 """A check's post in the Pip's own chat says what it found the way the One Pips screens draw it (0.52, Pips API 96).
 
-pips-flow-design §1 step 5 and the API 96 contract (052-plan/pips-api-96-contract.md): under the Pip's own words
+The API 96 contract: under the Pip's own words
 (`said`: what is wrong, why it matters, how sure it is; short messages split at a line of ---) one findings card
 "2 new · 1 still there", each finding marked new, back or still (`findings[].state`) and the counts in `found`
 ({new, back, still}; `counts` stays the severity counts). New or still comes from the model's word (same_as) when it
