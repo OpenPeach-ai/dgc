@@ -29,6 +29,8 @@ import '../media/shared/portal.css';
 // One card for everything that asks or reports, as in Work and ChatDGC (window.DgcCard).
 import '../media/shared/card.css';
 import '../media/shared/card.js';
+import '../media/shared/pipjob.css';  // a job a chat handed a Pip with @ (Pips API 111): one card in Work, ChatDGC and here
+import '../media/shared/pipjob.js';
 // A card's answers as icons that turn into the full button, on Needs attention as on Home (window.DgcIconActions).
 import '../media/shared/iconactions.css';
 import '../media/shared/iconactions.js';
@@ -315,14 +317,16 @@ const rowTerminal='<svg class="pi-icon" viewBox="0 0 16 16" width="13" height="1
 function chatMarkLook(part){return{logo:part.kind==='plugin'?pluginLogoSrc(part.identity):'',plug:transcriptIcon('plug'),folder:FOLDER_ICON,glyphMark:part.kind==='artifact'?outputIcon(part.identity):'',faceStyles:false};}
 function rememberMarks(pip=S.selected){if(!chatBox||!pip)return;const parts=chatBox.parts();if(parts)chatMarks.set(pip,{text:chatBox.el.value,parts});else chatMarks.delete(pip);}
 // What this Pip can reach, and nothing else: the plugins it can call (DGC lets a Pip with no folder call them so far),
-// the other Pips of its own workspace (what it can hand work to and be told about; each row says where that Pip works),
+// every other Pip listed here (what it can hand a job to with @, Pips API 111; each row says where that Pip works),
 // and its folder's files for a Pip that has one. Work's outputs too (Pips API 100): a Document, Slides, a Spreadsheet, a
 // Page or a Dashboard, one a message, sent as that message's `output`; an older DGC is offered none.
 const outputsOn=()=>S.apiVersion>=100&&!archived();
 const boxOutput=()=>{const parts=chatBox?.parts();return (parts||[]).find(part=>typeof part!=='string'&&part.kind==='artifact')?.identity||'';};
 function chatMentionSources(){
- const others=(S.jobs||[]).filter(p=>p.id!==S.selected&&p.status!=='archived'&&p.name).slice(0,100).map(p=>{const body=profile(p.profile).body;return{pip_id:p.id,name:p.name,pip_type:body||p.pip_type,kind:`${p.pip_type} Pip`,detail:`${pipPlace(p)} · v${p.current_version} · ${p.id.slice(-8)}`};}).filter(p=>Mentions.PIP_TYPES.includes(p.pip_type));
- return{plugins:everyPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:outputsOn()&&!boxOutput()?PIP_OUTPUTS:[],pips:others,pipsEmpty:'No other Pips here',files:personalPip()?[]:projectFiles,
+ // (Every Pip: this page's own list, and the One Pips list's every Pip where it has one, each once.)
+ const pool=[...(S.jobs||[]),...(Array.isArray(one?.pips)?one.pips:[])].filter((p,i,all)=>p&&all.findIndex(q=>q?.id===p.id)===i);
+ const others=pool.filter(p=>p.id!==S.selected&&p.status!=='archived'&&p.name).slice(0,100).map(p=>{const body=profile(p.profile).body;return{pip_id:p.id,name:p.name,pip_type:body||p.pip_type,kind:`${p.pip_type} Pip`,detail:personalPip(p)?'For anything':`Works in ${spaceName(p.workspace_id)||'a folder'}`};}).filter(p=>Mentions.PIP_TYPES.includes(p.pip_type));
+ return{plugins:everyPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:outputsOn()&&!boxOutput()?PIP_OUTPUTS:[],pips:others,pipsEmpty:'No other Pips yet',files:personalPip()?[]:projectFiles,
   // This computer's projects (pips-21, API 91): naming one gives this Pip a private copy of it.
   projects:projectMentionsOn()?S.projectChoices:[]};
 }
@@ -332,7 +336,7 @@ if(Mentions){
  chatBox=Mentions.box(el,{maxLength:CHAT_MAX_CHARS,faceStyles:false,edit:change=>chatEdit(change),pillOptions:chatMarkLook,cleanedChanged:()=>drawChatTray(),
   pasteBack:part=>part.kind==='artifact'?outputsOn()&&!boxOutput()&&PIP_OUTPUTS.some(([value,label])=>value===part.identity&&label===part.label):part.kind==='plugin'?chatMentionSources().plugins.some(p=>p.id===part.identity):part.kind==='pip'?chatMentionSources().pips.some(p=>p.pip_id===part.identity)
    :part.kind==='project'?hasBox()&&chatMentionSources().projects.some(p=>p.workspace_id===part.identity):part.kind==='file'&&!personalPip()});
- chatPicker=Mentions.picker(chatBox,chatPop,{edit:change=>chatEdit(change),sources:chatMentionSources,pipsDetail:'This Pip\u2019s workspace · no work starts',
+ chatPicker=Mentions.picker(chatBox,chatPop,{edit:change=>chatEdit(change),sources:chatMentionSources,pipsDetail:'@ one to hand it a job',
   refresh(){if(!personalPip()&&!projectFilesAsked){projectFilesAsked=true;vscode.postMessage({type:'pipsFiles'});}if(projectMentionsOn())void loadProjectChoices();},
   projectsDetail:'A private copy for this Pip to work in',
   // A Pip with no computer has nowhere to keep the copy: it is told to get one first, and no mark goes in.
@@ -465,6 +469,36 @@ disposers.push(()=>chatFollow.dispose());
 let adaptationSeq=0,handoffSeq=0,handoffDetailSeq=0,checkpointSeq=0,refreshSeq=0,selectionSeq=0,detailSeq=0,historySeq=0,activitySeq=0,approvalSeq=0,polling=false,dialogReturn=null,lastMarkup='';
 const observedAvatars=new WeakSet();
 const send = (type,args={}) => broker.request({type,...args});
+// @ a Pip (Pips API 111): a job a chat handed a Pip, in its chat. Its own turn is the "From <where it was asked>: <the
+// words>" line above its answer (linked back there), a job waiting at Ask me first is a card with Start and Not now, and
+// a job this Pip handed another is a card under the reply that handed it (media/shared/pipjob.js, the same card in Work
+// and ChatDGC). The store reads each job while it goes and redraws the chat when one moves.
+let pipJobRender=0;
+const pipJobs=globalThis.DgcPipJob?globalThis.DgcPipJob.store({ask:(type,fields)=>send(type,fields),place:'pip',document,
+ render:text=>renderPipMarkdown(text),
+ face:(pip,key)=>pipAvatar({id:pip.id,name:pip.name},'idle',`pipjob-${key}`,characterType(pip.pip_type)),
+ openChat:(pip,conversation)=>vscode.postMessage({type:'pipsOpenChat',pip:{id:pip.id,name:pip.name,pip_type:pip.pip_type},...(conversation?{conversation:{id:conversation}}:{})}),
+ openAsker:from=>vscode.postMessage({type:'pipsOpenAsker',kind:String(from.kind||''),id:String(from.id||''),title:String(from.title||'').slice(0,200)}),
+ onChange:()=>{if(!pipJobRender)pipJobRender=requestAnimationFrame(()=>{pipJobRender=0;render();});}}):null;
+const pipJobsOwn=globalThis.DgcPipJob?globalThis.DgcPipJob.store({ask:(type,fields)=>send(type,fields),place:'pip-own',document,
+ openAsker:from=>vscode.postMessage({type:'pipsOpenAsker',kind:String(from.kind||''),id:String(from.id||''),title:String(from.title||'').slice(0,200)}),
+ onChange:id=>{
+  // A job of its own that moved (Start, Not now, it began): the chat is read again, once, for its turn and the cards
+  // still waiting. A press or a poll that changes nothing else only redraws.
+  const now=pipJobsOwn?.get(id)?.state||'',moved=pipJobOwnSeen.has(id)&&pipJobOwnSeen.get(id)!==now;pipJobOwnSeen.set(id,now);
+  if(!pipJobRender)pipJobRender=requestAnimationFrame(()=>{pipJobRender=0;render();});
+  if(moved&&!pipJobOwnLoad)pipJobOwnLoad=setTimeout(()=>{pipJobOwnLoad=0;if(!disposed&&usable())void loadMessages();},300);}}):null;
+const pipJobOwnSeen=new Map();let pipJobOwnLoad=0;
+document.addEventListener('click',event=>{
+ const target=event.target;if(!target?.closest?.('[data-pipjob-act]'))return;
+ const own=!!target.closest('.pipjob-asking,.pipjob-from');
+ if((own?pipJobsOwn:pipJobs)?.click(target)){event.preventDefault();event.stopPropagation?.();}
+});
+/** The jobs waiting for your Start in this Pip's chat (Ask me first), at its end. */
+function askingJobCards(){
+ if(!pipJobsOwn||!Array.isArray(S.askingJobs)||!S.askingJobs.length)return '';
+ return S.askingJobs.map(j=>globalThis.DgcPipJob.askingHtml(j,{openAsker:true},pipJobsOwn.state(j.id))).join('');
+}
 const usable = () => S.connected && S.supported && S.enabled;
 const archived=()=>S.pip?.status==='archived';
 const canLifecycle=()=>S.apiVersion>=16&&lifecycleRevision(S.pip)!==null&&lifecycleRevision(S.pip)<Number.MAX_SAFE_INTEGER;
@@ -1052,6 +1086,8 @@ function waitingMarkup(){
 // failed message does; a hello that was the only thing in the chat offers Try again. A turn that ended with a post or a
 // reply says it there, and it says so only while nothing has been said since: a hello that worked on Try again has no
 // old failure above it.
+/** A job another chat handed this Pip (Pips API 111): DGC's turn, drawn as its "From …" line. */
+function jobTurn(m){return m?.role==='user'&&m.intro===true&&!!m.job&&/^pipjob_[0-9a-f]{32}$/.test(String(m.job.id||''))&&!!globalThis.DgcPipJob;}
 function failedHidden(m){return m.role==='user'&&m.intro===true&&m.status==='failed'&&typeof m.error==='string'&&!!m.error&&S.messages.at(-1)?.id===m.id&&!S.messages.some(r=>r.role==='assistant'&&r.run_id===m.run_id)&&!S.posts?.some?.(p=>p.run_id===m.run_id);}
 function failedHiddenMarkup(m){
  const failed=window.DgcMarkdown?.modelFailure?.(m.error),raw=typeof m.error_detail==='string'&&m.error_detail?(window.DgcMarkdown?.editorAdvice?.(m.error_detail)??m.error_detail):failed?.detail;
@@ -1149,7 +1185,7 @@ function chatMarkup(){
   const liveCuts=liveOn?(S.stream.cuts||[]).filter(c=>c.at>0&&(c.id?readBy(byId.get(c.id),S.stream.runId)&&!readIn.has(c.id):!!sending&&sending.key===c.key)).map(c=>({...c,at:Math.min(c.at,S.stream.text.length)})).sort((a,b)=>a.at-b.at):[];
   const liveIn=new Set(liveCuts.map(c=>c.id).filter(Boolean)),sendingLive=liveCuts.some(c=>!c.id);
   const sendingMessage=sending?{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at,...(sending.marks?.length?{display_mentions:sending.marks}:{}),...(sending.reply?{reply_to:sending.reply}:{})}:null;
-  const shown=[...foldRoutineLines(S.messages.filter(m=>!agentCheckReply(m)&&!readIn.has(m.id)&&!liveIn.has(m.id)).filter(m=>!(m.role==='user'&&m.intro===true)||failedHidden(m)||routineFailed(m)),S.messages,postRoutineTitle),...(sendingMessage&&!sendingLive?[sendingMessage]:[])];
+  const shown=[...foldRoutineLines(S.messages.filter(m=>!agentCheckReply(m)&&!readIn.has(m.id)&&!liveIn.has(m.id)).filter(m=>!(m.role==='user'&&m.intro===true)||failedHidden(m)||routineFailed(m)||jobTurn(m)),S.messages,postRoutineTitle),...(sendingMessage&&!sendingLive?[sendingMessage]:[])];
   // While it answers, the Pip itself is in the chat, at work, with its name: the reply replaces it.
   // A routine's run is its live post (liveMarkup), not the working row: what it is doing, its clock, Stop, how it started.
   const routineLive=routineLiveNow;
@@ -1163,12 +1199,15 @@ function chatMarkup(){
   // One message as drawn: yours, or a reply. (`bubble` alone: a message that is drawn inside a reply, where it was read.)
   const bubble=(m,more={})=>messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:renderPipReply,canSend,quote:quoteFor(m,shown),canReply:canReply(),canDownload:S.apiVersion>=43&&!remoteHost,canOpenFiles:canOpenFiles(),library:pictureLibraryLive()?pictureLibraryOf:null,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,undo:canUndoOwn(),openChanges:ownDetailsOpen,undoing:ownUndoing,undoErrors:ownUndoErrors,...more});
   const drawMessage=m=>{
+    // A job another chat handed it (Pips API 111): DGC's own line, "From <where it was asked>: <the words>", linked back.
+    if(jobTurn(m))return timed(m,false)+globalThis.DgcPipJob.fromLine(m.job,{openAsker:true})+(m.status==='failed'&&typeof m.error==='string'&&m.error?`<p class="muted pipjob-failed" role="status">${esc(m.error)}</p>`:'');
     if(routineFailed(m)){const failed=window.DgcMarkdown?.modelFailure?.(m.error);return timed(m,false)+failedRoutineMarkup(m,postRoutineTitle(m.text),{failure:failed,detail:typeof m.error_detail==='string'&&m.error_detail?(window.DgcMarkdown?.editorAdvice?.(m.error_detail)??m.error_detail):failed?.detail||''});}
     if(failedHidden(m))return timed(m,false)+failedHiddenMarkup(m);
     const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),routine=m.role==='assistant'&&prompt?.intro===true?postRoutineTitle(prompt.text):null;
     if(routine&&m.quiet===true)return timed(m,false)+quietLineMarkup(m,routine);
     const inline=m.role==='assistant'&&Array.isArray(m.steers)&&m.steers.some(x=>readIn.has(x.id))?new Map(m.steers.filter(x=>readIn.has(x.id)).map(x=>[x.id,bubble(byId.get(x.id))])):null;
-    return timed(m,!routine)+bubble(m,{renderMarkdown:routine?markdown:renderPipReply,prompt,inline,...(routine?routineReply(m,routine,type):{})})+memoryKept(m,shown);
+    return timed(m,!routine)+bubble(m,{renderMarkdown:routine?markdown:renderPipReply,prompt,inline,...(routine?routineReply(m,routine,type):{})})+memoryKept(m,shown)
+     +(m.role==='assistant'&&Array.isArray(m.pip_jobs)&&pipJobs?m.pip_jobs.filter(j=>/^pipjob_[0-9a-f]{32}$/.test(String(j?.id||''))).slice(0,3).map(j=>pipJobs.html(j.id,j)).join(''):'');
   };
   // Its runs, each a message from the Pip where it falls among the messages, all-clear runs in a row as one (Pips API
   // 51, pipRunPosts.js).
@@ -1213,7 +1252,7 @@ function chatMarkup(){
   const live=liveMarkup(markdown);
   // A hello that failed says so, above what a new chat says about itself: nothing else has been said.
   const quietChat=S.messages.every(m=>m.role==='user'&&m.intro===true&&m.status==='failed')&&!items.some(i=>!(i.message&&failedHidden(i.message)))&&!live&&!items.some(i=>i.note||(i.message&&routineFailed(i.message)));
-  return `<section class="pip-conversation${simple?' chat-style':''}${conv?' conv-look':''}" aria-label="Pip conversation">${flowPinnedMarkup()}<div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${liveReply}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${projectChangeCards()}${flowTailMarkup()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}${pipOff(S.pip)?`<p class="pip-off-line" role="status">${PIP_OFF_SAYS}</p>`:''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${needsComputerCard()}${goalCard()}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${replyChipMarkup()}${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${pagePip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}${conv?' conv-look':''}" aria-label="Pip conversation">${flowPinnedMarkup()}<div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${liveReply}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${projectChangeCards()}${askingJobCards()}${flowTailMarkup()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}${pipOff(S.pip)?`<p class="pip-off-line" role="status">${PIP_OFF_SAYS}</p>`:''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${needsComputerCard()}${goalCard()}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${replyChipMarkup()}${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${pagePip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -1445,7 +1484,7 @@ async function loadMessages(more=false){
     const kept=S.apiVersion>=47&&!remoteHost&&!before&&optionsEpoch===chatOptionsEpoch&&!chatOptionsSaving.has(id);
     if(!chatPreferences.has(id)||kept)chatPreferences.set(id,{...S.chatControls.options});if(!before)void loadChatContext();}
     if(more){if(page.next_before_id===before||page.messages.some(m=>S.messages.some(p=>p.id===m.id)))throw new Error('Conversation history did not advance. Refresh before retrying.');S.messages=[...page.messages,...S.messages].slice(-200);S.messageCursor=page.next_before_id;}
-    else{const held=new Set([...S.messages.filter(m=>m.steer_status!=='missed').map(m=>m.id),...S.chatWaiting.map(m=>m.id)]);if(!S.messagesLoaded)S.messageCursor=page.next_before_id;S.messages=mergeChatPage(S.messages,page.messages).slice(-200);S.chatWaiting=page.waiting;if(!before){S.routineNotes=routineNotes(page.routine_notes);S.fallbackOn=fallbackOn(page.fallback_on);}
+    else{const held=new Set([...S.messages.filter(m=>m.steer_status!=='missed').map(m=>m.id),...S.chatWaiting.map(m=>m.id)]);if(!S.messagesLoaded)S.messageCursor=page.next_before_id;S.messages=mergeChatPage(S.messages,page.messages).slice(-200);S.chatWaiting=page.waiting;if(!before){S.routineNotes=routineNotes(page.routine_notes);S.fallbackOn=fallbackOn(page.fallback_on);S.askingJobs=Array.isArray(page.asking_jobs)?page.asking_jobs.slice(0,8):[];}
       // A mid-turn message the reply ended without reading wasn't sent, and comes back to an empty box, as in Work. Only as it happens, never on a reload.
       back=S.messages.find(m=>m.steer_status==='missed'&&held.has(m.id));}
     S.messagesLoaded=true;S.messagesError='';S.chatActiveRun=page.active_run;if(!more)lookAgainForWaitingTurn(page);if(back&&!draft.chatText.trim())giveBackToBox(id,back);queueMicrotask(()=>{if(!disposed)drainChatQueue();});S.omitted=page.history_context_omitted_count;S.continuity=chatContinuity(page.continuity,id,S.workspace.id);syncRoutineLive();
@@ -5677,7 +5716,7 @@ function stashConversation(){
 function restoreConversation(){
  const pip=S.selected,key=convKey(pip,S.conv),kept=convStash.get(key);convStash.delete(key);
  messageSeq++;streamSeq++;streamLoading=false;chatContextSeq++;window.clearTimeout(waitingLook);waitingLook=0;waitingLooks=0;
- S.stream=null;S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.fallbackOn=null;S.messagesError='';S.messagesLoading=false;S.error='';S.chatContext=null;S.composerPanel='';
+ S.stream=null;S.chatActiveRun=null;S.chatWaiting=[];S.routineNotes=[];S.askingJobs=[];S.fallbackOn=null;S.messagesError='';S.messagesLoading=false;S.error='';S.chatContext=null;S.composerPanel='';
  S.messages=kept?.messages||[];S.messageCursor=kept?.cursor||null;S.messagesLoaded=!!kept?.loaded;S.omitted=kept?.omitted||0;S.continuity=kept?.continuity||null;
  convMaps().forEach((map,i)=>{const value=kept?.kept[i];if(value===undefined)map.delete(pip);else map.set(pip,value);});
  draft.chatText=kept?kept.draft:convDrafts.get(key)||'';convDrafts.delete(key);

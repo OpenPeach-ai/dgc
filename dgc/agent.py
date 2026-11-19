@@ -161,8 +161,10 @@ _DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_
 # Pips tools reach the model only after `use_pips` loads them (or the user points a turn at a
 # Pip). Offered on every request they cost more than every other tool together; a model that
 # needs them asks for them, the way mcp_search brings in MCP tools.
+# (handoff_to_pip, the older reviewed Pip-to-Pip proposal, is no longer offered: ask_pip hands a Pip a job, pip_jobs. Its
+# executor and the handoff ledger stay for what reads them.)
 _PIPS_TOOL_NAMES = frozenset({
-    "pips_context", "pips_setup", "pips_workflow", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip",
+    "pips_context", "pips_setup", "pips_workflow", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now",
     "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action",
     "pause_pip", "resume_pip", "attach_pip_to_session"})
 _PIPS_MUTATION_TOOL_NAMES = _PIPS_TOOL_NAMES - {"pips_context"}
@@ -1135,7 +1137,7 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
     segments = _and_segments(actual)
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
 from .tools import (EXECUTORS, MAX_TODO_CHARS, MAX_TODOS, TODO_STATUSES, TOOL_SCHEMAS,
-                    SUPERVISION_TOOL_SCHEMAS, TROUPE_TOOL_SCHEMA, ARTIFACT_TOOL_SCHEMAS,
+                    SUPERVISION_TOOL_SCHEMAS, TROUPE_TOOL_SCHEMA, ARTIFACT_TOOL_SCHEMAS, ASK_PIP_SCHEMA,
                     bash_handle_tools, execute,
                     shutdown_browsers, shutdown_python_kernels, take_pending_images,
                     take_pending_files)
@@ -1417,10 +1419,15 @@ _NOT_THE_USER = {"assistant": "assistant (DGC's own earlier reply, not the user)
 
 
 def _wake_notice(message: dict) -> bool:
-    """Is this user-role message the editor's notice that a background agent finished (agent_reports.wake_prompt)?
-    DGC writes it for the model to read; the person never typed it."""
+    """Is this user-role message the editor's notice that a background agent finished (agent_reports.wake_prompt), or
+    that a Pip answered a job this chat handed it (pip_jobs.notice)? DGC writes both for the model to read; the person
+    never typed either."""
     from .agent_reports import parse_wake_prompt
-    return isinstance(message, dict) and parse_wake_prompt(_message_text(message)) is not None
+    from .pip_jobs import parse_notice
+    if not isinstance(message, dict):
+        return False
+    text = _message_text(message)
+    return parse_wake_prompt(text) is not None or parse_notice(text) is not None
 
 
 def summariser_role(message: dict) -> str:
@@ -1740,6 +1747,8 @@ class AgentContext:
     on_background: object = None
     # Trusted owning-chat provenance, never supplied through a model tool argument.
     pip_proposal_origin: object = None
+    # Where a job handed to a Pip comes from (dgc/pip_jobs.py): this session, its title and folder. Never a tool argument.
+    pip_job_origin: object = None
     # Artifacts (dgc/artifact_tools): where one this context makes comes from ({"surface": "work", ...}, a callable
     # so it reads the session as it is now), and who hears that one was made or changed (the screens).
     artifact_origin: object = None
@@ -2546,6 +2555,7 @@ class Agent(GoalLifecycle):
                                 on_tool_timing=self._record_tool_timing,
                                 notes=lambda: self.notes(),
                                 pip_proposal_origin=self._pip_proposal_origin,
+                                pip_job_origin=self._pip_job_origin,
                                 artifact_origin=self._artifact_origin,
                                 on_artifact=self._artifact_changed)
         # Only now is there a context to carry the model's image capability. Syncing it before
@@ -3523,7 +3533,7 @@ class Agent(GoalLifecycle):
                         str((schema.get("function") or {}).get("name") or ""), len(order)))
             else:  # compatibility for injected/third-party manager shims
                 mcp_schemas = self.mcp.tool_schemas()
-        schemas = (TOOL_SCHEMAS + SUPERVISION_TOOL_SCHEMAS
+        schemas = (TOOL_SCHEMAS + [ASK_PIP_SCHEMA] + SUPERVISION_TOOL_SCHEMAS
                    + ([TROUPE_TOOL_SCHEMA] if self._troupe_exposed() else [])
                    + (self._router_tool_schemas() if self._router_tools_exposed() else [])
                    + (self._settings_tool_schemas() if self._router_tools_exposed() else [])
@@ -3535,15 +3545,16 @@ class Agent(GoalLifecycle):
                    + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas)
         from .pip_access import tools_available as pips_tools_available
         if not pips_tools_available(self.config):
-            hidden = _PIPS_TOOL_NAMES | {"use_pips"}
+            hidden = _PIPS_TOOL_NAMES | {"use_pips", "ask_pip"}
         elif self._pips_loaded():
             hidden = {"use_pips"}
         elif self._pips_denied():
-            hidden = _PIPS_TOOL_NAMES
+            hidden = _PIPS_TOOL_NAMES | {"ask_pip"}
         else:
             # Reading the Pips (pips_context) is offered every turn: a session can always see what its Pips found and
             # did (14 Nov: a Work chat asked about a Pip's card couldn't read its history and
-            # guessed). The tools that act still load with use_pips, for their tokens.
+            # guessed). So is handing one a job (ask_pip, pip_jobs): the model decides, never the prompt's wording. The
+            # tools that change a Pip still load with use_pips, for their tokens.
             hidden = _PIPS_MUTATION_TOOL_NAMES
         schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in hidden]
         if getattr(self, "_turn_output", "") in ("document", "slides", "spreadsheet", "dashboard"):
@@ -3551,7 +3562,8 @@ class Agent(GoalLifecycle):
             # Auto/Page turns, but don't let its familiar name win over make_artifact here.
             schemas = [tool for tool in schemas if tool.get("function", {}).get("name") != "artifact"]
         if self.depth > 0 or getattr(self, "_monitor_turn", False):
-            schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in _PIPS_MUTATION_TOOL_NAMES]
+            schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in _PIPS_MUTATION_TOOL_NAMES
+                       and tool.get("function", {}).get("name") != "ask_pip"]
         if not bool(getattr(self.client, "vision_supported", False)):
             # images: a model that cannot read an image is never offered a tool that shows it one.
             # When a vision model can look for it (dgc/vision.py), view_image asks that model and
@@ -5808,13 +5820,6 @@ class Agent(GoalLifecycle):
               if pips_on and self.depth == 0 and mode != "plan" else []),
             *(["- draft_pip_calendar_event saves a calendar draft from a completed Personal Pip result or reply. Ask for missing dates, times and timezone. The user chooses an account and separately approves creation. A saved draft is not a created event."] if pips_on and self.depth == 0 and mode != "plan" else []),
             *(["- draft_pip_email prepares an editable email draft from a completed Personal Pip result or reply. Ask for missing recipients; use explicit Personal scope. The user chooses an account and separately approves sending in that Pip’s chat. Never claim a draft was sent."] if pips_on and self.depth == 0 and mode != "plan" else []),
-            *(["- handoff_to_pip saves a proposal from a source finding or accepted Patch artifact to another Pip "
-               "in this workspace. Supply the exact task and action; the user must separately review them in Pips or the CLI. "
-               "For Personal result sharing use source_kind=personal_result, scope=personal and an exact shared_text excerpt, without action or finding_index. "
-               "The recipient retains only its own approved access. No source credentials, grants or conversation history transfer. "
-               "The tool permission is permission to propose only. Never claim acceptance, dispatch or completion. "
-               "Patch/Pulse still require their existing explicit handoff approval and confined execution policy."]
-              if pips_on and self.depth == 0 and mode != "plan" else []),
             *(["- pause_pip/resume_pip change only the inspected Pip's lifecycle under ordinary tool permissions. "
                "Pause holds background work, not conversations, and does not cancel its running turn. Resume permits previously approved queued/scheduled work "
                "on the existing runner and cannot clear global stop. attach_pip_to_session remembers a bounded reference "
@@ -6188,6 +6193,9 @@ class Agent(GoalLifecycle):
         held = "" if intents_only else self._held_note()
         if held:
             sections.append((f"held:{getattr(self, '_user_turn_serial', 0)}", held))
+        named = "" if intents_only or self.depth else self._named_pips_note()
+        if named:
+            sections.append((f"pips:{getattr(self, '_user_turn_serial', 0)}", "# Pips named here\n" + named))
         fresh = [(key, text) for key, text in sections if key not in given]
         given.update(key for key, _ in fresh)
         if not fresh:
@@ -6197,6 +6205,24 @@ class Agent(GoalLifecycle):
         body = body.replace(clock.NOTES_OPEN, "<dgc-turn-notes\u200b>").replace(
             clock.NOTES_CLOSE, "</dgc-turn-notes\u200b>")
         return self._safe_text(f"{clock.NOTES_OPEN}\n{body}\n{clock.NOTES_CLOSE}")
+
+    def _named_pips_note(self) -> str:
+        """The Pips this prompt names with @ (its display marks), as the model is told of them (pip_jobs.named_line):
+        each one's name, where it works and its level, and that ask_pip hands it a job. "" when it names none, when Pips
+        are off, or when the registry can't be read."""
+        marks = getattr(self, "_prompt_display_mentions", None) or []
+        if not any(isinstance(m, dict) and m.get("kind") == "pip" for m in marks):
+            return ""
+        from .pip_access import tools_available
+        if not tools_available(self.config):
+            return ""
+        try:
+            from .pip_jobs import named_line
+            from .workspace_registry import WorkspaceRegistry
+            with WorkspaceRegistry() as registry:
+                return named_line(registry, marks)
+        except Exception:                               # noqa: BLE001 -- the names are in the prompt's words anyway
+            return ""
 
     def _text_protocol_section(self) -> str:
         schemas = [{"name": t["function"]["name"],
@@ -7764,6 +7790,20 @@ class Agent(GoalLifecycle):
         if identity is None:
             raise RegistryError("session_required", "This chat needs a valid local workspace association before proposing a Pip update.")
         return {"session_id": self.session_file.stem, "workspace_id": identity["workspace_id"]}
+
+    def _pip_job_origin(self) -> dict:
+        """Where a job this session hands a Pip comes from (pip_jobs.tool_ask): the session, its title, its folder, and
+        this turn (one call made twice in a turn is one job). Only the main chat of a saved session."""
+        from .workspace_registry import RegistryError
+        if self.depth != 0 or getattr(self, "_monitor_turn", False):
+            raise RegistryError("scope", "Only the main chat of a session hands a Pip a job.")
+        if not self.session_file:
+            raise RegistryError("session_required", "Save this chat before handing a Pip a job.")
+        self._associate_workspace(force=True)            # its folder is known to Pips, so a copy of it can be made
+        self._pip_jobs_handed = True                     # the chat looks for its answer from now on (headless)
+        title = " ".join(str(getattr(self, "session_name", "") or "").split())[:200] or "this Work session"
+        return {"id": self.session_file.stem, "title": title, "folder": str(self.config.project_root),
+                "turn": int(getattr(self, "_budget_turn", 0) or 0)}
 
     def _associate_workspace(self, *, force: bool = False) -> dict | None:
         """Best-effort local identity, with one honest notice per distinct failure."""
@@ -11066,7 +11106,7 @@ class Agent(GoalLifecycle):
         call_id = call.id
         secrets = self._secret_values()
         display_args = redact_value(self._with_task_agent(name, args), secrets)
-        if name in ("pips_setup", "pips_workflow", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session") and (self.config.get("pips_enabled", False) is not True
+        if name in ("pips_setup", "pips_workflow", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session", "ask_pip") and (self.config.get("pips_enabled", False) is not True
                                        or self.depth > 0 or getattr(self, "_monitor_turn", False)):
             reason = ("Pips are disabled in this session" if self.config.get("pips_enabled", False) is not True
                       else "Only the main user chat can request Pip changes or background work")

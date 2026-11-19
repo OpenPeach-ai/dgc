@@ -539,6 +539,14 @@ MUTATION_COMMANDS |= API109_MUTATIONS
 # it keeps its chat, notes, routines, computer, level and model. dry_run says what stays and what changes. Local only.
 API110_MUTATIONS = frozenset({'give_pip_folder', 'remove_pip_folder'})
 MUTATION_COMMANDS |= API110_MUTATIONS
+# API 111: @ a Pip hands it a job from a chat (Work, ChatDGC or a Pip's chat). get_pip_job {job_id} reads a job as its card
+# shows it (where it was asked from, its state, its answer, and its change: the same change id the Pip's chat shows);
+# list_pip_jobs {pip_id} lists a Pip's jobs; start_pip_job and decline_pip_job {pip_id, job_id} are the person's Start
+# and Not now on one waiting at Ask me first. Local only.
+API111_READS = frozenset({'get_pip_job', 'list_pip_jobs'})
+API111_MUTATIONS = frozenset({'start_pip_job', 'decline_pip_job'})
+READ_COMMANDS |= API111_READS
+MUTATION_COMMANDS |= API111_MUTATIONS
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -720,6 +728,10 @@ COMMAND_FIELDS = {
     'add_project_folder': frozenset({'folder'}),
     'give_pip_folder': frozenset({'pip_id', 'folder', 'dry_run'}),
     'remove_pip_folder': frozenset({'pip_id', 'dry_run'}),
+    'get_pip_job': frozenset({'job_id'}),
+    'list_pip_jobs': frozenset({'pip_id'}),
+    'start_pip_job': frozenset({'pip_id', 'job_id'}),
+    'decline_pip_job': frozenset({'pip_id', 'job_id'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'usd_per_day'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -1040,7 +1052,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API110_MUTATIONS:
+        if command in API111_READS | API111_MUTATIONS:
+            minimum = 111
+        elif command in API110_MUTATIONS:
             minimum = 110
         elif command in API109_MUTATIONS:
             minimum = 109

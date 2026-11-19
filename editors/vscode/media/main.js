@@ -85,7 +85,8 @@
   }
   function pillElement(kind, label, wire = "", identity = "", pipType = "") {
     return M.pill(kind, label, wire, identity, { ...pillLook(kind, identity),
-      pipType: kind === "pip" ? pipType || attachments.find(a => a.pipReference?.pip_id === identity)?.pipReference?.pip_type : "" });
+      pipType: kind === "pip" ? pipType || attachments.find(a => a.pipReference?.pip_id === identity)?.pipReference?.pip_type
+        || pipTargets?.byId.get(identity)?.pip_type : "" });
   }
 
   // A null `start` puts the pill at the caret as it stands. Text offsets cannot say which side of
@@ -537,6 +538,95 @@
       });
     }
     return pipSetupCards;
+  }
+  // ---- @ a Pip (Pips API 111): a job this session handed a Pip is a card in the turn that handed it
+  // (media/shared/pipjob.js, the same card in ChatDGC and a Pip's chat). It reads the job through the editor (pipJob /
+  // pipJobReply: the window's Pips channel, as ChatDGC's card does); a reload draws it again from the tool's answer.
+  const pipJobAsks = new Map();
+  let pipJobSeq = 0;
+  function pipJobAsk(type, fields = {}) {
+    return new Promise((resolve, reject) => {
+      const id = `pipjob-${++pipJobSeq}`;
+      const timer = setTimeout(() => { pipJobAsks.delete(id); reject(new Error("DGC didn't answer. Try again.")); }, 30000);
+      pipJobAsks.set(id, { resolve, reject, timer });
+      vscode.postMessage({ type: "pipJob", id, request: { type, ...fields } });
+    });
+  }
+  function pipJobReply(msg) {
+    const asked = pipJobAsks.get(String(msg.id || "")); if (!asked) return;
+    pipJobAsks.delete(String(msg.id)); clearTimeout(asked.timer);
+    if (msg.ok) asked.resolve(msg.result); else asked.reject(new Error(String(msg.error || "DGC couldn't do that.").slice(0, 300)));
+  }
+  // (The @ menu's list of Pips is read through the page's own Pips channel: pipsReady, then pipsRequest / pipsReply.)
+  const pipJobBridge = { generation: 0, connected: false, api: 0, pending: new Map(), seq: 0, asked: false, queue: [] };
+  const pipsDocId = () => document.documentElement.dataset.pipsDocumentId;
+  function pipsAsk(type, fields = {}) {
+    return new Promise((resolve, reject) => {
+      const send = () => {
+        const id = `pipjob-list-${pipJobBridge.generation}-${++pipJobBridge.seq}`;
+        const timer = setTimeout(() => { pipJobBridge.pending.delete(id); reject(new Error("DGC didn't answer. Try again.")); }, 20000);
+        pipJobBridge.pending.set(id, { resolve, reject, timer });
+        vscode.postMessage({ type: "pipsRequest", id, generation: pipJobBridge.generation, request: { type, ...fields }, documentId: pipsDocId() });
+      };
+      if (pipJobBridge.connected) { send(); return; }
+      if (pipJobBridge.queue.length >= 20) { reject(new Error("Pips aren't connected yet.")); return; }
+      pipJobBridge.queue.push(send);
+      if (!pipJobBridge.asked) { pipJobBridge.asked = true; vscode.postMessage({ type: "pipsReady", documentId: pipsDocId() }); }
+    });
+  }
+  function pipJobReceive(msg) {
+    if (msg.type === "pipsConnection") {
+      if (msg.generation !== pipJobBridge.generation) {
+        for (const p of pipJobBridge.pending.values()) { clearTimeout(p.timer); p.reject(new Error("The connection changed. Try again.")); }
+        pipJobBridge.pending.clear();
+      }
+      pipJobBridge.generation = msg.generation;
+      pipJobBridge.connected = msg.connected === true && msg.supported !== false && msg.enabled === true;
+      pipJobBridge.api = Number(msg.apiVersion) || 0;
+      if (pipJobBridge.connected) { const waiting = pipJobBridge.queue.splice(0); for (const send of waiting) send(); }
+      return;
+    }
+    if (msg.type !== "pipsReply") return;
+    const p = pipJobBridge.pending.get(msg.id); if (!p) return;
+    pipJobBridge.pending.delete(msg.id); clearTimeout(p.timer);
+    if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error?.message || "DGC couldn't do that."));
+  }
+  const pipJobs = window.DgcPipJob ? window.DgcPipJob.store({
+    ask: pipJobAsk, place: "work", document,
+    openChat: (pip, conversation) => vscode.postMessage({ type: "pipJobOpen", pip: { id: pip.id, name: pip.name, pip_type: pip.pip_type },
+      ...(conversation ? { conversation } : {}) }),
+  }) : null;
+  document.addEventListener("click", (e) => { if (pipJobs?.click(e.target)) { e.preventDefault(); e.stopPropagation(); } });
+  /** The card for the job an ask_pip step handed, once per turn, after the step's row. */
+  function pipJobCardFrom(row, output) {
+    const id = window.DgcPipJob?.jobIdIn(output);
+    if (!id || !pipJobs || !turn) return;
+    if (turn.block.querySelector(`[data-pipjob="${id}"]`)) return;
+    const named = /^Handed to (.{1,120}?) \(job pipjob_/.exec(String(output || ""));
+    const node = pipJobs.mount(id, { pip: { name: named ? named[1] : "" } });
+    if (!replaying) node.classList.add("motion-arrive");
+    appendTurnContent(node); breakText();
+  }
+  // The Pips this box can name with @: every Pip, each with the folder it works in (list_pips scope all), asked when
+  // "@" is typed (at most every 30 s). Its kind (pip_type) is what its mark carries to the backend.
+  // (`var`: a draft restored as the page starts can draw a Pip's mark before this line has run.)
+  var pipTargets = { rows: [], byId: new Map(), askedAt: 0, loading: false };
+  function loadPipTargets() {
+    if (pipTargets.loading || Date.now() - pipTargets.askedAt < 30000 || !window.DgcPipJob) return;
+    pipTargets.loading = true; pipTargets.askedAt = Date.now();
+    Promise.all([pipsAsk("list_workspaces"), pipsAsk("list_pips", { scope: "all", limit: 100 })]).then(([places, listed]) => {
+      const where = new Map((places?.workspaces || []).filter((w) => w && typeof w.id === "string").map((w) => [w.id, w]));
+      pipTargets.rows = (Array.isArray(listed?.pips) ? listed.pips : [])
+        .filter((p) => p && /^pip_[0-9a-f]{32}$/.test(String(p.id)) && p.status !== "archived" && M.PIP_TYPES.includes(p.pip_type)
+          && typeof p.name === "string" && p.name.trim())
+        .slice(0, 60).map((p) => {
+          const place = where.get(p.workspace_id);
+          return { id: p.id, name: p.name.replace(/\s+/g, " ").trim().slice(0, 120), pip_type: p.pip_type,
+                   folder: place && place.kind !== "personal" ? String(place.name || "").slice(0, 80) : "" };
+        });
+      pipTargets.byId = new Map(pipTargets.rows.map((p) => [p.id, p]));
+      if (popMode === "@") onInput();
+    }, () => {}).finally(() => { pipTargets.loading = false; });
   }
   let pipDock = null;
   function dockPipCard(el) {
@@ -3771,7 +3861,8 @@
   const messageText = (text) => pasteClean()?.trimDraft(text) ?? String(text).trim();
   function promptDisplayMentions(text) {
     return M.displayMarks(draftParts(), text, { rich: displayMentionsVersion >= 2,
-      pipType: (part) => attachments.find(a => a.pipReference?.pip_id === part.identity)?.pipReference?.pip_type });
+      pipType: (part) => attachments.find(a => a.pipReference?.pip_id === part.identity)?.pipReference?.pip_type
+        || pipTargets?.byId.get(part.identity)?.pip_type || part.pipType });
   }
   function restoreDraftParts(parts, text) {
     if (!parts?.length) return;
@@ -5664,10 +5755,14 @@
       const clip = kind === "monitor" ? /^video: (.+?) · ended$/.exec(String(prompt || "")) : null;
       // A wake-up the chat set itself (dgc/wakeups.py): "wake-up: <why>".
       const planned = kind === "monitor" ? /^wake-up: (.+)$/s.exec(String(prompt || "")) : null;
+      // A Pip answered a job this session handed it (Pips API 111, dgc/pip_jobs.py): "pip-job: <Pip> · <how it ended>".
+      const answered = kind === "monitor" ? /^pip-job: (.{1,200}?) · (answered|couldn't finish|not now|stopped)$/.exec(String(prompt || "")) : null;
       const lead = kind === "wake" ? "Woke on agent" : clip ? "Woke as a video ended" : planned ? "Woke up as planned" : "Woke on monitor";
-      const mark = kind === "wake" ? "bot" : clip ? "play" : planned ? "history" : "activity";
+      const mark = answered ? "message-square" : kind === "wake" ? "bot" : clip ? "play" : planned ? "history" : "activity";
+      if (answered) note.classList.add("pip-job-note");
       note.innerHTML = `<span class="note-icon" data-icon="${mark}">${icon(mark)}</span>`
-        + `<span>${lead} · ${esc(String(clip ? clip[1] : planned ? planned[1] : prompt || "").slice(0, 200))}</span>`;
+        + (answered ? `<span>${esc(answered[1])}${answered[2] === "not now" ? ": not now" : ` ${esc(answered[2])}`}</span>`
+          : `<span>${lead} · ${esc(String(clip ? clip[1] : planned ? planned[1] : prompt || "").slice(0, 200))}</span>`);
       appendTarget.appendChild(note);
       wakeNote = note; head = note;
     } else if (!promptNode) {
@@ -10404,6 +10499,7 @@ function permissionChoices(ev) {
           && String(ev.output || "").startsWith("error: repeated tool call blocked");
         const moved = !ev.is_error && MOVED_RESULT.test(String(ev.output || ""));
         setToolStatus(c, blocked ? "blocked" : (ev.is_error ? "failed" : moved ? "moved" : "completed"));
+        if (!ev.is_error && String(ev.name || c.dataset.toolName || "") === "ask_pip") pipJobCardFrom(c, String(ev.output || ""));
         if (ev.is_diff && ev.diff) {
           c.classList.add("no-body");           // the diff below is this step's detail
           const rendered = renderDiff(ev.diff); c.after(rendered);
@@ -11604,7 +11700,7 @@ function permissionChoices(ev) {
     // alphabets. `label` keeps its sigil -- the matcher and the inserter both read it -- so this
     // is a rendering change only.
     const rowIcon = M.rowIconClass;
-    const face = (it, i) => { const ref = it.pipReference, index = ref ? M.PIP_TYPES.indexOf(ref.pip_type) : -1;
+    const face = (it, i) => { const ref = it.pipReference || it.pipTarget, index = ref ? M.PIP_TYPES.indexOf(ref.pip_type) : -1;
       return index >= 0 && window.PipConcepts?.plush ? `<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:ref.name},"idle",`pickerPip${i}`)}</span>` : ""; };
     const icon = (it) => { const logo = it.pluginId && pluginLogos[it.pluginId];
       return logo ? `<span class="pi-icon pi-plugin-mark" aria-hidden="true"><img src="${esc(logo)}" alt=""></span>`
@@ -11680,6 +11776,12 @@ function permissionChoices(ev) {
       const pipName=it.pipReference.name.replace(/\s+/g," ").trim();
       insertComposerPill(popStart,popEnd,"pip",pipName,displayMentionsVersion>=3?pipName:"",it.pipReference.pip_id);
       hidePop();input.focus();return;
+    }
+    if (it.pipTarget) {
+      const pip = pipTargets.byId.get(it.pipTarget.id);
+      if (!pip) { hidePop(); return; }
+      placeComposerPill(popStart, popEnd, "pip", pip.name, displayMentionsVersion >= 3 ? pip.name : "", pip.id);
+      hidePop(); input.focus(); return;
     }
     if (it.pluginId || it.artifactKind) {
       const name = String(it.label || "").trim();
@@ -12014,6 +12116,10 @@ function permissionChoices(ev) {
           candidates.push({ label, kind: "Artifact", detail: `Create ${label.toLowerCase()}`, artifactKind: value, artifactGlyph: glyph });
       }
       candidates.push(...files.filter((f) => f.label.toLowerCase().includes(query)).slice(0, 30));
+      // Every Pip, to hand it a job (Pips API 111): its name goes in the words, and the model is told who it is.
+      loadPipTargets();
+      if (pipJobBridge.api >= 111) candidates.unshift(...pipTargets.rows.filter((p) => !query || p.name.toLowerCase().includes(query))
+        .slice(0, 12).map((p) => ({ label: p.name, kind: "Pip", detail: p.folder ? `Works in ${p.folder}` : "For anything", pipTarget: p })));
       if(pipReferencesSupported && (!query||"pips".includes(query)))candidates.unshift({label:"Reference a Pip…",kind:"Pips",detail:"This session’s workspace · no work starts",pipPicker:true});
       showPop(candidates.slice(0, 40));
     } else hidePop();
@@ -14354,7 +14460,9 @@ function permissionChoices(ev) {
     if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked", "pipsChatDraft", "pipsChatChanged", "pipsFileData"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     // pipSetupChanged: a new-Pip card was created or turned down somewhere else; this chat's copy and the Pips page read it again.
     if (msg.type === "pipSetupChanged") { pipSetupCards?.receive(msg); for (const listener of pipsListeners) listener(msg); return; }
+    if (msg.type === "pipJobReply") { pipJobReply(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
+      pipJobReceive(msg);
       pipSetupCards?.receive(msg);
       pipDigestBar?.receive(msg);
       homePips?.receive(msg);

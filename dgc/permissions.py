@@ -115,6 +115,10 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    "keep_image",
                    # A wake-up (dgc/wakeups.py) only brings this chat back later; its turn asks for each thing as usual.
                    "wake_later", "wake_cancel",
+                   # Handing a Pip a job (dgc/pip_jobs.py): the Pip works in its own copy, at the level the user chose for
+                   # it, and its change waits for their Apply (or goes in by itself only where they chose Do it all). Not
+                   # in DISPLAY, for list_tasks' reason below.
+                   "ask_pip",
                    "list_tasks", "wait_tasks",
                    # `message_task` is not a read, and neither are propose_options, ask_user,
                    # present_document or update_goal above: this set is really "needs no

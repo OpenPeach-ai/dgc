@@ -1,0 +1,56 @@
+/* A job a chat handed a Pip with @ (media/shared/pipjob.js): media/shared/card.css's card (.dgc-card and its parts),
+   with what only a job has: the Pip's answer, the line that says where its change is, the files of the change with
+   each one's diff in place, and, in the Pip's own chat, the "From <where it was asked>" line above its answer.
+   Neutral greys only, as every card: the + and − counts take the editor's own diff colours. */
+.dgc-card.pipjob { max-width: 640px; }
+/* The Pip's face fills its place (card.css draws a mark's svg at 13 px: a face is not a mark). */
+.dgc-card.pipjob .dgc-card-face .dgc-plush, .dgc-card.pipjob .dgc-card-face .dgc-plush-rig { width: 100%; height: 100%; }
+.dgc-card.pipjob .pipjob-letter { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); font: var(--w-med) 12px/1 var(--sans); }
+.dgc-card.pipjob .pipjob-answer { margin: 8px 0 0 37px; min-width: 0; color: var(--text); font: var(--w-reg) var(--t-chat, var(--t-sm))/1.5 var(--sans);
+  overflow-wrap: anywhere; }
+.dgc-card.pipjob .pipjob-answer > :first-child { margin-top: 0; }
+.dgc-card.pipjob .pipjob-answer > :last-child { margin-bottom: 0; }
+.dgc-card.pipjob .pipjob-answer pre { max-width: 100%; overflow: auto; }
+.dgc-card.pipjob .pipjob-change { margin: 10px 0 0 37px; padding-top: 8px; border-top: 1px solid var(--hair); color: var(--text-2); font-size: var(--t-sm); }
+.dgc-card.pipjob .pipjob-plus { color: var(--vscode-gitDecoration-addedResourceForeground, #3fb950); font-variant-numeric: tabular-nums; }
+.dgc-card.pipjob .pipjob-minus { color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149); font-variant-numeric: tabular-nums; }
+.dgc-card.pipjob .pipjob-pulse { display: inline-block; width: 7px; height: 7px; margin: 0 7px 1px 0; border-radius: 50%; vertical-align: middle;
+  background: var(--text-2); animation: pipjob-pulse 1.4s ease-in-out infinite; }
+@keyframes pipjob-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dgc-card.pipjob .pipjob-pulse { animation: none; opacity: .7; } }
+.dgc-card.pipjob .dgc-card-note { margin-left: 37px; }
+.dgc-card.pipjob .dgc-card-error { margin-left: 37px; }
+.dgc-card.pipjob .dgc-card-actions { margin-left: 37px; }
+.dgc-card.pipjob .dgc-card-actions .pipjob-discard { margin: 0 0 0 auto; }
+/* Open its chat: a link in the quiet line under the title. */
+.dgc-card.pipjob .pipjob-open { display: inline; margin: 0; padding: 0; min-height: 0; height: auto; border: 0; background: none; color: var(--text-2);
+  font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--hair-strong); white-space: nowrap; }
+.dgc-card.pipjob .pipjob-open:hover { color: var(--text); text-decoration-color: currentColor; }
+.dgc-card.pipjob .pipjob-open:focus-visible { outline: var(--btn-ring); outline-offset: 2px; border-radius: 2px; }
+.dgc-card.pipjob .pipjob-files { margin-left: 37px; }
+.dgc-card.pipjob .pipjob-file { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; padding: 3px 0; }
+.dgc-card.pipjob .pipjob-file-link { margin: 0; min-width: 0; overflow-wrap: anywhere; text-align: left; font-family: var(--mono, monospace); font-size: var(--t-xs, 12px); }
+.dgc-card.pipjob .pipjob-file-count { margin-left: auto; font-size: var(--t-xs, 12px); white-space: nowrap; }
+.dgc-card.pipjob .pipjob-diff { flex: 1 0 100%; box-sizing: border-box; max-width: 100%; max-height: 320px; margin: 4px 0 2px; padding: 8px; overflow: auto;
+  border: 1px solid var(--hair); border-radius: var(--btn-r); background: color-mix(in srgb, var(--text) 3%, transparent);
+  font: 12px/1.45 var(--mono, monospace); white-space: pre; }
+.dgc-card.pipjob .pipjob-diff-add { color: var(--vscode-gitDecoration-addedResourceForeground, #3fb950); }
+.dgc-card.pipjob .pipjob-diff-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149); }
+.dgc-card.pipjob .pipjob-diff-hunk, .dgc-card.pipjob .pipjob-diff-meta { color: var(--text-2); }
+/* The narrow column (a side bar at 300 px): the card's parts take its full width, as every card's do. */
+@container (max-width: 380px) {
+  .dgc-card.pipjob :is(.pipjob-answer, .pipjob-change, .pipjob-files, .dgc-card-note, .dgc-card-error, .dgc-card-actions) { margin-left: 0; }
+  .dgc-card.pipjob .dgc-card-actions .pipjob-discard { flex: 0 0 auto; margin: 0 0 0 auto; }
+}
+/* The job's own line in the Pip's chat, above its answer: DGC's words, never a bubble of yours. */
+.pipjob-from { display: flex; align-items: flex-start; gap: 8px; max-width: 640px; margin: 10px 0 4px; color: var(--text-2); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.pipjob-from-mark { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--btn-r);
+  background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.pipjob-from-mark svg { width: 12px; height: 12px; }
+.pipjob-from-words { margin: 1px 0 0; min-width: 0; overflow-wrap: anywhere; }
+.pipjob-from-link { display: inline; margin: 0; padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-style: italic; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--hair-strong); }
+.pipjob-from-link:hover { text-decoration-color: currentColor; }
+.pipjob-from-link:focus-visible { outline: var(--btn-ring); outline-offset: 2px; border-radius: 2px; }
+@media (forced-colors: active) { .pipjob-from-mark { border: 1px solid CanvasText; } }

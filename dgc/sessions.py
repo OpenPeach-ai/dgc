@@ -1134,6 +1134,12 @@ def display_rows(messages) -> list[dict]:
                 # The editor's notice that a background agent finished: DGC's, never the person's words.
                 rows.append(display_row(woke))
                 continue
+            from .pip_jobs import parse_notice
+            told = parse_notice(text)
+            if told is not None:
+                # A Pip's answer to a job this chat handed it: DGC's notice, never the person's words.
+                rows.append({"who": "pip_job", "body": f"{told['pip']} answered a job this chat handed it.", "tools": ""})
+                continue
             text = display_prompt(_strip_editor_context(text))
             if text.startswith(_COMPACT_PREFIX):
                 skip_ack = True

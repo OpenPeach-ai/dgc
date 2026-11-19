@@ -640,7 +640,16 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # level, model and sub-agents; refused while it or a sub-agent works (busy). Both answer {pip, folder {name, folder,
 # workspace_id}, keeps [line], changes [line], done}; dry_run says them and changes nothing. Events pip_folder_given and
 # pip_folder_removed in both workspaces. Local only.
-PIPS_API_VERSION = 110
+# API 111 (0.52, @ a Pip hands it a job, pip_jobs): a Work session, a ChatDGC
+# chat or a Pip's chat hands a Pip a job with the model's ask_pip (offered whenever Pips are on). The job is DGC's turn in
+# the Pip's first chat (a user message with `intro` and `job` {id, pip, words, about, asked_from {kind work | chatdgc |
+# pip, id, title}, state, state_words, folder, answer?, error?, run_id?, change_id?}), run at its level on a copy of the
+# asking folder; Ask me first waits for the person's Start. get_pip_job {job_id} (R: job, with `change` {id, status,
+# name, digest, files [{path, change, plus, minus}], more, plus, minus, result} read afresh: the same change id the Pip's
+# chat shows, so apply/discard/undo_pip_project_change in either place are one), list_pip_jobs {pip_id} (R: jobs),
+# start_pip_job and decline_pip_job {pip_id, job_id} (M: R job). list_pip_messages carries `asking_jobs` and a reply's
+# `pip_jobs` (the jobs it handed other Pips). The older handoff_to_pip is no longer offered. Local only.
+PIPS_API_VERSION = 111
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}
@@ -4618,6 +4627,11 @@ class Backend:
                     notification = None
                     agent_notice = None
                     wakeup = None
+                    job_notice = None
+                    if turn_kind == "pip_job":
+                        job_notice = None if self._wake_blocked_locked() else self._take_pip_job_wake_locked()
+                        if job_notice is None:
+                            continue
                     if turn_kind == "monitor":
                         hub = self.agent.monitors
                         notification = (None if self._wake_blocked_locked()
@@ -4676,7 +4690,7 @@ class Backend:
                 from .workflows import display_prompt
                 shown_prompt = display_prompt(text)
                 name_session = getattr(self.agent, "name_session", None)
-                if (turn_kind not in ("continue", "monitor", "wake", "wakeup", "pip_setup", "goal")
+                if (turn_kind not in ("continue", "monitor", "wake", "wakeup", "pip_setup", "goal", "pip_job")
                         and not getattr(self.agent, "session_name", None)
                         and callable(name_session)):
                     title = _prompt_thread_title(shown_prompt)
@@ -4703,9 +4717,17 @@ class Backend:
                 if wakeup is not None:
                     # Drawn as "Woke up as planned · <why>"; on the wire a wake turn the editor already knows.
                     wake_label = shown_prompt = f"wake-up: {wakeup['why']}"
+                job_text = ""
+                if job_notice is not None:
+                    # A Pip answered a job this chat handed it (pip_jobs): drawn as "<Pip> answered", with its face; on
+                    # the wire a monitor turn every editor and SDK already knows.
+                    from .pip_jobs import notice as job_notice_text, notice_label, parse_notice
+                    job_text = job_notice_text(job_notice["view"])
+                    wake_label = shown_prompt = notice_label(parse_notice(job_text))
                 turn_prompt = (notification.label if notification is not None
-                               else (wake_label if agent_notice is not None or wakeup is not None else shown_prompt))
-                wire_kind = "monitor" if turn_kind == "wakeup" else turn_kind
+                               else (wake_label if agent_notice is not None or wakeup is not None or job_notice is not None
+                                     else shown_prompt))
+                wire_kind = "monitor" if turn_kind in ("wakeup", "pip_job") else turn_kind
                 if turn_kind == "goal":
                     # A goal's own next turn: drawn as one ("Goal · turn 3"), never as something the user sent. On the
                     # wire it is a resume turn, which every editor and SDK already knows.
@@ -4762,6 +4784,22 @@ class Backend:
                         with foreground_turn("monitor"), woken(self.agent, "wakeup"):
                             outcome = self.agent.run_turn(turn_text(wakeup, now=self.agent.wakeups.clock()),
                                                           reset_cancel=False)
+                    elif job_notice is not None:
+                        from .goals import woken
+                        from .session_turn_events import foreground_turn
+                        with foreground_turn("agent_wake"), woken(self.agent, "pip_job"):
+                            outcome = self.agent.run_turn(job_text, reset_cancel=False)
+                        if _wake_reached_the_model(self.agent, job_text):
+                            try:
+                                from .pip_jobs import mark_delivered
+                                from .workspace_registry import WorkspaceRegistry
+                                with WorkspaceRegistry() as registry:
+                                    mark_delivered(registry, job_notice["id"])
+                            except Exception:          # noqa: BLE001 -- told in this process: never twice here
+                                pass
+                        else:
+                            # Its turn never reached the model (another window holds the session): it may be told again.
+                            self.__dict__.setdefault("_pip_job_told", set()).discard(job_notice["id"])
                     elif agent_notice is not None:
                         wake_prompt = _agent_wake_prompt(agent_notice)
                         from .goals import woken
@@ -5245,7 +5283,7 @@ class Backend:
             return None
         hub = getattr(self.agent, "monitors", None)
         has_monitor = bool(hub is not None and hub.pending_count())
-        has_agent = bool(getattr(self, "_agent_wakes", None))
+        has_agent = bool(getattr(self, "_agent_wakes", None)) or bool(self.__dict__.get("_pip_job_wakes"))
         if not has_monitor and not has_agent and not self._wakeup_due_now():
             return None
         if has_monitor:
@@ -5259,7 +5297,7 @@ class Backend:
         if not hasattr(self, "_queue"):
             return
         if ((hub is None or not hub.pending_count()) and not getattr(self, "_agent_wakes", None)
-                and not self._wakeup_due_now()):
+                and not self.__dict__.get("_pip_job_wakes") and not self._wakeup_due_now()):
             return
         lock = self._turn_state_lock()
         paused_now = False
@@ -5275,7 +5313,8 @@ class Backend:
                 timer.start()
             else:
                 kind = ("monitor" if hub is not None and hub.pending_count()
-                        else "wake" if getattr(self, "_agent_wakes", None) else "wakeup")
+                        else "wake" if getattr(self, "_agent_wakes", None)
+                        else "pip_job" if self.__dict__.get("_pip_job_wakes") else "wakeup")
                 if kind == "monitor":
                     hub.policy.begin_wake()
                 self._queue.append(("", None, None, kind, ""))
@@ -7281,6 +7320,13 @@ class Backend:
             if role == "user" and isinstance(content, str) and _goal_scaffold(content):
                 open_turn(_goal_scaffold(content, m), "resume")
                 continue
+            if role == "user" and isinstance(content, str):
+                # A Pip's answer to a job this chat handed it (pip_jobs.notice): DGC's turn, drawn as it was live.
+                from .pip_jobs import notice_label, parse_notice
+                told = parse_notice(content)
+                if told is not None:
+                    open_turn(notice_label(told), "monitor")
+                    continue
             if role == "user" and reports_on:
                 # The notice the editor's wake turn handed the model: DGC wrote it, nobody typed it.
                 from .agent_reports import parse_wake_prompt
@@ -7607,6 +7653,10 @@ class Backend:
                     self._look_for_pip_runs(force=force)
                 except Exception:           # nor is the chip that says a Pip is at work
                     pass
+                try:
+                    self._look_for_pip_jobs(force=force)
+                except Exception:           # nor a Pip's answer to a job this chat handed it (it waits for the next look)
+                    pass
                 force = wake.wait(self._PIP_REPORT_POLL_S)
                 wake.clear()
 
@@ -7659,6 +7709,70 @@ class Backend:
                 return False
             self.em.emit("pip_runs_running", items=items, **_request_fields(request_id))
         return True
+
+    def _look_for_pip_jobs(self, *, force: bool = False) -> int:
+        """A job this chat handed a Pip with @ (pip_jobs) that has ended: its card reads it already, and the model is told
+        once, in DGC's own words, with a turn of its own when the chat is free (as a background helper's result is).
+        Looked at while this chat has one open, and at each full look."""
+        agent = getattr(self, "agent", None)
+        if getattr(self, "_pips_closing", False) or getattr(agent, "stopping", False) is True:
+            return 0
+        session = getattr(agent, "session_file", None)
+        config = getattr(self, "config", getattr(agent, "config", None))
+        get = getattr(config, "get", None)
+        if session is None or not callable(get) or get("pips_enabled", False) is not True:
+            return 0
+        handed = getattr(agent, "_pip_jobs_handed", False) is True
+        if not (force or handed or self.__dict__.get("_pip_jobs_open")):
+            return 0
+        from .workspace_registry import WorkspaceRegistry, in_use
+        if not in_use():
+            return 0
+        from . import pip_jobs
+        sid = Path(session).stem
+        if handed:
+            try:
+                agent._pip_jobs_handed = False
+            except Exception:                   # noqa: BLE001 -- a stand-in agent: the next full look finds it
+                pass
+        with WorkspaceRegistry() as registry:
+            self.__dict__["_pip_jobs_open"] = pip_jobs.open_jobs(registry, "work", sid)
+            if not self.__dict__["_pip_jobs_open"]:
+                return 0
+            due = pip_jobs.deliverable(registry, "work", sid)
+        if not due:
+            return 0
+        with self._turn_state_lock():
+            if getattr(self.agent, "session_file", None) != session:
+                return 0                        # another chat now: told when this one opens again
+            wakes = self.__dict__.setdefault("_pip_job_wakes", [])
+            tries = self.__dict__.setdefault("_pip_job_tries", {})
+            # (A job whose turn is running now, or that this chat was told of, is never queued again: its turn marks it
+            # told only once the model has it, and the next look comes sooner than that.)
+            known = {item["id"] for item in wakes} | self.__dict__.setdefault("_pip_job_told", set())
+            # A turn that couldn't start (another window holds the session) is tried three times, then waits for the
+            # chat to open again: never a loop of failed turns.
+            fresh = [{"id": view["id"], "session": sid, "view": view} for view in due
+                     if view["id"] not in known and tries.get(view["id"], 0) < 3]
+            for item in fresh:
+                tries[item["id"]] = tries.get(item["id"], 0) + 1
+            wakes.extend(fresh)
+            pending = bool(wakes)
+        if pending:
+            self._maybe_wake()
+        return len(fresh)
+
+    def _take_pip_job_wake_locked(self) -> dict | None:
+        """The next ended job to tell this chat's model about (its own chat only). Caller holds the turn-state lock."""
+        wakes = self.__dict__.get("_pip_job_wakes") or []
+        session = getattr(getattr(self, "agent", None), "session_file", None)
+        sid = Path(session).stem if session is not None else ""
+        while wakes:
+            item = wakes.pop(0)
+            if item.get("session") == sid:
+                self.__dict__.setdefault("_pip_job_told", set()).add(item["id"])
+                return item
+        return None
 
     def _flush_pip_reports(self) -> None:
         """Write shown reports into the transcript and save it. Only where the transcript may change:

@@ -521,6 +521,12 @@ class ChatService:
         self._wake_said: dict[str, float] = {}          # wake-up id -> when the editor was last told it is due
         if wakeups is True:
             self.engine.wake_book = self._wake_book
+        # Jobs a chat handed a Pip with @ (dgc/pip_jobs.py): when one ends, its chat is told once, with a turn the editor
+        # starts as it starts a wake-up's (chatdgc_wakeup_due, then chatdgc_wake with the job's id).
+        self._jobs_on = wakeups is True
+        self._job_said: dict[str, float] = {}           # job id -> when the editor was last told its answer is in
+        self._job_thread = None
+        self._job_stop = threading.Event()
         self._watch_videos()                             # last: a job's card can be written from here on
 
     def _mcp_app_shown(self, record: dict) -> None:
@@ -603,6 +609,10 @@ class ChatService:
             return self._opened_now(chat, request_id)
         finally:
             self._wakeups_opened(chat)
+            try:
+                self.jobs_kick()                      # a Pip's answer that came while it was closed is told now
+            except Exception:                         # noqa: BLE001 -- the next reply's end looks again
+                pass
 
     def _opened_now(self, chat: dict, request_id: str) -> None:
         for _ in range(3):
@@ -1814,6 +1824,22 @@ class ChatService:
                  "pip_type": str(p.get("pip_type") or "")}
                 for p in rows.get("pips") or [] if p.get("status") != "archived"]
 
+    def _every_pip(self) -> list[dict]:
+        """Every Pip a chat may hand a job (dgc/pip_jobs.py), none archived, with where it works (`folder`, "" for a Pip
+        for anything): for this box's @, as the side bar lists them."""
+        found = self._pips_call({"type": "list_workspaces"})
+        places = {w.get("id"): w for w in found.get("workspaces") or [] if isinstance(w, dict)}
+        rows = self._pips_call({"type": "list_pips", "scope": "all", "limit": 100})
+        out = []
+        for p in rows.get("pips") or []:
+            if not isinstance(p, dict) or p.get("status") == "archived":
+                continue
+            place = places.get(p.get("workspace_id")) or {}
+            out.append({"id": p["id"], "name": p.get("name") or "Pip", "goal": str(p.get("goal") or "")[:200],
+                        "pip_type": str(p.get("pip_type") or ""), "status": str(p.get("status") or "active"),
+                        "folder": "" if place.get("kind") == "personal" else str(place.get("name") or "")[:80]})
+        return out
+
     def _pips(self, cmd: dict) -> None:
         """Your Personal Pips, for "Hand it to a Pip"."""
         try:
@@ -1825,14 +1851,15 @@ class ChatService:
                   pips=[{key: p[key] for key in ("id", "name", "goal")} for p in pips])
 
     def _mentions(self, cmd: dict) -> None:
-        """What this box can name with @: the plugins a reply can use, and your Personal Pips."""
+        """What this box can name with @: the plugins a reply can use, and every Pip (0.52: a chat reaches every Pip,
+        and ask_pip hands one a job), each with where it works (`folder`, none for a Pip for anything)."""
         try:
             plugins = self.engine.mentionable_plugins()
         except Exception:                             # noqa: BLE001 -- none listed rather than no list
             plugins = []
         error = ""
         try:
-            pips = self._personal_pips()
+            pips = self._every_pip()
         except Exception as exc:                      # noqa: BLE001 -- Pips off, or the runner can't start: said
             pips, error = [], " ".join(str(exc).split())[:300]
         self.emit("chatdgc_mentions", request_id=cmd["request_id"], plugins=plugins, pips=pips,
@@ -1848,7 +1875,12 @@ class ChatService:
             known = {p["id"]: p for p in self._personal_pips()}
         except Exception:                             # noqa: BLE001 -- the name and type are still true
             known = {}
-        return [{"name": mark["label"], "type": mark["pip_type"], "goal": known.get(mark["identity"], {}).get("goal", "")}
+        try:
+            where = {p["id"]: p.get("folder") or "" for p in self._every_pip()}
+        except Exception:                             # noqa: BLE001 -- where it works unread: said without it
+            where = {}
+        return [{"name": mark["label"], "type": mark["pip_type"], "goal": known.get(mark["identity"], {}).get("goal", ""),
+                 **({"folder": where[mark["identity"]]} if where.get(mark["identity"]) else {})}
                 for mark in named]
 
     def _hand(self, conversation_id, message_id, action_id, pip_id) -> dict:
@@ -2539,7 +2571,12 @@ class ChatService:
 
     def _turns_changed(self) -> None:
         """A reply started or ended: the process's note says so (on_turns_changed is the Host's announce_peers). A
-        wake-up that fell due while its chat answered is said once the chat is free."""
+        wake-up that fell due while its chat answered is said once the chat is free, and so is a Pip's answer to a job
+        it handed (jobs_kick looks while any is open)."""
+        try:
+            self.jobs_kick()
+        except Exception:                             # noqa: BLE001 -- an answer is never worth a reply's end
+            pass
         if self._wake_books:
             try:
                 self._wake_check()
@@ -2648,9 +2685,11 @@ class ChatService:
     def _wake(self, cmd: dict) -> None:
         """The editor's chatdgc_wake: that wake-up's turn, now, if it is due on this chat; its user message says it is
         one (``wakeup``) and its text is what the chat said it would do. Refused (and kept) if it isn't due or has gone;
-        put back if the turn can't start."""
+        put back if the turn can't start. A job's id (pipjob_...) is the turn that tells the chat a Pip's answer."""
         from .. import wakeups
         conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
+        if str(cmd.get("id") or "").startswith("pipjob_"):
+            return self._job_wake(cmd)
         with self._wake_lock:
             book = self._wake_books.get(conversation_id)
         item = book.take(str(cmd.get("id") or "")) if book is not None else None
@@ -2669,6 +2708,105 @@ class ChatService:
         except Exception:
             book.put_back(item)
             raise
+
+    # ---- a Pip's answer to a job a chat handed it (dgc/pip_jobs.py) -----------------------------------------------
+    _JOB_POLL_S = 4.0
+
+    def jobs_kick(self) -> None:
+        """Look for answers from now on (a reply handed a job, or a chat opened): one thread, while any is open."""
+        if not getattr(self, "_jobs_on", False) or getattr(self, "_closing", False):
+            return
+        with self._wake_lock:
+            if self._job_thread is not None and self._job_thread.is_alive():
+                return
+            self._job_stop.clear()
+            thread = self._job_thread = threading.Thread(target=self._job_watch, daemon=True, name="chatdgc-pip-jobs")
+        thread.start()
+
+    def _job_watch(self) -> None:
+        quiet = 0
+        while not self._job_stop.wait(self._JOB_POLL_S) and not self._closing:
+            try:
+                open_now = self._job_check()
+            except Exception:                         # noqa: BLE001 -- an answer is never worth the chat; looked at again
+                open_now = 1
+            quiet = 0 if open_now else quiet + 1
+            if quiet >= 3:
+                return                                # nothing open: started again when a reply hands one
+
+    def _job_check(self) -> int:
+        """Tell the editor each ended job whose chat is free here (chatdgc_wakeup_due with the job's id): it starts the
+        turn. Said again after a minute if no turn came. Returns how many of ChatDGC's jobs are still open."""
+        from .. import pip_jobs
+        from ..workspace_registry import WorkspaceRegistry, in_use
+        if self.engine.config.get("pips_enabled", False) is not True or not in_use():
+            return 0
+        with WorkspaceRegistry() as registry:
+            if not pip_jobs._has_table(registry.db):
+                return 0
+            chats = [r[0] for r in registry.db.execute(
+                "SELECT DISTINCT asked_id FROM pip_jobs WHERE asked_kind='chatdgc' AND delivered_at IS NULL "
+                "AND state<>'asking' LIMIT 50").fetchall()]
+            due = []
+            for conversation_id in chats:
+                try:
+                    if self.engine.store.get(conversation_id) is None:
+                        continue
+                except (ChatStoreError, OSError, ValueError):
+                    continue
+                for view in pip_jobs.deliverable(registry, "chatdgc", conversation_id):
+                    due.append((conversation_id, view))
+        for conversation_id, view in due:
+            with self._lock:
+                busy = conversation_id in self._turns
+            if busy or self._holder_state(conversation_id) is not None:
+                continue
+            said = self._job_said.get(view["id"])
+            if said is not None and time.monotonic() - said < 60:
+                continue
+            self._job_said[view["id"]] = time.monotonic()
+            fields = {"conversation_id": conversation_id, "id": view["id"]}
+            try:
+                model = str((self.engine.store.get(conversation_id) or {}).get("model") or "")
+            except (ChatStoreError, OSError, ValueError):
+                model = ""
+            model = model or str(getattr(self.engine.config, "model", "") or "")
+            if model:
+                fields["model"] = model[:200]
+            self.emit("chatdgc_wakeup_due", **fields)
+        return len(chats)
+
+    def _job_wake(self, cmd: dict) -> None:
+        """The turn that tells a chat its Pip's answer (pip_jobs.notice), started by the editor's chatdgc_wake. Its user
+        message is DGC's (``wakeup``, drawn as "<Pip> answered"); the job is told once."""
+        from .. import pip_jobs
+        from ..workspace_registry import WorkspaceRegistry
+        conversation_id, request_id, job_id = cmd["conversation_id"], cmd["request_id"], str(cmd.get("id") or "")
+        with WorkspaceRegistry() as registry:
+            due = {view["id"]: view for view in pip_jobs.deliverable(registry, "chatdgc", conversation_id)}
+        view = due.get(job_id)
+        if view is None:
+            return self._error("That Pip's answer was told already, or isn't in yet.", request_id, conversation_id)
+        self._job_said.pop(job_id, None)
+        text = pip_jobs.notice(view)
+        label = pip_jobs.notice_label(pip_jobs.parse_notice(text)).removeprefix("pip-job: ")
+        mark = {"id": job_id, "why": label[:200], "at": datetime.now().astimezone().isoformat(timespec="seconds")}
+
+        def told(*args, **kwargs):
+            try:
+                with WorkspaceRegistry() as registry:
+                    pip_jobs.mark_delivered(registry, job_id)
+            except Exception:                         # noqa: BLE001 -- told again rather than never
+                pass
+
+        def run(cancel, on_start, stream_for, activity):
+            def started(mine, reply_id):
+                told()
+                if on_start is not None:
+                    on_start(mine, reply_id)
+            return self.engine.send(conversation_id, text, model=cmd.get("model"), search="off", wakeup=mark,
+                                    on_start=started, on_activity=activity, cancel=cancel, **stream_for())
+        self._start(cmd, run)
 
     def _cancel_wakeup(self, cmd: dict) -> None:
         """The pill's Cancel: that wake-up goes; the row says what is left either way."""
@@ -2691,6 +2829,7 @@ class ChatService:
             if self._wake_timer is not None:
                 self._wake_timer.cancel()             # its wake-ups stay in their journals for the next DGC
                 self._wake_timer = None
+        self._job_stop.set()
         self._reviews.close(min(grace_s, 2.0))
         for turn in turns:
             turn["cancel"].set()

@@ -2666,6 +2666,13 @@ def tick(registry, config) -> dict:
     # What the user approved while its chat was busy: its next turn, now the chat is free (pip_chat.send_owed_turns).
     from .pip_chat import send_owed_turns
     send_owed_turns(registry, config)
+    # Jobs chats handed Pips with @ (pip_jobs): each turn sent once its chat is free, its state read from its run, and
+    # the answer told to a Pip whose chat asked.
+    try:
+        from .pip_jobs import settle as settle_jobs
+        settle_jobs(registry, config)
+    except Exception:                                  # noqa: BLE001 - a pass never stops the supervisor
+        pass
     # Check-ins on the Pips' background commands started with an expected time (18 Nov).
     try:
         job_check_ins(registry, config)

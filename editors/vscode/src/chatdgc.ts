@@ -77,6 +77,10 @@ const MAX_FOLDER_CHARS = 4096;
 const MAX_BRIEF_CHARS = 200_000;
 
 /** What ChatDGC needs of the side bar: its process, and its home's webview. */
+/** What a job's card may ask of Pips from a ChatDGC tab (Pips API 111): read the job, start or decline it, and its change. */
+const PIP_JOB_COMMANDS = new Set(["get_pip_job", "start_pip_job", "decline_pip_job", "get_pip_project_change",
+  "apply_pip_project_change", "discard_pip_project_change", "undo_pip_project_change"]);
+
 export interface ChatDGCHost {
   /** "sent"; "starting" while its process comes up (sent again once it's ready); "old_cli" when it
    *  has no ChatDGC. */
@@ -130,6 +134,10 @@ export interface ChatDGCHost {
    *  them (media/mods.js), answered through `answer` when it couldn't be sent. */
   chatdgcMods?(): { version: number; offers?: number } | undefined;
   chatdgcModsSend?(message: Record<string, unknown>, answer: (ev: any) => void): boolean;
+  /** A job's card (Pips API 111): one Pips control through the window's Pips channel, its result or DGC's words. */
+  pipJob?(type: string, fields: Record<string, unknown>): Promise<any>;
+  /** Open its chat, from a job's card: that Pip's chat in a tab of its own. */
+  openPipChat?(pip: { id: string; name: string; pip_type: string }, conversation?: { id: string }): void;
 }
 
 
@@ -381,7 +389,7 @@ function chatdgcPage(asset: (name: string) => string, cspSource: string): string
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys dgc-dialog" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("media/shared/picturepop.js"))}"></script><script src="${attr(asset("media/shared/modelpicker.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/inline.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("media/shared/picturepop.js"))}"></script><script src="${attr(asset("media/shared/modelpicker.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/inline.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/pipjob.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library in its own editor tab. The page holds only where it goes: the ONE Library module (media/library.js, the
@@ -497,7 +505,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     try { return Number(this.host?.chatdgcOffers?.()?.wakeups) >= 1; } catch { return false; }
   }
   private wakeDue(conversation: string, id: string, model: string): void {
-    if (!this.wakesOffered() || !CONVERSATION_ID.test(conversation) || !/^wake\d{1,9}$/.test(id)) return;
+    // (A job's id, pipjob_...: the turn that tells the chat its Pip's answer, Pips API 111.)
+    if (!this.wakesOffered() || !CONVERSATION_ID.test(conversation) || !/^(?:wake\d{1,9}|pipjob_[0-9a-f]{32})$/.test(id)) return;
     const tab = [...this.tabs].find((t) => t.conversation === conversation && !t.elsewhere);
     this.ask({ tab, kind: "wake" }, { type: "chatdgc_wake", conversation_id: conversation, id, ...(model ? { model } : {}) });
   }
@@ -2452,6 +2461,27 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                                                 undefined, tab.panel.webview);
         }
         return;
+      case "pipJob": {
+        // A job this chat handed a Pip (Pips API 111): its card reads it, and Apply, Discard and Undo its change, through
+        // the window's Pips channel, never this chat's process. Only the commands a job card sends.
+        const id = String(message.id || "");
+        const request = message.request && typeof message.request === "object" ? message.request : {};
+        if (!/^pipjob-\d{1,9}$/.test(id)) return;
+        const reply = (fields: Record<string, unknown>) => this.post(tab, { type: "pipJobReply", id, ...fields });
+        if (!PIP_JOB_COMMANDS.has(String(request.type || "")) || !this.host?.pipJob) { reply({ ok: false, error: "Update DGC to follow a Pip's job here." }); return; }
+        const { type, ...fields } = request as Record<string, unknown>;
+        this.host.pipJob(String(type), fields).then((result) => reply({ ok: true, result }),
+          (error) => reply({ ok: false, error: error instanceof Error ? error.message : "DGC couldn't do that." }));
+        return;
+      }
+      case "pipJobOpen": {
+        // Open its chat, from a job's card: that Pip's chat in a tab of its own (the window's one keeper of them).
+        const pip = message.pip && typeof message.pip === "object" ? message.pip : null;
+        if (!pip || !/^pip_[0-9a-f]{32}$/.test(String(pip.id || "")) || typeof pip.name !== "string") return;
+        const conversation = /^conv_[0-9a-f]{32}$/.test(String(message.conversation || "")) ? { id: String(message.conversation) } : undefined;
+        this.host?.openPipChat?.({ id: pip.id, name: pip.name.slice(0, 120), pip_type: String(pip.pip_type || "") }, conversation);
+        return;
+      }
       case "mentionSources":
         // What the box's @ list can name: asked of the backend, which knows what a reply can really use.
         if (Number(this.host?.chatdgcOffers?.()?.mentions) >= 1) this.ask({ tab, kind: "mentions" }, { type: "chatdgc_mentions" });

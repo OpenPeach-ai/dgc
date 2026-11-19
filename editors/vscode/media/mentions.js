@@ -1156,6 +1156,9 @@
       opts.refresh?.();
       const rows = [];
       if (pipsOffered && (!query || "pips".includes(query))) rows.push({ label: "Reference a Pip…", kind: "Pips", detail: opts.pipsDetail || "No work starts", pipPicker: true });
+      // A Pip by its name ("@Rel"), to hand it a job (Pips API 111): the Pips whose name has what was typed, first.
+      if (pipsOffered && query) for (const p of (source.pips || []).filter((row) => String(row.name || "").toLowerCase().includes(query)).slice(0, 6))
+        rows.push({ label: p.name.replace(/\s+/g, " "), kind: "Pip", detail: p.detail || "", pipRow: p });
       // This computer's projects, in a Personal Pip's chat (pips-21): each one a row with a folder.
       for (const row of source.projects || []) {
         const label = String(row.name || "").replace(/\s+/g, " ").trim().slice(0, 80);

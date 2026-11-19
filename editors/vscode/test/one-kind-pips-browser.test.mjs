@@ -235,7 +235,7 @@ test("words: where a Pip works, never a kind of Pip", async (t) => {
     // In a Pip's chat, the @ list says where each other Pip works.
     await x.openPip(GST); await type(x, "@"); await x.waitIn("#chat-pop [role=option]"); await x.page.keyboard.press("Enter"); await x.page.waitForTimeout(300);
     const row = await x.inPips((root) => [...root.querySelectorAll("#chat-pop [role=option]")].find((r) => r.textContent.includes("ERP daily audit"))?.textContent || "");
-    assert.match(row, /lime_tiles · v3/, "its folder"); assert.doesNotMatch(row, /Project|Personal/);
+    assert.match(row, /Works in lime_tiles/, "its folder, in plain words"); assert.doesNotMatch(row, /· v\d/, "never its version"); assert.doesNotMatch(row, /Project|Personal/);
     await x.page.keyboard.press("Escape"); await x.inPips((root) => { const b = root.querySelector("#chatText"); b.textContent = ""; b.dispatchEvent(new Event("input", { bubbles: true })); });
     await toPage(x);
     assert.doesNotMatch(await x.inPips((root) => root.querySelector(".pip-page").textContent), kinds, "its page");

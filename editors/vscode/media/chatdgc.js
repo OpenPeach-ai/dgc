@@ -1565,6 +1565,31 @@
   }
   /** A user message that is a wake-up's turn: {wakeup: {id, why, at}}. */
   const isWakeup = (message) => !!message?.wakeup && typeof message.wakeup === "object" && typeof message.wakeup.why === "string" && !!message.wakeup.why.trim();
+  /** A wake-up's turn that told the chat a Pip's answer to a job it handed (Pips API 111): its words, "Scout answered". */
+  const jobWords = (message) => {
+    if (!/^pipjob_[0-9a-f]{32}$/.test(String(message?.wakeup?.id || ""))) return "";
+    const said = /^(.{1,200}?) · (answered|couldn't finish|not now|stopped)$/.exec(String(message.wakeup.why || ""));
+    return said ? (said[2] === "not now" ? `${said[1]}: not now` : `${said[1]} ${said[2]}`) : String(message.wakeup.why || "").slice(0, 200);
+  };
+  // ---- @ a Pip (Pips API 111): a job this chat handed a Pip is a card in the reply that handed it (media/shared/pipjob.js,
+  // the same card in Work and a Pip's chat). It reads the job through the editor's Pips channel (pipJob / pipJobReply).
+  const pipJobAsks = new Map();
+  let pipJobSeq = 0;
+  function pipJobAsk(type, fields = {}) {
+    return new Promise((resolve, reject) => {
+      const id = `pipjob-${++pipJobSeq}`;
+      const timer = setTimeout(() => { pipJobAsks.delete(id); reject(new Error("DGC didn't answer. Try again.")); }, 20000);
+      pipJobAsks.set(id, { resolve, reject, timer });
+      vscode.postMessage({ type: "pipJob", id, request: { type, ...fields } });
+    });
+  }
+  const pipJobs = window.DgcPipJob ? window.DgcPipJob.store({
+    ask: pipJobAsk, place: "chatdgc", document,
+    render: (text) => md(text) ?? `<p>${M.esc(text)}</p>`,
+    openChat: (pip, conversation) => vscode.postMessage({ type: "pipJobOpen", pip: { id: pip.id, name: pip.name, pip_type: pip.pip_type },
+      ...(conversation ? { conversation } : {}) }),
+  }) : null;
+  document.addEventListener("click", (e) => { if (pipJobs?.click(e.target)) { e.preventDefault(); e.stopPropagation(); } });
   function messageNode(message) {
     const live = state.busy && (message.id === state.replyId || message.local === true);
     // A wake-up's own turn (the chat woke itself, as it planned): a quiet note where a bubble would be. Its text was
@@ -1572,7 +1597,9 @@
     if (message.role === "user" && isWakeup(message)) {
       const note = el("article", "cd-msg cd-wake");
       note.dataset.id = message.id || "";
-      note.append(icon("history"), el("span", "cd-wake-words", `Woke up as planned · ${String(message.wakeup.why).slice(0, 200)}`));
+      const job = jobWords(message);
+      if (job) note.classList.add("cd-pip-job");
+      note.append(icon(job ? "comment-discussion" : "history"), el("span", "cd-wake-words", job || `Woke up as planned · ${String(message.wakeup.why).slice(0, 200)}`));
       return note;
     }
     const node = el("article", `cd-msg cd-${message.role === "user" ? "user" : "assistant"}`);
@@ -2531,8 +2558,14 @@
   // opening one holds while the page is open. A video's card is the player's (its own fold), never a row.
   const FOLDS = new Set(["done", "failed", "dismissed", "handed"]);
   function actionNode(message, card, live, apps) {
+    if (card.kind === "pip_job") return pipJobNode(card);
     const box = actionCard(message, card, live, apps);
     return card.kind !== "video" && FOLDS.has(card.status) ? cardRow(card, box, apps) : box;
+  }
+  /** A job this reply handed a Pip (Pips API 111): its card, kept drawn as the job goes (media/shared/pipjob.js). */
+  function pipJobNode(card) {
+    if (!pipJobs || !/^pipjob_[0-9a-f]{32}$/.test(String(card.job || ""))) return el("p", "cd-end", "A Pip has a job from this chat.");
+    return pipJobs.mount(card.job, { pip: card.pip, words: card.words });
   }
   /** "save_note" -> "Save note", "get-time" -> "Get time", "createEvent" -> "Create event". */
   const toolWords = (tool) => {
@@ -2936,7 +2969,7 @@
   // asked once the chat opens) says it for the rest. The Widgets list and the prompt rail both read it.
   const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
   // (A wake-up's turn is listed by its note's words: its text is the model's.)
-  const promptWords = (m) => (isWakeup(m) ? `Woke up as planned · ${m.wakeup.why}` : String(m.text || "")).replace(/\s+/g, " ").trim()
+  const promptWords = (m) => (isWakeup(m) ? (jobWords(m) || `Woke up as planned · ${m.wakeup.why}`) : String(m.text || "")).replace(/\s+/g, " ").trim()
     || (Array.isArray(m.attachments) ? m.attachments.map((a) => a?.name || "attachment").join(", ") : "");
   const WIDGET_ID = /^wg_[a-f0-9]{16}$/;
   const removedWidgets = new Set();          // deleted from this chat's list (said by the host), its reply maybe not on screen
@@ -3458,12 +3491,13 @@
   const mentionPicker = M.picker(field, $("cd-pop"), {
     edit: (change) => edit(change),
     refresh: askMentionSources,
-    pipsDetail: "Your Personal Pips · no work starts",
+    pipsDetail: "Your Pips · @ one to hand it a job",
     sources: () => ({
       plugins: mentionData.plugins,
       outputs: artifactsOffer ? OUTPUT_CHOICES.filter(([value]) => !Array.isArray(artifactsOffer.outputs) || !artifactsOffer.outputs.length || artifactsOffer.outputs.includes(value)) : [],
-      pips: mentionData.offered ? mentionData.pips.filter((p) => M.PIP_TYPES.includes(p.pip_type)).map((p) => ({ ...p, pip_id: p.id, detail: `Personal · ${p.id.slice(-8)}` })) : undefined,
-      pipsLoading: mentionData.loading, pipsError: mentionData.error, pipsEmpty: "No Personal Pips yet",
+      pips: mentionData.offered ? mentionData.pips.filter((p) => M.PIP_TYPES.includes(p.pip_type)).map((p) => ({ ...p, pip_id: p.id,
+        detail: typeof p.folder === "string" && p.folder ? `Works in ${p.folder}` : "For anything" })) : undefined,
+      pipsLoading: mentionData.loading, pipsError: mentionData.error, pipsEmpty: "No Pips yet",
       files: mentionData.files,
     }),
     face: (it, i) => {
@@ -4378,6 +4412,12 @@
   }
   window.addEventListener("message", (event) => {
     const msg = event.data || {};
+    if (msg.type === "pipJobReply") {
+      const asked = pipJobAsks.get(String(msg.id || "")); if (!asked) return;
+      pipJobAsks.delete(String(msg.id)); clearTimeout(asked.timer);
+      if (msg.ok) asked.resolve(msg.result); else asked.reject(new Error(String(msg.error || "DGC couldn't do that.").slice(0, 300)));
+      return;
+    }
     if (msg.type === "dock") {
       chatMarks?.said(msg);
       for (const holder of document.querySelectorAll("[data-folio]")) paintFolio(holder);      // each widget's Folio follows

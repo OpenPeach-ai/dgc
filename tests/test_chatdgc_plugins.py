@@ -486,16 +486,24 @@ class OnTheWire(PluginChat):
             time.sleep(0.01)
         raise AssertionError(f"no {kind}: {self.frames[-4:]}")
 
-    def test_the_box_can_name_the_plugins_a_reply_can_use_and_your_personal_pips(self):
-        ids = "pip_" + "a" * 32
-        pips = {"list_workspaces": {"workspaces": [{"id": "ws_" + "p" * 32, "kind": "personal"}]},
-                "list_pips": {"pips": [{"id": ids, "name": "Ava", "goal": "Plans", "status": "active", "pip_type": "scout"},
-                                       {"id": "pip_" + "b" * 32, "name": "Gone", "goal": "", "status": "archived", "pip_type": "rook"}]}}
+    def test_the_box_can_name_the_plugins_a_reply_can_use_and_every_pip(self):
+        # 0.52: a chat reaches every Pip (ask_pip hands one a job), a folder Pip with the folder it works in.
+        ids, shop = "pip_" + "a" * 32, "pip_" + "c" * 32
+        pips = {"list_workspaces": {"workspaces": [{"id": "ws_" + "p" * 32, "kind": "personal", "name": "Personal"},
+                                                   {"id": "ws_" + "s" * 32, "kind": "git", "name": "shop"}]},
+                "list_pips": {"pips": [{"id": ids, "name": "Ava", "goal": "Plans", "status": "active", "pip_type": "scout",
+                                        "workspace_id": "ws_" + "p" * 32},
+                                       {"id": shop, "name": "Tax check", "goal": "GST", "status": "active", "pip_type": "lens",
+                                        "workspace_id": "ws_" + "s" * 32},
+                                       {"id": "pip_" + "b" * 32, "name": "Gone", "goal": "", "status": "archived", "pip_type": "rook",
+                                        "workspace_id": "ws_" + "p" * 32}]}}
         self.service._pips_call = lambda request: pips[request["type"]]
         self.service.dispatch({"type": "chatdgc_mentions", "request_id": "m1"})
         said = self.wait_for("chatdgc_mentions", request_id="m1")
         self.assertEqual(sorted(p["id"] for p in said["plugins"]), sorted(self.world["installed"]))
-        self.assertEqual(said["pips"], [{"id": ids, "name": "Ava", "goal": "Plans", "pip_type": "scout"}])
+        self.assertEqual(said["pips"], [
+            {"id": ids, "name": "Ava", "goal": "Plans", "pip_type": "scout", "status": "active", "folder": ""},
+            {"id": shop, "name": "Tax check", "goal": "GST", "pip_type": "lens", "status": "active", "folder": "shop"}])
         self.assertNotIn("error", said)
 
     def test_pips_off_still_lists_the_plugins_and_says_why(self):

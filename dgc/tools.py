@@ -183,25 +183,6 @@ TOOL_SCHEMAS = [
          "message":{"type":"object","additionalProperties":False,"required":["recipient_email","subject","body"],"properties":{key:{"type":"string"} for key in ("recipient_email","subject","body")}},
          "request_key":{"type":"string","pattern":"^[A-Za-z0-9_-]{1,64}$"}},
         ["scope","source_run_id","message","request_key"]),
-    _fn("handoff_to_pip", "Propose a handoff from an existing audit finding or accepted Patch artifact to a different Pip in this chat's workspace, or share a Personal result with explicit scope=personal. "
-        "This saves a pending review only: it never approves, executes, changes jobs, or grants tools. The user must separately review "
-        "the exact task and action in Pips or the CLI. Use finding with finding_index (0-based), or artifact without it; "
-        "artifact inputs target Pulse only. For personal_result supply scope=personal and shared_text copied exactly from the source result; omit action and finding_index. "
-        "Personal recipients keep their own approved app access; source grants and chat history are never transferred. Retry the identical request with the same key, scoped to this session, source run and target Pip.",
-        {"source_kind": {"type": "string", "enum": ["finding", "artifact", "personal_result"]},
-         "scope": {"type": "string", "enum": ["personal"], "description": "Required only for personal_result. Omit for project findings/artifacts."},
-         "shared_text": {"type": "string", "minLength": 1, "maxLength": 12000, "description": "Personal results only: exact trimmed excerpt, at most 12,000 UTF-8 bytes. Select only what this task needs."},
-         "source_run_id": {"type": "string"}, "finding_index": {"type": "integer", "minimum": 0, "maximum": 15},
-         "target_pip_id": {"type": "string"}, "task": {"type": "string", "minLength": 1, "maxLength": 4000},
-         "action": {"type": "object", "description": "Required for project findings/artifacts; omit for Personal results. Exact existing action: {kind:read_only}; Patch {kind:patch,write_paths:[relative files],tests:[{argv:[exact arguments],cwd:relative directory}]}; Pulse {kind:test,tests:[...]}. No network, environment or extra grants.",
-                    "properties": {"kind": {"type": "string", "enum": ["read_only", "patch", "test"]},
-                                   "write_paths": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 32},
-                                   "tests": {"type": "array", "maxItems": 4, "items": {"type": "object",
-                                       "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 32}, "cwd": {"type": "string"}},
-                                       "required": ["argv", "cwd"], "additionalProperties": False}}},
-                    "required": ["kind"], "additionalProperties": False},
-         "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
-        ["source_kind", "source_run_id", "target_pip_id", "task", "request_key"]),
     _fn("run_pip_now", "Start one existing read-only Pip audit or Quill draft in this chat's project, or a personal task with explicit scope=personal. "
         "Read pips_context definition first and pass that exact job version. This uses the Pip's pinned model and "
         "existing source policy, independently of this chat. It cannot create/edit jobs, resume paused jobs, "
@@ -875,6 +856,19 @@ from .artifact_tools import TOOLS as ARTIFACT_TOOL_SCHEMAS  # noqa: E402
 # Agent._tool_schemas instead, and a session launched with DGC_SESSION_POLICY is not offered them
 # at all until an SDK exists that can name them. Moving them into TOOL_SCHEMAS is the mutation
 # tests/test_task_supervision.py exists to fail.
+# @ a Pip hands it a job (dgc/pip_jobs.py, Pips API 111): offered whenever Pips are on, never by the prompt's wording.
+# Not in TOOL_SCHEMAS: an SDK session never has Pips, and its policy is checked against TOOL_SCHEMAS (ready.tools).
+ASK_PIP_SCHEMA = _fn("ask_pip", "Hand one of the user's Pips a job: when the user names a Pip (\"@Scout check this\"), or a Pip is "
+    "clearly the one for it. The Pip takes it in its own chat and computer, on a copy of this session's folder, at its "
+    "own level. Its answer comes back to this chat as a card (with its change and Apply, when it makes one), and DGC "
+    "tells you when it is done. It doesn't block: say in one short line that the Pip has it, then carry on or end your "
+    "reply. Never poll for it.",
+    {"pip": {"type": "string", "description": "the Pip's name (or id), as the user named it"},
+     "job": {"type": "string", "description": "the job, in the user's own words as far as you can"},
+     "about": {"type": "string", "description": "what \"this\" refers to in this session (a file, an error, a "
+                                                "decision), in a few lines; \"\" when nothing"}},
+    ["pip", "job"])
+
 SUPERVISION_TOOL_SCHEMAS = [
     _fn("list_tasks", "List the sub-agents of THIS conversation and what each is doing: id, state "
         "(queued, running, waiting on the user, finished, failed, stopped), how long it has run, "
@@ -5442,6 +5436,11 @@ def handoff_to_pip(args, ctx):
     return propose(args, ctx)
 
 
+def ask_pip(args, ctx):
+    from .pip_jobs import tool_ask
+    return tool_ask(args, ctx)
+
+
 def pause_pip(args, ctx):
     from .pip_lifecycle_tool import apply
     return apply("pause_pip", args, ctx)
@@ -5487,6 +5486,7 @@ EXECUTORS = {
     "pips_adapt": pips_adapt,
     "run_pip_now": run_pip_now,
     "handoff_to_pip": handoff_to_pip,
+    "ask_pip": ask_pip,
     "draft_pip_email": draft_pip_email,
     "draft_pip_calendar_event": draft_pip_calendar_event,
     "draft_pip_connector_action": draft_pip_connector_action,

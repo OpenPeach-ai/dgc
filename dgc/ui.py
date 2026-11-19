@@ -225,7 +225,7 @@ def _pip_change_words(key, value) -> str:
 
 # The Pip tools whose step and Allow card say what they do; the rest of a Pip's tools only read.
 _PIP_SAID_TOOLS = ("pips_setup", "pips_workflow", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip",
-                   "pause_pip", "resume_pip", "attach_pip_to_session",
+                   "pause_pip", "resume_pip", "attach_pip_to_session", "ask_pip",
                    "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action")
 
 
@@ -250,6 +250,10 @@ def _pip_call_summary(name: str, args: dict) -> str:
         return f"Run {_pip_called(args)} now"
     if name == "handoff_to_pip":
         return f"Hand work to {_pip_called(args, 'target_pip_id')}"
+    if name == "ask_pip":
+        named = " ".join(str(args.get("pip") or "").split()).lstrip("@")[:80]
+        job = " ".join(str(args.get("job") or "").split())
+        return f"Hand {named or 'a Pip'} a job" + (f": {job[:160]}" if job else "")
     if name == "pips_adapt":
         changes = args.get("changes") if isinstance(args.get("changes"), dict) else {}
         return f"Change {_pip_called(args)}: " + "; ".join(_pip_change_words(key, value) for key, value in changes.items())

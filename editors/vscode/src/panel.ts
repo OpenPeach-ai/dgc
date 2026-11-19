@@ -1216,6 +1216,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       chatdgcKeepsRunning: () => !!this.processOf(this.backend)?.detach,
       chatdgcOpenHere: () => this.chatdgcOpenHere(),
       openWork: (folder, brief) => this.continueInWork(folder, brief),
+      pipJob: (type, fields) => (this.tab?.host || this).ensurePipsBridge().pipJob(type, fields),
+      openPipChat: (pip, conversation) => (this.tab?.host || this).openPipChat(pip, conversation),
     };
     chat.attach(host);
   }
@@ -6225,6 +6227,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (session) places.open(session).showPipFix(String(msg.run_id));
         return;
       }
+      case "pipJob": {
+        // A job this session handed a Pip (Pips API 111): its card reads it, and Apply, Discard and Undo its change,
+        // through this window's Pips channel (only the commands a job's card sends), answered to the page.
+        const id = String(msg.id || "");
+        const request = msg.request && typeof msg.request === "object" ? msg.request as Record<string, unknown> : {};
+        if (!/^pipjob-\d{1,9}$/.test(id)) return;
+        const { type, ...fields } = request;
+        this.ensurePipsBridge().pipJob(String(type || ""), fields).then(
+          (result) => this.post({ type: "pipJobReply", id, ok: true, result }),
+          (error) => this.post({ type: "pipJobReply", id, ok: false, error: error instanceof Error ? error.message : "DGC couldn't do that." }));
+        return;
+      }
+      case "pipJobOpen": {
+        // Open its chat, from a job's card: that Pip's chat in a tab of its own (the window's one keeper of them).
+        const pip = msg.pip && typeof msg.pip === "object" ? msg.pip : null;
+        if (!pip || !/^pip_[0-9a-f]{32}$/.test(String(pip.id || "")) || typeof pip.name !== "string") return;
+        const chatPip = { id: String(pip.id), name: String(pip.name).slice(0, 120), pip_type: String(pip.pip_type || "") };
+        (this.tab?.host || this).openPipChat(chatPip, /^conv_[0-9a-f]{32}$/.test(String(msg.conversation || "")) ? { id: String(msg.conversation) } : undefined);
+        return;
+      }
       case "pipsReady":
       case "pipsReconnect":
       case "pipsRequest":
@@ -9288,6 +9310,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.useProfileChanged(() => this.pipProfileChanged());
       // Open in editor on a Pip's chat: its tab is kept by the window's one keeper of them, not by this side bar.
       this.pipsEditor.useOpenChat((pip, conversation) => (this.tab?.host || this).openPipChat(pip, conversation));
+      this.pipsEditor.useOpenAsker((asker) => (this.tab?.host || this).openPipJobAsker(asker));
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsEditor;
@@ -9543,6 +9566,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private openPipChat(pip: ChatPip, conversation?: ChatConversation): void {
     this.ensurePipsTab().openChat(pip, conversation);
   }
+  /** Where a job a Pip was handed came from (Pips API 111): that Work session in its tab, that ChatDGC chat in its tab, or
+   *  that Pip in the Pips tab. From the "From …" line in the Pip's chat. */
+  private openPipJobAsker(asker: { kind: "work" | "chatdgc" | "pip"; id: string; title: string }): void {
+    if (asker.kind === "work") this.openSessionInEditor(asker.id, asker.title || "Work session");
+    else if (asker.kind === "chatdgc") this.chatdgc?.open(asker.id);
+    else this.openPipsEditor({ pip: asker.id });
+  }
   /** The bridge the Pips tab and every Pip chat's own tab are on, connected. */
   private ensurePipsTab(): PipsEditor {
     if (!this.pipsTab) {
@@ -9577,6 +9607,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsTab.useSetupDecided((id) => this.pipSetupDecided(id));
       this.pipsTab.useProfileChanged(() => this.pipProfileChanged());
       this.pipsTab.useOpenChat((pip, conversation) => this.openPipChat(pip, conversation));
+      this.pipsTab.useOpenAsker((asker) => this.openPipJobAsker(asker));
     }
     if (this.sessionReady) this.pipsTab.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsTab;
@@ -11519,6 +11550,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const ruleWordsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "rulewords.js"));
     // One card for everything that asks or reports, the same in ChatDGC and a Pip's chat (media/shared/card.js, window.DgcCard).
     const cardJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "card.js"));
+    // A job a chat handed a Pip with @ (Pips API 111), the same card in ChatDGC and a Pip's chat (media/shared/pipjob.js).
+    const pipJobJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "pipjob.js"));
     // A card's answers as icons that turn into the full button, on Home's cards (media/shared/iconactions.js, window.DgcIconActions).
     const iconActionsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "iconactions.js"));
     // The small sheet of its kind on an output card and a Library row (media/shared/filesheet.js, window.DgcFileSheet).
@@ -11876,7 +11909,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </footer>
 <script nonce="${nonce}" src="${menuJs}"></script><script nonce="${nonce}" src="${iconsJs}"></script><script nonce="${nonce}" src="${downloadJs}"></script><script nonce="${nonce}" src="${picturePopJs}"></script><script nonce="${nonce}" src="${askCardJs}"></script><script nonce="${nonce}" src="${fileMenuJs}"></script><script nonce="${nonce}" src="${inlineJs}"></script>
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
-<script nonce="${nonce}" src="${cardJs}"></script>
+<script nonce="${nonce}" src="${cardJs}"></script><script nonce="${nonce}" src="${pipJobJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
 <script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>

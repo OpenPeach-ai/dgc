@@ -266,7 +266,9 @@ class HandoffToolTests(unittest.TestCase):
             self.assertIn('DENIED', agent._handle_call(ToolCall('asks', 'handoff_to_pip', self.request())))
         self.assertEqual(approvals, ['handoff_to_pip'])
 
-    def test_native_agent_proposes_through_existing_tool_loop_without_dispatch(self):
+    def test_native_agent_is_no_longer_offered_the_proposal_tool_and_saves_nothing(self):
+        # 0.52: @ a Pip hands it a job (ask_pip, dgc/pip_jobs.py); the reviewed proposal tool is no longer offered, so a
+        # model that names it anyway is refused and nothing is saved. The ledger and its readers stay (tests above).
         agent, _ = self.agent(); args = self.request()
         self.cfg.data.update(mode='auto', api_mode='ollama')
         calls = []
@@ -280,9 +282,9 @@ class HandoffToolTests(unittest.TestCase):
              patch.object(LLMClient, 'chat', chat), patch('requests.sessions.Session.request', side_effect=AssertionError('No network')), \
              patch.object(pips, 'start_queued', side_effect=AssertionError('No runner wake')):
             self.assertTrue(agent.run_turn('Propose a review-only handoff for the recorded finding.'))
-        self.assertIn('"review_required":true', str(calls[-1]))
-        self.assertIn('"execution_started":false', str(calls[-1]))
-        self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pip_handoffs').fetchone()[0], 1)
+        self.assertIn('handoff_to_pip was not offered on this request', str(calls[-1]))
+        self.assertNotIn('handoff_to_pip', {t['function']['name'] for t in agent._tool_schemas()})
+        self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pip_handoffs').fetchone()[0], 0)
         self.assertEqual(self.store.runs(self.target['id']), [])
 
 
