@@ -48,19 +48,20 @@ def _dgc_turn(row) -> bool:
 
 
 def chat_matches(db, workspace_id, query) -> dict:
-    """Each Pip whose chat mentions the query: {pip_id: newest matching message text}."""
+    """Each Pip of the workspace whose chat mentions the query: {pip_id: newest matching message text}. By where the Pip
+    works now: one given a folder, or whose folder was removed (pip_folder), is found by everything said in its chat."""
     words = query.strip()
     if not words:
         return {}
     if _indexed(db):
         expression = '"' + words.replace('"', '""') + '"*'
         sql = ("SELECT m.pip_id, m.text, m.role, m.request_key FROM pip_chat_fts f JOIN pip_chat_messages m ON m.seq=f.rowid "
-               "WHERE pip_chat_fts MATCH ? AND m.workspace_id=? ORDER BY m.seq DESC LIMIT ?")
+               "JOIN pips p ON p.id=m.pip_id WHERE pip_chat_fts MATCH ? AND p.workspace_id=? ORDER BY m.seq DESC LIMIT ?")
         params = (expression, workspace_id, MAX_MATCHES)
     else:
         pattern = "%" + words.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        sql = ("SELECT pip_id, text, role, request_key FROM pip_chat_messages WHERE workspace_id=? AND text LIKE ? ESCAPE '\\' "
-               "ORDER BY seq DESC LIMIT ?")
+        sql = ("SELECT m.pip_id, m.text, m.role, m.request_key FROM pip_chat_messages m JOIN pips p ON p.id=m.pip_id "
+               "WHERE p.workspace_id=? AND m.text LIKE ? ESCAPE '\\' ORDER BY m.seq DESC LIMIT ?")
         params = (workspace_id, pattern, MAX_MATCHES)
     found = {}
     try:

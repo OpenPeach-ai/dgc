@@ -72,7 +72,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_fixes", "decide_pip_fix", "start_pip_work_helper", "answer_pip_waiting", "commit_pip_project_change",
     "list_pip_agents", "stop_pip_agent", "set_pip_agents", "retry_pip_fix", "undo_pip_agent_job",
     "set_pip_goal", "get_pip_goal", "stop_pip_goal",
-    "list_project_folders", "add_project_folder",
+    "list_project_folders", "add_project_folder", "give_pip_folder", "remove_pip_folder",
     "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
@@ -259,6 +259,9 @@ _COMMAND_ARGS = {
     "stop_pip_goal": {"pip_id", "goal_id"},
     # The Project Folder dropdown (project_folders, API 93): the folders with a session or a Project Pip; add one.
     "list_project_folders": set(), "add_project_folder": {"folder"},
+    # API 110: give a Pip for anything a folder, or make a folder Pip a Pip for anything again (pip_folder); dry_run says
+    # what stays and what changes, and changes nothing.
+    "give_pip_folder": {"pip_id", "folder", "dry_run"}, "remove_pip_folder": {"pip_id", "dry_run"},
     "get_pip_skills": {"pip_id"}, "set_pip_skill": {"pip_id", "skill", "on"},
     "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
     "get_pip_computer_desktop": {"pip_id"},
@@ -7111,6 +7114,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # what only you can do. Every answer is the user's own click, on this computer.
                 from . import pip_fixes
                 result = pip_fixes.control(store, command, request, actor, config)
+            elif command in ("give_pip_folder", "remove_pip_folder"):
+                # Pips API 110: the Pip moves into the folder's workspace, or back to the personal one, keeping its chat,
+                # notes, routines, computer, level and model. Local only: the user's own action, never a Pip's.
+                from . import pip_folder
+                result = pip_folder.control(store, command, request, actor, config)
             elif command in ("list_project_folders", "add_project_folder"):
                 # Pips API 93: the Project Folder dropdown. Local only: a folder is the user's to add.
                 from . import project_folders

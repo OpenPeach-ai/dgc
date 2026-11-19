@@ -53,7 +53,8 @@ export function mountRunCards(options) {
    if(!record(r)||r.id!==e.id||r.pip_id!==e.pipId||!id(r.workspace_id,'ws')||!['queued','running','cancelling','succeeded','failed','cancelled'].includes(r.status))throw Error('This didn’t load. Retry.');
    const [pv,rv]=await Promise.all([options.request('get_pip',{pip_id:e.pipId}),options.request('get_pip_runner')]);
    if(token!==epoch)return;
-   if(!record(pv.pip)||pv.pip.id!==r.pip_id||pv.pip.workspace_id!==r.workspace_id||!TYPES.includes(pv.pip.pip_type)||typeof pv.pip.name!=='string'||!record(rv.runner)||typeof rv.runner.online!=='boolean')throw Error('This didn’t load. Retry.');
+   // (Its Pip may work elsewhere now: given a folder, or its folder removed, Pips API 110. The run is still its own.)
+   if(!record(pv.pip)||pv.pip.id!==r.pip_id||!TYPES.includes(pv.pip.pip_type)||typeof pv.pip.name!=='string'||!record(rv.runner)||typeof rv.runner.online!=='boolean')throw Error('This didn’t load. Retry.');
    e.run=r;e.pip=pv.pip;e.runner=rv.runner;if(!active(r.status))e.stopping=false;
   }catch(error){if(token===epoch)e.error=error.message;}
   finally{if(token===epoch){e.loading=false;paint(e);}}

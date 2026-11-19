@@ -633,7 +633,14 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # job_id} (M) puts back what it changed (Work's rule: a file the user changed since is merged or named and left; R:
 # agent, undo). A fix it came from reads applied (then undone). At Do it all a folder Pip's own chat turn has the tool
 # start_work_subagent; a reply that used it carries `work_subagents`. Local only.
-PIPS_API_VERSION = 109
+# API 110 (0.52, give a Pip a folder later, pip_folder): give_pip_folder {pip_id, folder, dry_run?} (M) makes a Pip for
+# anything a folder Pip for that folder (a Git project with a commit, at its top folder; never Core), and
+# remove_pip_folder {pip_id, dry_run?} (M) makes a folder Pip a Pip for anything again. The Pip moves into the folder's
+# workspace (or back to the personal one) with its next version, keeping its chat, notes, routines, computer and Files,
+# level, model and sub-agents; refused while it or a sub-agent works (busy). Both answer {pip, folder {name, folder,
+# workspace_id}, keeps [line], changes [line], done}; dry_run says them and changes nothing. Events pip_folder_given and
+# pip_folder_removed in both workspaces. Local only.
+PIPS_API_VERSION = 110
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}

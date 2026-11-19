@@ -22,7 +22,9 @@
     // Download and Save a copy are one action, a copy saved on the person's computer (media/shared/download.js): one
     // glyph, the arrow down into a tray that a file's card wears (18 Nov). Save to Library (and In Library, once it is
     // there) keeps a picture in DGC's Library: its own action, the Library's own glyph.
-    save: "download", download: "download", library: "library" };
+    save: "download", download: "download", library: "library",
+    // A Pip's folder (Pips API 110): Give it a folder and Remove its folder, a folder with a plus and with a minus.
+    "give-folder": "give-folder", "remove-folder": "remove-folder" };
   // The icon font's outlines, filled.
   const FONT = {
     "go-to-file": "M8.59 1.01Q9.23 1.01 9.65 1.44L12.59 4.37Q13.01 4.8 13.01 5.44V13.01Q13.01 13.81 12.43 14.4Q11.84 14.99 10.99 14.99H5.01Q4.16 14.99 3.57 14.4Q2.99 13.81 2.99 13.01V6.03H4V13.01Q4 13.44 4.29 13.73Q4.59 14.03 5.01 14.03H10.99Q11.41 14.03 11.71 13.73Q12 13.44 12 13.01V6.03H9.49Q8.85 6.03 8.43 5.57Q8 5.12 8 4.48V2.03L7.95 1.92Q7.84 1.65 7.63 1.44L7.2 1.01ZM9.01 4.48Q9.01 4.69 9.15 4.85Q9.28 5.01 9.49 5.01H11.79L9.01 2.19ZM4.48 0Q4.69 0 4.85 0.16L6.88 2.13Q6.93 2.24 6.96 2.32Q6.99 2.4 6.99 2.51Q6.99 2.61 6.96 2.69Q6.93 2.77 6.88 2.88L4.85 4.85Q4.69 5.01 4.51 5.01Q4.32 5.01 4.16 4.85Q4 4.69 4 4.51Q4 4.32 4.16 4.16L5.28 2.99H2.51Q1.87 2.99 1.44 3.44Q1.01 3.89 1.01 4.48V5.49Q1.01 5.71 0.85 5.87Q0.69 6.03 0.48 6.03Q0.27 6.03 0.13 5.87Q0 5.71 0 5.49V4.48Q0 3.47 0.72 2.75Q1.44 2.03 2.51 2.03H5.28L4.16 0.85Q4 0.69 4 0.51Q4 0.32 4.16 0.16Q4.32 0 4.48 0Z",
@@ -56,12 +58,15 @@
   };
   // DGC's own drawings, in a 1.3 line.
   const PIN = "M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z";
+  const FOLDER = "M1.8 4.3a.9.9 0 0 1 .9-.9h3.1l1.4 1.4h6.1a.9.9 0 0 1 .9.9v6.6a.9.9 0 0 1-.9.9H2.7a.9.9 0 0 1-.9-.9z";
   const LINE = {
     pin: `<path d="${PIN}"/>`,
     unpin: `<path d="${PIN}"/>`,          // (the pin, solid: it is pinned, and pressing it unpins)
     archive: '<path d="M2 3.5h12v3H2zM3.2 6.5V13h9.6V6.5M6.5 9.2h3"/>',
     // (Download: the arrow down into a tray; media/shared/filesheet.js's DOWNLOAD is this one.)
     download: '<path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13h10"/>',
+    "give-folder": `<path d="${FOLDER}"/><path d="M8 7.4v3.4M6.3 9.1h3.4"/>`,
+    "remove-folder": `<path d="${FOLDER}"/><path d="M6.3 9.1h3.4"/>`,
   };
   const DOTS = '<circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/>';
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -98,6 +103,8 @@
     if (/^(new|add)\b/.test(w)) return "add";
     if (/^close\b/.test(w)) return "close";
     if (/^copy\b/.test(w)) return "copy";
+    if (/^give (it |this pip )?(a|the) folder\b/.test(w)) return "give-folder";
+    if (/^remove (its|the|this) folder\b/.test(w)) return "remove-folder";
     if (/^(delete|remove)\b/.test(w)) return "delete";
     if (/^pin\b/.test(w)) return "pin";
     if (/^unpin\b/.test(w)) return "unpin";

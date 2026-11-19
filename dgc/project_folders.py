@@ -168,6 +168,12 @@ def pips_all(store, *, limit=100, offset=0, query="") -> dict:
 
 def add(registry, folder) -> dict:
     """add_project_folder: the folder the user picked, as a project of DGC's (its workspace)."""
+    return {"workspace": registry.resolve(checked(folder))}
+
+
+def checked(folder) -> Path:
+    """A folder the user picked, as DGC opens one as a project: it exists and is a folder, and is never /, the home
+    folder or DGC's own. Its full path, resolved."""
     if not isinstance(folder, str) or not folder.strip() or not Path(folder).is_absolute():
         raise RegistryError("invalid_request", "Choose a folder on this computer by its full path.")
     path = Path(folder).expanduser()
@@ -180,4 +186,4 @@ def add(registry, folder) -> dict:
         raise RegistryError("invalid_request", "Choose a project's own folder, not the whole computer or your home folder.")
     if _own(resolved):
         raise RegistryError("invalid_request", "That folder is DGC's own. Choose one of your projects.")
-    return {"workspace": registry.resolve(resolved)}
+    return resolved

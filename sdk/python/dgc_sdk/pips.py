@@ -535,6 +535,10 @@ MUTATION_COMMANDS |= API108_MUTATIONS
 # rows of kind "work" carry changed, can_undo and undo; undo_pip_agent_job puts back what it changed. Local only.
 API109_MUTATIONS = frozenset({'undo_pip_agent_job'})
 MUTATION_COMMANDS |= API109_MUTATIONS
+# API 110: give a Pip for anything a folder (a Git project with a commit), or make a folder Pip a Pip for anything again;
+# it keeps its chat, notes, routines, computer, level and model. dry_run says what stays and what changes. Local only.
+API110_MUTATIONS = frozenset({'give_pip_folder', 'remove_pip_folder'})
+MUTATION_COMMANDS |= API110_MUTATIONS
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -714,6 +718,8 @@ COMMAND_FIELDS = {
     'stop_pip_goal': frozenset({'pip_id', 'goal_id'}),
     'list_project_folders': frozenset(),
     'add_project_folder': frozenset({'folder'}),
+    'give_pip_folder': frozenset({'pip_id', 'folder', 'dry_run'}),
+    'remove_pip_folder': frozenset({'pip_id', 'dry_run'}),
     'get_pips_payments': frozenset(),
     'set_pips_payments': frozenset({'usd_per_day'}),
     'set_pip_paying': frozenset({'pip_id', 'rule'}),
@@ -1034,7 +1040,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API109_MUTATIONS:
+        if command in API110_MUTATIONS:
+            minimum = 110
+        elif command in API109_MUTATIONS:
             minimum = 109
         elif command in API108_MUTATIONS:
             minimum = 108

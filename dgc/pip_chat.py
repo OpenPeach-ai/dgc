@@ -1408,7 +1408,10 @@ def snapshot(store, pip_id, *, context_size=32768, conversation_id=None):
 def _last_report(store, pip_id):
     rows = store.db.execute("SELECT r.id,r.workspace_id,r.finished_at,length(CAST(r.result AS BLOB)) AS result_size, "
                            "length(CAST(r.manifest AS BLOB)) AS manifest_size FROM pip_runs r "
-                           "WHERE r.pip_id=? AND r.status='succeeded' AND NOT EXISTS "
+                           "WHERE r.pip_id=? AND r.status='succeeded' "
+                           # Its report from where it works now: a Pip given a folder, or whose folder was removed
+                           # (pip_folder), keeps its earlier reports where they were made, as its history.
+                           "AND r.workspace_id=(SELECT workspace_id FROM pips WHERE id=r.pip_id) AND NOT EXISTS "
                            "(SELECT 1 FROM pip_chat_messages m WHERE m.run_id=r.id) "
                            # A sub-agent's run has no chat rows by design and is never a report (live test 15 Nov:
                            # taken as the last report, every message into the Pip's chat was refused).
@@ -2087,6 +2090,13 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
     noted = routine_notes(store.db, pip_id)
     from .pip_backup import out as fallback_out
     fallback_on = fallback_out(store.registry, pip_id)
+    # Every message is shown as this Pip's chat where it works now: one given a folder, or whose folder was removed
+    # (pip_folder), keeps the rows of its earlier turns where they were made (each matches its own run), and its chat is
+    # one chat.
+    for item in expanded:
+        item["workspace_id"] = pip["workspace_id"]
+    if continuity:
+        continuity = {**continuity, "workspace_id": pip["workspace_id"]}     # (its summary of the same chat)
     return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "conversation_id": conversation_id, "messages": expanded,
             # Routines that didn't run (missed, or couldn't start): lines the chat places by time (Pips package 2).
             **({"routine_notes": noted} if noted else {}),

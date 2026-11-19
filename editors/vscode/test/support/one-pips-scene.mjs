@@ -209,6 +209,22 @@ export function makeBackend(o = {}) {
     get_pip: (r) => { const found = pips.find((x) => x.id === r.pip_id); return found ? { pip: { ...found, knows_you: found.id in state.knows ? state.knows[found.id] : o.knows !== false, ...(found.id === GST ? { latest_run: { id: CHECK, status: "succeeded" } } : {}) } } : { error: { code: "not_found", message: "That Pip isn’t on this computer. It may have been deleted." } }; },
     create_pip: (r) => { const made = pip("pip_" + hex(String(state.made.length + 1)), r.workspace_id, r.name, r.pip_type, { goal: r.goal || "Help with what I ask in this chat" }); pips.push(made); state.made.push(made); state.order = [made.id, ...(typeof state.order === "function" ? state.order() : state.order)]; return { pip: made }; },
     introduce_pip: () => ({ started: true }), add_project_folder: (r) => ({ workspace: { id: ws("7"), name: r.folder.split("/").pop(), kind: "git" } }),
+    // Pips API 110 (dgc/pip_folder.py): Give it a folder and Remove its folder. The Pip moves: into the folder's
+    // workspace, or back to Personal; dry_run says what stays and what changes and moves nothing. `moveError`: DGC
+    // refuses (busy) in those words.
+    give_pip_folder: (r) => { if (o.moveError) return { error: { code: "busy", message: o.moveError } };
+      const found = pips.find((x) => x.id === r.pip_id), row = folders.find((f) => f.folder === r.folder), name = row ? row.name : r.folder.split("/").pop(), space = row?.workspace_id || ws("8");
+      if (!r.dry_run) { Object.assign(found, { workspace_id: space, source_policy: { mode: "committed_only", exclusions: "safe_source_v2" }, current_version: found.current_version + 1 }); if (row) { row.pips += 1; row.workspace_id = space; } }
+      return { pip: { ...found }, folder: { name, folder: r.folder, workspace_id: space }, done: !r.dry_run,
+        keeps: ["Its chat, notes and routines stay as they are.", "Its computer and everything in its Files stay.", "Its level, model and sub-agents stay as you set them."],
+        changes: [`It works on ${name}: it reads ${name}'s committed files, and its computer gets its own copy of ${name} to work in.`, `${name} itself changes only when you apply what it changed (at Do it all it applies them by itself, with Undo).`] }; },
+    remove_pip_folder: (r) => { if (o.moveError) return { error: { code: "busy", message: o.moveError } };
+      const found = pips.find((x) => x.id === r.pip_id), row = folders.find((f) => f.workspace_id === found.workspace_id), name = row ? row.name : "its folder";
+      const place = { name, folder: row ? row.folder : "", workspace_id: found.workspace_id };
+      if (!r.dry_run) { Object.assign(found, { workspace_id: P, source_policy: { mode: "personal" }, computer_plan: { schema_version: 1 }, current_version: found.current_version + 1 }); if (row) row.pips = Math.max(0, row.pips - 1); }
+      return { pip: { ...found }, folder: place, done: !r.dry_run,
+        keeps: ["Its chat, notes and routines stay as they are.", `Its computer and everything in its Files stay, with its copy of ${name}.`, "Its level, model and sub-agents stay as you set them."],
+        changes: [`It's a Pip for anything again: it no longer works on ${name} by itself. Name @${name} in a message to work on its copy again.`] }; },
     get_pip_runner: () => ({ runner }), get_workspace_context: (r) => ({ context: { workspace_id: r.workspace_id, revision: 0, entries: [] } }),
     list_pip_models: () => ({ default_model: "m", models: o.models || [], connection: "configured", ...(o.catalog || {}) }),
     list_pip_runs: (r) => ({ runs: r.pip_id === GST ? runs : [] }),

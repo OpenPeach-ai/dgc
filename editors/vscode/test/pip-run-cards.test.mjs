@@ -116,3 +116,12 @@ test('Stop from the map cancels the run and reads it again',async t=>{
  x.pending.length=0;
  assert.equal(await x.cards.stop('run_'+'e'.repeat(32)),false,'a run it does not show is not stopped');
 });
+test('a run made before its Pip was given a folder (or had it removed) still loads: the run is its Pip\'s own',async t=>{
+ // Pips API 110: the Pip works in another workspace now; the run keeps the one it was made in.
+ const x=harness(t);x.send();
+ x.pending.find(p=>p.type==='get_pip_run').resolve({run:saved('succeeded')});await flush();
+ x.pending.find(p=>p.type==='get_pip').resolve({pip:{id:pip,workspace_id:'ws_'+'e'.repeat(32),pip_type:'rook',name:'Review changes'}});
+ x.pending.find(p=>p.type==='get_pip_runner').resolve({runner:{online:true}});await flush();
+ assert.doesNotMatch(x.d.body.textContent,/This didn’t load/);
+ assert.equal(x.d.querySelector('.pip-run-state').textContent,'Report ready');
+});

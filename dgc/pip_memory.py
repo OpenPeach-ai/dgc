@@ -322,11 +322,13 @@ def list_memories(store,pip_id,before_id=None,limit=20):
         pip=_scope(store,pip_id); before=MAX_CURSOR+1
         if before_id is not None:
             _integer(before_id,'Memory cursor',1)
-            if not store.db.execute('SELECT 1 FROM pip_memories WHERE seq=? AND pip_id=?',(before_id,pip_id)).fetchone():
+            if not store.db.execute('SELECT 1 FROM pip_memories WHERE seq=? AND pip_id=? AND workspace_id=?',
+                                    (before_id,pip_id,pip['workspace_id'])).fetchone():
                 raise _error('Memory cursor does not belong to this Pip.','invalid_cursor')
             before=before_id
-        rows=_bounded(store.db,'SELECT seq,id FROM pip_memories WHERE pip_id=? AND seq<? ORDER BY seq DESC LIMIT ?',
-                       (pip_id,before,limit+1),{'seq':None,'id':64})
+        # Where it works now: what it was told about a folder's findings stays with that folder (pip_folder).
+        rows=_bounded(store.db,'SELECT seq,id FROM pip_memories WHERE pip_id=? AND workspace_id=? AND seq<? ORDER BY seq DESC LIMIT ?',
+                       (pip_id,pip['workspace_id'],before,limit+1),{'seq':None,'id':64})
         result={'pip_id':pip_id,'workspace_id':pip['workspace_id'],'memories':[],'next_before_id':None}
         for row in rows[:limit]:
             memory,_=_load(store,pip_id,row['id']); result['memories'].append(memory)
@@ -354,7 +356,7 @@ def snapshot(store,pip_id,source,job_version,as_of,*,context_reference=None):
                             (pip_id,pip['workspace_id'])).fetchone():
             from .pip_memory_references import snapshot as typed_snapshot
             return typed_snapshot(store,pip_id,source,job_version,now,context_reference)
-        total,revoked,expired=store.db.execute("SELECT count(*),coalesce(sum(status='revoked'),0),coalesce(sum(status='active' AND expires_at IS NOT NULL AND expires_at<=?),0) FROM pip_memories WHERE pip_id=?",(now,pip_id)).fetchone()
+        total,revoked,expired=store.db.execute("SELECT count(*),coalesce(sum(status='revoked'),0),coalesce(sum(status='active' AND expires_at IS NOT NULL AND expires_at<=?),0) FROM pip_memories WHERE pip_id=? AND workspace_id=?",(now,pip_id,pip['workspace_id'])).fetchone()
         eligible=total-revoked-expired
         for n in (total,revoked,expired):
             _integer(n,'Memory count',0,MAX_RECORDS)
@@ -362,7 +364,7 @@ def snapshot(store,pip_id,source,job_version,as_of,*,context_reference=None):
         value={'schema_version':1,'pip_id':pip_id,'workspace_id':pip['workspace_id'],'source':source,
                'job_version':job_version,'as_of':now,'total_records':total,'revoked_records':revoked,
                'expired_records':expired,'eligible_records':eligible,'omitted_records':eligible,'entries':[]}
-        rows=_bounded(store.db,"SELECT id FROM pip_memories WHERE pip_id=? AND status='active' AND (expires_at IS NULL OR expires_at>?) ORDER BY seq DESC LIMIT ?",(pip_id,now,MAX_PINNED),{'id':64})
+        rows=_bounded(store.db,"SELECT id FROM pip_memories WHERE pip_id=? AND workspace_id=? AND status='active' AND (expires_at IS NULL OR expires_at>?) ORDER BY seq DESC LIMIT ?",(pip_id,pip['workspace_id'],now,MAX_PINNED),{'id':64})
         for row in rows:
             memory,_=_load(store,pip_id,row['id'])
             entry={'memory':memory,'applicability':_applicability(memory,source,job_version)}

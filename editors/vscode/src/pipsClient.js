@@ -105,6 +105,7 @@ import {CHAT_API,agentsPage,foundListMarkup,saidMarkup,askCardMarkup,answeredMar
 import {AGENT_LIVE,WORK_API,agentsOwnOf} from './pipFlow.js';
 import {FLOW_API,took,fixesPage,fixAnswer,FIX_LIVE,findingsCardMarkup,fixAskMarkup,fixDecidedLine,fixingMarkup,fixEndedLine,waitingLineMarkup,waitingCardMarkup,reportRow,reportsTableMarkup} from './pipFlow.js';
 import {infoTip,wireInfoTips} from './pipInfoTip.js';
+import {KINDS as MOVE,offered as moveOffered,menuRowMarkup as moveMenuRow,pageButtonMarkup as moveButton,answerOf as moveAnswer,confirmation as moveConfirmation,doneNotice as moveDone} from './pipGiveFolder.js';
 import {watchButtons} from './buttonFit.js';
 import {pipArtifacts,dashboardList,artifactsPageMarkup,artifactsSectionsMarkup,reportNotice} from './pipArtifacts.js';
 import {templatePage,templateMarkup} from './pipTemplates.js';
@@ -2874,6 +2875,42 @@ async function applyComputerGrant(review){
  }catch(error){if(token===scope()&&S.review===review)review.error=errorText(error);}
  finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
 }
+// Give it a folder… and Remove its folder… (Pips API 110): the folder from New Pip's own picker (the folders DGC knows,
+// this window's, Add a folder…), then DGC says what stays and what changes (dry_run) in a confirmation, then it moves and
+// is opened again where it works now, on the same page, its header and folder line saying its new place.
+function startFolderMove(kind,button){
+ if(!S.pip||S.busy||!usable()||folderMoveKind()!==kind)return;
+ const menu=button.closest('details');menu?.removeAttribute('open');
+ if(kind===MOVE.remove){void previewFolderMove(kind,'');return;}
+ const Pick=globalThis.DgcFolderPick,anchor=menu?menu.querySelector('summary'):button,trigger=menu?()=>document.querySelector('details.pip-menu > summary'):()=>$('pip-give-folder');
+ if(!Pick||!anchor)return;
+ const rows=createFolderRows().filter(r=>r.exists!==false);
+ Pick.open(anchor,{rows,choice:'',all:false,add:true,goneOff:true,label:'Folder',keyboard:false,trigger,
+  onChoose:folder=>{if(folder)void previewFolderMove(kind,folder);},
+  onAdd:()=>void pickFolder().then(folder=>{if(folder)void previewFolderMove(kind,folder);})});
+}
+async function previewFolderMove(kind,folder){
+ const pip=S.pip;if(!pip||S.busy||!usable())return;const token=scope(),name=pip.name;
+ const command=kind===MOVE.give?'give_pip_folder':'remove_pip_folder',fields={pip_id:pip.id,...(kind===MOVE.give?{folder}:{}),dry_run:true};
+ try{const answer=moveAnswer(await send(command,fields),pip.id);if(token!==scope()||S.selected!==pip.id)return;
+  openReview({folderMove:{kind,folder,pip:pip.id},...moveConfirmation(kind,answer,{esc,name}),request:{type:command}});}
+ catch(error){if(token===scope())openReview({title:kind===MOVE.give?`Give ${name} a folder`:`Remove ${name}’s folder`,description:errorText(error),readOnly:true,request:{type:command}});}
+}
+async function applyFolderMove(review){
+ const move=review.folderMove,pip=S.pip;if(S.busy||!usable()||!pip||pip.id!==move.pip)return;
+ const token=scope(),name=pip.name,command=move.kind===MOVE.give?'give_pip_folder':'remove_pip_folder',tab=S.tab==='job'?'job':'chat';
+ S.busy=true;renderReview();
+ try{const answer=moveAnswer(await send(command,{pip_id:pip.id,...(move.kind===MOVE.give?{folder:move.folder}:{})}),pip.id);
+  if(token!==scope())return;
+  closeReview();S.busy=false;
+  // It lives elsewhere now: out of the list it was in, opened again in its new place (its own workspace).
+  S.jobs=S.jobs.filter(p=>p.id!==pip.id);one.pips=one.pips.map(p=>p.id===pip.id?{...p,...answer.pip}:p);
+  await loadFolders();
+  await navigateFromHost({pip:pip.id,section:tab});
+  S.notice=moveDone(move.kind,answer,name);render();void loadOne();
+ }catch(error){if(token===scope()&&S.review===review){review.error=errorText(error);}}
+ finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
+}
 async function openComputerAction(id){
  const c=computerState.value,a=c?.actions.find(x=>x.id===id);if(!a||!usable())return;
  if(a.summary?.kind==='login'){openLoginForm(a);return;}
@@ -3308,7 +3345,7 @@ function pulseRunsMarkup(runs){
  return `<section class="section"><div class="section-head"><h2>${historyName('Command runs')}</h2>${eligible?button('run','Run approved commands',disabled,'primary'):''}</div><p class="muted">${eligible?'Runs your approved commands exactly, without the model. Each command gets its own result.':'Add a command plan in Plan & schedule to run commands when you ask or on a schedule. Handoffs still work.'} Chatting with it never runs commands.</p>${errorMarkup(invalid)}${S.apiVersion<21?'<p class="notice">Update DGC to use a command plan.</p>':''}<div class="actions"><button type="button" data-tab="schedule">Plan & schedule</button><button type="button" data-tab="handoffs">Open handoffs</button></div>${runs.map(r=>`<div class="run-row"><button type="button" data-run="${esc(r.id)}" aria-current="${S.runId===r.id}"><span>${rowWords(r,r.execution_mode==='standalone_plan'&&pulseProgress(r)?`${pulseProgress(r).failed} failed · ${pulseProgress(r).passed} passed · ${esc(personalStatusLabel(r.status))}`:r.manifest?.pulse_verification&&r.status==='succeeded'?'Commands finished':esc(statusLabel(r.status)))}</span><small>${esc(date(r.created_at))}</small></button></div>`).join('')||'<p class="muted">No command runs yet.</p>'}</section>${reportMarkup()}`;
 }
 function pulseReportMarkup(run){
- let grant=null,receipt=null,error='';try{grant=pulseVerificationPin(run.manifest);if(!grant||grant.pip_id!==run.pip_id||grant.pip_id!==S.selected||grant.workspace_id!==S.workspace.id||run.workspace_id!==undefined&&run.workspace_id!==grant.workspace_id)throw Error('This run’s approval doesn’t match this Pip. Refresh to try again.');if(run.result!=null)receipt=pulseVerificationReceipt(run.result,run.manifest,run.status);else if(!active(run.status))throw Error('This run’s results are missing.');}catch(e){grant=null;receipt=null;error=errorText(e);}
+ let grant=null,receipt=null,error='';try{grant=pulseVerificationPin(run.manifest);if(!grant||grant.pip_id!==run.pip_id||grant.pip_id!==S.selected||grant.workspace_id!==(run.workspace_id??S.workspace.id)||run.workspace_id!==undefined&&run.workspace_id!==grant.workspace_id)throw Error('This run’s approval doesn’t match this Pip. Refresh to try again.');if(run.result!=null)receipt=pulseVerificationReceipt(run.result,run.manifest,run.status);else if(!active(run.status))throw Error('This run’s results are missing.');}catch(e){grant=null;receipt=null;error=errorText(e);}
  const counts={passed:0,failed:0,stopped:0,unexecuted:0,unknown:0};for(const c of receipt?.commands||[]){const label=pulseCommandLabel(c);counts[label==='Passed'?'passed':label==='Failed'?'failed':label==='Stopped'?'stopped':label==='Didn’t run'?'unexecuted':'unknown']++;}
  const title=receipt?`${counts.failed} failed · ${counts.passed} passed`:'Results unavailable';
  return `<section class="section" aria-label="Pulse command receipt"><div class="section-head"><h2>${esc(title)}</h2>${active(run.status)?button('cancel-run','Cancel run…',S.busy||!usable(),'danger'):''}</div>${grant?'<p class="notice">Results of the exact commands · no model. Exit code 0 means a command succeeded; it doesn’t prove the tests cover everything or that the code is correct.</p>':'<p class="notice">Results aren’t available. Don’t count this as a passed check.</p>'}${grant&&run.manifest.job.verification_plan.action.network==='loopback_http_v1'?'<p class="notice">Local page status checks only. The running app may not match the committed code, and these don’t check how pages look or anything behind a sign-in.</p>':''}${errorMarkup(error)}${run.error?errorMarkup(errorText(run.error)):''}${receipt?`<p>${counts.stopped} stopped · ${counts.unexecuted} didn’t run · ${counts.unknown} unknown</p><p class="muted">${receipt.phase==='running'?'Still running. These numbers may change.':`${outcomeWords(receipt.terminal_reason)}.`} A command that started but never reported back has an unknown result; commands after a stop don’t run.</p>`:''}${grant?`<dl class="meta"><dt>Status</dt><dd>${esc(personalStatusLabel(run.status))}</dd><dt>Model</dt><dd>Not used</dd><dt>Version</dt><dd>${grant.job_version}</dd><dt>Started by</dt><dd>${grant.trigger==='schedule'?'Its schedule':'You'}</dd>${grant.trigger==='schedule'?`<dt>Scheduled for</dt><dd>${esc(date(run.manifest.scheduled_at))}</dd>`:''}${pinnedSourceMarkup(run.manifest)}</dl>${receipt?receipt.commands.map((c,i)=>{const approved=run.manifest.job.verification_plan.action.tests[i],t=c.outcome;return `<article class="entry"><h3>Command ${i+1} · ${esc(pulseCommandLabel(c))}</h3><ol start="0">${approved.argv.map(arg=>`<li><pre>${esc(arg)}</pre></li>`).join('')}</ol><p class="mono">Runs in: ${esc(approved.cwd)}</p>${t?`<p>Exit code: ${t.exit_code===null?'didn’t start':t.exit_code} · ${esc(outcomeWords(t.status))}</p><pre>${esc(t.output||'No output recorded.')}</pre>${t.output_truncated?'<p class="notice">Only the start of the output is shown.</p>':''}<details><summary>Saved output</summary><p class="mono">${esc(t.artifact.path)} · ${t.artifact.bytes} bytes</p><p class="mono">SHA-256 ${esc(t.artifact.sha256)}</p><p class="muted">The full output is kept privately by DGC. The preview above may hide secrets.</p></details>`:''}</article>`;}).join(''):'<p role="status">No results saved yet.</p>'}<details><summary>Technical details</summary><dl class="meta"><dt>Run ID</dt><dd class="mono">${esc(run.id)}</dd><dt>Approval ID</dt><dd class="mono">${esc(grant.approval_id)}</dd><dt>Plan fingerprint</dt><dd class="mono">${esc(grant.plan_digest)}</dd><dt>Approval fingerprint</dt><dd class="mono">${esc(grant.digest)}</dd><dt>Setup fingerprint</dt><dd class="mono">${esc(grant.definition_digest)}</dd></dl><p class="muted">These identify what was approved. Command-plan results can’t be reviewed or saved to context.</p></details>`:''}${activityMarkup()}</section>`;
@@ -5222,6 +5259,8 @@ document.addEventListener('click',event=>{
  if((n=at('[data-agent-steps]'))){toggleAgentSteps(n.dataset.agentSteps);return;}
  if((n=at('[data-agent-stop]'))){void stopAgent(n.dataset.agentStop);return;}
  if((n=at('[data-agent-undo]'))){void undoAgentJob(n.dataset.agentUndo);return;}
+ if((n=at('[data-give-folder]'))){startFolderMove(MOVE.give,n);return;}
+ if((n=at('[data-remove-folder]'))){startFolderMove(MOVE.remove,n);return;}
  if((n=at('[data-retry-again]'))){void retryFix(n.dataset.retryAgain,true);return;}
  if((n=at('[data-retry-leave]'))){void retryFix(n.dataset.retryLeave,false);return;}
  if((n=at('[data-change-fold]'))){const id=n.dataset.changeFold;if(changeUi.folded.has(id))changeUi.folded.delete(id);else changeUi.folded.add(id);render();document.querySelector(`[data-change-fold="${id}"]`)?.focus({preventScroll:true});return;}
@@ -5447,8 +5486,13 @@ function oneReportsMarkup(){
 // word its row in the list and the filter line use).
 function placePartMarkup(){
  if(!onePips())return '';
- return `<section class="pip-page-group pip-place-part" aria-label="Where it works"><div class="pip-page-row static"><span class="row-words"><strong>Works in</strong><small class="pip-folder-where">Personal: it works in no folder</small></span></div></section>`;
+ // Give it a folder… (Pips API 110) at the row's end: it becomes a folder Pip for the folder you choose.
+ const give=folderMoveKind()===MOVE.give?moveButton(MOVE.give,{off:S.busy||!usable()}):'';
+ return `<section class="pip-page-group pip-place-part" aria-label="Where it works"><div class="pip-page-row static"><span class="row-words"><strong>Works in</strong><small class="pip-folder-where">Personal: it works in no folder</small></span>${give}</div></section>`;
 }
+// Give it a folder… or Remove its folder… (Pips API 110, src/pipGiveFolder.js): which one this Pip is offered, or ''.
+function folderMoveKind(){return onePips()?moveOffered(S.pip,{apiVersion:S.apiVersion,remote:remoteHost,archived:archived()}):'';}
+function folderMoveMenuRow(){const kind=folderMoveKind();return kind?moveMenuRow(kind,{off:S.busy||!usable(),icon:a=>window.DgcIcons?.html(a,{size:15})||''})+'<hr>':'';}
 // What only a Pip with a folder has, on its settings page.
 function folderPartsMarkup(p){
  const row=pipFolderRow(p),name=row?.name||spaceName(p.workspace_id)||'its folder',Pick=globalThis.DgcFolderPick,boxed=folderBox();
@@ -5458,7 +5502,7 @@ function folderPartsMarkup(p){
  let runs='Only when you ask';try{runs=p.event_trigger?eventTriggerLabel(p.event_trigger):p.schedule?scheduleLabel(p.schedule):runs;}catch{runs='On a schedule';}
  const chev='<span class="row-chevron" aria-hidden="true">›</span>';
  return `<section class="pip-page-group pip-folder-parts" aria-label="Its folder"><h3 class="pip-page-label">Its folder</h3>`
-  +`<div class="pip-page-row static"><span class="row-words"><strong>Works in</strong><small class="pip-folder-where" title="${esc(row?.folder||name)}">${row&&row.exists===false?'<span class="pip-row-folder-note">Folder not found</span> ':''}${row&&Pick?Pick.pathHtml(row.shown,row.folder):esc(name)}</small></span></div>`
+  +`<div class="pip-page-row static"><span class="row-words"><strong>Works in</strong><small class="pip-folder-where" title="${esc(row?.folder||name)}">${row&&row.exists===false?'<span class="pip-row-folder-note">Folder not found</span> ':''}${row&&Pick?Pick.pathHtml(row.shown,row.folder):esc(name)}</small></span>${folderMoveKind()===MOVE.remove?moveButton(MOVE.remove,{off:S.busy||!usable()}):''}</div>`
   +`<div class="pip-page-row static"><span class="row-words"><strong>What it reads</strong><small>${esc(reads)}</small></span></div>`
   +`<button type="button" class="pip-page-row" data-tab="schedule"><span class="row-words"><strong>When it runs</strong><small class="row-preview">${esc(runs)}</small></span>${chev}</button>`
   +`<button type="button" class="pip-page-row" data-tab="runs"><span class="row-words"><strong>Reports</strong><small class="row-preview">What each check found, as a table</small></span>${chev}</button>`
@@ -5953,7 +5997,7 @@ function simplePipHeader(){
  // the header has room for one more (under that its measured widths leave none: src/pips.css). Not in the tab itself.
  const opens=onChat&&canOpenChatTab();
  const openIcon=opens?`<button type="button" id="pip-open-editor" class="topbar-icon open-editor-icon" data-open-chat-tab aria-label="Open in editor" title="Open in editor">${simpleIcon('openEditor')}</button>`:'';
- const actions=`<div class="topbar-actions">${pipSwitchMarkup(p)}${project||folderPip&&activeOwnRun()?runNowMarkup():''}${computer}${openIcon}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${folderPip?runNowMenuRow():''}${opens?`<button type="button" data-open-chat-tab><span class="dgc-menu-icon" aria-hidden="true">${window.DgcIcons?.html('open-in-editor',{size:15})||''}</span><span>Open in editor</span></button><hr>`:''}${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>`;
+ const actions=`<div class="topbar-actions">${pipSwitchMarkup(p)}${project||folderPip&&activeOwnRun()?runNowMarkup():''}${computer}${openIcon}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu dgc-menu dgc-menu-rows">${folderPip?runNowMenuRow():''}${opens?`<button type="button" data-open-chat-tab><span class="dgc-menu-icon" aria-hidden="true">${window.DgcIcons?.html('open-in-editor',{size:15})||''}</span><span>Open in editor</span></button><hr>`:''}${folderMoveMenuRow()}${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div>`;
  // Its chat: back, its face and name at the left, fixed; the thread selector in the middle, always centred; the switch,
  // its computer and the menu at the right (live round 1, 14 Nov). What a Project Pip last did, or its folder, follows
  // its name where there is room.
@@ -6818,7 +6862,7 @@ function allowedMarkup(){
 function pipPageMenu(){
  const p=S.pip,off=S.busy||!usable();
  return `${personalPip()?'':runNowMenuRow()}<button type="button" data-tab="runs">${reportsName()}</button>${S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?'<button type="button" data-tab="memory">Memory</button>':''}<hr>`
-  +'<button type="button" data-copy-pip-id>Copy ID</button>'
+  +folderMoveMenuRow()+'<button type="button" data-copy-pip-id>Copy ID</button>'
   +(archived()?'':`<button type="button" id="toggle-pip"${off||S.apiVersion>=16&&!canLifecycle()?' disabled':''}>${p.status==='paused'?'Resume':'Pause'}</button>`)
   +(S.apiVersion>=16&&canLifecycle()?(archived()?`<button type="button" id="restore-pip"${off?' disabled':''}>Restore…</button>${S.apiVersion>=68?`<button type="button" id="delete-archived-pip-menu" class="danger-text"${off?' disabled':''}>Delete permanently…</button>`:''}`:`<button type="button" id="archive-pip" class="danger-text"${off?' disabled':''}>Archive…</button>`):'');
 }
@@ -7316,7 +7360,7 @@ async function navigateFromHostNow(value) {
   S.tab=tab;rememberView();render();
   // The Work chat's chip for a running Pip opens its chat at the run's live post (or its post, if it has ended).
   if(tab==='chat'&&typeof value.run==='string'&&/^run_[0-9a-f]{32}$/.test(value.run)){await jumpToRun(value.run);return;}
-  if(tab==='runs'){await loadSelected(true);if(token===scope()&&typeof value.run==='string'&&value.run){const result=await send('get_pip_run',{run_id:value.run});if(token!==scope())return;if(result.run?.pip_id!==S.selected||result.run?.workspace_id!==S.workspace.id||result.run?.id!==value.run)throw Error('This run does not belong to the selected Pip.');S.run=result.run;S.runId=value.run;render();}}else if(tab==='notifications')await loadNotifications();else if(tab==='job')await loadModels();else if(tab==='handoffs')await loadHandoffs();else if(tab==='revisions')await loadApprovals();else if(tab==='context'&&S.apiVersion>=12){void loadOutcomeSessions();void loadOutcomes();}
+  if(tab==='runs'){await loadSelected(true);if(token===scope()&&typeof value.run==='string'&&value.run){const result=await send('get_pip_run',{run_id:value.run});if(token!==scope())return;if(result.run?.pip_id!==S.selected||result.run?.id!==value.run)throw Error('This run does not belong to the selected Pip.');S.run=result.run;S.runId=value.run;render();}}else if(tab==='notifications')await loadNotifications();else if(tab==='job')await loadModels();else if(tab==='handoffs')await loadHandoffs();else if(tab==='revisions')await loadApprovals();else if(tab==='context'&&S.apiVersion>=12){void loadOutcomeSessions();void loadOutcomes();}
   if(token!==scope()||S.selected!==value.pip||!usable())return;
   if(typeof value.review==='string'&&value.review){
     if(['email_draft','calendar_draft','connector_draft'].includes(value.reviewKind)&&tab==='chat'&&S.apiVersion>=(value.reviewKind==='connector_draft'?37:value.reviewKind==='calendar_draft'?35:32))await openEmailDraft(value.review);
@@ -8155,6 +8199,7 @@ document.addEventListener('click',event=>{
       if(review.fullLevel){const back=review.refocus;closeReview();void setLevel('full',{refocus:back});return;}
       if(review.newPip){void createSimplePip(draft.newPipCharacter,draft.newPipName,review);return;}
       if(review.computerGrant!==undefined){void applyComputerGrant(review);return;}
+      if(review.folderMove){void applyFolderMove(review);return;}
       if(review.computerAction){if(!reviewBlocked(review))void decideComputerAction(review,true);else{review.error='This action expired. Nothing was sent.';renderReview();}return;}
       if(review.messageForm){prepareMessage(review);return;}
       if(review.appPicker){prepareAppReview(review);return;}

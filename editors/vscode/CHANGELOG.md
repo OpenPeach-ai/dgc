@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Give it a folder… and Remove its folder…, on a Pip's page and in its ⋯ menu.** A Pip for anything (never Core) has Give it a folder… at the end of its "Works in" row; a folder Pip has Remove its folder… there. Both are in its chat's and its page's ⋯ menu too, each with its own folder glyph. The folder comes from the picker New Pip uses (the folders DGC knows, this window's, Add a folder…). DGC says first what stays (its chat, notes, routines, computer, level, model) and what changes, in a confirmation; then the Pip opens again where it works now, on the page it was on, its header naming its folder. When DGC can't (it is working, the folder isn't a Git project with a commit), the dialog says why. Needs Pips API 110.
 - **Work's plan looks like a plan**: the Tasks pill shows the step being worked on; it opens the plan's section (its time, a progress bar, a mark per step that turns, draws its check or is struck); in the conversation one card per turn updates in place as the plan changes.
 - **Thinking is one slider, Faster to Smarter**, in Work, ChatDGC and a Pip's chat: a moving fill, Ultra's own colours and sparkles, the note behind its ?; press a stop, drag, or use the arrow keys.
 - **DGC's products named and coloured**: VIBE after the side bar's and ChatDGC's wordmark, in Geist; the SDK's mark in olive; Home's GitHub, Docs, DGC-SDK and Settings always live in its ⋯.

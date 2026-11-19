@@ -439,7 +439,10 @@ def snapshot(store, pip_id):
             # Current tree, or committed source under safe_source_v2: the checkpoint records its
             # policy, so a change of rules or Excluded folders is never compared as like for like.
             value["schema_version"] = 2
-        row = store.db.execute("SELECT id FROM pip_checkpoints WHERE pip_id=? ORDER BY id DESC LIMIT 1", (pip_id,)).fetchone()
+        # Its checkpoints where it works now: a Pip whose folder was removed, or given another (pip_folder), keeps what
+        # it found in each folder with that folder.
+        row = store.db.execute("SELECT id FROM pip_checkpoints WHERE pip_id=? AND workspace_id=? ORDER BY id DESC LIMIT 1",
+                               (pip_id, pip["workspace_id"])).fetchone()
         if row is None:
             return _pin(value)
         checkpoint = _load(store, row[0])
@@ -620,8 +623,8 @@ def history(store, pip_id, before_id=None, limit=20):
             cursor = store.db.execute("SELECT pip_id,workspace_id FROM pip_checkpoints WHERE id=?", (before,)).fetchone()
             if cursor is None or cursor["pip_id"] != pip_id or cursor["workspace_id"] != pip["workspace_id"]:
                 raise _error("Checkpoint cursor does not belong to this Pip.", "invalid_cursor")
-        rows = store.db.execute("SELECT id FROM pip_checkpoints WHERE pip_id=? AND id<? ORDER BY id DESC LIMIT ?",
-                                (pip_id, before, limit + 1)).fetchall()
+        rows = store.db.execute("SELECT id FROM pip_checkpoints WHERE pip_id=? AND workspace_id=? AND id<? ORDER BY id DESC "
+                                "LIMIT ?", (pip_id, pip["workspace_id"], before, limit + 1)).fetchall()
         items = []
         for row in rows[:limit]:
             checkpoint = _load(store, row[0], reviews=False)

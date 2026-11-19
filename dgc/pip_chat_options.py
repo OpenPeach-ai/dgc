@@ -135,7 +135,7 @@ def controls(store, pip_id, config):
     source = 'default'
     own = saved(store.db, pip_id)
     # The Pip's own choices. Reported as 'last_message', the remembered choice editors since API 24 know.
-    row = None if own is not None else store.db.execute('''SELECT r.id,length(CAST(r.manifest AS BLOB)) AS size
+    row = None if own is not None else store.db.execute('''SELECT r.id,r.workspace_id,length(CAST(r.manifest AS BLOB)) AS size
         FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id
         WHERE m.pip_id=? AND m.role='user' ORDER BY m.seq DESC LIMIT 1''', (pip_id,)).fetchone()
     if row is not None:
@@ -143,7 +143,9 @@ def controls(store, pip_id, config):
         if row['size'] is None or row['size'] > MAX_STORED_MANIFEST_BYTES:
             raise RegistryError('stored_data_limit', 'The saved reply manifest exceeds its read budget.')
         manifest = json.loads(store.db.execute('SELECT manifest FROM pip_runs WHERE id=?', (row['id'],)).fetchone()[0])
-        if manifest.get('pip_id') != pip_id or manifest.get('workspace_id') != pip['workspace_id']:
+        # (Its own run's workspace: a Pip given a folder, or whose folder was removed, keeps its earlier replies where
+        # they were made, pip_folder.)
+        if manifest.get('pip_id') != pip_id or manifest.get('workspace_id') != row['workspace_id']:
             raise RegistryError('invalid_history', 'Saved reply controls belong to another Pip.')
         selected = validate_manifest(manifest)
         if selected is not None:

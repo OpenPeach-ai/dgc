@@ -360,7 +360,12 @@ def validate_parent(registry, row, manifest):
     # Membership precedes bounded original manifest/definition reads and decode.
     if registry.db.execute('''SELECT 1 FROM pip_runs r JOIN pips p ON p.id=r.pip_id
          WHERE r.id=? AND r.pip_id=? AND r.workspace_id=? AND p.workspace_id=r.workspace_id''',
-         (run_id,pip_id,workspace_id)).fetchone() is None: _fail()
+         (run_id,pip_id,workspace_id)).fetchone() is None:
+        # A run made where its Pip lived before it was given a folder or had it removed (pip_folder) is its history.
+        from .pip_folder import lived_in
+        if not lived_in(registry.db, pip_id, workspace_id) or registry.db.execute(
+                'SELECT 1 FROM pip_runs WHERE id=? AND pip_id=? AND workspace_id=?', (run_id,pip_id,workspace_id)).fetchone() is None:
+            _fail()
     actual = registry.db.execute('''SELECT
          CASE WHEN length(CAST(binding_id AS BLOB))<=128 THEN binding_id END AS binding_id,
          CASE WHEN length(CAST(requested_by AS BLOB))<=128 THEN requested_by END AS requested_by,

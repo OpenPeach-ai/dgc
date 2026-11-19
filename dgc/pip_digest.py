@@ -508,8 +508,9 @@ def outcomes(registry, pip_id) -> dict:
     from .pips import PipStore
     store = PipStore(registry)
     job = store._job(pip_id)
-    rows = registry.db.execute("SELECT id FROM pip_checkpoints WHERE pip_id=? ORDER BY id DESC LIMIT ?",
-                               (pip_id, MAX_OUTCOME_CHECKPOINTS + 1)).fetchall()
+    # (Its findings where it works now: each folder's stay with that folder, pip_folder.)
+    rows = registry.db.execute("SELECT id FROM pip_checkpoints WHERE pip_id=? AND workspace_id=? ORDER BY id DESC LIMIT ?",
+                               (pip_id, job["workspace_id"], MAX_OUTCOME_CHECKPOINTS + 1)).fetchall()
     truncated = len(rows) > MAX_OUTCOME_CHECKPOINTS
     ids = [row[0] for row in rows[:MAX_OUTCOME_CHECKPOINTS]][::-1]
     reviews, state = {}, {}         # by identity; a rewording carries its earlier identity's record
