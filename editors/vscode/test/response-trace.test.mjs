@@ -115,8 +115,8 @@ test("a timed denial closes its own span without claiming a failure", () => {
   assert.deepEqual(view.errors, []);
 });
 
-test("Trace failures use DGC's tool-failure olive token", () => {
-  assert.match(traceCss, /\.dgc-trace-row\.error \.dgc-trace-bar \{ background: var\(--err, #768A00\)/);
+test("Trace failures use DGC's error red token", () => {
+  assert.match(traceCss, /\.dgc-trace-row\.error \.dgc-trace-bar \{ background: var\(--err, #E5484D\)/);
 });
 
 test("the dialog shows on a Pip's page: its body hides everything else, never this", () => {

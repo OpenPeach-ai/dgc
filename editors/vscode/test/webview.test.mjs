@@ -3621,9 +3621,10 @@ test("a mermaid fence becomes a diagram, and survives a runtime that never arriv
   assert.deepEqual(errors, [], "an absent mermaid runtime raises no error");
 });
 
-test("removed lines read as removed, not as the auto-mode olive", () => {
-  // --err went olive for auto mode. Diff polarity rode on it, so every deletion count turned
-  // green -- the one colour that means the opposite of what a "-12" is saying.
+test("removed lines read as removed, and auto mode never rides on the error colour", () => {
+  // --err once went olive for auto mode. Diff polarity rode on it, so every deletion count turned
+  // green -- the one colour that means the opposite of what a "-12" is saying. Deletions keep their own token; errors
+  // are now the same red, and auto mode is DGC's purple.
   assert.match(mainCss, /--del:\s*#[0-9A-Fa-f]{6}/, "deletions need their own token");
   for (const rule of [/\.diff \.del-stat \{ color: var\(--del-text\)/,
                       /\.change-del \{ color: var\(--del-text\)/,
@@ -3636,12 +3637,12 @@ test("removed lines read as removed, not as the auto-mode olive", () => {
     assert.ok(contrastRatio(delText, rootHex(background)) >= 4.5,
       `--del-text against ${background} must clear normal-text contrast`);
   }
-  // Red and the auto-mode olive must stay far apart, or the fix is cosmetic only. Contrast ratio
-  // is the wrong instrument here -- it compares luminance, and these two are deliberately close
-  // in luminance so both read on the same surfaces. Hue is what a reader is actually telling
-  // apart, so that is what is asserted.
-  assert.ok(hueDistance(delText, rootHex("--err-text")) >= 60,
-    "the deletion colour must be clearly distinct in hue from the auto/error colour");
+  // Auto mode is a mode, not a failure: its marks take the link purple, never the error red.
+  assert.match(mainCss, /#cbox\[data-mode="auto"\] #modeicon \{ color: var\(--link\); \}/, "auto mode's mark is purple");
+  assert.doesNotMatch(mainCss, /#cbox\[data-mode="auto"\][^{]*\{[^}]*var\(--err/, "auto mode never uses the error colour");
+  // Hue is what a reader tells apart (luminance is deliberately close so both read on the same surfaces): an error and
+  // a removed line are one red on purpose.
+  assert.ok(hueDistance(delText, rootHex("--err-text")) <= 15, "errors and removed lines are one red");
   assert.ok(hueDistance(delText, rootHex("--good")) >= 60,
     "and from the addition colour it sits next to in every diff header");
 });

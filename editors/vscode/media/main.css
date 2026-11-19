@@ -1127,8 +1127,8 @@ body.hide-reasoning .tool-group-label .tg-thought { display: none; }
 .tool[data-status="blocked"] .dot { background: var(--muted); }
 .tool[data-status="blocked"] .verb { color: var(--muted); }
 .tool .dot.deny { background: var(--faint); }
-/* A failed step's dot says so by its shape too, a small cross: olive is also auto mode's colour, and a round olive
-   dot read as "done" (release check, 2026-11-03, a "Couldn't delegate" step). Drawn inside the dot's own box, so
+/* A failed step's dot says so by its shape too, a small cross, not by its colour alone: a round coloured dot read as
+   "done" (release check, 2026-11-03, a "Couldn't delegate" step). Drawn inside the dot's own box, so
    the row doesn't move. */
 .tool[data-status="failed"] .dot {
   border-radius: 0; transform: scale(1.5);
@@ -1703,7 +1703,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
    background reads as a second, heavier element rather than as emphasis. */
 .model-control.ultra { color: var(--accent-text); background: var(--accent-soft); }
 .model-control.ultra #effortname { color: var(--lav); }
-/* Auto mode uses the same light purple wash as the prompt bubble, not the olive error colour. */
+/* Auto mode uses the same light purple wash as the prompt bubble, not the red error colour. */
 #cbox[data-mode="auto"] .model-control.ultra { color: var(--accent-text); background: var(--accent-soft); }
 #cbox[data-mode="auto"] .model-control.ultra #effortname { color: var(--lav); }
 #btn-ctx.warn { color: var(--err-text); }
@@ -3760,7 +3760,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
 .pic-fold-open[hidden], .pic-fold-body[hidden] { display: none; }
 .pic-fold-body > .made-files { margin-top: var(--sp-1, 4px); }
 @media (prefers-reduced-motion: reduce) { .pic-fold-chev { transition: none; } }
-/* D14: this session's model didn't answer and its fallback does. The button names the fallback, in the olive DGC uses
+/* D14: this session's model didn't answer and its fallback does. The button names the fallback, in the red DGC uses
    when something isn't answering (tokens.css --err), on its soft wash, with the word. */
 #btn-model.on-fallback { background: var(--err-soft); color: var(--err-text); }
 #btn-model.on-fallback #modelname, #btn-model.on-fallback #effortname { color: var(--err-text); }

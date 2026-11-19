@@ -4531,7 +4531,7 @@ test("a card's place never cuts the reply's Markdown: inside a code fence or a l
   } finally { await s.page.close(); }
 });
 
-test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined up at the right end, the model button in olive while it answers", async (t) => {
+test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined up at the right end, the model button in red while it answers", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen({ width: 700 });
   const at = "2026-11-09T10:00:00.000Z";
@@ -4560,7 +4560,7 @@ test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined u
     const rowBox = await picker.locator(".dgc-mp-row", { hasText: "glm-5.3:cloud" }).boundingBox();
     assert.ok(rowBox.x + rowBox.width - (b.x + b.width) <= 34, "at the row's right end, before the check's place");
     await s.page.keyboard.press("Escape");
-    // Its model didn't answer: the waiting line names the fallback, and so does the pill, in olive, with the word.
+    // Its model didn't answer: the waiting line names the fallback, and so does the pill, in red, with the word.
     await s.send({ type: "turn", state: "started", replyId: M(2) });
     await s.send({ type: "waiting", messageId: M(2), model: "glm-5.3:cloud", usual_s: 0 });
     const pill = s.page.locator("#cd-model-pill");
@@ -4572,7 +4572,7 @@ test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined u
       fallback: { for: "deepseek-v4.1-flash:cloud", line: "deepseek-v4.1-flash:cloud didn't answer; glm-5.3:cloud did" } } });
     await s.send({ type: "turn", state: "ended", replyId: M(2) });
     assert.equal(await s.page.locator(`.cd-assistant[data-id="${M(2)}"] .cd-fallback-line`).textContent(), "deepseek-v4.1-flash:cloud didn't answer; glm-5.3:cloud did");
-    assert.ok(await pill.evaluate((n) => n.classList.contains("on-fallback")), "still out: still olive");
+    assert.ok(await pill.evaluate((n) => n.classList.contains("on-fallback")), "still out: still red");
     await s.send({ type: "message", message: { id: M(4), role: "assistant", text: "Rome.", created_at: at, finish: "stop", model: "deepseek-v4.1-flash:cloud" } });
     assert.ok(!(await pill.evaluate((n) => n.classList.contains("on-fallback"))), "its own model wrote again: back to normal");
     assert.equal(await s.page.locator("#cd-model-name").textContent(), "deepseek-v4.1-flash:cloud");
@@ -4612,7 +4612,7 @@ test("ChatDGC: the fallback word in the model button has the same room on both s
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../media/chatdgc.css", import.meta.url), "utf8");
   assert.match(css.match(/\.cd-fallback-word\s*\{([^}]*)\}/)[1], /margin:\s*0 2px;/);
-  // Its dial and chevron take the olive too, as the button does (Work's and a Pip's reasoning words do).
+  // Its dial and chevron take the red too, as the button does (Work's and a Pip's reasoning words do).
   assert.match(css, /\.cd-model-pill\.on-fallback \.cd-model-chevron \{ color: var\(--err-text\); opacity: \.7; \}/);
   assert.match(css, /\.cd-model-pill\.on-fallback \.cd-arc-fill \{ stroke: var\(--err-text\); \}/);
 });

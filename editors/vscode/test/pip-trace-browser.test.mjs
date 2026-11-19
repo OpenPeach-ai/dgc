@@ -86,7 +86,7 @@ async function openTrace(width) {
 }
 const box = (p, s) => p.locator(s).first().boundingBox();
 
-test("on a Pip's own page the dialog stands by itself: its colours, its rows, its range, its failed step in green", async (t) => {
+test("on a Pip's own page the dialog stands by itself: its colours, its rows, its range, its failed step in red", async (t) => {
   if (skipOrFail(t)) return;
   const { p, errors, context } = await openTrace(1000);
   try {
@@ -98,7 +98,7 @@ test("on a Pip's own page the dialog stands by itself: its colours, its rows, it
         green: getComputedStyle(failed.querySelector(".dgc-trace-bar")).backgroundColor, greenTime: getComputedStyle(failed.querySelector(".dgc-trace-meta span:last-child")).color };
     });
     assert.deepEqual(look, { background: "rgb(30, 30, 30)", color: "rgb(212, 212, 212)", edge: "rgb(60, 60, 60)", scrubPad: "0px", scrubBorder: "0px", glyph: "codicon",
-      height: 26, green: "rgb(118, 138, 0)", greenTime: "rgb(131, 153, 0)" });
+      height: 26, green: "rgb(229, 72, 77)", greenTime: "rgb(240, 116, 126)" });
     assert.deepEqual(await p.locator(".dgc-trace-meta span:first-child").allTextContents(), ["10,634 tk", "6 hits", "Failed", "11,275 tk"]);
     const playBox = await box(p, ".dgc-trace-play"), scrubBox = await box(p, ".dgc-trace-scrub");
     assert.equal(playBox.width, 24);

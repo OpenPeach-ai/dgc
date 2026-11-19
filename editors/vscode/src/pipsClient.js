@@ -972,7 +972,7 @@ function chatControlsMarkup(canSend,busy){
  if(S.mic!=='idle')return `<div class="composer-controls pip-voice">${voiceBar?voiceBar.markup():''}</div>`;
  const locked=archived()||!usable()||S.busy,current=S.pip.model_choice?.mode==='model'?S.pip.model_choice.model:'',selected=modelValue(S.pip.model_choice),chip=chipModel(S.pip.model_choice,current),shownModel=chip.text,available=S.apiVersion>=24&&!!S.chatControls,o=available?chosenChatOptions():null;
  const subs=subscriptionChoices(everyPip());
- // D14: its own model is out and its fallback answers: the chip names the fallback, in olive, until its own model is back.
+ // D14: its own model is out and its fallback answers: the chip names the fallback, in red, until its own model is back.
  const onFallback=S.fallbackOn&&!S.noProvider&&S.apiVersion>=76?S.fallbackOn:null;
  const unavailable=`<p class="composer-unavailable">${S.apiVersion<24?'Update DGC to change these settings.':'These settings didn’t load. Refresh, then send.'}</p>`;
  const ultraOn=pipUltra();

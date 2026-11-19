@@ -3534,7 +3534,7 @@
     $("btn-model").classList.toggle("ultra", curUltra);
     $("btn-model").title = `${model} · ${effort} reasoning — click to change`;
     $("btn-model").setAttribute("aria-label", `Change model and reasoning. Current model: ${model}. Profile: ${effort}.`);
-    // D14: its model didn't answer and its fallback does: the button names the fallback, in olive, with the word.
+    // D14: its model didn't answer and its fallback does: the button names the fallback, in red, with the word.
     $("btn-model").classList.toggle("on-fallback", !!fallbackActive);
     let word = $("btn-model").querySelector(".model-fallback-word");
     if (fallbackActive) {

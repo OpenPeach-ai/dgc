@@ -297,7 +297,7 @@ test("a fallback model: the ⋯ beside a model in its picker, Main and Fallback 
   assert.deepEqual(p.choices().map((b) => b.textContent), ["Use as main", "Stop using as fallback"]);
   p.choices()[1].click(); await flush();
   assert.deepEqual(JSON.parse(JSON.stringify(x.requests("set_pip_backup").at(-1).request)), { type: "set_pip_backup", pip_id: PIP, model: "", provider: "" });
-  // Its own model out and its fallback answering: the chip names the fallback, in olive, with the word.
+  // Its own model out and its fallback answering: the chip names the fallback, in red, with the word.
   const y = pipsPage({ apiVersion: 76, models: MODELS, fallback: { provider: "", model: "spare" }, fallbackOn: { model: "spare", since: now } });
   await y.drain(); y.click(`[data-job="${PIP}"]`); await y.drain();
   const chip = y.d.getElementById("chat-model");

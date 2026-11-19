@@ -1010,7 +1010,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 /* A Pip's attachments are the shared pills (media/shared/composer.css). */
 .chat-images .dgc-att{flex:none}
 
-/* D14: its own model is out and its fallback answers. The chip names the fallback, with the word, in the olive DGC uses
+/* D14: its own model is out and its fallback answers. The chip names the fallback, with the word, in the red DGC uses
    when something isn't answering (tokens.css --err), on its soft wash, until its own model answers again. */
 .pip-composer .model-control.on-fallback{background:var(--err-soft);color:var(--err-text)}
 .pip-composer .model-control.on-fallback .composer-model-name,.pip-composer .model-control.on-fallback .composer-effort-name{color:var(--err-text)}

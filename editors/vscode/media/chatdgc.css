@@ -950,7 +950,7 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 /* ChatDGC's mods above the message box (media/mods.js; main.css draws them). */
 .cd-foot .mod-strip { margin: 0 0 var(--sp-2); }
 /* D14: a chat's fallback model (its rows are the model picker's: media/shared/modelpicker.css). */
-/* While the fallback answers: the pill names it, in the olive DGC uses when something isn't answering, with the word. */
+/* While the fallback answers: the pill names it, in the red DGC uses when something isn't answering, with the word. */
 .cd-model-pill.on-fallback { background: var(--err-soft); color: var(--err-text); }
 .cd-model-pill.on-fallback .cd-model-name { color: var(--err-text); }
 .cd-model-pill.on-fallback .cd-model-chevron { color: var(--err-text); opacity: .7; }

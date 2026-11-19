@@ -48,7 +48,7 @@ const danger = (page, selector, shadow = "") => page.evaluate(([sel, host]) => {
 test("the role is written once, with the button's other tokens", () => {
   const css = readFileSync(new URL("../media/shared/tokens.css", import.meta.url), "utf8");
   for (const name of ["--btn-danger", "--btn-danger-hover", "--btn-on-danger"]) assert.match(css, new RegExp(`${name}\\s*:`), `${name} is defined`);
-  assert.match(css, /--btn-danger:\s*var\(--vscode-inputValidation-errorBorder, #BE1100\)/, "its red is the editor's own error red, never DGC's olive");
+  assert.match(css, /--btn-danger:\s*var\(--vscode-inputValidation-errorBorder, #BE1100\)/, "its red is the editor's own error red, never DGC's own --err");
   assert.doesNotMatch(css.match(/--btn-danger[^;]*;/g).join(""), /--err\b/);
   assert.match(css, /\.dgc-btn\.danger/, "and the button itself has the role");
   assert.match(css.slice(css.indexOf("forced-colors: active", css.indexOf("--btn-danger"))), /--btn-danger/, "high contrast gives it the system's colours");

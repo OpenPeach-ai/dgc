@@ -105,11 +105,11 @@ html { scrollbar-color: auto; }
   /* Something on the chip line needs you. Amber, and lifted for words: --need is 6.1:1 on the dark editor ground and
      4.8:1 on the input one, --need-text 7.4:1 and 5.9:1. The light themes take darker steps (below). */
   --need:#D1902B; --need-text:#E0A24E;
-  /* Auto mode and error states share this olive. --err paints borders, fills and dots, where
-     the exact colour is what matters. Text uses --err-text: the same hue lifted until it clears
-     4.5:1 on every panel surface, because #768A00 reads 3.74:1 on --surface2 and the webview
-     contrast test rightly refuses it. */
-  --err:#768A00; --err-text:#839900; --err-soft:rgba(118,138,0,.16);
+  /* Errors and blocked states are red: the same red as removed lines (--del below), so DGC has one red. Olive is the
+     SDK's brand colour and nothing else; auto mode is DGC's purple. --err paints borders, fills and dots, where the
+     exact colour is what matters. Text uses --err-text, the same hue lifted until it clears 4.5:1 on every panel
+     surface (the webview contrast test checks it). */
+  --err:#E5484D; --err-text:#F0747E; --err-soft:rgba(229,72,77,.16);
   /* Diff polarity is not an error state. Removed lines rode on --err, so turning that
      olive for auto mode made every −120 line count read as an addition. Red means removed
      everywhere, so it gets its own token: --del paints the gutter rail and row fill where
@@ -227,9 +227,9 @@ body.vscode-light, body.vscode-high-contrast-light { --need:#A86A12; --need-text
 /* Lines added and removed, as words on the bar's pills: the dark theme's green and pink are 1.7:1 and 2.3:1 on a light
    pill. These are the same hues at 5.4:1 and 5.3:1 there. */
 body.vscode-light, body.vscode-high-contrast-light { --add-text:#0F6B3F; --del-ink:#B3261E; }
-/* The olive as text on a light ground: #839900 is 3.2:1 on white, so blocked tasks and errors read faint in light
-   themes. The same hue, darker: 5.9:1 on white, 4.8:1 on the darkest light surface. */
-body.vscode-light { --err-text:#5C6B00; }
+/* The error red on a light ground: a deeper step for fills and dots, and for words the red removed lines use there
+   (#B3261E, 6.6:1 on white). */
+body.vscode-light { --err:#D93036; --err-text:#B3261E; --err-soft:rgba(217,48,54,.12); }
 /* Seti's own light pair, except the three it ships too pale to clear 3:1 on a light ground. */
 body.vscode-light {
   --fk-blue:#498ba7; --fk-yellow:#8d8d2d; --fk-orange:#cc6d2e; --fk-green:#6c9438;
@@ -298,7 +298,7 @@ body.vscode-high-contrast, body.vscode-high-contrast-light {
    A fourth role, danger, is for DGC's own confirms that can't easily be undone (turning on Auto mode, removing a
    system or a server with its saved key, deleting an archived Pip for good): the same box, corner, step and ring, with
    a red fill, the editor's own error red (its input-validation error border: #BE1100 in the Dark, Light and High
-   Contrast themes, where white words read at about 5.9:1; never DGC's olive --err). It takes the place of the normal
+   Contrast themes, where white words read at about 5.9:1; never DGC's own --err). It takes the place of the normal
    fill on its view: still one filled button there.
    A dialog's main action that carries a mark, or whose words do not fit the box, takes the one wide size.
    A small button whose words do not fit its 76 px ("Check sign-in", "Open report" on a Pip's report card) takes the

@@ -1,7 +1,7 @@
 // A Work session's fallback model (D14, 9 Nov; fallback on every surface, part C; in the one model picker since 17 Nov):
 // the ⋯ beside a model in Work's picker (a model of this session's route or of a saved provider), Main and Fallback at
 // the rows' right end, only from a CLI that offers it; Claude Code or Codex too (part E, on its own default model: its
-// "CLI default" row); and the model button in olive while the fallback answers.
+// "CLI default" row); and the model button in red while the fallback answers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -88,7 +88,7 @@ test("Work: a session's Claude Code or Codex fallback, told after a reload, show
   assert.deepEqual(errors, []);
 });
 
-test("Work: no ⋯ from an older CLI, none for the session's own CLI; the button in olive while the fallback answers", () => {
+test("Work: no ⋯ from an older CLI, none for the session's own CLI; the button in red while the fallback answers", () => {
   const { doc, send, errors } = makeDom();
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud", routes: ROUTES,
@@ -122,7 +122,7 @@ test("Work: the model button's name, its fallback word and its reasoning share o
   assert.match(rule[1], /align-items:\s*baseline/);
   const word = css.match(/#btn-model \.model-fallback-word\s*\{([^}]*)\}/);
   assert.match(word[1], /margin:\s*0 2px;/, "the word has the same room on both sides");
-  assert.match(css, /#btn-model\.on-fallback \.model-chevron \{ color: var\(--err-text\); opacity: \.7; \}/, "its chevron in the olive too, as a Pip's and ChatDGC's");
+  assert.match(css, /#btn-model\.on-fallback \.model-chevron \{ color: var\(--err-text\); opacity: \.7; \}/, "its chevron in the red too, as a Pip's and ChatDGC's");
 });
 
 test("Work: a long model name stays on one line (its … at rest), slides while pointed at, and its whole name is its tooltip (9 Nov)", () => {

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { openThinkingPage } from "./render-thinking.mjs";
 
 // A failed step's dot says it failed, in real Chromium, live and after a reload. Release check, 2026-11-03: a batch
-// of helpers that named none read "Couldn't delegate", and its dot was round and olive, which read as a step that
-// worked (olive is the error colour, and also auto mode's). It is a small cross now; a step that worked keeps its
+// of helpers that named none read "Couldn't delegate", and its dot was round and coloured, which read as a step
+// that worked. It is a small cross now; a step that worked keeps its
 // round dot. DGC_REQUIRE_CHROMIUM=1 turns a missing browser into a failure.
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }

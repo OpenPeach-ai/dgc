@@ -4167,7 +4167,7 @@
     pill.dataset.level = LEVELS[level][0];
     pill.title = `${name || "No model"} · thinking: ${LEVELS[level][1]}. Click to change`;
     pill.setAttribute("aria-label", `Model ${name || "not chosen"}, thinking ${LEVELS[level][1]}. Change model and thinking`);
-    // D14: its model didn't answer and its fallback does: the pill names the fallback, in olive, with the word.
+    // D14: its model didn't answer and its fallback does: the pill names the fallback, in red, with the word.
     const on = state.fallbackOn && state.fallbackOffered ? modelName(state.fallbackOn.model) : "";
     pill.classList.toggle("on-fallback", !!on);
     trayView();
@@ -4703,7 +4703,7 @@
         for (const item of Array.isArray(message.images?.items) ? message.images.items : []) {
           if (images.get(item?.id)?.error) images.delete(item.id);
         }
-        // D14: a reply its fallback wrote keeps the pill olive; one its own model wrote ends the outage.
+        // D14: a reply its fallback wrote keeps the pill red; one its own model wrote ends the outage.
         if (message.role === "assistant" && ["stop", "length"].includes(message.finish) && !earlierThanShown(message)) {
           state.fallbackOn = message.fallback ? { model: String(message.model || state.fallback) } : null; updatePill();
         }

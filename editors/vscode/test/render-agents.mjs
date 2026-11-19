@@ -10,7 +10,7 @@
 //                                             measures what these show)
 //
 // --narrow is 300px. --menu opens the dialog (a nested child, ended rows, "+N more", the Stop note).
-// --auto puts the composer in auto mode (the olive border) to check the green against it.
+// --auto puts the composer in auto mode (the purple border) to check the green against it.
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -193,7 +193,7 @@ try {
       "pill-idle-light-460.png": { width: 460, light: true, idle: true },
       "dialog-dark-300.png": { width: 300, menu: true },
       "dialog-light-460.png": { width: 460, light: true, menu: true },
-      "pill-auto-olive-dark-460.png": { width: 460, auto: true },
+      "pill-auto-dark-460.png": { width: 460, auto: true },
       "pill-forced-colors-300.png": { width: 300, forced: true, waiting: true },
       "pill-running-dark-900.png": { width: 900 },
       "pill-waiting-light-900.png": { width: 900, light: true, waiting: true },

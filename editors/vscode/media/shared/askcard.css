@@ -64,8 +64,8 @@
 .ask-foot { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2) 0;
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .ask-pg { font-variant-numeric: tabular-nums; }
-/* The shared olive alone reads about 4:1 on the dark input surface and 3.2:1 on a light one; mixed
-   toward the theme's strongest text it keeps its hue and clears 4.5:1 in both. */
+/* The error red, mixed toward the theme's strongest text, keeps its hue and clears 4.5:1 on the input surface in
+   both themes. */
 .ask-error { margin: var(--sp-1) var(--sp-2) 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
   color: color-mix(in srgb, var(--err-text) 60%, var(--text-strong)); }
 .ask-sending { margin: var(--sp-1) var(--sp-2) 0; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); }

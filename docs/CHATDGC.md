@@ -149,7 +149,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   using as fallback**); once a fallback is set, the two rows say **Main** and **Fallback** at their right end. It is one
   model on your own connection, a saved provider, Claude Code or Codex. When the chat's model fails before the
   reply wrote or did anything (a usage limit, unreachable, signed out), the fallback writes the whole reply, with the
-  whole chat; the button by Send names it in olive with the word **fallback**, and the first such reply says so once
+  whole chat; the button by Send names it in red with the word **fallback**, and the first such reply says so once
   ("X didn't answer; Y did"). Its **Trace** keeps the change: the try that failed, how long it took and why, then the
   fallback's steps, marked as the fallback's. The next reply tries the chat's own model first. Each chat keeps its
   fallback with its next reply; a new chat starts with the last one you chose.

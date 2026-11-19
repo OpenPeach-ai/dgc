@@ -96,7 +96,7 @@
 }
 .dgc-menu .dgc-menu-choices { display: flex; flex-direction: column; margin: 0 0 2px 30px; padding-left: 6px; border-left: 1px solid var(--hair); }
 .dgc-menu .dgc-menu-choices .dgc-menu-row { min-height: 26px; font-size: var(--t-sm); }
-/* Main and Fallback: small words at the row's end. Main in the accent, Fallback in the olive DGC uses when something
+/* Main and Fallback: small words at the row's end. Main in the accent, Fallback in the red DGC uses when something
    isn't answering, the colour the prompt box takes while the fallback answers. */
 .dgc-menu .dgc-menu-pill {
   flex: none; margin-left: auto; padding: 0 6px; border: 1px solid var(--hair-strong); border-radius: 999px;

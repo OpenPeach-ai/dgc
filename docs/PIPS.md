@@ -1498,7 +1498,7 @@ find becomes a fix by its level: see [When a check finds something](#when-a-chec
   on one; it takes a worker only when the fallback is needed, and gives it back when the run ends). Each Pip has its own; choosing one for a Pip never changes another's, and a
   new Pip starts with the last one you chose. When a Pip's own model doesn't answer (a usage limit, a host that is down,
   a Claude Code or Codex that is signed out), its turn carries on with the fallback. Its prompt box names the fallback,
-  in olive with the word **fallback**, until its own model answers again; the first reply says so once, in a line before
+  in red with the word **fallback**, until its own model answers again; the first reply says so once, in a line before
   its time ("Its own model didn't answer; X did"). Its **Trace** keeps the change: the try that failed, how long it
   took and why, then the fallback's steps, marked as the fallback's. The next run tries its own model first. A
   subscription turn that already said or did something isn't run again. `dgc pips backup --pip PIP MODEL [--provider ID]` (or `none`) sets it
