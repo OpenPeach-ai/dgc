@@ -3,8 +3,10 @@
 
 /* A colour's swatch: a small square of that exact colour right after its code. A 1px edge in the text's colour, so white
    on a light page and black on a dark one still show. It copies its code on a click. */
+/* The swatch sits a little above the baseline: 0.07em below it sat it 1.75px under the digits' middle on a Mac's
+   monospace font (his picture, 19 Nov). Not a flex box: that put a space into the words a copy or a screen reader gets. */
 .dgc-il-colour { white-space: nowrap; }
-.dgc-il-sw { position: relative; display: inline-block; box-sizing: border-box; flex: none; width: .8em; height: .8em; min-width: 0; min-height: 0; margin: 0 0 0 .3em; padding: 0; vertical-align: -.07em;
+.dgc-il-sw { position: relative; display: inline-block; box-sizing: border-box; flex: none; width: .8em; height: .8em; min-width: 0; min-height: 0; margin: 0 0 0 .3em; padding: 0; vertical-align: .03em;
   border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 2.5px; background-clip: border-box; box-shadow: none; appearance: none; font: inherit; line-height: 0; cursor: copy; forced-color-adjust: none; }
 button.dgc-il-sw:hover { border-color: color-mix(in srgb, currentColor 80%, transparent); }
 button.dgc-il-sw:focus-visible, .dgc-il-copy:focus-visible, .dgc-il-commit:focus-visible, .dgc-il-time:focus-visible { outline: 1px solid var(--vscode-focusBorder, currentColor); outline-offset: 1px; }

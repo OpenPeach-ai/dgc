@@ -116,7 +116,7 @@ class GoalTurnsAgentTests(unittest.TestCase):
         self.assertIn("empty", self.agent._goal_details["reason"])
 
     def test_a_reply_or_tool_work_is_not_an_empty_turn(self):
-        for say, tool in (("Waiting on the build: still running.", False), ("", True)):
+        for say, tool in (("", True),):
             with self.subTest(say=say, tool=tool):
                 self.agent.goal_turns = True
                 self.agent.set_goal("watch the build", replace=True)
@@ -127,6 +127,44 @@ class GoalTurnsAgentTests(unittest.TestCase):
                     self.agent.run_turn(self.agent.take_goal_next_turn())
                 self.assertEqual(self.agent.goal_status, "active")
                 self.assertEqual(self.agent._goal_details["stalled_cycles"], 0)
+
+    def test_the_same_words_three_turns_running_with_no_work_pause_the_goal(self):
+        # Live (19-20 Nov, a real Work goal on glm-5.3:cloud): its completion report was dropped with a failed cycle, and
+        # it then replied "Steady state holds, goal complete" every turn for 57 turns (108M tokens). Words alone, the
+        # same each time and with no tool work, are not progress: the third such turn pauses it, in plain words.
+        self.agent.goal_turns = True
+        self.agent.set_goal("build the dashboard")
+        self.agent._run_turn = self.step_that(say="Steady state holds: goal complete, nothing to do until 07:36.", tool=False)
+        self.agent.run_turn("build the dashboard")
+        for _ in range(2):
+            self.agent._goal_continuing = True
+            self.agent.run_turn(self.agent.take_goal_next_turn())
+        self.assertEqual(self.agent.goal_status, "paused")
+        self.assertIn("said the same thing", self.agent._goal_details["reason"])
+        self.assertEqual(self.agent.take_goal_next_turn(), "", "no fourth turn")
+
+    def test_different_words_or_any_tool_work_keep_it_going(self):
+        replies = iter([f"Still waiting on the build: {n} of 5 jobs left." for n in range(5, 0, -1)])
+        self.agent.goal_turns = True
+        self.agent.set_goal("watch the build")
+        def step(prompt):
+            self.agent.messages.append({"role": "user", "content": prompt})
+            self.agent.messages.append({"role": "assistant", "content": next(replies)})
+            return True
+        self.agent._run_turn = step
+        self.agent.run_turn("watch the build")
+        for _ in range(4):
+            self.agent._goal_continuing = True
+            self.agent.run_turn(self.agent.take_goal_next_turn())
+        self.assertEqual(self.agent.goal_status, "active")
+
+    def test_each_goal_turn_says_the_goal_is_still_open(self):
+        # So a model that believes it already closed the goal (its report was dropped) is told otherwise every turn.
+        from dgc.goals import cycle_prompt
+        text = cycle_prompt("build the dashboard", {})
+        self.assertIn("still open", text)
+        self.assertIn("update_goal(status='completed'", text)
+        self.assertIn("Saying so in words doesn't close it", text)
 
     def test_inside_one_turn_repeated_tool_work_no_longer_blocks_it(self):
         # goal_turns off (an SDK client, the terminal): the cycles still run inside the turn; the same tool work again

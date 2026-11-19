@@ -13905,7 +13905,7 @@ function permissionChoices(ev) {
       const when = el("span", "pip-fixes-name"); when.textContent = wakeupClock(w.at);
       const why = el("span", "pip-fixes-state"); why.textContent = w.why;
       const words = el("span", "wakeup-words"); words.append(when, why);
-      const cancel = el("button", "rail-main wakeup-cancel"); cancel.type = "button"; cancel.textContent = "Cancel";
+      const cancel = el("button", "dgc-btn small wakeup-cancel"); cancel.type = "button"; cancel.textContent = "Cancel";
       cancel.title = `Cancel the wake-up at ${wakeupClock(w.at)}`; cancel.setAttribute("aria-label", cancel.title);
       cancel.onclick = () => { cancel.disabled = true; vscode.postMessage({ type: "cancelWakeup", id: w.id }); };
       li.append(words, cancel);
@@ -14508,8 +14508,11 @@ function permissionChoices(ev) {
     // pipsChatDraft, pipsChatChanged: a Pip's chat is open in another page too (its editor tab, the Pips tab): what was
     // typed there, and that something was sent or answered there (15 Nov, "Open in editor").
     // pipUsageMeter, pipUsageChanged, pipPlanConnecting: a Pip's chat's usage meter and its picker's ChatGPT plan Connect (0.52).
+    // pipsPhotoData (a chat picture's original: its pop-up's Download), pipsFileCopy, pipsFileSaid, pipsGitRefs (a commit's link),
+    // pipsProfileChanged: never passed on here before (20 Nov: a Pip chat's pop-up Download did nothing in the side bar).
     if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked", "pipsChatDraft", "pipsChatChanged", "pipsFileData",
-      "pipUsageMeter", "pipUsageChanged", "pipPlanConnecting"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
+      "pipUsageMeter", "pipUsageChanged", "pipPlanConnecting",
+      "pipsPhotoData", "pipsFileCopy", "pipsFileSaid", "pipsGitRefs", "pipsProfileChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     // pipSetupChanged: a new-Pip card was created or turned down somewhere else; this chat's copy and the Pips page read it again.
     if (msg.type === "pipSetupChanged") { pipSetupCards?.receive(msg); for (const listener of pipsListeners) listener(msg); return; }
     if (msg.type === "pipJobReply") { pipJobReply(msg); return; }

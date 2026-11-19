@@ -101,11 +101,13 @@ def expand_workflow_prompt(text: str, expand) -> str:
 
 # Telling a model to "adjust course" left the user with no sign it had been read: the turn simply
 # carried on and they could not tell whether the interjection had landed. Ask for one sentence of
-# acknowledgement first -- a local model in particular does what it is told and little else.
+# acknowledgement first -- a local model in particular does what it is told and little else. New work goes on the
+# checklist too: a real goal session (20 Nov) took five asks mid-turn and tracked only the first.
 STEERING_PREFIX = ("<user-interjection>\nThe user sent this WHILE you were working. Before your "
                    "next tool call, say in one short sentence how you are handling it -- changing "
-                   "course now, doing it after the current step, or why it does not apply -- then "
-                   "carry on:\n")
+                   "course now, doing it after the current step, or why it does not apply. If it is "
+                   "new work and you keep a checklist, add it there with the `todo` tool, so it isn't "
+                   "lost when the turn ends. Then carry on:\n")
 STEERING_SUFFIX = "\n</user-interjection>"
 
 # `message_task` lets the PARENT MODEL send a note to a running child. It went out under the

@@ -657,7 +657,7 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 #att-viewer .att-body { flex: 1 1 auto; min-height: 0; margin: 0; padding: var(--sp-3); overflow: auto; overscroll-behavior: contain;
   border: 1px solid var(--border); border-radius: var(--r-md); background: var(--vscode-editorWidget-background, var(--surface));
   color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
-.goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--border-strong); }
+/* A goal's prompt is a clean bubble like any other: no stripe down its side (his call, 19 Nov). */
 .text { white-space: normal; overflow-wrap: anywhere; font-size: var(--t-chat); line-height: 1.62; color: var(--text); font-family: var(--sans); }
 .text > :first-child, .surface-markdown > :first-child { margin-top: 0; }
 .text > :last-child, .surface-markdown > :last-child { margin-bottom: 0; }
@@ -3486,6 +3486,14 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
 .pip-fixes-name { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-strong); font-weight: var(--w-semi); }
 .pip-fixes-state { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+/* Wake-ups: one row each, its time, what it's for, and Cancel at the row's end (his picture, 19 Nov: the three stood
+   stacked, the time touching its words, with no room between). */
+.wakeup-row { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: 4px var(--sp-2);
+  border-radius: var(--r-sm); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.wakeup-row:hover { background: var(--surface2); }
+.wakeup-words { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-2); }
+.wakeup-words .pip-fixes-name { font-variant-numeric: tabular-nums; }
+.wakeup-row .wakeup-cancel { flex: none; }
 
 /* A goal's end ("Goal done · 2 h 14 min · 1.8M tokens · 7 cycles"): one quiet line under its turn, in the muted ink
    that reads at 4.5:1 (the line is a fact to read, not a passing notice). */

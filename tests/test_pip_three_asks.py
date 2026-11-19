@@ -351,6 +351,7 @@ class RejectFollowUp(unittest.TestCase):
         host = types.SimpleNamespace(state_directory=self.registry.directory, pip_id=pip["id"], workspace_id=pip["workspace_id"],
                                      run_id=None, last_run_id=run["id"], id="host_1", browser=browser,
                                      user_input_at=__import__("time").monotonic(),
+                                     awaiting_user_payment=True,      # the Pip asked the user to pay (its card rule)
                                      _record_held=lambda: self.fail("the user's own Pay is not held"))
         host._queued = [types.SimpleNamespace(request_id="req-9", payment=True, summary=lambda: dict(summary))]
         pip_computer._settle_writes(host)

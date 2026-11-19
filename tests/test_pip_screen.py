@@ -267,11 +267,36 @@ class WhoseSubmitTests(unittest.TestCase):
         pip_computer._settle_writes(host)
         self.assertEqual((released, recorded), (["r1"], []))
 
-    def test_a_page_submitting_on_its_own_waits_for_you(self):
+    def test_while_you_use_it_what_its_pages_send_is_yours(self):
+        # His call (20 Nov): browsing on a Pip's computer himself, a page's own beacon became an Allow card and the Pip
+        # looked into it. While the person is at it (a click or key in the last few minutes), it is their browsing.
         host, released, recorded = self.host(60)
         pip_computer._settle_writes(host)
-        self.assertEqual(released, [])
-        self.assertEqual(len(recorded), 1, "held as an action to approve")
+        self.assertEqual((released, recorded), (["r1"], []))
+
+    def test_with_nobody_at_it_a_page_submitting_on_its_own_waits_for_you(self):
+        for quiet in (pip_computer.PERSON_SECONDS + 5, None):
+            with self.subTest(quiet=quiet):
+                host, released, recorded = self.host(quiet if quiet is not None else 0)
+                if quiet is None:
+                    host.user_input_at = 0.0           # never touched
+                pip_computer._settle_writes(host)
+                self.assertEqual(released, [])
+                self.assertEqual(len(recorded), 1, "held as an action to approve")
+
+    def test_your_own_payment_tells_the_pip_only_when_it_asked_you_to_pay(self):
+        from unittest.mock import patch
+        for asked in (False, True):
+            with self.subTest(asked=asked):
+                held = types.SimpleNamespace(request_id="r1", payment=True, summary=lambda: {"site": "shop.example"})
+                host = types.SimpleNamespace(state_directory=Path(tempfile.mkdtemp()), pip_id="pip_" + "a" * 32,
+                                             workspace_id="ws_" + "b" * 32, id="host1", last_run_id="run_1",
+                                             awaiting_user_payment=asked,
+                                             browser=types.SimpleNamespace(current_url="https://shop.example/pay"))
+                with patch("dgc.workspace_registry.WorkspaceRegistry") as registry:
+                    pip_computer._user_paid(host, held)
+                self.assertEqual(registry.called, asked)
+                self.assertFalse(host.awaiting_user_payment, "asked once, told once")
 
     def test_during_a_run_the_run_decides(self):
         host, released, recorded = self.host(0.5)

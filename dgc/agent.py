@@ -6193,6 +6193,13 @@ class Agent(GoalLifecycle):
         held = "" if intents_only else self._held_note()
         if held:
             sections.append((f"held:{getattr(self, '_user_turn_serial', 0)}", held))
+        stopped = [] if intents_only or self.depth else list(getattr(self, "_stopped_by_you", None) or [])
+        if stopped:
+            self._stopped_by_you = []
+            sections.append((f"stopped:{getattr(self, '_user_turn_serial', 0)}:{id(stopped)}", "# Stopped when you were stopped\n"
+                             "The user pressed Stop, and this stopped with your turn: " + "; ".join(stopped) + ". None of "
+                             "it runs again by itself. If the user asks you to continue, start again what is still "
+                             "needed (the same command, or a new helper for the same task) and say what you started."))
         named = "" if intents_only or self.depth else self._named_pips_note()
         if named:
             sections.append((f"pips:{getattr(self, '_user_turn_serial', 0)}", "# Pips named here\n" + named))
@@ -7829,11 +7836,14 @@ class Agent(GoalLifecycle):
         self._workspace_association_notice = None
         return identity
 
-    def _persist(self, pending_tail: list | None = None) -> bool:
+    def _persist(self, pending_tail: list | None = None, *, shared: bool = False) -> bool:
+        """Save the session. ``shared``: a settings change from the command thread (the model, the thinking level, a
+        session setting) joins the reservation this agent's own running turn holds, as a rename does: the persist lock
+        serialises it with that turn's saves. Refused, a model chosen mid-turn could not be saved (live, 20 Nov)."""
         if not self.session_file:
             self._last_persist_error = ""
             return True
-        with self._session_turn_scope() as reserved:
+        with self._session_turn_scope(shared=shared) as reserved:
             if not reserved:
                 self._last_persist_error = (
                     "Session save stopped because another DGC process owns its active turn. "
@@ -10696,7 +10706,14 @@ class Agent(GoalLifecycle):
                                  "For this multi-step task, "
                                  "use the `todo` tool to list the steps and mark each done as you go.")
             pending = self._open_todos()
-            if pending and not wake and result.tool_calls[-1].name != "todo":
+            # Said after the first step without a checklist update, then every third one: after every step (live, 20
+            # Nov: ~200 times in one session) it cost tokens and the model learned to read past it.
+            if result.tool_calls and result.tool_calls[-1].name == "todo":
+                self._todo_quiet_steps = 0
+            elif pending and not wake:
+                self._todo_quiet_steps = getattr(self, "_todo_quiet_steps", 0) + 1
+            quiet = getattr(self, "_todo_quiet_steps", 0)
+            if pending and not wake and quiet and (quiet == 1 or quiet % 3 == 0):
                 reminders.append("Checklist still open: "
                                  + "; ".join(f"{t['status']}: {t['content']}" for t in pending[:6])
                                  + ". Before the next step, use the actual `todo` tool to mark "
@@ -13975,6 +13992,33 @@ class Agent(GoalLifecycle):
         owner = str(getattr(getattr(self, "ctx", None), "tool_owner", "") or "")
         if owner:
             resources.stop(owner, None)
+
+    def stop_background_by_user(self) -> list:
+        """The user's Stop (his call, 20 Nov): the turn's background work stops with it -- its background helpers, its
+        troupes and its background commands -- each written down as stopped by request, so a reopen never starts it
+        again by itself. Returns a plain line for each; the next prompt's notes tell the model, once, so "continue" can
+        start again what is still needed."""
+        from . import stopped_work, tools, troupe_agent
+        lines = []
+        jobs = getattr(self, "_detached_jobs", None) or {}
+        for agent_id, job in list(jobs.items()):
+            lines.append(f'a background helper, "{str(job.get("description") or agent_id)[:120]}"')
+        troupes = list((getattr(self, "_troupes", None) or {}).keys())
+        lines += [f"a troupe ({str(t)[:40]})" for t in troupes]
+        owner = tools._tool_owner(self.ctx)
+        for shell in tools.running_background(owner):
+            where = f" in {shell['cwd']}" if shell.get("cwd") else ""
+            lines.append(f"a background command, `{shell['command'][:200]}`{where}")
+        if not lines:
+            return []
+        stopped_work.chat_stopping(self, end="stopped")
+        if troupes:
+            troupe_agent.stop(self)
+        for job in list(jobs.values()):
+            job["cancel"].set()
+        tools.shutdown_background(owner, by_user=True)
+        self._stopped_by_you = lines
+        return lines
 
     def stop_detached(self, agent_id: str | None = None) -> int:
         """Cancel one detached child, or every detached child (and troupe). Returns how many were signalled."""

@@ -6,6 +6,19 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A goal can't loop on words**: each goal turn says the goal is still open until a completion is accepted, and three
+  turns in a row with no work and the same reply pause it (a real goal took 57 turns saying it was done after its
+  completion report was dropped).
+- **Changing the model, the thinking level or a session setting mid-turn is saved**: the save joins the running turn,
+  as a rename does (it said "The session could not save its provider choice" and put the old route back).
+- **Using a Pip's computer yourself is yours**: with no Pip run going, while you've clicked or typed in the last few
+  minutes, what its pages send is sent as your browsing, with no Allow card, and the Pip isn't told. A payment you make
+  there tells the Pip only when it asked you to pay. With nobody at the computer, a page's own request still waits.
+- **Stop stops the turn's background work too**: its background helpers, troupes and background commands, said in one
+  line ("Stopped too: …"); the next prompt tells the model what stopped, so "continue" starts again what's still
+  needed. None of it restarts by itself.
+- **New work you send mid-turn goes on the checklist**, and "Checklist still open" comes after the first step without
+  an update and then every third, not after every step.
 - **Opening Your Browser starts the Pips runner** when it isn't running (an emergency stop is never cleared), and the
   editor passes the dock's and Home's requests through (over Remote-SSH they were refused).
 - **Keep Pips running waits for a busy service manager**: changes to the user service manager may take a minute (a

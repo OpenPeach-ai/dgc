@@ -141,6 +141,31 @@ class LiveControlTests(unittest.TestCase):
         self.assertFalse(any(e.get("type") == "command_rejected" and e.get("command") == "set_model"
                              for e in self.events))
 
+    def test_a_saved_session_takes_a_new_model_while_its_turn_runs(self):
+        # Live (20 Nov, his Work session): switching the model mid-turn said "The session could not save its provider
+        # choice": the save asked for the turn's own reservation from the command thread and was refused, then put the
+        # old route back under the running turn. A provider choice is one field under the lock the turn's saves take.
+        from dgc import sessions
+        self.agent.session_file = sessions.new_path(self.agent.config.project_root)
+        self.assertTrue(self.agent._persist())
+        entered = threading.Event()
+        def chat(*args, **kwargs):
+            if not entered.is_set():
+                entered.set()
+                self.assertTrue(self.release.wait(5))
+            return ChatResult(content="done")
+        self.backend._emit_context = lambda *a, **k: None
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.backend.dispatch({"type": "prompt", "text": "Keep going", "request_id": "first"})
+            self.assertTrue(entered.wait(5))
+            self.backend.dispatch({"type": "set_model", "route": "native", "model": "vision-model", "scope": "session",
+                                    "request_id": "model"})
+            self.wait("model_changed", request_id="model", model="vision-model")
+            self.release.set()
+            self.wait("turn_end", reason="completed")
+        self.assertFalse(any(e.get("type") == "command_rejected" for e in self.events), [e for e in self.events if e.get("type") == "command_rejected"])
+        self.assertEqual(self.agent.config.model, "vision-model")
+
     def test_set_think_applies_while_a_turn_runs_and_announces_the_switch(self):
         entered = threading.Event()
         def chat(messages, **kwargs):

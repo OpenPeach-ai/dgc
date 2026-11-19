@@ -52,3 +52,17 @@ test("a wake-up's turn reads as one it planned, never as a message the user type
   event({ type: "turn_start", turn_id: "t2", prompt: "video: tide.mp4 · ended", kind: "monitor" });
   assert.match([...v.doc.querySelectorAll(".monitor-note")].at(-1).textContent, /Woke as a video ended/, "others keep their words");
 });
+
+test("each wake-up is one row: its time, what it is for, and a Cancel button at the end (his picture, 19 Nov)", async () => {
+  const { v, event, chip } = chat();
+  event({ type: "wakeups", items: [{ id: "wake1", at: at(7, 36), why: "Verify dashboard servers are live" }] });
+  chip().click();
+  const row = v.doc.querySelector("#rail-pop .wakeup-row");
+  assert.ok(row, "a row");
+  assert.deepEqual([...row.children].map((n) => n.className), ["wakeup-words", "dgc-btn small wakeup-cancel"], "words, then the button");
+  assert.deepEqual([...row.querySelector(".wakeup-words").children].map((n) => n.textContent), ["07:36", "Verify dashboard servers are live"]);
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../media/main.css", import.meta.url), "utf8");
+  assert.match(css, /\.wakeup-row \{ display: flex; align-items: center; gap: var\(--sp-2\)/, "the row lays its parts side by side, with room");
+  assert.match(css, /\.wakeup-words \{ flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: var\(--sp-2\)/, "the time and its words, apart");
+});

@@ -5557,7 +5557,7 @@ class Backend:
         One save at a time: a newer change while one runs is saved by the next."""
         def run():
             with self._think_save_lock():
-                ok = self.agent._persist()
+                ok = self.agent._persist(shared=True)
             if ok:
                 return
             revert()
@@ -9386,6 +9386,12 @@ class Backend:
 
         elif t in ("cancel", "interrupt"):
             self._stop_turn()
+            # His call (20 Nov): a manual Stop stops the turn's background helpers and commands too, said in one line;
+            # the next prompt tells the model what stopped.
+            stop_background = getattr(self.agent, "stop_background_by_user", None)
+            stopped = stop_background() if callable(stop_background) else []
+            if stopped:
+                self.em.emit("info", message="Stopped too: " + "; ".join(stopped) + ".")
 
         elif t == "set_mode":
             if self._busy() and cmd.get("live") is not True:
@@ -9542,7 +9548,7 @@ class Backend:
                 previous = str(config_get("subscription_model", "") if callable(config_get) else "").strip()
                 if session_route:
                     self.config.hold("subscription_model", model)
-                    if not self.agent._persist():
+                    if not self.agent._persist(shared=True):
                         self.config.hold("subscription_model", previous)
                         self.em.emit("command_rejected", command=t, reason="session_save_failed",
                                      message="The session could not save its model choice.",
@@ -9625,7 +9631,7 @@ class Backend:
             switch_window = getattr(self.agent, "window_after_switch", None)
             context_changed = bool(cmd.get("model") and callable(switch_window)
                                    and switch_window(previous, scoped=session_route))
-            if session_route and not self.agent._persist():
+            if session_route and not self.agent._persist(shared=True):
                 self.config.data = route_before['data']
                 self.config._ephemeral_keys = route_before['ephemeral']
                 self.config._held_keys = route_before['held']
@@ -10658,7 +10664,7 @@ class Backend:
                     self.agent.autonomous_gate = values["autonomous_gate"]
                 if "autonomous_max_turns" in values:
                     self.agent.autonomous_max_turns = values["autonomous_max_turns"]
-                if session_route and values and not self.agent._persist():
+                if session_route and values and not self.agent._persist(shared=True):
                     raise RuntimeError(getattr(self.agent, "_last_persist_error", "")
                                        or "the Work session could not save its model route")
             except Exception as exc:
@@ -10726,7 +10732,7 @@ class Backend:
                 self.config.restore_agents_route(None)
             if part in (None, "fallback"):
                 self.config.restore_agents_fallback(None)
-            if not self.agent._persist():
+            if not self.agent._persist(shared=True):
                 (self.config.data, self.config._ephemeral_keys, self.config._held_keys, self.config._env_secret_keys,
                  self.config._provider_secret_identity) = before
                 self.em.emit("command_rejected", command=t, reason="session_save_failed",

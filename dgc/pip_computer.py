@@ -54,6 +54,7 @@ PLAN = {"schema_version": 1}
 ACTION_TTL_SECONDS = 24 * 3600
 IDLE_SECONDS = 15 * 60
 USER_WRITE_SECONDS = 3.0             # a submit this soon after the user's own input is theirs
+PERSON_SECONDS = 5 * 60              # with no run, the person counts as using the computer this long after their input
 CAREFUL_REF = "careful:"               # a careful-mode hold (pip_careful): nothing paused in the browser
 CAREFUL_KINDS = ("site", "text", "floor")
 LEVEL_REF = "level:"                   # a step its level approved before anything was paused (pip_levels)
@@ -462,6 +463,7 @@ class Host:
         self.viewer = None
         self.desktop = None                 # the full screen (pip_screen), when this machine has it
         self.user_input_at = 0.0            # the user's last click or key on this computer
+        self.awaiting_user_payment = False  # the Pip asked the user to pay on this screen (its card rule)
         self._pump_thread = None
         self.run_id = None
         self.frames_dir = None
@@ -771,6 +773,7 @@ class Host:
                     self.browser.drop(held.request_id)
                 self._back_from_drop()
                 self.card_note = CARD_EMPTY
+                self.awaiting_user_payment = True      # the user's own Pay on this screen is the one the Pip asked for
                 continue
             # The fuse (pip_levels.fuse): 25 things done on its own in the last hour, and it asks again, its level and
             # its Always allows both, until the hour has passed. Its card says so.
@@ -3150,12 +3153,13 @@ def _host_view(self, op: str, request: dict) -> dict:
 
 
 def _settle_writes(self) -> None:
-    """With no run: a submit right after the user's own click or key is theirs, and is sent; any
-    other (a page's own timer, say) waits for the user's approval like a Pip's."""
+    """With no run: while the person is using the computer (a click or key in the last few minutes), what its pages send
+    is theirs and is sent, and the Pip is never told (his call, 20 Nov: a page's own beacon while he browsed became an
+    Allow card, and the Pip looked into it). With nobody at it, a page's own write waits for the user's approval."""
     if self.run_id is not None:
         return
     while self._queued:
-        if time.monotonic() - self.user_input_at <= USER_WRITE_SECONDS:
+        if self.user_input_at and time.monotonic() - self.user_input_at <= PERSON_SECONDS:
             held = self._queued.pop(0)
             if held.request_id in self.browser.held:
                 self.browser.release(held.request_id)
@@ -3939,7 +3943,11 @@ def _tab_listing(host) -> str:
 
 def _user_paid(self, held) -> None:
     """The user typed their card on the Pip's screen and pressed Pay: theirs, sent at once (their own action is the
-    approval). Kept as a sent action, so it is on record and the Pip, told in its chat, carries on (tick)."""
+    approval). When the Pip asked them to pay (its card rule), it is kept as a sent action and the Pip, told in its chat,
+    carries on (tick). Their own browsing is theirs: nothing is kept and the Pip isn't told (his call, 20 Nov)."""
+    if not getattr(self, "awaiting_user_payment", False):
+        return
+    self.awaiting_user_payment = False
     from .workspace_registry import WorkspaceRegistry, identifier
     from datetime import timedelta
     from .pip_schedules import _instant, timestamp

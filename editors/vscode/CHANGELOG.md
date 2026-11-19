@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Chat sessions name themselves CHAT** after the wordmark; Work stays VIBE.
+- **Clean bubbles**: a goal's prompt bubble has no stripe down its side.
+- **A colour's swatch sits level with its code** on a Mac's monospace font.
+- **A Pip's chat in the side bar gets everything its editor tab gets**: a picture's Download in the pop-up, Copy, a file's
+  "saved" note and commit links (the side bar passed on only a list, and those five were missing).
+- **Wake-ups list one row each**: its time, what it's for, and Cancel at the end.
 - **Your Browser opens from the dock and Home's card, also over Remote-SSH.** The editor now passes their requests to
   DGC (it answered "Unknown Pips command." before), and a click starts the Pips runner when it isn't running.
 - **Keep Pips running says what it's doing**: "Turning on…" while the system's service manager works (up to a few

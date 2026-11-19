@@ -3058,9 +3058,9 @@ def background_shell_output(bid: str, owners: dict) -> dict | None:
             "dropped": dropped}
 
 
-def _shutdown_background(owner: str | None = None) -> None:
-    """Stop running background shells: one agent's -- a chat closing while its process lives on --
-    or, at exit, everyone's."""
+def _shutdown_background(owner: str | None = None, *, by_user: bool = False) -> None:
+    """Stop running background shells: one agent's -- a chat closing while its process lives on, or (``by_user``) the
+    user's Stop -- or, at exit, everyone's."""
     with _BG_LOCK:
         entries = [entry for entry in _BG.values() if owner is None or entry.get("owner") == owner]
     for entry in entries:
@@ -3068,22 +3068,34 @@ def _shutdown_background(owner: str | None = None) -> None:
         # IDs: the kernel may have reused one for an unrelated process by interpreter shutdown.
         if entry.get("finished") is None:
             entry["killed"] = True
-            # Not the user's or the model's kill: the chat or DGC is going away. Said before the process
-            # goes, so a restart knows this command did not end by request (dgc/stopped_work.py).
-            entry["shutdown"] = True
+            # The user's Stop is a kill by request (never started again on a reopen). Otherwise the chat or DGC is going
+            # away: said before the process goes, so a restart knows it did not end by request (dgc/stopped_work.py).
+            if not by_user:
+                entry["shutdown"] = True
             try:
                 from . import stopped_work
-                stopped_work.shell_ended(entry, "dgc_stopped")
+                stopped_work.shell_ended(entry, "killed" if by_user else "dgc_stopped")
             except Exception:
                 pass
             _terminate_background(entry["proc"], sweep_exited_group=True)
             _join_background_reader(entry)
 
 
-def shutdown_background(owner: str) -> None:
+def shutdown_background(owner: str, *, by_user: bool = False) -> None:
     """One agent's running background shells, and nobody else's."""
     if owner:
-        _shutdown_background(owner)
+        _shutdown_background(owner, by_user=by_user)
+
+
+def running_background(owner: str) -> list:
+    """One agent's background shells still running: [{id, command, cwd}], oldest first."""
+    if not owner:
+        return []
+    with _BG_LOCK:
+        entries = [(bid, entry) for bid, entry in _BG.items()
+                   if entry.get("owner") == owner and entry.get("finished") is None]
+    return [{"id": str(bid), "command": str(entry.get("command") or ""), "cwd": str(entry.get("cwd") or "")}
+            for bid, entry in sorted(entries, key=lambda item: item[1].get("started", 0))]
 
 
 atexit.register(_shutdown_background)
