@@ -95,8 +95,7 @@ def _pin(store, pip_id, config):
     source_mode = job['source_policy'].get('mode') if isinstance(job['source_policy'], dict) else None
     if job['status'] != 'active' or (kind == 'personal' and source_mode != 'personal') \
             or (kind != 'personal' and (source_mode != 'committed_only'
-                                       or job['pip_type'] not in PROJECT_READERS
-                                       or not (Path(root)/'.git').exists())) or kind not in ('personal', 'git', 'folder'):
+                                       or job['pip_type'] not in PROJECT_READERS)) or kind not in ('personal', 'git', 'folder'):
         _fail('A workflow needs active Pips of one kind. Project workflows use committed source and read-only Pips.')
     model = _model_settings(config.clone_for_root(Path(root)), job['model_choice'], personal=kind=='personal')
     validate_pinned_connection(config, model)

@@ -409,8 +409,9 @@ class WhoAndWhen(GiveWorld, unittest.TestCase):
         plain = Path(self.base) / "plain"
         plain.mkdir()
         (plain / "a.txt").write_text("hi")
-        said = self.refused("unsupported_source", self.give, folder=plain)
-        self.assertIn("Git", said)
+        # Any folder DGC opens as a project (19 Nov): one that isn't a Git project is read as it is
+        # (tests/test_pip_any_folder.py), never refused.
+        self.assertFalse(self.give(folder=plain, dry_run=True)["done"])
         self.refused("not_found", self.give, folder=Path(self.base) / "gone")
         self.refused("invalid_request", self.give, folder="relative/path")
         with patch("dgc.project_folders._home", return_value=self.root):

@@ -613,7 +613,7 @@ The new identity is not yet stored. Its only valid prior checkpoint is empty;
 enqueue recomputes that pin after insertion inside the acceptance transaction.
 Existing targets retain their actual checkpoint and reviewed finding history.
 """
-    from .pips import PipStore, source_revision
+    from .pips import PipStore, git_root, pinned_revision
     from . import pip_checkpoints
     from .pip_source_changes import snapshot_for_source
     from .pip_sources import pin
@@ -633,12 +633,12 @@ Existing targets retain their actual checkpoint and reviewed finding history.
         version = 1 if body['definition']['source_policy'] == {'mode': 'committed_only'} else 2
         checkpoint = pip_checkpoints._pin({'schema_version': version, 'pip_id': pip_id,
                                           'workspace_id': body['workspace_id'], 'checkpoint': None})
-    revision = source_revision(binding['canonical_root'], request['source_ref'])
+    revision = pinned_revision(registry, binding['canonical_root'], request['source_ref'])
     source = pin(body['definition']['source_policy'], source_revision=revision)
     return {'pip_id': pip_id, 'workspace_id': body['workspace_id'], 'job_version': request.get('expected_version', 0) + 1,
             'lifecycle_revision': lifecycle, 'binding_id': binding['id'], 'canonical_root': binding['canonical_root'],
             'source_revision': revision, 'checkpoint': checkpoint,
-            'changes': snapshot_for_source(binding['canonical_root'], source, checkpoint)}
+            'changes': snapshot_for_source(git_root(registry, binding['canonical_root']), source, checkpoint)}
 
 
 def review(registry, setup_id, workspace_id, expected_digest, actor, config, accept: bool):
@@ -732,8 +732,8 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
             else:
                 from .pip_limits import require_room
                 require_room(registry.db, workspace_id)
-            from .pips import source_revision
-            if not personal:source_revision(root, body['definition']['source_ref'])
+            from .pips import pinned_revision
+            if not personal:pinned_revision(registry, root, body['definition']['source_ref'])
             version = request.get('expected_version', 0) + 1
             if 'pip_id' not in request:
                 registry.db.execute('INSERT INTO pips VALUES(?,?,?,?,?,?)', (pip_id, workspace_id, 'active', version, now, now))

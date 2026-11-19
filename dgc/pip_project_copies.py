@@ -62,6 +62,28 @@ def leftover(rel: str) -> bool:
     """Whether a path is something running code leaves behind (bytecode, test and type-check caches, installed packages)."""
     parts = rel.split("/")
     return bool(set(parts[:-1]) & LEFTOVER_DIRS) or bool(LEFTOVER_FILE.fullmatch(parts[-1]))
+
+
+def _never_folder(name: str) -> bool:
+    from .checker_box import SKIPPED_DIRS, secret
+    low = name.lower()
+    return secret(name, True) or low in SKIPPED_DIRS or low in SKIP or low in LEFTOVER_DIRS
+
+
+def never_copied(rel: str) -> bool:
+    """What DGC never copies from a folder that isn't a Git project with a commit (no .gitignore decides for it): .env
+    and .env.*, keys, certificates and credential files, and dependency, virtual environment, build and cache folders.
+    One list: the credential files a Pip's checker never sees and the folders it leaves alone (checker_box), with the
+    copy's own leftovers."""
+    from .checker_box import secret
+    *dirs, name = rel.split("/")
+    return any(_never_folder(d) for d in dirs) or secret(name, False) or bool(LEFTOVER_FILE.fullmatch(name))
+
+
+def plain(root) -> bool:
+    """Whether a folder is read as it is (no Git project with a commit at its top decides what a copy leaves out)."""
+    from .pip_folder_git import own_commit
+    return not own_commit(root)
 NAME = re.compile(r"[^A-Za-z0-9._-]+")
 DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 STATUSES = ("pending", "applied", "partial", "not_applied", "discarded", "undone")
@@ -280,10 +302,11 @@ def _project(registry, workspace_id) -> tuple[dict, Path]:
 
 
 def _git(root: Path, *args, data: bytes | None = None) -> bytes | None:
-    """Git's answer, or None. Its stdin is what DGC gives it, never the editor's protocol pipe."""
+    """Git's answer, or None. Its stdin is what DGC gives it, never the editor's protocol pipe. A read never refreshes
+    the folder's own Git index (GIT_OPTIONAL_LOCKS=0): DGC writes nothing in a folder but what the user applies."""
     try:
         proc = subprocess.Popen(["git", "-C", str(root), *args], stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
     except OSError:
         return None
     try:
@@ -295,21 +318,58 @@ def _git(root: Path, *args, data: bytes | None = None) -> bytes | None:
     return out if proc.returncode == 0 else None
 
 
-def project_files(root: Path) -> list[str]:
-    """What a copy holds: Git's tracked and new files without the ignored, else a walk without dependency folders."""
+def project_files(root: Path, *, as_is: bool | None = None) -> list[str]:
+    """What a copy holds. A Git project with a commit at its top: Git's tracked and new files without the ignored.
+    Any other folder is read as it is (a Pip works in any folder, 19 Nov): what Git lists where it can read the folder
+    (a Git project with no commit yet, a folder inside a bigger one: its .gitignore still leaves things out), else every
+    file, and never what DGC never copies (never_copied). ``as_is``: whether the folder is read as it is (plain), when
+    the caller knows."""
     listed = _git(root, "ls-files", "-co", "--exclude-standard", "-z")
     if listed is not None:
-        names = [n for n in listed.decode("utf-8", "replace").split("\0") if n]
-        return sorted({n for n in names if _rel_ok(n) and n.split("/")[0] != ".git"})
+        names = sorted({n for n in listed.decode("utf-8", "replace").split("\0")
+                        if n and _rel_ok(n) and n.split("/")[0] != ".git"})
+        if not (plain(root) if as_is is None else as_is):
+            return names
+        venvs = tuple(n[:-len("pyvenv.cfg")] for n in names if n.endswith("/pyvenv.cfg"))
+        return [n for n in names if not never_copied(n) and not (venvs and n.startswith(venvs))]
     fd = os.open(root, DIR)
     try:
-        out = []
-        for rel, kind, _, _ in _walk(fd):
-            if kind == "file" and not set(rel.split("/")[:-1]) & SKIP:
-                out.append(rel)
-        return out
+        return [rel for rel, kind, _, _ in _plain_walk(fd) if kind == "file" and not never_copied(rel)]
     finally:
         os.close(fd)
+
+
+def _plain_walk(root_fd: int, prefix: str = "", depth: int = 0):
+    """_walk for a folder read as it is: a folder DGC never copies (node_modules, a virtual environment: one holding
+    pyvenv.cfg, .git, .ssh...) is never walked into, so a big one costs nothing."""
+    if depth > 32:
+        return
+    for name in sorted(os.listdir(root_fd)):
+        try:
+            info = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+        except OSError:
+            continue
+        rel = prefix + name
+        if stat.S_ISDIR(info.st_mode):
+            if _never_folder(name):
+                continue
+            try:
+                fd = os.open(name, DIR, dir_fd=root_fd)
+            except OSError:
+                continue
+            try:
+                try:
+                    os.stat("pyvenv.cfg", dir_fd=fd, follow_symlinks=False)
+                    continue                          # a virtual environment, whatever its name
+                except OSError:
+                    pass
+                yield from _plain_walk(fd, rel + "/", depth + 1)
+            finally:
+                os.close(fd)
+        elif stat.S_ISREG(info.st_mode):
+            yield rel, "file", info.st_size, info.st_mtime_ns
+        else:
+            yield rel, "link" if stat.S_ISLNK(info.st_mode) else "other", 0, 0
 
 
 def _ignored(root: Path, rels) -> set:
@@ -419,16 +479,19 @@ def prepare(store, pip_id, marks, request_key) -> list:
                                                  (row["id"],)).fetchone() is not None
         folder = "projects/" + _folder_name(workspace["name"])
         if row is not None and waiting:
-            told.append({"name": workspace["name"][:80], "folder": folder, "files": row["files"], "kept": True})
+            told.append({"name": workspace["name"][:80], "folder": folder, "files": row["files"], "kept": True,
+                         **_as_is(registry, row["id"])})
             continue
         made = _make_copy(store, pip_id, workspace, root, folder, row["id"] if row is not None else None)
-        told.append({"name": workspace["name"][:80], "folder": folder, "files": made["files"], "kept": False})
+        told.append({"name": workspace["name"][:80], "folder": folder, "files": made["files"], "kept": False,
+                     **({"plain": True} if made.get("plain") else {})})
     return told
 
 
 def _make_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, *, fit: bool = False) -> dict:
     registry, db = store.registry, store.db
-    rels = project_files(root)
+    as_is = plain(root)
+    rels = project_files(root, as_is=as_is)
     if len(rels) > MAX_FILES and not fit:
         raise RegistryError("project_too_big", f"{workspace['name']} has {len(rels):,} files; a copy holds at most "
                                                f"{MAX_FILES:,}, so DGC copied nothing.")
@@ -495,14 +558,14 @@ def _make_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, *, fi
     # ("source": each project file's size and time as copied, so a folder Pip's next turn copies only what changed.)
     _save_snapshot(registry, copy_id, {"folder": folder, "files": snapshot,
                                        "source": {rel: stamps[rel] for rel in snapshot},
-                                       **({"left_out": left["names"]} if left else {})})
+                                       **({"left_out": left["names"]} if left else {}), **({"plain": True} if as_is else {})})
     at = _now(registry)
     with registry.transaction():
         db.execute("INSERT INTO pip_project_copies(id,pip_id,workspace_id,name,files,bytes,made_at) VALUES(?,?,?,?,?,?,?) "
                    "ON CONFLICT(pip_id,workspace_id) DO UPDATE SET files=excluded.files,bytes=excluded.bytes,"
                    "made_at=excluded.made_at,name=excluded.name",
                    (copy_id, pip_id, workspace["id"], workspace["name"][:80], len(snapshot), total, at))
-    return {"copy_id": copy_id, "files": len(snapshot), "bytes": total, "left_out": left}
+    return {"copy_id": copy_id, "files": len(snapshot), "bytes": total, "left_out": left, "plain": as_is}
 
 
 LEFT_LISTED = 5000                       # left-out names a copy remembers (for Apply's reason); the count is exact
@@ -565,7 +628,7 @@ def own_folder(store, pip_id) -> dict | None:
                 updated = made["updated"] if made else 0
             row = db.execute("SELECT * FROM pip_project_copies WHERE id=?", (row["id"],)).fetchone()
             return {"name": name, "folder": folder, "files": row["files"], "kept": True, "updated": updated,
-                    **_fingerprint(registry, row["id"])}
+                    **_fingerprint(registry, row["id"]), **_as_is(registry, row["id"])}
         made = None
         if row is not None and isinstance(snap.get("source"), dict) and snap.get("folder") == folder:
             made = _update_copy(store, pip_id, workspace, root, folder, row["id"], snap)
@@ -576,8 +639,13 @@ def own_folder(store, pip_id) -> dict | None:
         return {"name": name, "folder": folder, "error": str(exc)}
     left = made.get("left_out")
     return {"name": name, "folder": folder, "files": made["files"], "kept": False, "updated": made["updated"],
-            **_fingerprint(registry, made.get("copy_id")),
+            **_fingerprint(registry, made.get("copy_id")), **({"plain": True} if made.get("plain") else {}),
             **({"left_out": {k: left[k] for k in ("files", "bytes", "examples")}} if left else {})}
+
+
+def _as_is(registry, copy_id) -> dict:
+    """{plain: true} for a copy of a folder read as it is (DGC's own skip list, not Git's ignore rules, left things out)."""
+    return {"plain": True} if copy_id and _snapshot(registry, copy_id).get("plain") else {}
 
 
 def _fingerprint(registry, copy_id) -> dict:
@@ -596,7 +664,8 @@ def _update_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, sna
     or removed (the copy matches its snapshot everywhere else, so each other file may be the folder's again). None when
     the copy's folder in the box is gone (the caller makes it afresh)."""
     registry, db = store.registry, store.db
-    rels = project_files(root)
+    as_is = plain(root)
+    rels = project_files(root, as_is=as_is)
     limit = copy_limit()
     files_now, stamps = dict(snap.get("files") or {}), dict(snap.get("source") or {})
     source = os.open(root, DIR)
@@ -667,13 +736,17 @@ def _update_copy(store, pip_id, workspace, root: Path, folder: str, copy_id, sna
         os.close(source)
     saved = {**snap, "folder": folder, "files": files_now, "source": stamps}
     saved.pop("left_out", None)
+    saved.pop("plain", None)
     if left:
         saved["left_out"] = left["names"]
+    if as_is:
+        saved["plain"] = True
     _save_snapshot(registry, copy_id, saved)
     with registry.transaction():
         db.execute("UPDATE pip_project_copies SET files=?,bytes=?,name=? WHERE id=?",
                    (len(files_now), total, workspace["name"][:80], copy_id))
-    return {"copy_id": copy_id, "files": len(files_now), "bytes": total, "updated": updated, "left_out": left}
+    return {"copy_id": copy_id, "files": len(files_now), "bytes": total, "updated": updated, "left_out": left,
+            "plain": as_is}
 
 
 def context_for(store, pip, req) -> list:
@@ -699,7 +772,7 @@ def context_for(store, pip, req) -> list:
 def _compare(store, copy) -> list:
     """The copy against what it was: [{path, change: modified|added|deleted|link, ...}] in path order."""
     snap = _snapshot(store.registry, copy["id"])
-    folder, was = snap.get("folder", ""), snap.get("files", {})
+    folder, was, as_is = snap.get("folder", ""), snap.get("files", {}), snap.get("plain") is True
     files = _files_fd(store, copy["pip_id"])
     try:
         try:
@@ -718,6 +791,8 @@ def _compare(store, copy) -> list:
                     out.append({"path": rel, "change": "link"})
                 elif leftover(rel):
                     continue                                # (a test run's __pycache__ is never a change, new or old)
+                elif as_is and old is None and never_copied(rel):
+                    continue                                # (a folder read as it is: a .env or build/ it made, never)
                 elif kind == "missing":
                     out.append({"path": rel, "change": "deleted"})
                 elif old is None:
@@ -933,6 +1008,8 @@ def apply(store, pip_id, change_id, expected_digest, *, by=None) -> dict:
                     why = "It's inside Git's own folder: never written."
                 elif rel in ignored:
                     why = "The project ignores this file, so DGC doesn't write it."
+                elif snap.get("plain") is True and never_copied(rel):
+                    why = "DGC never copies a file like this (.env, keys, dependency or build folders), so it never writes one."
                 if why is None:
                     current = _read(project, rel)
                     kind = _kind_at(project, rel)

@@ -1,8 +1,9 @@
 // pips-12, the editor half, in real Chromium with the real Pips bundle (test/support/pip-chat-scene.mjs, opts.teams at
-// Pips API 88): Skills on a Pip's page (a row a skill with its switch), Folder on its page (a button and a small menu in
-// the row's own flow), the Personal list in two folders with headings that fold, the Teams menu with Export team… (a
-// dialog of ticks and a name) and Import team… (the team's cards under a line that names it). Nothing is cut off, pokes
-// out or lies on something else, dark and light, in a tab (700 px) and in the side bar (300 px).
+// Pips API 88): Skills on a Pip's page (a row a skill with its switch), the Personal list as one list (its folders were
+// dropped before release, 0.52: no headings, and no Folder row on a Pip's page, whatever a development install's
+// profiles say), the Teams menu with Export team… (a dialog of ticks and a name) and Import team… (the team's cards
+// under a line that names it). Nothing is cut off, pokes out or lies on something else, dark and light, in a tab
+// (700 px) and in the side bar (300 px).
 // DGC_TEAMS_PICTURES=<folder> keeps a picture of each.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -38,7 +39,6 @@ async function openPage(theme, width, opts = {}) {
   await x.p.waitForTimeout(250);
   return x;
 }
-const LONG = "Home, money and yearly renewals to watch";
 
 /** What the eye would catch inside `selector` (pass to page.evaluate): a control outside the box or past its edge, words
     cut sideways by their box (`.may-clip`: names that end in "…" by design are not counted), two controls on each other,
@@ -101,7 +101,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     } finally { await x.close(); }
   });
 
-  test(`a refused switch goes back and says why; below API 88 the page has no Skills and no Folder (${theme}, ${width}px)`, async (t) => {
+  test(`a refused switch goes back and says why; below API 88 the page has no Skills (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openPage(theme, width, { teams: "refuse" });
     try {
@@ -118,92 +118,49 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     } finally { await old.close(); }
   });
 
-  test(`Folder on a Pip's page: a button that says where it is, a small menu in the row's own flow, and New folder… (${theme}, ${width}px)`, async (t) => {
+  test(`a Pip's page has no Folder row, whatever its profile from a development install says (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openPage(theme, width);
     try {
-      const read = () => x.p.evaluate(() => { const root = window.__pipsRoot || document, sec = root.querySelector(".pip-folder-set"), box = (n) => n.getBoundingClientRect(), c = box(sec);
-        const btn = sec.querySelector("[data-pip-folder-open]"), menu = sec.querySelector(".pip-folder-menu"), inside = (n) => { const r = box(n); return r.left >= c.left - 0.5 && r.right <= c.right + 0.5 && r.top >= c.top - 0.5 && r.bottom <= c.bottom + 0.5; };
-        const hit = (n) => { const r = box(n), top = root.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!top && (top === n || n.contains(top)); };
-        return { value: btn.textContent.trim(), expanded: btn.getAttribute("aria-expanded"), btnInside: inside(btn), btnFill: getComputedStyle(btn).backgroundColor,
-          menu: menu ? { inside: inside(menu), shared: menu.classList.contains("dgc-menu"), under: box(menu).top >= box(btn).bottom - 0.5, fill: getComputedStyle(menu).backgroundColor,
-            rows: [...menu.querySelectorAll(".dgc-menu-row")].map((r) => ({ text: r.textContent.trim(), checked: r.getAttribute("aria-checked"), hit: hit(r), inside: inside(r) })) } : null,
-          focus: (root.activeElement || document.activeElement)?.textContent?.trim() || "" }; });
-      await x.p.locator(".pip-folder-set").scrollIntoViewIfNeeded();
-      let m = await read();
-      assert.deepEqual([m.value, m.expanded, m.menu, m.btnInside], ["No folder", "false", null, true]); assert.equal(isPurple(m.btnFill), false);
-      checkLayout(await x.p.evaluate(looked, [".pip-folder-set", null]), solid);
-      await x.p.locator("[data-pip-folder-open]").click(); await x.p.waitForSelector(".pip-folder-menu");
-      await x.p.locator(".pip-folder-menu").scrollIntoViewIfNeeded();
-      m = await read();
-      assert.equal(m.expanded, "true"); assert.ok(m.menu.shared && m.menu.inside && m.menu.under, "the shared menu, under its button, inside the group (nothing is cut by its rounded edge)");
-      assert.deepEqual(m.menu.rows.map((r) => [r.text, r.checked]), [["No folder", "true"], [LONG, "false"], ["Launch", "false"], ["New folder…", null]]);
-      assert.deepEqual(m.menu.rows.filter((r) => !r.hit || !r.inside).map((r) => r.text), [], "every row is in sight and can be clicked");
-      assert.equal(m.focus, "No folder", "the keyboard is on where it is now"); assert.equal(isPurple(m.menu.fill), false);
-      checkLayout(await x.p.evaluate(looked, [".pip-folder-set", ".dgc-menu-label"]), solid);
-      await picture(x.p, `folder-menu-${theme}-${width}`, ".pip-folder-menu");
-      // Escape closes it and the button has the keyboard again.
-      await x.p.keyboard.press("Escape"); await x.p.waitForFunction(() => !(window.__pipsRoot || document).querySelector(".pip-folder-menu"));
-      assert.equal((await read()).focus, "No folder");
-      // Pick a folder in use: DGC is told, and the button says it.
-      await x.p.locator("[data-pip-folder-open]").click(); await click(x.p, '[data-pip-folder-pick="Launch"]');
-      await x.p.waitForFunction(() => (window.__pipsRoot || document).querySelector("[data-pip-folder-open]")?.textContent.trim() === "Launch" && !(window.__pipsRoot || document).querySelector("[data-pip-folder-open]").disabled);
-      assert.deepEqual(await sent(x.p, "set_pip_profile"), [{ pip_id: PIP, changes: { group: "Launch" } }]);
-      // New folder…: one box in the group, with Add and Cancel beside or under it.
-      await x.p.locator("[data-pip-folder-open]").click(); await click(x.p, "[data-pip-folder-new]"); await x.p.waitForSelector("#pipFolderName");
-      assert.equal(await x.p.evaluate(() => (window.__pipsRoot || document).activeElement?.id || document.activeElement?.id), "pipFolderName");
-      await x.p.locator("#pipFolderName").fill("A folder name of exactly forty letters !");
-      checkLayout(await x.p.evaluate(looked, [".pip-folder-set", null]), solid);
-      await picture(x.p, `folder-new-${theme}-${width}`, ".pip-folder-set");
-      await x.p.keyboard.press("Enter");
-      await x.p.waitForFunction(() => !(window.__pipsRoot || document).querySelector("#pipFolderName") && !(window.__pipsRoot || document).querySelector("[data-pip-folder-open]").disabled);
-      assert.deepEqual((await sent(x.p, "set_pip_profile")).at(-1), { pip_id: PIP, changes: { group: "A folder name of exactly forty letters !" } });
-      m = await read(); assert.equal(m.value, "A folder name of exactly forty letters !"); assert.ok(m.btnInside, "a long folder name stays inside its row");
-      checkLayout(await x.p.evaluate(looked, [".pip-folder-set", ".pip-folder-value"]), solid);
+      const m = await x.p.evaluate(() => { const root = window.__pipsRoot || document, page = root.querySelector(".pip-page");
+        return { folderSet: !!root.querySelector(".pip-folder-set, [data-pip-folder-open], #pip-folder-form, .pip-folder-menu"),
+          groups: [...page.querySelectorAll(".pip-page-body > section")].map((sec) => sec.getAttribute("aria-label")), words: page.textContent }; });
+      assert.equal(m.folderSet, false, "no Folder row, menu or New folder… box");
+      assert.ok(!m.groups.includes("Folder"), m.groups.join(", "));
+      assert.doesNotMatch(m.words, /No folder|New folder…/);
+      assert.ok(m.groups.indexOf("Skills") === m.groups.indexOf("Apps it can use") + 1, "Skills still sits under Apps it can use: " + m.groups.join(", "));
+      await x.p.locator(".pip-skills").scrollIntoViewIfNeeded();
+      checkLayout(await x.p.evaluate(looked, [".pip-skills", ".pip-skill-line"]), solid);
+      await picture(x.p, `page-no-folder-${theme}-${width}`, ".pip-skills");
+      assert.deepEqual(await sent(x.p, "set_pip_profile"), []);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
 
-  test(`the Personal list in two folders: no-folder Pips first, a heading a folder with its count, and a heading folds it (${theme}, ${width}px)`, async (t) => {
+  test(`the Personal list is one list: no folder headings, every Pip once, the head's actions on one line (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await open(theme, width, { home: true });
     try {
-      await x.p.waitForSelector(".pip-folder");
-      const read = () => x.p.evaluate(() => { const root = window.__pipsRoot || document, home = root.querySelector(".simple-home"), box = (n) => n.getBoundingClientRect(), h = box(home);
-        const tops = (list) => list.map((n) => Math.round(box(n).top));
-        const folders = [...home.querySelectorAll(".pip-folder")].map((f) => { const b = f.querySelector(".pip-folder-toggle"), name = b.querySelector(".pip-folder-name"), n = b.querySelector(".pip-folder-count"), rows = [...f.querySelectorAll(".pip-row")];
-          return { name: name.textContent, count: n.textContent, expanded: b.getAttribute("aria-expanded"), rows: rows.map((r) => r.querySelector(".pip-row-name").textContent.slice(0, 20)),
-            headInside: box(b).left >= h.left - 0.5 && box(b).right <= h.right + 0.5, countInside: box(n).right <= box(b).right + 0.5 && box(n).left >= box(name).right - 0.5, countSeen: box(n).width > 3,
-            nameWhole: name.scrollWidth <= name.clientWidth + 1, headHeight: Math.round(box(b).height), rowsBelow: rows.every((r) => box(r).top >= box(b).bottom - 0.5), ink: getComputedStyle(b).color, fill: getComputedStyle(b).backgroundColor,
-            rowsInside: rows.every((r) => box(r).left >= h.left - 0.5 && box(r).right <= h.right + 0.5) }; });
-        const loose = [...home.querySelectorAll(":scope > .pip-rows .pip-row")], heads = [...home.querySelectorAll(".pip-folder-toggle")];
+      await x.p.waitForSelector(".simple-home [data-job]");
+      const m = await x.p.evaluate(() => { const root = window.__pipsRoot || document, home = root.querySelector(".simple-home"), box = (n) => n.getBoundingClientRect(), h = box(home);
+        const rows = [...home.querySelectorAll(".pip-row")];
         const actions = [...home.querySelectorAll(".simple-home-head button, .simple-home-head summary")].filter((n) => n.checkVisibility());
         const lap = []; for (let i = 0; i < actions.length; i++) for (let j = i + 1; j < actions.length; j++) { const a = box(actions[i]), b = box(actions[j]); if (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5) lap.push(i + "/" + j); }
-        return { loose: loose.map((r) => r.querySelector(".pip-row-name").textContent.slice(0, 20)), looseAboveFolders: Math.max(...tops(loose)) < Math.min(...tops(heads)), folders,
+        return { names: rows.map((r) => r.querySelector(".pip-row-name").textContent.slice(0, 20)), lists: home.querySelectorAll(":scope > .pip-rows").length,
+          headings: home.querySelectorAll(".pip-folders, .pip-folder, .pip-folder-head, [data-pip-folder-toggle]").length,
+          rowsInside: rows.every((r) => box(r).left >= h.left - 0.5 && box(r).right <= h.right + 0.5),
           head: { names: actions.map((a) => a.getAttribute("aria-label") || a.textContent.trim()), lap, inside: actions.every((a) => box(a).left >= h.left - 0.5 && box(a).right <= h.right + 0.5),
             oneLine: new Set(actions.map((a) => Math.round((box(a).top + box(a).bottom) / 2))).size === 1, titleClear: box(home.querySelector(".simple-home-head h2")).right <= box(actions[0]).left + 0.5 },
           jobs: home.querySelectorAll("[data-job]").length, sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 }; });
-      const m = await read();
-      assert.deepEqual(m.loose, ["Core", "Mornings"], "Pips with no folder come first, under no heading"); assert.ok(m.looseAboveFolders);
-      assert.deepEqual(m.folders.map((f) => [f.name, f.count, f.expanded, f.rows.length]), [[LONG, "2", "true", 2], ["Launch", "2", "true", 2]]);
+      assert.equal(m.headings, 0, "no folder headings");
+      assert.equal(m.lists, 1, "one list");
       assert.equal(m.jobs, 6, "every Pip is in the list once");
-      for (const f of m.folders) { assert.ok(f.headInside && f.rowsInside && f.rowsBelow, `${f.name}: its heading and rows are inside the list, rows under the heading`);
-        assert.ok(f.countSeen && f.countInside, `${f.name}: its count is in sight beside its name`); assert.ok(f.headHeight <= 30, `${f.name}: a heading is one quiet line (${f.headHeight}px)`);
-        assert.equal(isPurple(f.ink) || isPurple(f.fill), false); }
-      assert.ok(m.folders[1].nameWhole, "a short folder name is whole"); if (width === 700) assert.ok(m.folders[0].nameWhole, "a 40-character name is whole in a tab");
+      assert.equal(m.names[0], "Core", "Core first, then the list's own order");
+      assert.ok(m.rowsInside, "every row inside the list");
       assert.deepEqual(m.head.names, ["Pips settings", "Teams", "New Pip"]);
       assert.ok(m.head.inside && m.head.oneLine && m.head.titleClear && !m.head.lap.length, "Your Pips, settings, Teams and New Pip sit on one line, none on another: " + JSON.stringify(m.head));
       assert.equal(m.sideways, false);
-      await picture(x.p, `list-folders-${theme}-${width}`);
-      // A heading folds its folder: its count stays, its Pips are put away, and the next folder moves up.
-      await x.p.locator('[data-pip-folder-toggle="Launch"]').click();
-      await x.p.waitForFunction(() => (window.__pipsRoot || document).querySelector('[data-pip-folder-toggle="Launch"]')?.getAttribute("aria-expanded") === "false");
-      const folded = await read();
-      assert.deepEqual(folded.folders.map((f) => [f.count, f.expanded, f.rows.length]), [["2", "true", 2], ["2", "false", 0]]); assert.equal(folded.jobs, 4);
-      await picture(x.p, `list-folded-${theme}-${width}`);
-      await x.p.keyboard.press("Enter");
-      await x.p.waitForFunction(() => (window.__pipsRoot || document).querySelector('[data-pip-folder-toggle="Launch"]')?.getAttribute("aria-expanded") === "true");
-      assert.equal((await read()).jobs, 6, "Enter on the heading opens it again");
+      await picture(x.p, `list-one-${theme}-${width}`);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
@@ -229,7 +186,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
           nameWide: box(d.querySelector("#teamName")).width > c.width * 0.6, focus: (root.activeElement || document.activeElement)?.id || "" }; });
       let m = await read();
       assert.equal(m.title, "Export team");
-      assert.deepEqual(m.ticks.map((r) => [r[1], r[2]]), [["", true], ["Launch", true], ["Launch", true], [LONG, true]], "every Pip that can be shared, ticked, its folder under its name (not Core, not Patch)");
+      assert.deepEqual(m.ticks.map((r) => [r[1], r[2]]), [["", true], ["", true], ["", true], ["", true]], "every Pip that can be shared, ticked, by its name alone (not Core, not Patch)");
       assert.equal(m.count, "4 Pips in this team."); assert.deepEqual(m.confirm, ["Export…", false]);
       assert.ok(m.inView && m.listInside && m.ticksSquare && m.tickBesideName && m.nameWide, "the dialog is in view, its ticks square and beside their names: " + JSON.stringify(m));
       assert.equal(m.focus, "teamName", "the keyboard starts on the team's name");

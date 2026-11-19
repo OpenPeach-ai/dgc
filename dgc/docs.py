@@ -4029,6 +4029,14 @@ Git lists) is never all or nothing: its biggest files are left out and the Pip i
 it changes reaches your folder until it is applied (below). Its page opens its computer, Files and
 Terminal, and photos and files sent in its chat are in its Files too.
 
+A Pip works in any folder, not only a Git project. A folder that isn't one (or a Git project with no
+commit yet) is read as it is: DGC copies its files and skips what must never be copied: `.env` and
+`.env.*`, keys and certificates (`*.pem`, `*.key`, `id_rsa`...), credential files, `node_modules`,
+virtual environments, build output and caches. Your folder is never touched: no `.git` is added, and
+DGC keeps its own Git of the folder on its side, for its checks and "what changed since". Apply writes
+the changed files into your folder and Undo puts them back, from DGC's own record of what Apply
+replaced. Once the Git project has a commit, its Pips read its commits as any Git project's do.
+
 On a Mac without Apple silicon and macOS 26, Pips can't have their own computer; one dialog says so,
 once. There a Pip with a folder reads its folder as it did before 0.52 (by default, the last commit) and
 reports what it finds; it fixes nothing.

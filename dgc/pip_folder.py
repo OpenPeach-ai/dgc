@@ -111,22 +111,14 @@ def _not_busy(store, job) -> None:
 
 
 def _folder(folder) -> Path:
-    """The folder you gave it: one DGC opens as a project (Add a folder's own rules), and one a folder Pip can work in:
-    listed among your projects (never a temporary one) and a Git project with a commit, at its top folder."""
+    """The folder you gave it: any folder DGC opens as a project (Add a folder's own rules), listed among your projects
+    (never a temporary one). A Pip works in any folder (19 Nov): one that isn't a Git project with a commit at its top
+    is read as it is, with DGC's own Git of it on DGC's side (pip_folder_git); the folder is never written."""
     from . import project_folders, sessions
     root = project_folders.checked(folder)
     if sessions.not_a_project(root):
         raise RegistryError("invalid_request", "That folder is a temporary one, or DGC's own. Choose one of your "
                                                "projects.")
-    from .pips import source_revision
-    try:
-        source_revision(root, "HEAD")
-    except RegistryError as exc:
-        if exc.code == "unsupported_source":
-            raise RegistryError("unsupported_source", "Choose the top folder of that Git project, where its .git folder "
-                                                      "is.") from None
-        raise RegistryError("unsupported_source", f"{root.name or 'That folder'} isn't a Git project with a commit yet. "
-                            "A Pip works on a folder's committed files: commit it once, then give it this folder.") from None
     return root
 
 
@@ -191,8 +183,13 @@ def _plural(n, one, many=None) -> str:
     return f"{n} {one if n == 1 else (many or one + 's')}"
 
 
-def _words(job, name, *, to_folder: bool, boxed: bool, dropped, pending) -> tuple[list[str], list[str]]:
-    """What stays and what changes, as its confirmation says it."""
+# How a folder that isn't a Git project with a commit is read (pip_project_copies.never_copied), in the page's words.
+AS_IS = "files as they are (DGC skips .env, keys and node_modules)"
+
+
+def _words(job, name, *, to_folder: bool, boxed: bool, dropped, pending, as_is=False) -> tuple[list[str], list[str]]:
+    """What stays and what changes, as its confirmation says it. ``as_is``: the folder isn't a Git project with a
+    commit, so it is read as it is."""
     keeps = ["Its chat, notes and routines stay as they are.",
              "Its level, model and sub-agents stay as you set them."]
     if boxed:
@@ -202,7 +199,8 @@ def _words(job, name, *, to_folder: bool, boxed: bool, dropped, pending) -> tupl
         keeps.insert(1, f"It still has no computer: give it one on its page when you want it to work on a copy of {name}.")
     changes = []
     if to_folder:
-        changes.append(f"It works on {name}: it reads {name}'s committed files"
+        reads = f"{name}'s {AS_IS}" if as_is else f"{name}'s committed files"
+        changes.append(f"It works on {name}: it reads {reads}"
                        + (f", and its computer gets its own copy of {name} to work in." if boxed else "."))
         if boxed:
             changes.append(f"{name} itself changes only when you apply what it changed (at Do it all it applies them by "
@@ -390,7 +388,8 @@ def give(store, pip_id, folder, actor, *, dry_run=False) -> dict:
     definition, dropped = _next_definition(job, to_folder=True)
     boxed = definition.get("computer_plan") is not None
     pending = _pending(store, job, removing=False, folder_ws=workspace["id"] if workspace else None)
-    keeps, changes = _words(job, name, to_folder=True, boxed=boxed, dropped=dropped, pending=pending)
+    from .pip_project_copies import plain
+    keeps, changes = _words(job, name, to_folder=True, boxed=boxed, dropped=dropped, pending=pending, as_is=plain(root))
     place = {"name": name, "folder": str(root), "workspace_id": workspace["id"] if workspace else None}
     if dry_run:
         return _answer(store.get(pip_id), place, keeps, changes, done=False)

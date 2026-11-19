@@ -45,7 +45,11 @@ class CurrentTreeTests(unittest.TestCase):
         job = self.create()
         proposal = self.store.propose(job['id'], 1, {'source_policy': TREE}, 'user')
         self.assertEqual(self.store.get(job['id'])['source_policy'], pip_sources.default_policy('rook'))  # new Pips: committed, safe_source_v2
-        with self.assertRaises(RegistryError): self.queue(job)
+        # Before the review it reads committed source, never the current tree. (This folder isn't a Git project: its
+        # committed source is DGC's own Git of it, since a Pip works in any folder, 0.52; before, the run was refused.)
+        run = self.raw(self.queue(job))
+        self.assertEqual((run['source_policy'], run['source_snapshot']), (pip_sources.default_policy('rook'), None))
+        self.assertRegex(run['source_revision'], r'^[0-9a-f]{40}$')
         self.registry.associate_session('chat', self.root)
         with self.assertRaises(RegistryError):
             self.store.propose(job['id'], 1, {'source_policy': TREE}, 'core_proposal', origin_session_id='chat',

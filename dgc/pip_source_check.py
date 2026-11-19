@@ -31,7 +31,8 @@ def check(registry, pip) -> dict:
     try:
         if policy['mode'] == 'committed_only':
             from . import pips
-            result['revision'] = pips.source_revision(root, pip['source_ref'])
+            result['revision'] = pips.pinned_revision(registry, root, pip['source_ref'])
+            root = pips.git_root(registry, root)          # (a folder without Git: DGC's own Git of it)
             if v2:
                 rows, left = pips.committed_selection(root, result['revision'], policy)
                 result['left_out'] = left.record()

@@ -1,8 +1,9 @@
-"""Pips API 88 in the Python SDK: the two fields that came with it inside existing commands are refused before 88.
+"""Pips API 88 in the Python SDK: the field that came with it inside an existing command is refused before 88.
 
-set_pip_profile's `changes.group` (a folder in the Personal list) and use_pip_computer_view's op `close` (its tab
-closed): an older runtime would refuse each with its own words, so the SDK says so first, as it does for op `pointer`
-before 53. start_pip_app_link's `another` is older (0.51, API 74) and still goes to such a runtime
+use_pip_computer_view's op `close` (its tab closed): an older runtime would refuse it with its own words, so the SDK
+says so first, as it does for op `pointer` before 53. start_pip_app_link's `another` is older (0.51, API 74) and still
+goes to such a runtime. set_pip_profile's `changes.group` (a folder in the Personal list) was dropped before release
+(0.52): the SDK no longer gates it, and the runtime refuses it as a change it doesn't know
 (TypeScript: tests/test_dgc_sdk_api88_fields.mjs).
 """
 import sys
@@ -14,7 +15,6 @@ sys.path.insert(0, "tests")
 PIP = "pip_" + "a" * 32
 LINK = "piplink_" + "b" * 32
 SENDS = (
-    ("set_pip_profile", {"pip_id": PIP, "changes": {"group": "Home"}}),
     ("use_pip_computer_view", {"pip_id": PIP, "op": "close"}),
 )
 
@@ -38,6 +38,11 @@ class Api88Fields(unittest.TestCase):
             with self.subTest(command=command):
                 sent = now.pips.mutate(command, values, approved=True)["request"]
                 self.assertEqual({k: sent[k] for k in values}, values)
+
+    def test_changes_group_is_no_longer_an_api88_field(self):
+        wire = self.Wire(); old = self.session(wire, caps={**self.CAPS, "pips_api_version": 87})
+        sent = old.pips.mutate("set_pip_profile", {"pip_id": PIP, "changes": {"group": "Home"}}, approved=True)["request"]
+        self.assertEqual(sent["changes"], {"group": "Home"}, "passed on, for the runtime to refuse")
 
     def test_the_same_commands_without_them_still_go_to_an_older_runtime(self):
         wire = self.Wire(); old = self.session(wire, caps={**self.CAPS, "pips_api_version": 87})

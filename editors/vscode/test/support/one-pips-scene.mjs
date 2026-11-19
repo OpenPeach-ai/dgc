@@ -18,6 +18,7 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *    fix      "none" | "ask" | "declined" | "running" | "ready" | "applied" (by itself, at Do it all): GST watchdog's fix
  *    waiting  the GSP wallet waits on you (true by default)
  *    box      GST watchdog has its own computer (true by default); false: a machine without boxes
+ *    plain    lime_tiles isn't a Git project (its list_project_folders row says git: false; a Pip works in any folder)
  *    level    its level ("ask" by default)
  *    own      its last reply changed its own schedule at once (an own-change line, with Undo)
  *    order    the ids of list_pips {scope: "all"} after Core, in DGC's order (a function reads it each time)
@@ -86,10 +87,10 @@ export function makeBackend(o = {}) {
     pip(GST, LIME, NAME, "rook", { goal: sub ? "Check the tile shop's totals every evening at 8" : "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.pending ? { proposals: o.pending } : {}), ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}) }),
     pip(ERP, LIME, "ERP daily audit", "scout"), pip(BEDS, GARDEN, "Bed planner", "scout")];
   const folders = [
-    { folder: "/home/me/code/shop", name: "shop", here: true, exists: true, sessions: 2, pips: 0, workspace_id: SHOP, updated_at: ago(30) },
-    { folder: "/home/me/code/garden", name: "garden", here: false, exists: true, sessions: 1, pips: 1, workspace_id: GARDEN, updated_at: ago(90) },
-    { folder: "/home/me/code/lime_tiles", name: "lime_tiles", here: false, exists: true, sessions: 3, pips: 2, workspace_id: LIME, updated_at: ago(10) },
-    { folder: "/home/me/code/notes", name: "notes", here: false, exists: false, sessions: 1, pips: 0, workspace_id: null, updated_at: ago(9000) }];
+    { folder: "/home/me/code/shop", name: "shop", here: true, exists: true, git: true, sessions: 2, pips: 0, workspace_id: SHOP, updated_at: ago(30) },
+    { folder: "/home/me/code/garden", name: "garden", here: false, exists: true, git: true, sessions: 1, pips: 1, workspace_id: GARDEN, updated_at: ago(90) },
+    { folder: "/home/me/code/lime_tiles", name: "lime_tiles", here: false, exists: true, git: !o.plain, sessions: 3, pips: 2, workspace_id: LIME, updated_at: ago(10) },
+    { folder: "/home/me/code/notes", name: "notes", here: false, exists: false, git: false, sessions: 1, pips: 0, workspace_id: null, updated_at: ago(9000) }];
   const runner = { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 }, boxes: { available: true, why: "", ...(o.boxes || {}) } };
   const controls = { version: 1, mode: "read_only", options: { context_size: 8192, thinking: o.thinking || "off" }, options_source: "last_message", inherited_context_size: 1048576, effective_context_size: 8192,
     context_min: 2048, context_max: 32768, thinking_levels: ["off", "low", "medium", "high", "xhigh"], reasoning_control: "provider_dependent", reasoning_note: "n", context_note: "n" };

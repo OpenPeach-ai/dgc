@@ -55,6 +55,18 @@ test('a Pip pinned to a branch says so on its page; one without a box says it on
  assert.match(plain.text('.pip-folder-parts'),/Your current files\. It only reads them\./);
 });
 
+test('a Pip in a folder that isn\'t a Git project says it reads the files as they are, and what DGC never copies',async()=>{
+ // A Pip works in any folder (list_project_folders' git false): DGC's own list leaves out .env, keys and node_modules.
+ const x=setup({api:95,scene:{plain:true}});await x.drain();await x.openPip(GST);await x.menu('job');
+ assert.match(x.text('.pip-folder-parts'),/What it reads\s*Your files as they are, in its own copy\. DGC skips \.env, keys and node_modules\./);
+ assert.doesNotMatch(x.text('.pip-folder-parts'),/Git ignores/);
+ const bare=setup({api:95,scene:{plain:true,box:false}});await bare.drain();await bare.openPip(GST);await bare.menu('job');
+ assert.match(bare.text('.pip-folder-parts'),/Your files as they are\. It only reads them\. DGC skips \.env, keys and node_modules\./);
+ // A Git project (git true, or an older DGC that doesn't say): as before.
+ const git=setup({api:95});await git.drain();await git.openPip(GST);await git.menu('job');
+ assert.match(git.text('.pip-folder-parts'),/Not what Git ignores, such as \.env\./);
+});
+
 test('the hint under the box no longer says "Your current files · reads only" on every turn',async()=>{
  const x=setup({api:95});await x.drain();await x.openPip(GST);
  assert.doesNotMatch(x.text('.composer-hint'),/reads only|Your current files|Committed code/);

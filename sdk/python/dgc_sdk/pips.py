@@ -535,7 +535,7 @@ MUTATION_COMMANDS |= API108_MUTATIONS
 # rows of kind "work" carry changed, can_undo and undo; undo_pip_agent_job puts back what it changed. Local only.
 API109_MUTATIONS = frozenset({'undo_pip_agent_job'})
 MUTATION_COMMANDS |= API109_MUTATIONS
-# API 110: give a Pip for anything a folder (a Git project with a commit), or make a folder Pip a Pip for anything again;
+# API 110: give a Pip for anything a folder (any folder DGC opens as a project), or make a folder Pip a Pip for anything again;
 # it keeps its chat, notes, routines, computer, level and model. dry_run says what stays and what changes. Local only.
 API110_MUTATIONS = frozenset({'give_pip_folder', 'remove_pip_folder'})
 MUTATION_COMMANDS |= API110_MUTATIONS
@@ -551,10 +551,9 @@ PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'd
 
 
 def _api88_field(command, values) -> bool:
-    """What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list)
-    and use_pip_computer_view's op close (its tab closed). start_pip_app_link's another is older (0.51)."""
-    if command == 'set_pip_profile':
-        return isinstance(values.get('changes'), dict) and 'group' in values['changes']
+    """What came with API 88 inside an existing command: use_pip_computer_view's op close (its tab closed).
+    start_pip_app_link's another is older (0.51). (set_pip_profile's changes.group, a folder in the Personal list, was
+    dropped before release, 0.52: a runtime refuses it as any change it doesn't know.)"""
     return command == 'use_pip_computer_view' and values.get('op') == 'close'
 PIP_KEY_ID = re.compile(r"pipkey_[a-f0-9]{32}\Z")
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
@@ -1255,8 +1254,8 @@ class Pips:
                 raise DGCUnsupportedError('Photos and files through the spool, and as_file, require a runtime advertising Pips API 52 or newer')
             _check_api52_fields(values)
         if version < 88 and _api88_field(command, values):
-            raise DGCUnsupportedError("A Pip's folder (changes.group) and a closed computer view (op close) require a runtime "
-                                      "advertising Pips API 88 or newer")
+            raise DGCUnsupportedError("A closed computer view (op close) requires a runtime advertising Pips API 88 or "
+                                      "newer")
         if API53_FIELDS.get(command, frozenset()) & set(values) or (command == 'use_pip_computer_view' and values.get('op') == 'pointer'):
             if version < 53:
                 raise DGCUnsupportedError("Where a Pip acted by position (pointers, the view's pointer) requires a runtime advertising Pips API 53 or newer")

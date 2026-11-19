@@ -57,13 +57,18 @@ class Starting(GoalWorld):
         # Live, 12 Nov: it checked in after every day ("Ready for Day 4?"), and the goal waited each time.
         self.assertIn("never to check in", turn["text"])
 
-    def test_only_a_personal_pip_and_a_real_objective(self):
+    def test_a_real_objective_and_any_pips_conversation(self):
         with self.assertRaises(RegistryError):
             pip_goals.set_goal(self.store, self.pip["id"], "   ", None, "editor-user", self.cfg)
-        project = self.store.create(self.registry.resolve(self.base)["id"], "Reviewer", "Review.", "local-console",
+        # Every Pip's conversation can have a goal, a folder Pip's too, in a folder that isn't a Git project (a Pip
+        # works in any folder, 0.52; this folder's missing commit used to refuse its first turn).
+        folder = self.base / "reviewed"
+        folder.mkdir()
+        (folder / "notes.md").write_text("# Notes\n")
+        project = self.store.create(self.registry.resolve(folder)["id"], "Reviewer", "Review.", "local-console",
                                     pip_type="rook")
-        with self.assertRaises(RegistryError):
-            pip_goals.set_goal(self.store, project["id"], "Review everything", None, "editor-user", self.cfg)
+        goal = pip_goals.set_goal(self.store, project["id"], "Review everything", None, "editor-user", self.cfg)
+        self.assertEqual(goal["status"], "active")
 
     def test_a_new_goal_replaces_the_old_one(self):
         first = self.start("First goal")

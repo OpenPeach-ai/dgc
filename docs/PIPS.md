@@ -78,8 +78,14 @@ A Pip with a folder gets a copy of that folder in its computer's Files
 (`Files/projects/<name>/`) at the start of each turn:
 
 - **What is copied**: the files Git lists, tracked and new, without what Git ignores (so
-  no `.env`, no `node_modules`), never `.git`, and never a link. A folder that isn't a
-  Git project is walked, leaving out the usual dependency and build folders.
+  no `.env`, no `node_modules`), never `.git`, and never a link.
+- **Any folder, not only a Git project.** A folder that isn't a Git project with a commit
+  (no Git at all, or a Git project with no commit yet) is read as it is, and DGC skips
+  what must never be copied: `.env` and `.env.*`, keys and certificates (`*.pem`, `*.key`,
+  `id_rsa`...), credential files, `node_modules`, virtual environments, build output and
+  caches. The folder is never touched: no `.git` is added. DGC keeps its own Git of it on
+  its side, for the commits a check and its "what changed since" pin; Apply writes into
+  the folder, and Undo puts back what Apply replaced from DGC's own record.
 - **Your files as they are now.** Every run reads its copy, scheduled runs included, so
   a Pip sees your uncommitted work and never only the last commit. After the first copy,
   only what changed in the folder is copied again.

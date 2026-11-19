@@ -116,8 +116,11 @@ class PipSetupControlsTests(unittest.TestCase):
 
 
     def test_model_tool_roundtrip_only_drafts_then_human_reviews(self):
+        # Outside auto mode: a card. (In auto mode the chat's permission is the approval and the Pip is made at once,
+        # pip_setup_tool. This test ran in auto mode and leaned on its folder having no commit, which stopped the
+        # creation; a Pip works in any folder now, 0.52.)
         agent, _ = self.agent()
-        self.cfg.data.update(mode='auto', api_mode='ollama')
+        self.cfg.data.update(mode='default', api_mode='ollama')
         request = self.request()
         responses = iter([ChatResult(tool_calls=[ToolCall('setup-card', 'pips_setup', request)]),
                           ChatResult(content='Review the setup card in Pips before it starts.')])

@@ -311,10 +311,10 @@ export function pipAppsRefusal(request: any, apiVersion: number): string {
   if (request.type === 'set_pip_app' && typeof request.on !== 'boolean') return 'Switch an app on or off.';
   return '';
 }
-/** pips-12: a switch per skill on a Pip's page, and folders in the Personal list (Pips API 88). get_pip_skills {pip_id}
- *  lists its skills, set_pip_skill {pip_id, skill, on} switches one; a Pip's folder is set_pip_profile's changes.group.
- *  Why a request is refused, or '' when it may go: an older DGC is never sent one; a skill is named as DGC names it; on
- *  is true or false; a folder's name is one line of up to 40 characters. */
+/** pips-12: a switch per skill on a Pip's page (Pips API 88). get_pip_skills {pip_id} lists its skills, set_pip_skill
+ *  {pip_id, skill, on} switches one. Why a request is refused, or '' when it may go: an older DGC is never sent one; a
+ *  skill is named as DGC names it; on is true or false. (The Personal list's folders, set_pip_profile's changes.group,
+ *  were dropped before release, 0.52.) */
 const PIP_SKILL = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 export function pipTeamsRefusal(request: any, apiVersion: number): string {
   if (['get_pip_skills', 'set_pip_skill'].includes(request?.type)) {
@@ -322,11 +322,6 @@ export function pipTeamsRefusal(request: any, apiVersion: number): string {
     if (request.type === 'set_pip_skill' && (typeof request.skill !== 'string' || !PIP_SKILL.test(request.skill))) return 'Choose one of the skills on this Pip’s page.';
     if (request.type === 'set_pip_skill' && typeof request.on !== 'boolean') return 'Switch a skill on or off.';
     return '';
-  }
-  if (request?.type === 'set_pip_profile' && request.changes && typeof request.changes === 'object' && Object.prototype.hasOwnProperty.call(request.changes, 'group')) {
-    if (apiVersion < 88) return 'Update DGC to put Pips in folders.';
-    const group = request.changes.group;
-    if (typeof group !== 'string' || [...group.trim()].length > 40 || /[\u0000-\u001f\u007f]/.test(group)) return 'A folder’s name is one line of up to 40 characters.';
   }
   return '';
 }

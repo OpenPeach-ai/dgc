@@ -505,8 +505,10 @@ def _own_box_words(own) -> str:
             "tool) is walled off from this machine: its browser reaches the web, and its Terminal and Files are yours to "
             "use freely.")
     if isinstance(own, dict) and own.get('folder') and not own.get('error'):
-        said += (f" Its Files hold your own copy of this project at {own['folder']} ({own.get('files', 0)} files, without"
-                 " what Git ignores): edit files and run commands and tests there. Nothing you change there reaches the "
+        left_out = (" the files as they are, without .env, keys, credential files and dependency, build and cache "
+                    "folders, which DGC never copies" if own.get('plain') else " without what Git ignores")
+        said += (f" Its Files hold your own copy of this project at {own['folder']} ({own.get('files', 0)} files,"
+                 f"{left_out}): edit files and run commands and tests there. Nothing you change there reaches the "
                  "user's real folder until the user applies it: DGC shows what you changed as a card below your reply.")
         if own.get('kept'):
             said += (" Your changes wait for the user, so the files your waiting change touched are as you left them; "
@@ -728,6 +730,30 @@ def source_revision(root, ref):
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision):
         raise RegistryError("source_unavailable", "Git returned an invalid commit identity.")
     return revision
+
+
+def pinned_revision(registry, root, ref):
+    """source_revision for a project folder: its own commit where it is a Git project with one at its top, else DGC's
+    own Git of it, brought up to date first (a Pip works in any folder, pip_folder_git). The folder is never written."""
+    try:
+        return source_revision(root, ref)
+    except RegistryError as exc:
+        from .pip_folder_git import own_commit
+        if exc.code not in ("source_unavailable", "unsupported_source") or own_commit(root):
+            raise                    # (a Git project with commits: a branch that isn't there stays an error)
+    from .pip_folder_git import source_root
+    place = source_root(registry, root, sync=True)
+    if place != str(Path(root)) and ref != "HEAD" and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", str(ref)):
+        raise RegistryError("source_unavailable", f"{Path(root).name or 'This folder'} isn't a Git project with a commit, "
+                            f"so it has no branch {str(ref)[:80]} to read. A Pip there reads its files as they are: set "
+                            "it back to HEAD.")
+    return source_revision(place, ref)
+
+
+def git_root(registry, root) -> str:
+    """Where committed-source reads of a pinned revision go (the folder, or DGC's own Git of it)."""
+    from .pip_folder_git import source_root
+    return source_root(registry, root)
 
 
 # A Pip run keeps going (reported 2026-10-14): no step limit (0, as DGC's own max_turns), no wall clock, and main
@@ -1388,7 +1414,7 @@ class PipStore:
         from .pip_sources import pin
         source = source or pin(pip.get("source_policy", "committed_only"), source_revision=revision)
         checkpoint = pip_checkpoints.snapshot(self, pip["id"])
-        changes = snapshot_for_source(binding["canonical_root"], source, checkpoint)
+        changes = snapshot_for_source(git_root(self.registry, binding["canonical_root"]), source, checkpoint)
         return {"pip_id": pip["id"], "workspace_id": pip["workspace_id"], "job_version": pip["current_version"],
                 "lifecycle_revision": pip['lifecycle_revision'],
                 "binding_id": binding["id"], "canonical_root": binding["canonical_root"], "source_revision": revision,
@@ -1402,7 +1428,7 @@ class PipStore:
         if pip["pip_type"] not in ("scout", "lens", "rook", "lock"):
             return None
         binding = self.registry.binding(pip["workspace_id"])
-        revision = source_revision(binding["canonical_root"], pip["source_ref"])
+        revision = pinned_revision(self.registry, binding["canonical_root"], pip["source_ref"])
         return self._prepare_audit(pip, binding, revision)
 
     def enqueue(self, pip_id, idempotency_key, actor, config, *, schedule_occurrence=None, conversation_request=None, handoff=None, event_occurrence=None, _audit_preparation=None, main_chat_request=None, pulse_request=None, _model_preparation=None, computer_continuation=None, _waiting_message=None):
@@ -1574,7 +1600,7 @@ class PipStore:
             raise RegistryError('manual_only', 'A Pip that reads your current files runs only when you ask: no handoffs, schedule or events.')
         if current_tree and self.db.in_transaction:
             raise RegistryError('source_preparation_required', 'Capture current-tree source outside the queue transaction.')
-        revision = None if current_tree or personal else source_revision(binding['canonical_root'], pip['source_ref'])
+        revision = None if current_tree or personal else pinned_revision(self.registry, binding['canonical_root'], pip['source_ref'])
         frozen_config = config.clone_for_root(Path(binding["canonical_root"]))
         model = None
         if not standalone:
@@ -5076,7 +5102,7 @@ def _execute_pulse_plan(registry, row, manifest, config, deadline):
     prepared = None
     if boxed:
         snapshot = directory / 'source'
-        snapshot_info = clean_snapshot(binding['canonical_root'], manifest['source_revision'], snapshot)
+        snapshot_info = clean_snapshot(git_root(registry, binding['canonical_root']), manifest['source_revision'], snapshot)
         cancelled.check()
         prepared = prepare_isolated_repo(snapshot, directory)
         collect_artifacts(prepared, action)
@@ -5294,12 +5320,12 @@ def _execute_run(registry, row, config):
     elif action is None and source['source_policy'] != {'mode': 'committed_only'}:
         # safe_source_v2: what this commit's copy skips or leaves out is recorded with the run
         # and told to the Pip (in its in-memory manifest; the stored one is immutable).
-        snapshot_info, left_out = copy_committed(binding["canonical_root"], manifest["source_revision"], snapshot,
+        snapshot_info, left_out = copy_committed(git_root(registry, binding["canonical_root"]), manifest["source_revision"], snapshot,
                                                  source['source_policy'])
         registry.event(row["workspace_id"], "pip_run_source_left_out", pip_id=row["pip_id"], run_id=row["id"], payload=left_out)
         manifest = {**manifest, "source_left_out": left_out}
     else:
-        snapshot_info = clean_snapshot(binding["canonical_root"], manifest["source_revision"], snapshot)
+        snapshot_info = clean_snapshot(git_root(registry, binding["canonical_root"]), manifest["source_revision"], snapshot)
     if action is not None:
         from .pip_execution import prepare_isolated_repo
         prepared = prepare_isolated_repo(snapshot, run_dir, action=action)

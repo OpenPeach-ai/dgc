@@ -26,10 +26,9 @@ CREATE TABLE IF NOT EXISTS pip_profiles (
 """
 BODIES = ("core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill")
 COLORS = ("core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill", "peach", "rose", "lilac", "sky", "mint", "sun", "slate")
-FIELDS = ("title", "body", "color", "notify", "group")
-# Its folder in the Personal list (pips-12: "folders, not walls"): kept beside the profile, "" for none.
-GROUP_KEY = "pip_group:"
-MAX_GROUP = 40
+FIELDS = ("title", "body", "color", "notify")
+# (A Pip's folder in the Personal list, "group", was dropped before release, 0.52: what a development install kept for it,
+# metadata rows "pip_group:<pip id>", is never read.)
 LOCAL = ("editor-user", "local-console")
 SHARED_KINDS = ("links", "media", "files")
 MAX_SHARED = 60
@@ -46,33 +45,20 @@ def migrate_character_palette(db) -> None:
 
 
 def default() -> dict:
-    return {"title": "", "body": None, "color": None, "notify": True, "group": ""}
+    return {"title": "", "body": None, "color": None, "notify": True}
 
 
-def _groups(db, pip_ids) -> dict:
-    ids = list(pip_ids)
-    if not ids:
-        return {}
-    try:
-        rows = db.execute(f"SELECT key,value FROM metadata WHERE key IN ({','.join('?' * len(ids))})",
-                          [GROUP_KEY + i for i in ids]).fetchall()
-    except Exception:                    # a registry without metadata (never in practice)
-        return {}
-    return {row[0][len(GROUP_KEY):]: str(row[1])[:MAX_GROUP] for row in rows}
-
-
-def _view(row, group="") -> dict:
+def _view(row) -> dict:
     if row is None:
-        return {**default(), "group": group}
-    return {"title": row["title"], "body": row["body"], "color": row["color"], "notify": bool(row["notify"]), "group": group}
+        return default()
+    return {"title": row["title"], "body": row["body"], "color": row["color"], "notify": bool(row["notify"])}
 
 
 def get(db, pip_id: str) -> dict:
-    group = _groups(db, [pip_id]).get(pip_id, "")
     try:
-        return _view(db.execute("SELECT * FROM pip_profiles WHERE pip_id=?", (pip_id,)).fetchone(), group)
+        return _view(db.execute("SELECT * FROM pip_profiles WHERE pip_id=?", (pip_id,)).fetchone())
     except Exception:                    # a registry from before schema 41
-        return {**default(), "group": group}
+        return default()
 
 
 def profiles(db, pip_ids) -> dict:
@@ -82,11 +68,8 @@ def profiles(db, pip_ids) -> dict:
     if ids:
         try:
             marks = ",".join("?" * len(ids))
-            groups = _groups(db, ids)
             for row in db.execute(f"SELECT * FROM pip_profiles WHERE pip_id IN ({marks})", ids).fetchall():
-                found[row["pip_id"]] = _view(row, groups.get(row["pip_id"], ""))
-            for pip_id in ids:
-                found.setdefault(pip_id, {**default(), "group": groups.get(pip_id, "")})
+                found[row["pip_id"]] = _view(row)
         except Exception:
             pass
     return {pip_id: found.get(pip_id, default()) for pip_id in ids}
@@ -104,7 +87,7 @@ def update(store, pip_id: str, changes, actor: str) -> dict:
     if job["status"] == "archived":
         raise RegistryError("archived", f"{job['name']} is archived. Restore it first.")
     if not isinstance(changes, dict) or not changes or set(changes) - set(FIELDS):
-        raise RegistryError("invalid_request", "Change its title, face, colour, notifications or folder.")
+        raise RegistryError("invalid_request", "Change its title, face, colour or notifications.")
     fields = get(store.db, pip_id)
     if "title" in changes:
         title = changes["title"]
@@ -123,18 +106,8 @@ def update(store, pip_id: str, changes, actor: str) -> dict:
         if type(changes["notify"]) is not bool:
             raise RegistryError("invalid_request", "Notifications are on or off.")
         fields["notify"] = changes["notify"]
-    if "group" in changes:
-        group = changes["group"]
-        if not isinstance(group, str) or len(group.strip()) > MAX_GROUP or re.search(r"[\x00-\x1f\x7f]", group):
-            raise RegistryError("invalid_request", f"Keep its folder's name to one line, up to {MAX_GROUP} characters.")
-        fields["group"] = " ".join(group.split())
     now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     with store.registry.transaction():
-        if "group" in changes:
-            if fields["group"]:
-                store.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (GROUP_KEY + pip_id, fields["group"]))
-            else:
-                store.db.execute("DELETE FROM metadata WHERE key=?", (GROUP_KEY + pip_id,))
         store.db.execute("INSERT INTO pip_profiles(pip_id,title,body,color,notify,updated_at) VALUES(?,?,?,?,?,?) "
                          "ON CONFLICT(pip_id) DO UPDATE SET title=excluded.title,body=excluded.body,color=excluded.color,"
                          "notify=excluded.notify,updated_at=excluded.updated_at",

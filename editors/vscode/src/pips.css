@@ -1687,47 +1687,23 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
    the card's own flow (nothing floats over the chat or is cut by the card), none picked until you pick. */
 .allow-from{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;min-width:0;font-size:12px}
 .allow-from-label{flex:none;color:var(--muted)}
-button.allow-from-btn,button.pip-folder-btn{display:inline-flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0;max-width:100%;height:var(--btn-h);min-height:0;margin:0;padding:0 8px 0 10px;border:1px solid var(--btn-line);border-radius:var(--btn-r);background:transparent;color:var(--btn-text);font:var(--w-med,500) var(--t-sm,12px)/1 var(--sans);box-shadow:none;cursor:pointer;transition:var(--btn-move)}
-button.allow-from-btn:hover:not(:disabled),button.allow-from-btn[aria-expanded=true],button.pip-folder-btn:hover:not(:disabled),button.pip-folder-btn[aria-expanded=true]{border-color:var(--btn-line-hover);background:var(--btn-wash);color:var(--btn-text)}
-button.allow-from-btn:focus-visible,button.pip-folder-btn:focus-visible{outline:var(--btn-ring);outline-offset:2px}
-button.allow-from-btn:disabled,button.pip-folder-btn:disabled{opacity:.55;cursor:default}
+button.allow-from-btn{display:inline-flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0;max-width:100%;height:var(--btn-h);min-height:0;margin:0;padding:0 8px 0 10px;border:1px solid var(--btn-line);border-radius:var(--btn-r);background:transparent;color:var(--btn-text);font:var(--w-med,500) var(--t-sm,12px)/1 var(--sans);box-shadow:none;cursor:pointer;transition:var(--btn-move)}
+button.allow-from-btn:hover:not(:disabled),button.allow-from-btn[aria-expanded=true]{border-color:var(--btn-line-hover);background:var(--btn-wash);color:var(--btn-text)}
+button.allow-from-btn:focus-visible{outline:var(--btn-ring);outline-offset:2px}
+button.allow-from-btn:disabled{opacity:.55;cursor:default}
 .allow-from-btn.is-empty .allow-from-value{color:var(--text-2)}
 .allow-from-value{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .allow-from-chevron{flex:none;color:var(--muted)}
 .allow-from-menu{flex:1 1 100%;min-width:0;box-sizing:border-box}
 .allow-from-menu .dgc-menu-row .dgc-menu-label{flex:1 1 auto}
-@media(forced-colors:active){button.allow-from-btn,button.pip-folder-btn{border-color:ButtonText}}
+@media(forced-colors:active){button.allow-from-btn{border-color:ButtonText}}
 /* Skills on a Pip's page (pips-12): one row a skill with its switch, as an app's row; its one line is two lines at most
    (the whole of it is the row's tooltip). A skill switched off reads muted; its switch stays as clear. */
 .pip-skill-line{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .pip-skill.is-off>.pip-page-row .row-words>strong{color:var(--muted)}
 .pip-skill .row-words>strong{overflow-wrap:anywhere}
-.pip-skills>p.error,.pip-folder-set>p.error{margin:0;padding:8px 14px 10px;font-size:12px}
-/* Folder on a Pip's page: the button says where it sits and opens the shared menu in the row's own flow (nothing floats
-   over the page or is cut by the group's rounded edge); New folder… gives one box for the name. */
-button.pip-folder-btn{max-width:min(100%,220px)}
-.pip-folder-btn.is-empty .pip-folder-value{color:var(--text-2)}
-.pip-folder-value{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pip-folder-btn .pip-folder-chevron{flex:none;color:var(--muted)}
-.pip-folder-menu{flex:1 1 100%;min-width:0;box-sizing:border-box}
-.pip-folder-menu .dgc-menu-row .dgc-menu-label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pip-folder-new{gap:8px;border-top:1px solid var(--pip-edge)}
-.pip-folder-new>input{flex:1 1 140px;min-width:0;width:auto}
-.pip-folder-new-actions{display:inline-flex;gap:6px;margin-left:auto}
-/* Folders in the Personal list: a quiet heading a folder (its name, how many Pips it holds, a chevron that turns when it
-   is folded), its Pips under it. Pips with no folder come first, under no heading. */
-.pip-folders{display:grid;gap:6px;margin-top:6px}
-.pip-folder{display:grid;gap:2px;min-width:0}
-.pip-folder-head{margin:0;font:inherit;min-width:0}
-button.pip-folder-toggle{display:flex;align-items:center;gap:6px;width:100%;min-width:0;min-height:26px;margin:0;padding:2px 8px;border:0;border-radius:var(--btn-r,6px);background:transparent;color:var(--muted);font:600 12px/1.3 var(--sans,inherit);text-align:left;box-shadow:none;cursor:pointer}
-button.pip-folder-toggle:hover{background:var(--pip-wash);color:var(--vscode-foreground)}
-button.pip-folder-toggle:focus-visible{outline:var(--btn-ring,1px solid var(--vscode-focusBorder));outline-offset:-1px}
-.pip-folder-toggle .pip-folder-chevron{flex:none;transition:transform .15s}
-.pip-folder.is-closed .pip-folder-chevron{transform:rotate(-90deg)}
-.pip-folder-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pip-folder-count{flex:none;font-weight:400;font-variant-numeric:tabular-nums}
-@media(prefers-reduced-motion:reduce){.pip-folder-toggle .pip-folder-chevron{transition:none}}
-/* Export team: one tick a Pip (its folder under its name), in a list that scrolls when it is long. */
+.pip-skills>p.error{margin:0;padding:8px 14px 10px;font-size:12px}
+/* Export team: one tick a Pip, in a list that scrolls when it is long. */
 .team-pips{margin:0;padding:0;border:0;min-width:0}
 .team-pips>legend{padding:0;margin:0 0 4px;font-size:12px;color:var(--muted)}
 .team-pip-list{list-style:none;margin:0;padding:2px 0;max-height:min(44vh,320px);overflow:auto;border:1px solid var(--pip-edge);border-radius:8px}

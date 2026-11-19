@@ -51,7 +51,7 @@ def _seconds(stamp) -> float:
 
 
 def listing(registry, config) -> dict:
-    """list_project_folders: {folders: [{folder, name, here, exists, sessions, pips, workspace_id, updated_at}]}."""
+    """list_project_folders: {folders: [{folder, name, here, exists, git, sessions, pips, workspace_id, updated_at}]}."""
     from . import sessions
     here = Path(config.project_root).expanduser().resolve(strict=False)
     found: dict[str, dict] = {}
@@ -99,7 +99,13 @@ def listing(registry, config) -> dict:
              "updated_at": _iso(place["updated"]) if place["updated"] else None}
             for key, place in found.items()]
     rows.sort(key=lambda item: (item["updated_at"] or ""), reverse=True)
-    return {"folders": rows[:MAX_FOLDERS]}
+    rows = rows[:MAX_FOLDERS]
+    from .pip_folder_git import own_commit
+    for item in rows:
+        # A Git project with a commit at its top (its Pips read its commits and what Git ignores stays out), or a folder
+        # read as it is, without what DGC never copies (a Pip works in any folder).
+        item["git"] = bool(item["exists"]) and own_commit(item["folder"])
+    return {"folders": rows}
 
 
 def pips_everywhere(store, *, limit=100, offset=0, query="", order="created") -> dict:

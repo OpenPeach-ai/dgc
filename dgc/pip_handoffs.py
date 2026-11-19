@@ -398,7 +398,7 @@ def _current(store, source, target_pip_id, config):
     if "text" in source and source.get("source_revision") is None:
         from .pip_personal_handoffs import current
         return current(store, source, target_pip_id, config)
-    from .pips import _model_settings, source_revision
+    from .pips import _model_settings, pinned_revision
     source_job, target_job = store._job(source["pip_id"]), store._job(target_pip_id)
     from .pip_archive import require_live
     require_live(store,source['pip_id']); require_live(store,target_pip_id)
@@ -412,9 +412,9 @@ def _current(store, source, target_pip_id, config):
         raise _error("Both handoff jobs must use committed source. Current-tree work needs a separate manual run.", "unsupported_source")
     binding = store.registry.binding(target_job["workspace_id"])
     root = binding["canonical_root"]
-    if source_revision(root, source_job["source_ref"]) != source["source_revision"]:
+    if pinned_revision(store.registry, root, source_job["source_ref"]) != source["source_revision"]:
         raise _error("The source ref advanced after this report; produce a fresh result before handing off.", "stale_source")
-    if source_revision(root, target_job["source_ref"]) != source["source_revision"]:
+    if pinned_revision(store.registry, root, target_job["source_ref"]) != source["source_revision"]:
         raise _error("The target must use the same committed base revision as the source result.", "stale_source")
     frozen = config.clone_for_root(Path(root))
     settings = _model_settings(frozen, target_job["model_choice"])

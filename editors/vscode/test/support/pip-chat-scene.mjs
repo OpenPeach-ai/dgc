@@ -547,9 +547,9 @@ export const host = (opts) => `(${function (PIP, opts) {
     Object.assign(answers, { pause_pip: turn(false), resume_pip: turn(true) });
   }
   // opts.teams: pips-12 (Pips API 88; pass api: 88): a Pip's skills with a switch each (get_pip_skills, set_pip_skill:
-  // budget on, deep-research switched off, one from a plugin with a long line, one with no line); a Pip's folder
-  // (set_pip_profile changes.group), and with opts.many two folders in the list ("Launch" with two Pips and a
-  // long-named one with two); and the host's two team-file answers: export_pip_team_file says the file was saved,
+  // budget on, deep-research switched off, one from a plugin with a long line, one with no line); with opts.many, four
+  // Pips whose profiles still carry the `group` a development install saved before the Personal list's folders were
+  // dropped (0.52: never shown); and the host's two team-file answers: export_pip_team_file says the file was saved,
   // import_pip_team_file adds three new-Pip cards (the team "Launch crew"). opts.teams === "refuse": DGC refuses a switch.
   if (opts.teams && !project) {
     const state = { off: new Set(["deep-research"]) };

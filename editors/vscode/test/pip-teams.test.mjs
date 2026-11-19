@@ -1,8 +1,8 @@
 // pips-12, the editor half (Pips API 88): Library, departments and team files.
 // - "Skills" on a Pip's page: get_pip_skills is read strictly, one row a skill with its one line and a switch that
 //   tells DGC (set_pip_skill); a refusal puts the switch back.
-// - Folders in the Personal list: a Pip's folder is profile.group; Pips without one come first under no heading, each
-//   folder under its heading with its count, which folds; the folder is set on the Pip's page from a small menu.
+// - The Personal list's folders (profile.group) were dropped before release (0.52): the list is one list, a Pip's page
+//   has no Folder row, and a group a development install saved is never shown.
 // - Team files: Export team… ticks Pips and names the team, and the host saves the file; Import team… has the host
 //   read the file, and the cards show with a line naming the team and what was left out. The page never has a path.
 // The host's allow-list takes these only at API 88, each named as DGC names it. The look, in real Chromium:
@@ -64,46 +64,11 @@ test('the Skills section: one row a skill with its one line and the page’s swi
 
 const job=(c,name,extra={})=>({id:pid(c),workspace_id:PW,pip_type:'scout',name,goal:'Help with '+name+'.',source_policy:{mode:'personal'},source_ref:'HEAD',status:'active',current_version:1,lifecycle_revision:0,policy:'read_only',
  trigger:'manual',schedule:null,proposals:[],pending_review_count:0,profile:{title:'',body:null,color:null,notify:true,group:''},...extra});
+// A Pip a development install had put in a folder (its profile still says so): never shown as one.
 const inFolder=(c,name,group,extra={})=>job(c,name,{profile:{title:'',body:null,color:null,notify:true,group},...extra});
 
-test('folders: a Pip’s folder is its profile’s group; the list is the Pips with none, then each folder by name',()=>{
- assert.equal(teams.pipFolder({group:'Launch'}),'Launch');assert.equal(teams.pipFolder({group:''}),'');assert.equal(teams.pipFolder({title:''}),'','a DGC from before folders');
- for(const bad of [null,undefined,'Launch',{group:7},{group:'x'.repeat(41)},{group:'two\nlines'}])assert.equal(teams.pipFolder(bad),'',JSON.stringify(bad));
- const list=[job('1','Core',{pip_type:'core'}),inFolder('2','Writer','Launch'),job('3','Mornings'),inFolder('4','Bills','Home'),inFolder('5','Researcher','Launch'),inFolder('6','Old','archive 10')];
- assert.deepEqual(teams.foldersInUse(list),['archive 10','Home','Launch']);
- const held=teams.pipsByFolder(list);
- assert.deepEqual(held.loose.map(p=>p.name),['Core','Mornings'],'no folder: first, in the list’s own order');
- assert.deepEqual(held.folders.map(f=>[f.name,f.pips.map(p=>p.name)]),[['archive 10',['Old']],['Home',['Bills']],['Launch',['Writer','Researcher']]]);
- assert.deepEqual(teams.pipsByFolder([]),{loose:[],folders:[]});
- // A new folder's name, as typed.
- assert.equal(teams.folderName('  Launch   week '),'Launch week');assert.equal(teams.folderName('x'.repeat(40)).length,40);
- assert.throws(()=>teams.folderName('   '),/Give the folder a name/);assert.throws(()=>teams.folderName('x'.repeat(41)),/up to 40 characters/);
- // Its heading: a button that folds it, with how many it holds.
- const open=dom(teams.folderMarkup(held.folders[2],2,{esc,open:true,rows:'<i id="rows"></i>'})),head=open.querySelector('.pip-folder-head > button.pip-folder-toggle');
- assert.equal(open.querySelector('section.pip-folder').getAttribute('aria-label'),'Launch, 2 Pips');
- assert.equal(head.getAttribute('aria-expanded'),'true');assert.equal(head.dataset.pipFolderToggle,'Launch');
- assert.equal(head.querySelector('.pip-folder-name').textContent,'Launch');assert.equal(head.querySelector('.pip-folder-count').textContent,'2');
- assert.ok(open.getElementById(head.getAttribute('aria-controls')).querySelector('#rows'),'its rows are what the button controls');
- const shut=dom(teams.folderMarkup(held.folders[1],1,{esc,open:false,rows:'<i id="rows"></i>'}));
- assert.equal(shut.querySelector('button').getAttribute('aria-expanded'),'false');assert.equal(shut.querySelector('#rows'),null,'folded: its rows are not drawn');
- assert.equal(shut.querySelector('section').getAttribute('aria-label'),'Home, 1 Pip');
-});
-
-test('Folder on a Pip’s page: a button that says where it is; its menu is No folder, the folders in use and New folder…',()=>{
- const shut=dom(teams.pipFolderMarkup({esc,folder:'Launch',folders:['Home','Launch'],pipName:'Mornings'}));
- assert.equal(shut.querySelector('section.pip-page-group').getAttribute('aria-label'),'Folder');
- const btn=shut.querySelector('button[data-pip-folder-open]');assert.equal(btn.textContent,'Launch');assert.equal(btn.getAttribute('aria-expanded'),'false');assert.equal(btn.getAttribute('aria-haspopup'),'menu');
- assert.equal(shut.querySelector('.pip-folder-menu'),null);
- assert.equal(dom(teams.pipFolderMarkup({esc,folder:'',folders:[]})).querySelector('[data-pip-folder-open]').textContent,'No folder');
- const open=dom(teams.pipFolderMarkup({esc,folder:'Launch',folders:['Home','Launch'],open:true,pipName:'Mornings'})),menu=open.querySelector('.dgc-menu.pip-folder-menu[role=menu]');
- assert.equal(menu.getAttribute('aria-label'),'Folder for Mornings');
- assert.deepEqual([...menu.querySelectorAll('.dgc-menu-row')].map(r=>[r.textContent,r.getAttribute('role'),r.getAttribute('aria-checked'),r.dataset.pipFolderPick]),
-  [['No folder','menuitemradio','false',''],['Home','menuitemradio','false','Home'],['Launch','menuitemradio','true','Launch'],['New folder…','menuitem',null,undefined]]);
- assert.ok(menu.querySelector('[data-pip-folder-new]'));
- const adding=dom(teams.pipFolderMarkup({esc,folder:'',folders:[],adding:true,draft:'Lau',error:'Give the folder a name.'})),box=adding.querySelector('#pip-folder-form input#pipFolderName');
- assert.equal(box.value,'Lau');assert.equal(box.maxLength,40);assert.ok(adding.querySelector(`label[for="${box.id}"]`),'the box has a name');
- assert.deepEqual([...adding.querySelectorAll('#pip-folder-form button')].map(b=>[b.textContent,b.type]),[['Add','submit'],['Cancel','button']]);
- assert.equal(adding.querySelector('[role=alert]').textContent,'Give the folder a name.');
+test('no folders: the helpers that grouped the Personal list are gone, and a team’s Pips are listed by name alone',()=>{
+ for(const name of ['pipFolder','folderName','foldersInUse','pipsByFolder','folderMarkup','pipFolderMarkup','FOLDER_MAX'])assert.equal(teams[name],undefined,name);
 });
 
 test('team files: the Pips a file can hold, the request the dialog makes, and what comes back, each checked',()=>{
@@ -112,7 +77,7 @@ test('team files: the Pips a file can hold, the request the dialog makes, and wh
  const all=new Set(pips.map(p=>p.id)),d=dom(teams.teamExportMarkup({esc,pips,ticked:all,name:'',left:2}));
  assert.equal(d.querySelector('#teamName').maxLength,80);assert.equal(d.querySelector('#teamName').placeholder,'My team');
  assert.deepEqual([...d.querySelectorAll('input[data-team-pip]')].map(b=>[b.dataset.teamPip,b.checked,b.closest('label').querySelector('strong').textContent,b.closest('label').querySelector('small')?.textContent||'']),
-  [[pid('2'),true,'Writer','Launch'],[pid('3'),true,'Mornings','']]);
+  [[pid('2'),true,'Writer',''],[pid('3'),true,'Mornings','']],'a folder a profile still names is never shown');
  assert.equal(d.querySelector('#team-count').textContent,'2 Pips in this team.');
  assert.match(d.body.textContent,/Your accounts, memory, chats and results stay here\. 2 Pips aren’t listed: your Primary Pip and Patch Pips can’t be shared\./);
  assert.deepEqual(teams.teamExportRequest(pips,all,'  Launch   crew '),{pip_ids:[pid('2'),pid('3')],name:'Launch crew'});
@@ -151,20 +116,17 @@ function host(api=88,vs={}){
   return {id,call:sent.slice(before).find(m=>m.type==='pips_control')?.request,reply:reply(id,from)};};
  return {editor,panels,ask,reply,sent,main};
 }
-test('the allow-list: skills and a folder go from the Pips page at API 88, each named as DGC names it, and never to an older DGC',()=>{
+test('the allow-list: skills go from the Pips page at API 88, each named as DGC names it, and never to an older DGC',()=>{
  const h=host();
  const list=h.ask({type:'get_pip_skills',pip_id:PIP}).call;assert.deepEqual({type:list.type,pip_id:list.pip_id},{type:'get_pip_skills',pip_id:PIP});
  const off=h.ask({type:'set_pip_skill',pip_id:PIP,skill:'deep-research',on:false}).call;assert.deepEqual({type:off.type,pip_id:off.pip_id,skill:off.skill,on:off.on},{type:'set_pip_skill',pip_id:PIP,skill:'deep-research',on:false});
  assert.equal(h.ask({type:'set_pip_skill',pip_id:PIP,skill:'stripe.refunds_2',on:true}).call.skill,'stripe.refunds_2');
  for(const skill of ['','Bad Skill!','x'.repeat(65),'-lead',7,null,undefined,'../budget']){const r=h.ask({type:'set_pip_skill',pip_id:PIP,skill,on:true});assert.equal(r.call,undefined,String(skill));assert.match(r.reply.error.message,/Choose one of the skills/);}
  for(const on of ['no',1,null,undefined]){const r=h.ask({type:'set_pip_skill',pip_id:PIP,skill:'budget',on});assert.equal(r.call,undefined,String(on));assert.match(r.reply.error.message,/on or off/);}
- const folder=h.ask({type:'set_pip_profile',pip_id:PIP,changes:{group:'Launch'}}).call;assert.deepEqual(folder.changes,{group:'Launch'});
- assert.deepEqual(h.ask({type:'set_pip_profile',pip_id:PIP,changes:{group:''}}).call.changes,{group:''},'no folder');
  assert.deepEqual(h.ask({type:'set_pip_profile',pip_id:PIP,changes:{title:'Chief of staff'}}).call.changes,{title:'Chief of staff'},'the page’s other changes go as before');
- for(const group of ['x'.repeat(41),'two\nlines',7,null]){const r=h.ask({type:'set_pip_profile',pip_id:PIP,changes:{group}});assert.equal(r.call,undefined,String(group));assert.match(r.reply.error.message,/one line of up to 40 characters/);}
  const old=host(87);
  for(const [request,says] of [[{type:'get_pip_skills',pip_id:PIP},/^Update DGC to choose the skills a Pip can use\./],[{type:'set_pip_skill',pip_id:PIP,skill:'budget',on:false},/^Update DGC to choose the skills/],
-  [{type:'set_pip_profile',pip_id:PIP,changes:{group:'Launch'}},/^Update DGC to put Pips in folders\./],[{type:'export_pip_team_file',pip_ids:[PIP],name:'Launch'},/^Update DGC to share a team of Pips\./],[{type:'import_pip_team_file'},/^Update DGC to share a team of Pips\./]]){
+  [{type:'export_pip_team_file',pip_ids:[PIP],name:'Launch'},/^Update DGC to share a team of Pips\./],[{type:'import_pip_team_file'},/^Update DGC to share a team of Pips\./]]){
   const r=old.ask(request);assert.equal(r.call,undefined,request.type);assert.match(r.reply.error.message,says);}
  assert.equal(old.ask({type:'set_pip_profile',pip_id:PIP,changes:{title:'Chief of staff'}}).call.type,'set_pip_profile','an older DGC still takes a title');
  // The page never sends DGC's own team commands (a file's text, or a document): only the host does, from a file it read.
@@ -230,7 +192,7 @@ test('Import team: the host reads the picked file (256 KiB at most) and sends it
  const d=h.ask({type:'import_pip_team_file',path:'/home/u/launch.dgc-team.json'});assert.equal(d.call,undefined);assert.match(d.reply.error.message,/Choose a team file to import/,'the page names no file');
 });
 
-// The page itself (jsdom): the list in folders, the folder menu, the Skills switches and the two team flows.
+// The page itself (jsdom): one list, no Folder row, the Skills switches and the two team flows.
 const types=['core','scout','lens','patch','rook','pulse','lock','quill'].map((id,character_index)=>({id,character_index,name:id[0].toUpperCase()+id.slice(1),role:id,description:'Reads and reports',available:id!=='core',unavailable_reason:id==='core'?'Core is the main chat.':null,default_name:id,default_goal:'Review',engine:id==='core'?null:id==='patch'?'patch':id==='pulse'?'test':id==='quill'?'documentation_draft':'source_audit'}));
 const controls={version:1,mode:'read_only',options:{context_size:8192,thinking:'off'},options_source:'last_message',inherited_context_size:1048576,effective_context_size:8192,context_min:2048,context_max:32768,thinking_levels:['off','low','medium','high','xhigh'],reasoning_control:'provider_dependent',reasoning_note:'n',context_note:'n'};
 const setupCard=(c,name)=>({id:'setup_'+c.repeat(32),digest:'a'.repeat(64),workspace_id:PW,project_root:'/home/me',pip_id:null,name,goal:'Do the '+name+' job.',pip_type:'lens',work_kind:'personal_task',source_ref:'HEAD',schedule:null,run_now:false,next_run_at:null,
@@ -268,51 +230,20 @@ function page({api=88,list,skillsList=SKILLS}={}){
 }
 async function openPage(x,id=pid('a')){await x.drain();x.click(`[data-job="${id}"]`);await x.drain();x.click('[data-tab="job"]');await x.drain();}
 
-test('the Personal list: Pips with no folder first under no heading, then each folder with its count; a heading folds its folder',async()=>{
+test('the Personal list is one list, every Pip once, whatever a profile from a development install says; its page has no Folder row',async()=>{
  const x=page();await x.drain();
- assert.deepEqual(x.shown(),{loose:['Core','Mornings'],folders:[['Home','1','true',['Bills']],['Launch','2','true',['Writer','Researcher']]]});
+ assert.deepEqual(x.shown(),{loose:['Core','Writer','Mornings','Bills','Researcher'],folders:[]},'no headings: one list, in its own order');
+ assert.equal(x.d.querySelector('.pip-folders, .pip-folder, [data-pip-folder-toggle]'),null);
  assert.equal(x.d.querySelectorAll('[data-job]').length,5,'every Pip is there once');
- x.click('[data-pip-folder-toggle="Launch"]');
- assert.deepEqual(x.shown().folders,[['Home','1','true',['Bills']],['Launch','2','false',[]]],'folded: its count stays, its Pips are put away');
- assert.equal(x.d.activeElement?.dataset.pipFolderToggle,'Launch','the heading keeps the keyboard');
- x.click('[data-pip-folder-toggle="Launch"]');assert.deepEqual(x.shown().folders[1],['Launch','2','true',['Writer','Researcher']]);
- // With no folders in use the list is the one list it was.
- const plain=page({list:[job('1','Core',{pip_type:'core'}),job('a','Mornings')]});await plain.drain();
- assert.deepEqual(plain.shown(),{loose:['Core','Mornings'],folders:[]});assert.equal(plain.d.querySelector('.pip-folders'),null);
- // An older DGC lists no folders and has no Teams menu, whatever a profile says.
+ assert.ok(x.d.querySelector('.team-menu'),'the Teams menu stays, on its own condition');
+ await openPage(x,pid('2'));
+ assert.equal(x.d.querySelector('.pip-folder-set, [data-pip-folder-open], #pip-folder-form'),null,'no Folder row on its page');
+ assert.doesNotMatch(x.d.querySelector('.pip-page-body')?.textContent||'',/No folder|New folder|Launch/);
+ assert.equal(x.requests('set_pip_profile').length,0);
+ // An older DGC: the one list too, and no Teams menu or Skills.
  const old=page({api:87});await old.drain();
  assert.deepEqual(old.shown(),{loose:['Core','Writer','Mornings','Bills','Researcher'],folders:[]});assert.equal(old.d.querySelector('.team-menu'),null);
-});
-
-test('a Pip’s page sets its folder: pick one in use, No folder, or New folder… with a name; DGC is told and the list follows',async()=>{
- const x=page();await openPage(x);
- const btn=()=>x.d.querySelector('[data-pip-folder-open]');assert.equal(btn().textContent,'No folder');
- x.click(btn());
- assert.deepEqual([...x.d.querySelectorAll('.pip-folder-menu .dgc-menu-row')].map(r=>[r.textContent,r.getAttribute('aria-checked')]),[['No folder','true'],['Home','false'],['Launch','false'],['New folder…',null]]);
- x.click('[data-pip-folder-pick="Launch"]');
- const first=x.requests('set_pip_profile')[0];assert.deepEqual(JSON.parse(JSON.stringify(first.request)),{type:'set_pip_profile',pip_id:pid('a'),changes:{group:'Launch'}});
- x.state.list[2].profile={...x.state.list[2].profile,group:'Launch'};x.answer(first,{pip_id:pid('a'),profile:x.state.list[2].profile});await x.drain();
- assert.equal(btn().textContent,'Launch');assert.equal(x.d.querySelector('.pip-folder-menu'),null,'the menu closed');
- assert.match(x.d.body.textContent,/Mornings is in the folder “Launch”\./);
- // New folder…: a box for its name; an empty name is refused here, a good one is sent tidied.
- x.click(btn());x.click('[data-pip-folder-new]');assert.equal(x.d.querySelector('.pip-folder-menu'),null);assert.ok(x.d.querySelector('#pipFolderName'));
- x.submit('#pip-folder-form');assert.equal(x.d.querySelector('.pip-folder-set [role=alert]').textContent,'Give the folder a name.');assert.equal(x.requests('set_pip_profile').length,1);
- x.type('#pipFolderName','  Money   matters ');x.submit('#pip-folder-form');
- const second=x.requests('set_pip_profile')[1];assert.deepEqual({...second.request.changes},{group:'Money matters'});
- // DGC refuses: its words show on the row, and the box stays with what was typed.
- x.answer(second,'Only you can change a Pip’s page, on this computer.',false);await x.drain();
- assert.equal(x.d.querySelector('.pip-folder-set [role=alert]').textContent,'Only you can change a Pip’s page, on this computer.');assert.equal(x.d.querySelector('#pipFolderName').value,'  Money   matters ');assert.equal(btn().textContent,'Launch');
- x.click('[data-pip-folder-cancel]');assert.equal(x.d.querySelector('#pipFolderName'),null);
- // No folder puts it back.
- x.click(btn());x.click('[data-pip-folder-pick=""]');
- const third=x.requests('set_pip_profile')[2];assert.deepEqual({...third.request.changes},{group:''});
- x.state.list[2].profile={...x.state.list[2].profile,group:''};x.answer(third,{pip_id:pid('a'),profile:x.state.list[2].profile});await x.drain();
- assert.equal(btn().textContent,'No folder');assert.match(x.d.body.textContent,/Mornings is in no folder\./);
- // Picking where it already is asks DGC nothing.
- x.click(btn());x.click('[data-pip-folder-pick=""]');assert.equal(x.requests('set_pip_profile').length,3);
- // Below API 88 the page has no Folder row and no Skills.
- const old=page({api:87});await openPage(old);
- assert.equal(old.d.querySelector('.pip-folder-set'),null);assert.equal(old.d.querySelector('.pip-skills'),null);assert.equal(old.requests('get_pip_skills').length,0);
+ await openPage(old);assert.equal(old.d.querySelector('.pip-skills'),null);assert.equal(old.requests('get_pip_skills').length,0);
 });
 
 test('Skills on a Pip’s page: a switch tells DGC about that skill on that Pip; a refusal puts it back and says why',async()=>{

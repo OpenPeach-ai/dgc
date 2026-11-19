@@ -103,8 +103,10 @@ JOB_TURN = (
 ABOUT = "\nWhat “this” means there: {about}"
 OWN = "\nIt is about your own folder, {name}: work on your copy of it, as always."
 COPY = ("\nIt is about the folder {name}: DGC put a copy of it in your computer's Files at {folder} ({files} files: the "
-        "current files, without what Git ignores). Work there; what you change comes back as one change for the user to "
+        "current files, without {left}). Work there; what you change comes back as one change for the user to "
         "Apply.")
+GIT_LEFT = "what Git ignores"
+PLAIN_LEFT = ".env, keys and dependency and build folders, which DGC never copies"
 NO_COPY = ("\nIt is about the folder {name}, but DGC couldn't put a copy of it in your computer: {why} Answer from what "
            "you can, and say plainly if you need the files.")
 RETURN_TURN = (
@@ -382,11 +384,12 @@ def send(store, config, job_id) -> None:
             folder_name = str(registry.get(row["project_id"])["name"])[:80]
         except RegistryError:
             folder_name = None
-    folder, files, note = row["copy_folder"], 0, row["folder_note"]
+    folder, files, note, as_is = row["copy_folder"], 0, row["folder_note"], False
     if row["project_id"] and not row["own_folder"] and folder is None and note is None:
         try:
             told = copies.prepare(store, row["pip_id"], [{"kind": "project", "identity": row["project_id"]}], key)
             folder, files = (told[0]["folder"], int(told[0]["files"])) if told else (None, 0)
+            as_is = bool(told and told[0].get("plain"))
             if folder is None:
                 note = "the folder couldn't be copied."
         except RegistryError as exc:
@@ -395,10 +398,11 @@ def send(store, config, job_id) -> None:
             note = "the folder couldn't be copied."
         _update(registry, job_id, copy_folder=folder, folder_note=note)
     elif folder:
-        snap = db.execute("SELECT files FROM pip_project_copies WHERE pip_id=? AND workspace_id=?",
+        snap = db.execute("SELECT id,files FROM pip_project_copies WHERE pip_id=? AND workspace_id=?",
                           (row["pip_id"], row["project_id"])).fetchone() if row["project_id"] else None
         files = int(snap["files"]) if snap else 0
-    text = turn_text(row, folder_name=folder_name, folder=folder, files=files, note=note)
+        as_is = bool(snap and copies._as_is(registry, snap["id"]))
+    text = turn_text(row, folder_name=folder_name, folder=folder, files=files, note=note, plain=as_is)
     try:
         sent = pip_chat._owed_turn(store, row["pip_id"], text, key, ACTOR, config)
     except RegistryError as exc:
@@ -417,8 +421,8 @@ def send(store, config, job_id) -> None:
                 conversation_id=(message or {}).get("conversation_id"))
 
 
-def turn_text(row, *, folder_name=None, folder=None, files=0, note=None) -> str:
-    """The job's turn, as DGC writes it for the Pip."""
+def turn_text(row, *, folder_name=None, folder=None, files=0, note=None, plain=False) -> str:
+    """The job's turn, as DGC writes it for the Pip. ``plain``: its copy is of a folder read as it is (no Git)."""
     where = WHERE[row["asked_kind"]].format(title=str(row["asked_title"]).replace("“", "\"").replace("”", "\""))
     about = ABOUT.format(about=row["about"]) if row["about"] else ""
     shown = folder_name or "the folder"
@@ -427,7 +431,7 @@ def turn_text(row, *, folder_name=None, folder=None, files=0, note=None) -> str:
     elif row["own_folder"]:
         place = OWN.format(name=shown)
     elif folder:
-        place = COPY.format(name=shown, folder=folder, files=files)
+        place = COPY.format(name=shown, folder=folder, files=files, left=PLAIN_LEFT if plain else GIT_LEFT)
     else:
         why = (note or "it couldn't be copied.").rstrip()
         place = NO_COPY.format(name=shown, why=why if why.endswith(".") else why + ".")

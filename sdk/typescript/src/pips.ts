@@ -154,7 +154,7 @@ export type PipMutationParams = {
   remove_pip_login: { login_id: string };
   grant_pip_login: { login_id: string; pips: "all" | string[] };
   set_pip_computer_apps: { choice: "download" | "not_now" };
-  set_pip_profile: { pip_id: string; changes: { title?: string; body?: string | null; color?: string | null; notify?: boolean; group?: string } };
+  set_pip_profile: { pip_id: string; changes: { title?: string; body?: string | null; color?: string | null; notify?: boolean } };
   update_pip_computers: Record<string, never>;
   reset_pip_computer: { pip_id: string };
   add_pip_routine: { pip_id: string; title: string; prompt: string; trigger: Record<string, PipJson> };
@@ -1120,7 +1120,7 @@ for (const command of API108_MUTATIONS) MUTATIONS.add(command);
 // rows of kind "work" carry changed, can_undo and undo; undo_pip_agent_job puts back what it changed. Local only.
 const API109_MUTATIONS = new Set(["undo_pip_agent_job"]);
 for (const command of API109_MUTATIONS) MUTATIONS.add(command);
-// API 110: give a Pip for anything a folder (a Git project with a commit), or make a folder Pip a Pip for anything again;
+// API 110: give a Pip for anything a folder (any folder DGC opens as a project), or make a folder Pip a Pip for anything again;
 // it keeps its chat, notes, routines, computer, level and model. dry_run says what stays and what changes. Local only.
 const API110_MUTATIONS = new Set(["give_pip_folder", "remove_pip_folder"]);
 for (const command of API110_MUTATIONS) MUTATIONS.add(command);
@@ -1132,13 +1132,10 @@ const API111_READS = new Set(["get_pip_job", "list_pip_jobs"]);
 const API111_MUTATIONS = new Set(["start_pip_job", "decline_pip_job"]);
 for (const command of API111_READS) READS.add(command);
 for (const command of API111_MUTATIONS) MUTATIONS.add(command);
-/** What came with API 88 inside existing commands: set_pip_profile's changes.group (a folder in the Personal list) and
- *  use_pip_computer_view's op close (its tab closed). start_pip_app_link's another is older (0.51). */
+/** What came with API 88 inside an existing command: use_pip_computer_view's op close (its tab closed).
+ *  start_pip_app_link's another is older (0.51). (set_pip_profile's changes.group, a folder in the Personal list, was
+ *  dropped before release, 0.52: a runtime refuses it as any change it doesn't know.) */
 function api88Field(command: string, values: Record<string, unknown>): boolean {
-  if (command === "set_pip_profile") {
-    const changes = values.changes;
-    return typeof changes === "object" && changes !== null && !Array.isArray(changes) && Object.hasOwn(changes, "group");
-  }
   return command === "use_pip_computer_view" && values.op === "close";
 }
 const CONVERSATION_ID = /^conv_[0-9a-f]{32}$/;
@@ -1539,7 +1536,7 @@ export class Pips {
       checkApi52Fields(values);
     }
     if ((this.caps.pips_api_version as number) < 88 && api88Field(command, values)) {
-      throw new DGCUnsupportedError("A Pip's folder (changes.group) and a closed computer view (op close) require a runtime advertising Pips API 88 or newer");
+      throw new DGCUnsupportedError("A closed computer view (op close) requires a runtime advertising Pips API 88 or newer");
     }
     if ((API53_FIELDS[command] || []).some((key) => Object.hasOwn(values, key)) || command === "use_pip_computer_view" && values.op === "pointer") {
       if ((this.caps.pips_api_version as number) < 53) {

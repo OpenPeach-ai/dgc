@@ -147,6 +147,17 @@ def observe_commit(root,source_ref):
     return value[:-1]
 
 
+def _place(registry, root):
+    """Where a folder's commits are read: the folder itself, or DGC's own Git of a folder that isn't a Git project with
+    a commit (pip_folder_git), brought up to date first, so its files changing is its next commit. A folder DGC can't
+    read is probed as it is, and is unavailable."""
+    from .pip_folder_git import source_root
+    try:
+        return source_root(registry, root, sync=True)
+    except (RegistryError, OSError):
+        return root
+
+
 def _stopped(registry,config,stop_event):
     if config.get("pips_enabled",False) is not True or (stop_event is not None and stop_event.is_set()):
         return True
@@ -188,7 +199,7 @@ def _legacy_tick(registry,config,*,now=None,limit=MAX_TICK_ITEMS,stop_event=None
                     reset_observation(registry,pip_id,current["job_version"],_definition(registry,pip_id)[1],checked)
                 state=_state(registry,pip_id)
             result["checked"]+=1
-            try: revision=observe_commit(current["canonical_root"],current["source_ref"])
+            try: revision=observe_commit(_place(registry,current["canonical_root"]),current["source_ref"])
             except _Unavailable: revision=None; result["unavailable"]+=1
             with registry.transaction():
                 if (_stopped(registry,config,stop_event) or _state(registry,pip_id)!=state
@@ -354,11 +365,11 @@ def _root_identity(root):
         raise _Unavailable('root_unavailable') from exc
 
 
-def _path_probe(current, state, *, checked_at, deadline):
+def _path_probe(current, state, *, checked_at, deadline, root=None):
     from .pip_commit_paths import compare, validate_probe
     before, after, comparison = state['revision'], None, None
     status, reason = 'unavailable', None
-    root = Path(current['canonical_root'])
+    root = Path(root or current['canonical_root'])
     try:
         identity = _root_identity(root)
         code, raw = _capture(root,['rev-parse','--show-toplevel'],4097,deadline=deadline)
@@ -413,7 +424,8 @@ def _observe_paths(registry, config, pip_id, checked, stop_event):
         _path_history(current,state)
     if _stopped(registry,config,stop_event):
         return 'skipped'
-    probe, comparison = _path_probe(current,state,checked_at=checked,deadline=time.monotonic()+PROBE_SECONDS)
+    place = _place(registry, current['canonical_root'])
+    probe, comparison = _path_probe(current,state,checked_at=checked,deadline=time.monotonic()+PROBE_SECONDS,root=place)
     if _stopped(registry,config,stop_event):
         return 'skipped'
     with registry.transaction():

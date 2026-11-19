@@ -634,12 +634,14 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # agent, undo). A fix it came from reads applied (then undone). At Do it all a folder Pip's own chat turn has the tool
 # start_work_subagent; a reply that used it carries `work_subagents`. Local only.
 # API 110 (0.52, give a Pip a folder later, pip_folder): give_pip_folder {pip_id, folder, dry_run?} (M) makes a Pip for
-# anything a folder Pip for that folder (a Git project with a commit, at its top folder; never Core), and
+# anything a folder Pip for that folder (any folder DGC opens as a project, never a temporary one; never Core), and
 # remove_pip_folder {pip_id, dry_run?} (M) makes a folder Pip a Pip for anything again. The Pip moves into the folder's
 # workspace (or back to the personal one) with its next version, keeping its chat, notes, routines, computer and Files,
 # level, model and sub-agents; refused while it or a sub-agent works (busy). Both answer {pip, folder {name, folder,
 # workspace_id}, keeps [line], changes [line], done}; dry_run says them and changes nothing. Events pip_folder_given and
-# pip_folder_removed in both workspaces. Local only.
+# pip_folder_removed in both workspaces. Local only. (19 Nov: a Pip works in any folder. A folder that isn't a Git project
+# with a commit is read as it is, without .env, keys or dependency and build folders, and DGC keeps its own Git of it,
+# pip_folder_git; list_project_folders rows carry `git`.)
 # API 111 (0.52, @ a Pip hands it a job, pip_jobs): a Work session, a ChatDGC
 # chat or a Pip's chat hands a Pip a job with the model's ask_pip (offered whenever Pips are on). The job is DGC's turn in
 # the Pip's first chat (a user message with `intro` and `job` {id, pip, words, about, asked_from {kind work | chatdgc |

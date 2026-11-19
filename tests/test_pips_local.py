@@ -283,9 +283,13 @@ class LocalPipsTests(unittest.TestCase):
         self.assertNotIn("api_key", settings)
         self.assertEqual(self.store.run(run["id"])["manifest"]["model"], "codex")
 
-    def test_uncommitted_folder_refused(self):
-        with self.assertRaisesRegex(RegistryError, "source is unavailable"):
-            self.enqueue()
+    def test_a_folder_without_a_commit_is_read_as_it_is(self):
+        # A Pip works in any folder (0.52, tests/test_pip_any_folder.py): DGC's own Git of the folder pins the run's
+        # source; the folder itself gets no .git.
+        (self.root / "source.py").write_text("def hello():\n    return 'hello'\n", encoding="utf-8")
+        run = self.enqueue()
+        self.assertRegex(run["manifest"]["source_revision"], r"^[0-9a-f]{40}$")
+        self.assertFalse((self.root / ".git").exists())
 
     def test_unsupported_process_supervision_refused_before_enqueuing_or_spawning(self):
         pip = self.create()
