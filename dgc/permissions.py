@@ -267,6 +267,24 @@ class Rule:
         return self._match_one(value)
 
 
+# A user's allow rule this broad doesn't skip auto mode's safety check (his call, 20 Nov, as Claude Code drops such rules
+# in auto mode): every command, any script of an interpreter, any timed or package-manager run, every sub-agent or monitor.
+_BROAD_PATTERNS = re.compile(r"^(\*|(python\d*(\.\d+)?|node|bash|sh|zsh|fish|ruby|perl|php|deno|bun|pwsh|powershell|timeout|"
+                             r"npx|bunx|npm run|npm exec|pnpm|pnpm run|pnpm exec|yarn|yarn run|uv run|poetry run|pipx run|"
+                             r"env|sudo|xargs|nohup|watch)[\s:]*\*)$")
+
+
+def broad_allow(reason: str) -> bool:
+    """Whether an ALLOW's reason ("rule: Bash(*)") names a rule too broad to skip auto mode's safety check."""
+    m = re.match(r"^rule: ([A-Za-z_]+)(?:\((.*)\))?$", str(reason or ""))
+    if not m:
+        return False
+    tool, pattern = m.group(1).lower(), (m.group(2) or "").strip()
+    if tool in ("agent", "task", "monitor"):
+        return True
+    return tool in ("bash", "shell", "powershell") and (not pattern or bool(_BROAD_PATTERNS.match(pattern)))
+
+
 def parse_rules(rules: dict[str, list[str]]) -> list[Rule]:
     out = []
     for action in (ALLOW, ASK, DENY):

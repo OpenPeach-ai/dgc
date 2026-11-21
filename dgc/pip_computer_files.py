@@ -1143,6 +1143,8 @@ def check_ins_due(now: float | None = None) -> list[dict]:
             seen = getattr(buffer, "seen", len(buffer))
             if seen != entry["seen"]:
                 entry["seen"], entry["seen_at"] = seen, now
+            if entry["last"] is not None and seen == entry.get("checked_seen"):
+                continue                             # nothing new since its last look (as monitors.check_ins_due)
             quiet = now - entry["seen_at"] >= CHECK_IN_QUIET_S
             spaced = entry["last"] is None or now - entry["last"] >= CHECK_IN_MIN_GAP_S
             if not (now >= entry["due"] or (quiet and spaced)):
@@ -1155,6 +1157,7 @@ def check_ins_due(now: float | None = None) -> list[dict]:
                 head = f"nothing new for {int((now - entry['seen_at']) // 60)} min (running {running} min)"
             gap = entry["gap"]
             entry["last"], entry["due"], entry["gap"] = now, now + gap, min(CHECK_IN_MAX_GAP_S, gap * 2)
+            entry["checked_seen"] = seen
             out.append({"job": job_id, "command": entry["command"], "head": head, "gap_minutes": gap // 60,
                         "meta": dict(entry["meta"]), "check": int(now)})
     for item in out:

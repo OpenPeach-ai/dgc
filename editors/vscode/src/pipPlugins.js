@@ -4,6 +4,7 @@
 // a plugin that can move money: those ask every time) or Don't.
 
 import {infoTip} from './pipInfoTip.js';
+import { PLUGIN_LEVELS } from './pluginLevels.js';
 import { field, editButton, editError, askedAgainLine } from './pipAppLinks.js';
 import '../media/pluginCalls.js';   // globalThis.DgcPluginCalls: a plugin call in plain words, the same in all three chats
 
@@ -251,12 +252,7 @@ export function pluginsPageMarkup(cards, { esc, busy = false, pipName = 'This Pi
 // Pips settings → Plugins (list_pip_plugin_uses): which Pips use each plugin, with Remove per Pip,
 // and the plugins added to DGC that a Pip could ask for.
 // What each plugin may do without asking (Pips API 45): four levels, for every Pip.
-export const PLUGIN_LEVELS = [
-  ['always_ask', 'Always ask', 'Asks before it reads or changes anything'],
-  ['any_changes', 'Ask before any change', 'Reads at once, asks before it changes anything'],
-  ['important', 'Ask before important actions', 'Reads at once, asks before it sends, creates, edits, deletes, shares or pays'],
-  ['never_ask', 'Never ask', 'Reads and acts without asking'],
-];
+export { PLUGIN_LEVELS };
 
 export function pluginUsesPage(value) {
   const fail = () => { throw new Error('Your Pips’ plugins didn’t load. Refresh to try again.'); };
@@ -285,7 +281,7 @@ export function pluginUsesPage(value) {
 
 function levelsMarkup(uses, { esc, busy, error }) {
   const off = busy ? ' disabled' : '';
-  const intro = `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Every Pip can use these</strong><small>A plugin you turn on in DGC Settings → Plugins is yours to use in every Pip. Choose what each may do without asking you. In a run you aren’t watching, a Pip always asks before it changes anything.</small></span><button type="button" class="quiet pill" data-open-plugins${off}>Open Plugins</button></div></section>`;
+  const intro = `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Every Pip can use these</strong><small>A plugin you turn on in DGC Settings → Plugins is yours to use in every Pip. Choose what each may do without asking you (Always ask holds in your Work sessions too). In a run you aren’t watching, a Pip always asks before it changes anything.</small></span><button type="button" class="quiet pill" data-open-plugins${off}>Open Plugins</button></div></section>`;
   if (!uses.plugins.length) return intro + `<section class="pip-page-group"><p class="pip-page-empty">No plugins yet. Add one in DGC Settings → Plugins, and every Pip can use it.</p></section>${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}`;
   const rows = uses.plugins.map(p => {
     const id = `plugin-level-${p.plugin}`;

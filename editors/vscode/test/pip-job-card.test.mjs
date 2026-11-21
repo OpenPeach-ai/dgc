@@ -163,7 +163,7 @@ test("in the Pip's own chat: the From line, linked back, and Start or Not now at
   const { J, doc } = world();
   const box = doc.createElement("div");
   box.innerHTML = J.fromLine(job(), { openAsker: true });
-  assert.equal(text(box), "From Tidy the October invoices: check billing/tax.py's rounding");
+  assert.equal(text(box), "From your Work session Tidy the October invoices: check billing/tax.py's rounding");
   const link = box.querySelector('[data-pipjob-act="asker"]');
   assert.deepEqual([link.dataset.kind, link.dataset.id], ["work", "sess-1"]);
   const asked = [], opened = [];

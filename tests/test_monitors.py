@@ -1753,9 +1753,12 @@ class ServeTests(unittest.TestCase):
             first = serve.wait(lambda e: e["type"] == "turn_start" and e.get("kind") == "monitor", 60)
             self.assertTrue(first)
             self.assertTrue(wait_for(lambda: wake_requests() >= 1, 20))
-            serve.send({"type": "prompt", "text": "second question", "request_id": "p2"})
+            serve.send({"type": "prompt", "text": "second question", "request_id": "p2", "delivery": "steer"})
             release_soon()
             answered = serve.wait(lambda e: e["type"] == "turn_start" and e.get("request_id") == "p2", 60)
+            accepted = next(e for e in serve.events if e["type"] == "prompt_accepted" and e.get("request_id") == "p2")
+            self.assertEqual(accepted.get("message"), "DGC's own check-in turn stops at its next step, and your "
+                             "message runs right after.", "said as what happens, never as a refusal")
             self.assertTrue(answered, kinds(serve.events))
             first_end = next(e for e in serve.events
                              if e["type"] == "turn_end" and e["turn_id"] == first["turn_id"])

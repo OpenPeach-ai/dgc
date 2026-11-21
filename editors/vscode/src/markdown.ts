@@ -189,10 +189,16 @@ let faviconsEnabled = true;
 export function setFavicons(on: boolean): void { faviconsEnabled = !!on; }
 export function faviconsOn(): boolean { return faviconsEnabled; }
 
+// An address no public site has: an IP address, localhost, a one-word name, a private or tailnet name. Google's icon
+// service can't reach it and sends a soft stand-in globe, and the address never needs to leave the machine: such a
+// link wears DGC's own sharp mark (links.css) instead.
+const PRIVATE_HOST = /^(?:localhost|[^.]+|\d{1,3}(?:\.\d{1,3}){3}|\[.*\])$|\.(?:localhost|local|lan|home|internal|intranet|corp|private|home\.arpa|ts\.net)$/i;
+
 export function faviconUrl(value: string): string | undefined {
   try {
     const url = new URL(value);
     if (url.protocol !== "http:" && url.protocol !== "https:") return;
+    if (PRIVATE_HOST.test(url.hostname)) return;
     return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(url.origin)}&sz=32`;
   } catch { return; }
 }

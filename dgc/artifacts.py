@@ -1277,10 +1277,13 @@ def _shell_hosts(server: "_Server") -> list[str]:
 _EDITOR_ANCESTORS = ("vscode-webview:", "vscode-file:")
 
 
-def _page_csp(server: "_Server", base: str) -> str:
+def _page_csp(server: "_Server", base: str, also: str = "") -> str:
     """The artifact's own CSP with its frame-ancestors narrowed to the shell's origin and VS Code's panels: they may
-    frame the page and the page may open itself; nothing else may frame it."""
-    ancestors = " ".join(["'self'", *(f"http://{_url_host(h)}:{server.port}" for h in _shell_hosts(server)),
+    frame the page and the page may open itself; nothing else may frame it. `also`: the address this request reached
+    (already allowed by the host check): the shell opened on that address frames it (a Tailscale address isn't among
+    the LAN ones, and Chrome blocked the page there). IPv6 literals are left out: Chrome rejects them as sources."""
+    hosts = sorted({*_shell_hosts(server), *([also] if also else [])})
+    ancestors = " ".join(["'self'", *(f"http://{h}:{server.port}" for h in hosts if ":" not in h and "[" not in h),
                           *_EDITOR_ANCESTORS])
     kept = [part.strip() for part in base.split(";") if part.strip() and not part.strip().startswith("frame-ancestors")]
     return "; ".join([*kept, f"frame-ancestors {ancestors}"])
@@ -1447,7 +1450,7 @@ def _make_page_handler(server: "_Server", art: Artifact):
                 data, _version = read_regular_bytes(target)
                 self._send(200, data,
                            "text/markdown; charset=utf-8" if download else _guess_type(target),
-                           csp=_page_csp(server, server.file_csp),
+                           csp=_page_csp(server, server.file_csp, also=self._request_host()),
                            headers={"Content-Disposition": 'attachment; filename="document.md"'}
                            if download else None)
             except (OSError, WorkspaceBoundaryError):

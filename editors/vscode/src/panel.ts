@@ -152,7 +152,7 @@ export function projectEditRules(more: unknown, answered: unknown, projectRoot: 
 // Settings and Work's model menu ask for the same list. fallback_engine: Claude Code or Codex as a session's fallback.
 const CONFIG_EVENT_FIELDS = ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
   "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget", "subagent_context_size",
-  "fallback_engine", "dev_mode", "dev_limits"];
+  "fallback_engine", "dev_mode", "dev_limits", "artifact_bind", "artifact_hostname"];
 /** The same list, with "Let DGC change Dev Mode settings" for a DGC that says it has the key (ready.capabilities.dev_mode_tools). */
 const configEventFields = (capabilities: unknown): string[] => (devToolsOffered(capabilities) ? [...CONFIG_EVENT_FIELDS, "dev_mode_tools"] : CONFIG_EVENT_FIELDS);
 const HOME_BACKEND_KEY = "dgc.homeBackend.v1";
@@ -760,6 +760,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private chatdgcSettable = false;
   /** The CLI takes the per-turn token cap from Settings (its config answered turn_token_budget). */
   private budgetSettable = false;
+  /** The CLI takes where pages open from (its config answered artifact_bind). */
+  private pagesSettable = false;
   /** The CLI takes the sub-agents' context window from Settings (its config answered subagent_context_size). */
   private subagentWindowSettable = false;
   /** This chat's sub-agents' context window as its config last said it (0: the main chat's). */
@@ -3876,11 +3878,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // The panel draws the CLI's own face slot for each sub-agent, so two at work never share a
     // face. Same gate: an undeclared field fails the whole handshake on an older CLI.
     const supportsAgentFaces = this.lastReadyEvent?.capabilities?.agent_faces === true;
+    // The panel draws an Allow card's countdown (request_deadline). Same gate.
+    const supportsDeadline = this.lastReadyEvent?.capabilities?.request_deadline === true;
     const command = this.stateCommand(
       "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots(),
                            ...(supportsOpenAsks ? { open_asks: true } : {}),
                            ...(supportsAskOptions ? { ask_options: true } : {}),
-                           ...(supportsAgentFaces ? { agent_faces: true } : {}) });
+                           ...(supportsAgentFaces ? { agent_faces: true } : {}),
+                           ...(supportsDeadline ? { request_deadline: true } : {}) });
     const accepted = setup || this.initializingBackend === be
       ? be.sendSetup(command)
       : be.send(command);
@@ -5204,6 +5209,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         if ("chatdgc_personality" in ev) { this.chatdgcSettable = true; }
         if ("turn_token_budget" in ev) { this.budgetSettable = true; }
+        if ("artifact_bind" in ev) { this.pagesSettable = true; }
         if ("subagent_context_size" in ev) { this.subagentWindowSettable = true; this.subagentWindow = Math.max(0, Math.floor(Number((ev as any).subagent_context_size) || 0)); }
         this.routeState.nativeModel = String(ev.model || "");
         this.routeState.nativeThink = String(ev.think || "off");
@@ -5548,7 +5554,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       } else this.settingsEditor?.webview.postMessage({ ...ev, type: "pluginOperation" });
       return;
     }
-    if (ev.type === "command_rejected" && ["inspect_plugin", "uninstall_plugin", "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin", "list_plugin_marketplaces"].includes(ev.command)) {
+    if (ev.type === "command_rejected" && ["set_plugin_permission", "inspect_plugin", "uninstall_plugin", "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin", "list_plugin_marketplaces"].includes(ev.command)) {
       const requested = this.settingsPreviewRequests.get(String(ev.request_id || ""));
       this.settingsPreviewRequests.delete(String(ev.request_id || ""));
       this.settingsEditor?.webview.postMessage({ type: "pluginOperationError", requested, action: ev.command, message: ev.message });
@@ -10944,6 +10950,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // toggle. Ask for it here instead, from the surface that owns the switch: commands share one
       // ordered pipe, so this is dispatched after the toggle has been applied.
       this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
+    } else if (msg?.type === "pluginLevel") {
+      // A plugin's page: what it may do without asking (the same setting as Pips settings → Plugins).
+      const plugin = String(msg.plugin || ""), level = String(msg.level || "");
+      if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(plugin) || !["always_ask", "any_changes", "important", "never_ask"].includes(level)) return;
+      if (this.lastReadyEvent?.capabilities?.plugin_levels !== true) {
+        this.settingsEditor?.webview.postMessage({ type: "pluginOperationError", message: "Update DGC to choose what a plugin may do without asking here." });
+        return;
+      }
+      this.sendPluginCommand({ type: "set_plugin_permission", request_id: this.nextRequestId("plugin-level"), plugin, level });
     } else if (msg?.type === "modsList" || msg?.type === "modSet") {
       // Settings -> Plugins -> Mods: the mods of the Work chat palette commands act on (the tab last worked in, else
       // this side bar's), as its /mods lists them, with the same Allow, On, Off and Reload. Each Work chat runs its own
@@ -11141,6 +11156,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // The per-turn token cap: blank or 0 is no cap. Only to a CLI that answered it (an older one refuses the save).
       if (this.budgetSettable && v.turn_token_budget !== undefined) {
         values.turn_token_budget = Math.max(0, Math.min(1_000_000_000, Math.floor(Number(v.turn_token_budget) || 0)));
+      }
+      // Where pages open from and the address links use: only to a CLI that answered them.
+      if (this.pagesSettable) {
+        if (v.artifact_bind === "localhost" || v.artifact_bind === "lan") { values.artifact_bind = v.artifact_bind; }
+        if (typeof v.artifact_hostname === "string") { values.artifact_hostname = v.artifact_hostname.trim().slice(0, 253); }
       }
       // The prompt-cache lifetime and Ollama's keep-loaded time: only to a CLI that answered cache_settings.
       if (this.cacheSettings) {

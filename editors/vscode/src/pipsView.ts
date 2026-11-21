@@ -457,7 +457,7 @@ export function yourBrowserTabRefusal(request: any, pipId: string): string {
 /** Your own tabs in Your Browser, streamed into an editor tab where the computer DGC runs on has no screen (Remote-SSH;
  *  his call, 18 Nov). Its page may ask for your own tab and nothing else (a frame, your own hand in it, the address bar,
  *  your tabs, its size), and no other page may ask for your own tab at all. */
-const YOUR_OWN_OPS = new Set(['frame', 'input', 'go', 'back', 'forward', 'reload', 'new_tab', 'tab', 'close_tab', 'size', 'close']);
+const YOUR_OWN_OPS = new Set(['frame', 'input', 'go', 'back', 'forward', 'reload', 'new_tab', 'tab', 'close_tab', 'size', 'close', 'selection']);
 const YOUR_OWN_FIELDS = new Set(['type', 'own', 'op', 'seq', 'events', 'tab', 'width', 'height', 'url']);
 export function yourOwnTabRefusal(request: any): string {
   const refused = 'This tab only shows your own tabs in Your Browser.';

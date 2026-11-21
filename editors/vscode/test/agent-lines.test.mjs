@@ -49,6 +49,20 @@ function batchOfThree(p, names = ["A", "B", "C"]) {
   p.advance(2000);
 }
 
+test("a project with no Git HEAD says so on the agent's page, never as a line under each sub-agent (his call, 20 Nov)", () => {
+  const p = panel();
+  p.event({ type: "turn_start", turn_id: "t1", prompt: "audit the dashboard" });
+  spawn(p.event, 0, "Vision audit of dashboard routes");
+  p.event({ type: "info", message: "⟳ sub-task: Vision audit of dashboard routes" });
+  p.event({ type: "info", message: "↳ this project has no Git HEAD; sub-task writes use the shared checkout" });
+  start(p.event, 0, "Vision audit of dashboard routes", { isolated: false });
+  assert.equal([...p.doc.querySelectorAll(".sys")].filter((n) => /no Git HEAD/.test(n.textContent)).length, 0, "not in the chat");
+  lines(p.doc)[0].querySelector("button.agent-name").click();
+  assert.match(p.doc.querySelector("#agent-log .agent-act")?.textContent || "", /shared checkout \(this project has no Git HEAD\)/,
+    "on its page, on its activity row");
+  assert.deepEqual(p.errors, []);
+});
+
 test("one delegated agent becomes one muted line", () => {
   const p = panel();
   p.event({ type: "turn_start", turn_id: "t1", prompt: "count the lines" });
@@ -495,10 +509,11 @@ test("a nested agent's updates repaint its line on the page in place, keeping a 
 });
 
 test("the spawn notices are not drawn when the backend reports agents; other notices are", () => {
+  // (20 Nov, his call: "no Git HEAD" is said on each agent's page, not under every sub-agent.)
   const notices = ["⟳ sub-task: map auth [explorer]", "↳ isolated checkout: /tmp/wt/map-auth",
-    "↯ running 2 isolated sub-tasks in parallel (max 4)"];
-  const others = ["↳ this project has no Git HEAD; sub-task writes use the shared checkout",
-    "↳ subagent_link_paths not shared — node_modules: no such file", "↯ running 2 independent reads in parallel"];
+    "↯ running 2 isolated sub-tasks in parallel (max 4)", "↳ this project has no Git HEAD; sub-task writes use the shared checkout"];
+  // ("↯ running 2 independent reads in parallel" is never drawn since 21 Nov: how DGC ran the steps, which their rows show.)
+  const others = ["↳ subagent_link_paths not shared — node_modules: no such file", "Context window raised to 64K"];
   for (const [capabilities, drawn] of [[{ agents: true }, others], [{}, [...notices, ...others]]]) {
     const p = panel({ capabilities });
     p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
@@ -676,14 +691,18 @@ test("an agent's page says what became of its changes", () => {
   spawn(p.event, 1, "A");
   start(p.event, 1, "A");
   nameOf(p.doc, 1).click();
-  assert.match(p.$("agent-page-meta").textContent, /^Working for \d+s · isolated checkout$/);
+  assert.match(p.$("agent-log").querySelector(".agent-act").textContent.replace(/\s+/g, " ").trim(),
+    /^Working \(\d+s · isolated checkout\)$/, "its activity row, as a session's");
   end(p.event, 1, "finished", { message: "Did the work." });
   assert.equal(p.$("agent-log").querySelector(".agent-page-outcome"), null, "nothing before the spawn's result");
   const held = "Sub-task 'A' completed but its changes were NOT integrated: conflict. Conflicts: a.py. The isolated "
     + "worktree is preserved at /wt/a on branch dgc/a.";
   p.event({ type: "tool_result", call_id: "call_1", name: "task", output: `${held}\nSummary:\nDid the work.`, is_error: false });
-  const note = p.$("agent-log").firstElementChild;
-  assert.ok(note.matches(".agent-page-outcome[data-held]"), "the outcome comes first, marked held");
+  // Drawn as a session's turn: what became of its changes leads what it said, under its folded work.
+  const note = p.$("agent-log").querySelector(":scope > .msg.dgc > .agent-page-outcome");
+  assert.ok(note?.matches("[data-held]"), "marked held");
+  const shown = [...note.parentElement.children].filter((n) => !n.matches(".role, .work-step"));
+  assert.ok(shown[0].matches(".agent-act") && shown[1] === note, "first after its Worked for row, before its answer");
   assert.equal(note.textContent, held);
   // A background spawn's result is not an outcome.
   const bg = panel();
@@ -742,5 +761,5 @@ test("the backend's spawn notices and outcome sentences are the ones the panel r
     assert.ok(agentPy.includes(phrase), `dgc/agent.py no longer says ${JSON.stringify(phrase)}`);
   }
   assert.match(agentPy, /f"↯ running \{len\(calls\)\} isolated sub-tasks in parallel \(max \{limit\}\)"/);
-  assert.match(mainJs, /const AGENT_SPAWN_NOTICE = \/\^\(\?:⟳ sub-task: \|↳ isolated checkout: \|↯ running \\d\+ isolated sub-tasks in parallel\\b\)\//);
+  assert.match(mainJs, /const AGENT_SPAWN_NOTICE = \/\^\(\?:⟳ sub-task: \|↳ isolated checkout: \|↳ this project has no Git HEAD\|↯ running \\d\+ isolated sub-tasks in parallel\\b\)\//);
 });

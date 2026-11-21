@@ -78,6 +78,90 @@ class Headless(OwnHost):
         store.start()
         self.addCleanup(store.stop)
 
+    def test_your_tabs_wear_their_sites_icons(self):
+        # (His 20 Nov ask: tabs like Chrome's, with each site's icon.)
+        self.host.open("https://example.com/", None, headless=True)
+        original = self.pipe.send
+
+        def send(payload):
+            if payload.get("method") == "Runtime.evaluate" and "icon" in payload["params"]["expression"]:
+                self.pipe.sent.append(payload)
+                self.pipe.inbox.append({"id": payload["id"], "sessionId": payload.get("sessionId"),
+                                        "result": {"result": {"type": "string", "value": "https://news.example.org/fav.png"}}})
+                return
+            original(payload)
+        self.pipe.send = send
+        fetched = []
+        png = b"\x89PNG\r\n\x1a\n" + b"0" * 40
+
+        def fetch(url):
+            fetched.append(url)
+            return png, "image/png"
+        self.host.fetch_icon = fetch
+        self.host.icon_wait = True                    # (the download runs at once here, not in a thread)
+        reply = self.host.view_own("frame", {"op": "frame", "seq": 0})
+        current = [t for t in reply["tabs"] if t["current"]]
+        self.assertEqual(fetched, ["https://news.example.org/fav.png"])
+        self.assertTrue(current and current[0].get("icon", "").startswith("data:image/png;base64,"), reply["tabs"])
+        self.host.view_own("frame", {"op": "frame", "seq": 0})
+        self.assertEqual(len(fetched), 1, "fetched once, kept by its address")
+
+    def test_an_icon_that_isnt_a_small_picture_is_never_kept(self):
+        for body, kind in ((b"<html>", "text/html"), (b"x" * 300_000, "image/png"), (b"", "image/png")):
+            with self.subTest(kind=kind, size=len(body)):
+                self.assertIsNone(your_browser.icon_data(body, kind))
+        self.assertTrue(your_browser.icon_data(b"\x00\x00\x01\x00" + b"0" * 30, "image/x-icon").startswith("data:image/x-icon"))
+
+    def test_copy_in_your_tab_lands_on_the_editors_clipboard(self):
+        # (His 20 Nov test: Ctrl+C in the streamed tab copied into Chrome's clipboard on the other computer.)
+        self.host.open("https://example.com/", None, headless=True)
+        original = self.pipe.send
+
+        def send(payload):
+            if payload.get("method") == "Runtime.evaluate":
+                self.pipe.sent.append(payload)
+                expression = payload["params"]["expression"]
+                self.assertIn("(text|search|url|email|tel|number)", expression, "only plain text fields")
+                self.assertNotIn("password", expression, "a password field is never read")
+                self.pipe.inbox.append({"id": payload["id"], "sessionId": payload.get("sessionId"),
+                                        "result": {"result": {"type": "string", "value": "the selected words"}}})
+                return
+            original(payload)
+        self.pipe.send = send
+        reply = self.host.view_own("selection", {"op": "selection"})
+        self.assertEqual((reply["ok"], reply["text"]), (True, "the selected words"))
+        self.assertIn("selection", your_browser.OWN_OPS)
+
+    def test_with_no_screen_but_xvfb_it_is_real_chrome_on_a_screen_of_its_own(self):
+        # (His 20 Nov test over Remote-SSH: headless Chrome says "HeadlessChrome", and Google's sign-in and reCAPTCHA
+        # turned it away; its pictures were soft on a Retina screen.) A Pip's computer runs Chrome on a display of its
+        # own: so does Your Browser where the computer has no screen, at twice the pixels.
+        screens = []
+
+        class Screen:
+            def poll(self):
+                return None
+
+            def terminate(self):
+                screens.append("stopped")
+
+            def wait(self, timeout=None):
+                return 0
+        self.host.which = lambda name: "/usr/bin/Xvfb" if name == "Xvfb" else None
+        envs = []
+        launch = self.host.launch
+        self.host.launch = lambda argv, env, log: (envs.append(env), launch(argv, env, log))[1]
+        with patch.object(your_browser, "start_virtual_screen", lambda which: (":147", Screen())):
+            self.host.open("https://example.com/", None, headless=True)
+        argv = self.launched[-1]
+        self.assertNotIn("--headless=new", argv, "never headless Chrome where a screen of its own can be made")
+        self.assertIn(f"--force-device-scale-factor={your_browser.SCREEN_SCALE}", argv)
+        self.assertTrue(any(a.startswith("--window-size=") for a in argv))
+        self.assertEqual(envs[-1].get("DISPLAY"), ":147")
+        self.assertTrue(self.host.headless, "still streamed to the editor's tab")
+        self.host.close()
+        self.assertEqual(screens, ["stopped"], "its screen goes with it")
+
     def test_with_no_screen_chrome_runs_headless_with_its_sandbox_and_dgcs_profile(self):
         self.host.open("https://example.com/", None, headless=True)
         argv = self.launched[-1]

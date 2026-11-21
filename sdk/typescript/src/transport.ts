@@ -39,7 +39,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "options_resolved", "outline", "permission_decision", "permission_request", "permission_resolved",
   "permissions", "plan_proposal", "prompt_accepted", "queue_changed", "queued", "ready", "recall",
   "pip_desktop_closed", "pip_desktop_data", "pip_fix", "pip_fix_change", "pip_fixes", "pip_report", "pip_runs_running", "pip_usage_report", "pips_result", "pips_settings", "pips_status", "prompt_pips",
-  "request_expired", "retained_tasks", "rewind_preview", "rewound", "router_changed", "router_status", "router_suggestion", "rule_added", "saved_plan", "seeing", "server_window", "session",
+  "request_deadline", "request_expired", "retained_tasks", "rewind_preview", "rewound", "router_changed", "router_status", "router_suggestion", "rule_added", "saved_plan", "seeing", "server_window", "session",
   "session_attachment", "session_attachments", "session_held", "session_holder", "session_live", "session_moved", "session_named", "sessions", "setting_undone", "skill_catalog", "skill_detail", "skill_draft", "skill_package", "skill_saved", "status",
   "steering_update", "stream_end", "subagent_settings", "agents_model", "text_delta", "think_changed", "thinking_delta",
   "thinking_end", "todos", "tool_call", "tool_denied", "tool_images", "tool_progress", "trace_usage", "reply_trace",

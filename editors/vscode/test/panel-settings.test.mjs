@@ -983,6 +983,22 @@ test("the token cap goes only to a CLI that answered it, as a whole number of to
   }
 });
 
+test("where pages open from goes only to a CLI that answered it", async () => {
+  const older = harness();
+  await older.provider.saveSettings(settings({ artifact_bind: "lan", artifact_hostname: "gb10.tail1234.ts.net" }));
+  assert.equal(older.commands.some((c) => c.type === "set_config" && "artifact_bind" in (c.values || {})), false,
+    "an older CLI refuses an unknown key, and the whole save with it");
+  const { provider, commands } = harness();
+  provider.onEvent({ type: "config", model: "m", mode: "default", artifact_bind: "localhost", artifact_hostname: "" });
+  await provider.saveSettings(settings({ artifact_bind: "lan", artifact_hostname: "  gb10.tail1234.ts.net " }));
+  const config = commands.find((c) => c.type === "set_config" && "artifact_bind" in (c.values || {}));
+  assert.deepEqual([config?.values.artifact_bind, config?.values.artifact_hostname], ["lan", "gb10.tail1234.ts.net"]);
+  const odd = harness();
+  odd.provider.onEvent({ type: "config", model: "m", mode: "default", artifact_bind: "localhost", artifact_hostname: "" });
+  await odd.provider.saveSettings(settings({ artifact_bind: "everywhere" }));
+  assert.equal(odd.commands.some((c) => c.type === "set_config" && "artifact_bind" in (c.values || {})), false);
+});
+
 test("Let DGC change Dev Mode settings is saved as dev_mode_tools, only to a CLI that says it takes the key", async () => {
   // Settings › Dev Mode (14 Nov). set_config refuses a whole save for one key it doesn't know, so the key goes only to
   // a DGC that offers it (ready.capabilities.dev_mode_tools), beside Dev Mode's own two settings.

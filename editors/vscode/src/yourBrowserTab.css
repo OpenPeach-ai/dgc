@@ -48,6 +48,22 @@ body { background: var(--bg, var(--vscode-editor-background)); color: var(--text
   overflow-wrap: anywhere; }
 .yb-line[hidden] { display: none; }
 .yb-own-mode .yb-bar { border-bottom: 0; padding-bottom: 6px; }
+/* Your tabs like Chrome's (his 20 Nov ask), in DGC's own shapes: a strip with a hairline under it; the current tab, its
+   6 px top corners and hairline sides, stands on the address row (it hides the strip's line under it); the others are
+   quiet, a thin divider between two of them, a wash on hover. Each wears its site's icon, its title and its Close. */
+.yb-own-mode .yb-tabs { gap: 0; align-items: flex-end; margin: -2px -10px 0; padding: 0 8px; border-bottom: 1px solid var(--hair, rgba(128, 128, 128, .25)); }
+.yb-own-mode .yb-own { position: relative; flex: 0 1 220px; height: var(--btn-h, 26px); margin-bottom: -1px; border: 1px solid transparent; border-bottom: 0;
+  border-radius: var(--btn-r, 6px) var(--btn-r, 6px) 0 0; background: transparent; }
+.yb-own-mode .yb-own.yb-on { background: var(--bg, var(--vscode-editor-background)); border-color: var(--hair, rgba(128, 128, 128, .25)); }
+.yb-own-mode .yb-own:not(.yb-on):hover { background: var(--wash, rgba(128, 128, 128, .12)); }
+.yb-own-mode .yb-own:not(.yb-on) + .yb-own:not(.yb-on)::before { content: ""; position: absolute; left: -1px; top: 6px; width: 1px; height: calc(var(--btn-h, 26px) - 12px);
+  background: var(--hair-strong, rgba(128, 128, 128, .4)); }
+.yb-own-mode .yb-own:hover::before, .yb-own-mode .yb-own:hover + .yb-own::before { opacity: 0; }
+.yb-own-mode .yb-own .yb-tab { align-items: center; gap: 8px; height: 100%; padding: 0 2px 0 10px; }
+.yb-fav { flex: none; width: 16px; height: 16px; object-fit: contain; border-radius: 3px; }
+.yb-fav-none { display: grid; place-items: center; color: var(--faint, inherit); }
+.yb-fav-none svg { width: 14px; height: 14px; }
+.yb-own-mode .yb-new { align-self: center; margin-left: 4px; }
 .yb-own-mode .yb-stage { padding: 8px; }
 .yb-own-mode .yb-frame { cursor: default; user-select: none; -webkit-user-select: none; }
 .yb-keys { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; margin: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; }

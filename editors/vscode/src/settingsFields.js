@@ -535,7 +535,13 @@ export function renderFields(section, main, config, providers, ui) {
                     "Served on this computer only (loopback).")
                 + field("Serve pages as they're made", "And bring them back after a restart.", bool("artifact_autostart", c.artifact_autostart !== false))
                 + field("Pages in plan mode", "Plan mode may serve pages too.", bool("artifact_in_plan", c.artifact_in_plan === true),
-                    "Off keeps plan mode to reading and proposing: it can't start a preview."))
+                    "Off keeps plan mode to reading and proposing: it can't start a preview.")
+                // Where pages open from (the CLI's /artifact had it; the extension didn't: 21 Nov).
+                + ("artifact_bind" in c ? field("Open pages from", c.artifact_bind === "lan" ? "Other devices can open them too." : "Only this computer opens them.",
+                    sel("artifact_bind", [["localhost", "This computer only"], ["lan", "Your network and Tailscale"]], c.artifact_bind || "localhost"),
+                    "Your network and Tailscale: your phone or another computer on the same network or tailnet opens a page DGC serves. Anyone there with its link can see it.")
+                  + field("Address for links", "Optional: a name your devices use.", inp("artifact_hostname", c.artifact_hostname || ""),
+                    "A Tailscale name (gb10.tail1234.ts.net) or a host:port. Empty: links use this computer's own address.") : ""))
             // What an Always allow on a card made, in words, each with Remove (user test W8). Removed at once: not
             // part of Save.
             + group("Always allowed", ui.rules == null ? '<div class="row-line rule-line"><span class="words"><span class="hint" role="status">Reading the rules from DGC…</span></span></div>'

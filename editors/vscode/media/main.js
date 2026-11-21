@@ -4466,19 +4466,25 @@
     pending: "\u21b3 steering \u2026",
     queued: "\u21b3 queued for the next turn",
   };
+  // "Steering · 12:56 PM", pulsing, while the model hasn't read it yet; "Steered · 12:56 PM" once it has: the same place
+  // under the bubble (his call, 21 Nov: the pending words sat on a line of their own).
   function syncSteerTime(node) {
     const time = node?.querySelector(":scope > .msg-time");
     if (!time) return;
     time.querySelector(":scope > .steer-time-prefix")?.remove();
-    if (node.dataset.steer === "applied") {
-      time.prepend(el("span", "steer-time-prefix", "Steered \u00b7 "));
+    const steer = node.dataset.steer;
+    if (steer === "applied" || steer === "pending") {
+      time.prepend(el("span", steer === "pending" ? "steer-time-prefix steering" : "steer-time-prefix",
+        steer === "pending" ? "Steering \u00b7 " : "Steered \u00b7 "));
       node.querySelector(":scope > .steer-note")?.remove();
     }
   }
   function setSteerState(node, state) {
     if (!node) return;
     node.dataset.steer = state;
-    const words = state === "applied" && !node.querySelector(":scope > .msg-time") ? "Steered" : STEER_NOTE[state];
+    const timed = !!node.querySelector(":scope > .msg-time");
+    const words = state === "applied" ? (timed ? "" : "Steered") : state === "pending" ? (timed ? "" : "Steering \u2026")
+      : STEER_NOTE[state];
     let note = node.querySelector(":scope > .steer-note");
     if (!words) { if (note) note.remove(); syncSteerTime(node); return; }
     if (!note) { note = el("div", "steer-note"); node.appendChild(note); }
@@ -5787,13 +5793,13 @@
         note.append(face, pipName, el('span','pip-approval-status','Created'));
       }else note.append(el('span','','Pip created'));
       appendTarget.appendChild(note);head=note;
+    } else if (kind === "resume" && /^Goal · turn \d{1,7}$/.test(String(prompt || ""))) {
+      // A goal's own next turn (DGC names it "Goal · turn 3"): nothing in the chat, its work and answer just follow (his
+      // call, 21 Nov: "Goal · turn 64" lines are the goal's own business). The goal pill above the box says where it is.
     } else if (kind === "resume" || kind === "continue") {
       const note = el("div", replaying ? "resume-note hist" : "resume-note");
-      // A goal's own next turn (12 Nov): DGC names it "Goal · turn 3"; any other resume keeps its words.
-      const goalTurn = kind === "resume" && /^Goal · turn \d{1,7}$/.test(String(prompt || "")) ? String(prompt) : "";
-      if (goalTurn) note.classList.add("goal-turn-note");
-      note.innerHTML = `<span class="note-icon" data-icon="${goalTurn ? "target" : "play"}">${icon(goalTurn ? "target" : "play")}</span>`
-        + `<span>${goalTurn ? esc(goalTurn) : kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
+      note.innerHTML = `<span class="note-icon" data-icon="play">${icon("play")}</span>`
+        + `<span>${kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
       if (kind === "continue") note.classList.add("continue-note");
       appendTarget.appendChild(note);
       head = note;
@@ -6193,7 +6199,10 @@
   // endTurn draws it, live and replayed alike, so a reload, a reattach and a resume draw the same fold.
   const WORK_STEPS = [".text.commentary:not(.commentary-detail)", ".tool-group", ".tg-live",
     '.tool:not([data-tool-name="propose_options"])', ".disclosure", ".reasoning", ".thought-note",
-    ".thought-static", '.model-retry[data-state="recovered"]', ".agent-line", ".monitor-event"].join(", ");
+    ".thought-static", '.model-retry[data-state="recovered"]', ".agent-line", ".monitor-event",
+    // The turn's Tasks card: progress while it works, folded with the rest once it has answered (it stayed open
+    // under a finished turn, 21 Nov). The Tasks pill above the box still opens the list.
+    ".todos-card"].join(", ");
   function isWorkStep(node) {
     return node.matches(WORK_STEPS) && !(node.matches(".agent-line") && node.querySelector(".agent-mark.is-live"));
   }
@@ -6308,6 +6317,19 @@
     if (!row) return;
     event.preventDefault();
     toggleWorkFold(row);
+  });
+  // A sub-agent's page folds its work the same way (buildAgentWork).
+  const agentWorkLog = $("agent-log");
+  agentWorkLog?.addEventListener("click", (event) => {
+    const row = event.target.closest?.(".msg.dgc.has-work-fold > .work-toggle");
+    if (row) setWorkOpen(row.parentElement, row.getAttribute("aria-expanded") !== "true", row);
+  });
+  agentWorkLog?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest?.(".msg.dgc.has-work-fold > .work-toggle");
+    if (!row) return;
+    event.preventDefault();
+    setWorkOpen(row.parentElement, row.getAttribute("aria-expanded") !== "true", row);
   });
   function endTurn(reason = "completed", finalId) {
     if (!turn) return;
@@ -7537,7 +7559,24 @@
       const stick = atEnd(); flushText(); if (stick || following) scroll(); else noteNewContent();
     }, 48);
   }
-  function breakText() { if (turn) { flushText(); turn.textEl = null; turn._buf = ""; turn.renderedAt = 0; } }
+  function breakText() {
+    if (!turn) return;
+    flushText();
+    // Kept so text that goes on with no step between continues it (resumeText).
+    if (turn.textEl) { turn.lastTextEl = turn.textEl; turn.lastBuf = turn._buf; }
+    turn.textEl = null; turn._buf = ""; turn.renderedAt = 0;
+  }
+  // A reply's text that goes on after a seam (a stream closed with no phase), with nothing but thinking or a status line between (no
+  // step, no card), is the same paragraph: a model that streamed in pieces drew "The / live / history changes are i /
+  // n place." as five (live, 20 Nov; the saved reply was whole). The rows between move above it, as appendText does.
+  function resumeText() {
+    const last = turn?.lastTextEl;
+    if (!turn || turn.textEl || !last?.isConnected || last._seam !== true) return;
+    for (let n = last.nextElementSibling; n && n !== turn.act; n = n.nextElementSibling) {
+      if (!n.matches(".sys, .disclosure, .reasoning, .thought-note, .thought-static, .model-retry")) return;
+    }
+    turn.textEl = last; turn._buf = turn.lastBuf || last._markdown || "";
+  }
 
   // Closes the reasoning group (or streaming progress note) that is still taking deltas. Its label
   // then reads "Thought for Ns" from the backend's own seconds (see the 0.40 thinking section).
@@ -7641,11 +7680,13 @@
     if (only && only !== ICON_FALLBACK) return only;
     return BUCKET_ICON[lead] || ICON_FALLBACK;
   }
-  function refreshToolGroup(group) {
+  // `owned`: a group on a sub-agent's page, whose steps are all that agent's: it counts them and leaves the live turn alone.
+  function refreshToolGroup(group, { owned = false } = {}) {
     if (!group) return;
     const all = [...group.querySelectorAll(":scope > .tool")];
-    const cards = all.filter((card) => !card.classList.contains("agent-owned") && !card.classList.contains("pip-run-owned"));
+    const cards = owned ? all : all.filter((card) => !card.classList.contains("agent-owned") && !card.classList.contains("pip-run-owned"));
     if (!cards.length) {
+      if (owned) return;
       if (all.length) group.classList.add("agent-owned");
       if (turn && turn.toolGroup === group) turn.toolGroup = null;
       syncLiveStep();
@@ -7716,7 +7757,7 @@
       headerIcon(running.length ? running : executed.length ? executed : cards));
     // Error counts stay visible in the summary. Tool output only expands on
     // the reader's click; progress and failures never take over their scroll.
-    syncLiveStep();
+    if (!owned) syncLiveStep();
   }
   // "thought 13s": the main model's finished thinking inside a group (the marks on its steps and a
   // thought that ended the stretch), from the seconds the backend stated. A block still streaming
@@ -8522,9 +8563,29 @@
       // and backticks and all. W29, user test 15 Nov).
       + `<span class="plan-fold-chev" aria-hidden="true">${icon("chevron-down", "sm")}</span></summary><div class="plan-body surface-markdown">${md(String(plan ?? ""))}</div></details>`;
   }
+  // "Denied in 1:59 if you don't answer", just above the card's buttons, until it is answered or closed.
+  function cardCountdown(card, seconds) {
+    const end = performance.now() + Math.max(1, seconds) * 1000;
+    let line = card.querySelector(".card-countdown");
+    if (!line) {
+      line = el("div", "card-countdown");
+      line.setAttribute("role", "timer");
+      const btns = card.querySelector(".btns");
+      if (btns) btns.before(line); else card.appendChild(line);
+    }
+    clearTimeout(card._countdown);
+    const tick = () => {
+      if (card.classList.contains("resolved") || !card.isConnected) { line.remove(); return; }
+      const ms = Math.max(0, end - performance.now()), left = Math.ceil(ms / 1000);
+      line.textContent = `Denied in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} if you don't answer`;
+      if (ms > 0) card._countdown = setTimeout(tick, ms % 1000 || 1000);   // on each whole second
+    };
+    tick();
+  }
   function resolveCard(c, decision = "") {
     if (!c || c.classList.contains("resolved")) return false;
     c.classList.add("resolved");
+    if (c._countdown) { clearTimeout(c._countdown); c.querySelector(".card-countdown")?.remove(); }
     c.querySelectorAll(":scope > details.plan-fold").forEach((fold) => { fold.open = false; });
     if (!replaying) c.classList.add("motion-resolved");
     c.setAttribute("aria-disabled", "true");
@@ -8800,13 +8861,18 @@ function permissionChoices(ev) {
     const background = ev.kind === "background_exit";
     const ended = ev.kind === "ended" || background;
     const lines = (Array.isArray(ev.lines) ? ev.lines : []).map((line) => String(line)).slice(0, 40);
-    const head = el("div", "monitor-event-head");
+    // Folded like a tool's step (his call, 20 Nov: a monitor's check-ins stood open, line after line): its head is the
+    // button that opens it, with the tools' chevron; its lines show only when open.
+    const head = el("button", "monitor-event-head");
+    head.type = "button";
+    head.setAttribute("aria-expanded", "false");
     // A command run with `bash` in background mode is not a monitor; its card says what it is.
     const kind = background ? "Background command" : "Monitor";
     const state = background ? "exited" : ended ? "ended" : `event ${Math.max(0, Number(ev.event_index) || 0)}`;
     head.innerHTML = icon(background ? "square-terminal" : "activity")
       + `<span class="me-title">${kind} · ${esc(String(ev.description || ev.id || "").slice(0, 120))}</span>`
-      + `<span class="me-meta">${esc(state)}</span>`;
+      + `<span class="me-meta">${esc(state)}</span><span class="chev" aria-hidden="true">›</span>`;
+    head.onclick = () => { const open = !card.classList.contains("open"); card.classList.toggle("open", open); head.setAttribute("aria-expanded", String(open)); };
     card.setAttribute("aria-label", `${kind} ${String(ev.description || ev.id || "")}, ${state}`);
     card.appendChild(head);
     const body = ended ? lines.slice(1) : lines;
@@ -10376,7 +10442,7 @@ function permissionChoices(ev) {
         }
         break;
       }
-      case "text_delta": ensureTurn(); finishReasoning(); releaseToolGroup(); turn.chars += ev.text.length; appendText(ev.text); break;
+      case "text_delta": ensureTurn(); finishReasoning(); releaseToolGroup(); turn.chars += ev.text.length; resumeText(); appendText(ev.text); break;
       // A background sub-agent's own work arrives after the turn that started it has ended. It is on
       // the agent's page, never in the chat: it must not open a turn, scroll, or raise "New". (The
       // returns below skip the follow tail at the end of this switch on purpose.)
@@ -10399,6 +10465,9 @@ function permissionChoices(ev) {
         // copy button with it when it was added before (it came back only when the turn ended), and
         // whether a message is a detailed one is read off its rendered shape.
         breakText();
+        // A stream closed with no phase is a seam in one reply (a continuation), not a message of its own: text that goes
+        // on right after it continues the same paragraph (resumeText).
+        if (closed) closed._seam = !ev.phase;
         if (closed && ev.phase === "commentary") markCommentary(closed);
         break;
       }
@@ -11175,7 +11244,11 @@ function permissionChoices(ev) {
         // isolated sub-tasks in parallel") are what its line in the transcript now says, and the
         // agent's page names an isolated checkout. They were never replayed either, so a reload
         // always drew the chat without them. A backend without agent frames still prints them.
+        if (agentsLive && String(ev.message || "").startsWith("↳ this project has no Git HEAD")) agentsShareCheckout = true;
         if (agentsLive && AGENT_SPAWN_NOTICE.test(String(ev.message || ""))) return;
+        // "↯ running 3 independent reads in parallel": how DGC ran the steps, which their own rows already show. It
+        // stayed under a finished turn's Worked for row, line after line (21 Nov).
+        if (/^↯ running \d+ independent reads in parallel$/.test(String(ev.message || ""))) return;
         if (String(ev.message || "").startsWith("Switched to ")) {
           const line = el("div", "sys model-switch", esc(ev.message));
           appendConversationContent(line);
@@ -11231,6 +11304,13 @@ function permissionChoices(ev) {
         // An older CLI's refusal names the command: never a method's name in the chat.
         sysLine(ev.reason === "turn_in_progress" || !ev.message
           ? "That can't be done while a reply is running. Stop it or wait for it to finish." : ev.message, true); break;
+      case "request_deadline": {
+        // An Allow card answered within `seconds` or denied (a step DGC never runs on its own): its countdown.
+        const card = [...document.querySelectorAll(".card[data-request-id]")]
+          .find((c) => c.dataset.requestId === String(ev.id));
+        if (card && !card.classList.contains("resolved")) cardCountdown(card, Number(ev.seconds) || 0);
+        break;
+      }
       case "request_expired":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
           if (card.dataset.requestId === String(ev.id)) resolveCard(card, "Closed without a decision");
@@ -14180,6 +14260,13 @@ function permissionChoices(ev) {
     }
   }
 
+  // Near the top of the transcript, its earlier messages load (renderHistory sets the loader for the history on screen).
+  let loadEarlier = () => false, earlierFrame = 0;
+  const HISTORY_PAGE_TURNS = 25;
+  log.addEventListener("scroll", () => {
+    if (earlierFrame || log.scrollTop > 240) return;
+    earlierFrame = requestAnimationFrame(() => { earlierFrame = 0; if (log.scrollTop <= 240) loadEarlier(); });
+  }, { passive: true });
   function renderHistory(items) {
     // Non-destructive: replace only the history block, and place it ABOVE any live
     // content. A resumed session's `history` event can arrive AFTER the user has
@@ -14187,7 +14274,10 @@ function permissionChoices(ev) {
     // to wipe that just-sent prompt while the turn kept streaming.
     log.querySelectorAll(".hist").forEach((e) => e.remove());
     const history = el("div", "hist history-pages");
-    const older = el("button", "act history-older", "Show earlier messages");
+    // Earlier messages load by themselves when you scroll to the top (his call, 21 Nov, as Codex does): no button on
+    // screen. This one is for the keyboard and screen readers only (shown when focused), and says "Loading earlier
+    // messages…" while the archive loads.
+    const older = el("button", "act history-older history-auto", "Show earlier messages");
     older.title = "Load the previous page of this session\u2019s history";
     history.appendChild(older);
     // Saved history IS the live event vocabulary, so a page of it renders by driving the same
@@ -14198,9 +14288,10 @@ function permissionChoices(ev) {
     let cursor = units.length;
     function page() {
       const frag = document.createDocumentFragment();
-      // Take whole turns until the page is about fifty events deep, and never fewer than one.
-      let start = cursor, count = 0;
-      while (start > 0 && count < 50) { start--; count += units[start].length; }
+      // 25 whole turns a page, as Codex loads a thread (its app server's default page; about fifty events, often two or
+      // three turns of tool work, had you scrolling up again and again: 21 Nov).
+      let start = cursor;
+      while (start > 0 && cursor - start < HISTORY_PAGE_TURNS) start--;
       replayInto(units.slice(start, cursor).flat(), frag, cursor === units.length);
       const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
       const landed = [...frag.children];
@@ -14222,6 +14313,7 @@ function permissionChoices(ev) {
       if (recallPending) return;
       recallPending = true;
       older.textContent = "Loading earlier messages\u2026";
+      older.dataset.loading = "1";
       older.disabled = true;
       vscode.postMessage({ type: "getRecall",
                            before: recallCursor === null ? undefined : recallCursor });
@@ -14229,6 +14321,7 @@ function permissionChoices(ev) {
     renderHistory._absorbRecall = (ev) => {
       recallPending = false;
       older.disabled = false;
+      delete older.dataset.loading;
       older.textContent = "Show earlier messages";
       recallCursor = Number(ev.before) || 0;
       const rows = Array.isArray(ev.items) ? ev.items : [];
@@ -14278,9 +14371,14 @@ function permissionChoices(ev) {
       }
     }
     older.type = "button";
-    older.onclick = () => { if (cursor > 0) page(); else askForRecall(); };
+    const earlier = () => { if (older.hidden || recallPending || !older.isConnected) return false; if (cursor > 0) page(); else askForRecall(); return true; };
+    older.onclick = earlier;
+    loadEarlier = earlier;
     log.insertBefore(history, log.firstChild);   // history above any live user prompt / streaming turn
     page();
+    // A first page shorter than the window has no top to scroll to: the next pages come until it fills (only with a
+    // real layout, a few pages at most).
+    for (let n = 0; n < 6 && log.clientHeight > 0 && log.scrollHeight <= log.clientHeight + 40 && cursor > 0; n++) page();
     startHintedTurn();                // a running turn the snapshot does not hold yet
     scroll();
   }
@@ -14976,7 +15074,10 @@ function permissionChoices(ev) {
   const AGENT_WORD_STATE = { "started working": "started", running: "running", "waiting for your permission": "waiting",
     "waiting for your answer": "waiting", queued: "queued", finished: "finished", failed: "failed", stopped: "stopped" };
   // The backend's own notices for a spawn (dgc/agent.py; a test pins the wording to them).
-  const AGENT_SPAWN_NOTICE = /^(?:⟳ sub-task: |↳ isolated checkout: |↯ running \d+ isolated sub-tasks in parallel\b)/;
+  const AGENT_SPAWN_NOTICE = /^(?:⟳ sub-task: |↳ isolated checkout: |↳ this project has no Git HEAD|↯ running \d+ isolated sub-tasks in parallel\b)/;
+  // A project with no Git HEAD runs its sub-agents in the shared checkout: said on each agent's page, not as a line under
+  // every sub-agent in the chat (his call, 20 Nov).
+  var agentsShareCheckout = false;              // `var`: the info handler, earlier in this file, sets it
   // A clause separator: " · " for the eye, a comma for a screen reader (reasonAgentPrefix's pause).
   const AGENT_SEP = { sep: true };
   // First members of the lines whose "N more" was used: an expanded line stays expanded for the
@@ -15488,16 +15589,67 @@ function permissionChoices(ev) {
     if (answer) {
       const block = el("div", "text agent-answer");
       block.innerHTML = md(answer);
-      report.push(block);
+      if (conversation) report.push(block);
+      else {
+        // On its page, its answer sits as a session's final answer does.
+        block.classList.add("final");
+        const wrap = el("div", "answer complete");
+        wrap.appendChild(block);
+        report.push(wrap);
+      }
     }
     const files = document.createDocumentFragment();
     paintAgentFiles(files, record);
     report.push(...files.childNodes);
     const told = report.some((node) => !node.classList.contains("agent-page-outcome"));
-    if (conversation) into.appendChild(agentPromptMessage(record));
-    else into.append(...report);
-    paintAgentTranscript(id, into, { lines, images, open, told, below: conversation });
-    if (conversation) into.append(...report);
+    if (conversation) {
+      into.appendChild(agentPromptMessage(record));
+      paintAgentTranscript(id, into, { lines, images, open, told, below: true });
+      into.append(...report);
+      return;
+    }
+    // Its page reads like a Work session (his call, 20 Nov): the prompt it was given as the session draws a prompt,
+    // then its turn: its steps grouped as the session groups them, the activity row under them while it works, and
+    // once it ended the work folded under "Worked for …" at the top, with its answer and files below.
+    into.appendChild(agentPromptMessage(record));
+    const block = into.appendChild(el("div", "msg dgc agent-turn"));
+    paintAgentTranscript(id, block, { lines, images, open, told, below: true });
+    groupAgentSteps(block);
+    block.append(...report);
+    const act = el("div", "thinking agent-act", `<span class="spin">${MARK}</span> <span class="verb"></span> <span class="meta"></span>`);
+    if (AGENT_ACTIVE.has(record.state)) { block.appendChild(act); return; }
+    act.classList.add("done");
+    // Finished: its work folds, as a finished turn's does. Stopped or failed: its work is all it has to show.
+    const rows = record.state === "finished" ? workRows(block, act, null) : [];
+    if (!rows.length) { block.prepend(act); return; }
+    act.classList.add("work-toggle");
+    act.setAttribute("role", "button");
+    act.setAttribute("aria-expanded", "false");
+    act.tabIndex = 0;
+    block.classList.add("has-work-fold", "work-folded");
+    paintWorkFold(block);
+  }
+  // A sub-agent's steps on its page, grouped as the session groups a stretch of work: each run of steps (with the
+  // thinking between them) is one "Read 1 file, ran 1 command" group, closed until you open it.
+  const AGENT_STEP_ROWS = ".tool, .diff, .disclosure, .reasoning, .thought-static, .thought-note";
+  function groupAgentSteps(block) {
+    let run = [];
+    const flush = () => {
+      if (run.some((node) => node.matches(".tool"))) {
+        const group = el("details", "tool-group");
+        group.innerHTML = `<summary><span class="tg-icon" data-icon="wrench" aria-hidden="true">${icon("wrench")}</span>`
+          + '<span class="tool-group-label">Working</span></summary>';
+        group.open = false;
+        run[0].before(group);
+        group.append(...run);
+        refreshToolGroup(group, { owned: true });
+      }
+      run = [];
+    };
+    for (const node of [...block.children]) {
+      if (node.matches(AGENT_STEP_ROWS)) run.push(node); else flush();
+    }
+    flush();
   }
   function paintAgentFiles(into, record) {
     const items = agentHandoffFiles(record.message);
@@ -15533,15 +15685,30 @@ function permissionChoices(ev) {
     }
     if (!live && agentPageTick) { clearInterval(agentPageTick); agentPageTick = null; }
   }
+  // The page's activity row, as a session's: "Working (12s · isolated checkout)" under its steps while it works,
+  // "Worked for 41s · isolated checkout" once it ended. Where it worked (the chat's old "↳ isolated checkout" notice)
+  // is said here, not on a line under the header.
   function paintAgentPageMeta(id) {
     const record = agentRecords.get(id);
     const meta = $("agent-page-meta");
-    if (!record || !meta) return;
+    if (meta) { meta.hidden = true; meta.textContent = ""; }
+    const act = $("agent-log")?.querySelector(":scope > .msg.dgc > .agent-act");
+    if (!record || !act) return;
     const working = AGENT_ACTIVE.has(record.state);
     const ms = working ? agentLiveMs(record) : Number(record.duration_ms || 0);
-    // Where the agent worked, which the chat's "↳ isolated checkout" notice used to say.
     const where = agentWhere(record) || agentThinking(record);
-    meta.textContent = `${working ? "Working" : "Worked"} for ${elapsedWords(ms)}${where ? ` · ${where}` : ""}${record.isolated ? " · isolated checkout" : ""}`;
+    const checkout = record.isolated ? "isolated checkout" : agentsShareCheckout ? "shared checkout (this project has no Git HEAD)" : "";
+    const tail = [where, checkout].filter(Boolean).join(" · ");
+    if (!working) {
+      const words = `Worked for ${elapsedWords(ms)}${tail ? ` · ${tail}` : ""}`;
+      if (act.textContent !== words) act.textContent = words;
+      return;
+    }
+    const verb = act.querySelector(".verb"), clock = act.querySelector(".meta");
+    const says = record.state === "waiting" ? "Waiting for your input" : "Working";
+    if (verb && verb.textContent !== says) verb.textContent = says;
+    const time = `(${elapsedWords(ms)}${tail ? ` · ${tail}` : ""})`;
+    if (clock && clock.textContent !== time) clock.textContent = time;
   }
   // The spawn's own result says whether the agent's changes reached your checkout; its line only says
   // it finished. The page says what was integrated, above the agent's report -- and says it plainly
@@ -15577,9 +15744,15 @@ function permissionChoices(ev) {
       title.title = name;
       title.setAttribute("aria-label", name);
     }
-    paintAgentPageMeta(id);
+    // What you opened stays open while the page is drawn again: its groups, and its folded work.
+    const groupsOpen = [...agentLog.querySelectorAll(":scope > .msg.dgc > details.tool-group")].map((group) => group.open);
+    const workOpen = agentLog.querySelector(":scope > .msg.dgc > .work-toggle")?.getAttribute("aria-expanded") === "true";
     clearAgentPageImages();
     buildAgentWork(id, agentLog, { lines: agentPageLines, images: agentPageImageRecords });
+    agentLog.querySelectorAll(":scope > .msg.dgc > details.tool-group").forEach((group, i) => { if (groupsOpen[i]) group.open = true; });
+    const turnBlock = agentLog.querySelector(":scope > .msg.dgc.has-work-fold");
+    if (workOpen && turnBlock) setWorkOpen(turnBlock, true);
+    paintAgentPageMeta(id);
     syncAgentPageTick();
     page.scrollTop = keepBottom ? page.scrollHeight : keep;
     if (focused) focusQuietly(agentLog.querySelector(`.agent-name[data-agent-id="${cssEscape(focused)}"]`), { preventScroll: true });

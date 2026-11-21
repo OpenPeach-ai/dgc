@@ -1258,7 +1258,7 @@ function chatMarkup(){
   let turnOpen=false,pipRun=false;
   // A conversation (Pips API 97): the Pip's reply is Work's prose, with its face, name and time once per run of its messages.
   const plainReply=(html,m,lead)=>{const open=`class="pip-message msg assistant dgc`;if(!html.includes(open))return html;
-   const led=lead&&!html.includes('run-post-head'),head=led?`<div class="run-post-head"><span class="run-post-face" aria-hidden="true">${pipAvatar(S.pip,'idle',`said-${m.id}`,type||characterType(S.pip.pip_type))}</span><strong class="run-post-name">${esc(S.pip.name)}</strong>${globalThis.DgcTime?.markup(Date.parse(m.created_at))||''}</div>`:'';
+   const led=lead&&!html.includes('run-post-head'),head=led?`<div class="run-post-head"><span class="run-post-face" aria-hidden="true">${pipAvatar(S.pip,'idle',`said-${m.id}`,type||characterType(S.pip.pip_type))}</span><strong class="run-post-name">${esc(S.pip.name)}</strong></div>`:'';   // (its time is under the reply, once: 21 Nov)
    // (A reply in pieces is several of these: each is plain, and its face and name stand over its first words.)
    const out=html.replaceAll(open,`${open} pip-plain${led?' pip-led':''}`);if(!led)return out;
    const first=out.indexOf(open),into=out.indexOf('>',first)+1;return out.slice(0,into)+head+out.slice(into);};
@@ -1418,7 +1418,7 @@ async function jumpToRun(runId){
 // which routine, and a long one starts short with Show all.
 function routineReply(m,title,type){
   const cut=shortReply(m.text),look=type||characterType(S.pip.pip_type);
-  const head=`<div class="run-post-head"><span class="run-post-face" aria-hidden="true">${pipAvatar(S.pip,'idle',`routine-${m.id}`,look)}</span><strong class="run-post-name">${esc(S.pip.name)}</strong><span class="run-post-routine">${esc(title)}</span>${globalThis.DgcTime?.markup(Date.parse(m.created_at))||''}</div>`;
+  const head=`<div class="run-post-head"><span class="run-post-face" aria-hidden="true">${pipAvatar(S.pip,'idle',`routine-${m.id}`,look)}</span><strong class="run-post-name">${esc(S.pip.name)}</strong><span class="run-post-routine">${esc(title)}</span></div>`;
   return {head,clip:cut.clipped?{text:cut.text,open:shownInFull.has(m.id),key:m.id}:null};
 }
 function postContext(){

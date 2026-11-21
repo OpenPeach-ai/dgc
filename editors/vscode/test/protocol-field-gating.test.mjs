@@ -57,6 +57,13 @@ test("open_asks is withheld from a CLI that did not declare it", () => {
   assert.equal(with_[0].open_asks, true, "and a CLI that declared it still gets it");
 });
 
+test("request_deadline is withheld from a CLI that did not declare it", () => {
+  const without = byType(handshakeCommands({}), "set_workspace_roots");
+  assert.equal("request_deadline" in without[0], false, "an older CLI rejects the whole handshake command");
+  const with_ = byType(handshakeCommands({ request_deadline: true }), "set_workspace_roots");
+  assert.equal(with_[0].request_deadline, true, "the panel draws an Allow card's countdown");
+});
+
 test("agent_faces is withheld from a CLI that did not declare it", () => {
   const without = byType(handshakeCommands({}), "set_workspace_roots");
   assert.equal(without.length, 1, "the handshake command is still sent");

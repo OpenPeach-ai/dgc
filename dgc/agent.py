@@ -865,6 +865,39 @@ def interaction_offers_always() -> bool:
     return not getattr(_INTERACTION, "no_always", False)
 
 
+def _plugin_always_asks(name: str) -> str:
+    """The plugin whose tool this is, by name, when the user set it to Always ask; "" otherwise."""
+    match = re.match(r"mcp__([A-Za-z0-9_.-]+?)__", name)
+    if not match:
+        return ""
+    try:
+        from .pip_plugins import level, owner
+        found = owner(match.group(1))
+        if found is not None and level(found["name"], found) == "always_ask":
+            return str(found.get("display_name") or found["name"])[:80]
+    except Exception:  # noqa: BLE001 -- a registry that can't be read leaves the call to its rules
+        return ""
+    return ""
+
+
+def _minutes(seconds: float) -> str:
+    """A card's time limit in plain words: "2 minutes", "1 minute", "30 seconds"."""
+    whole = max(1, int(round(float(seconds))))
+    if whole % 60 == 0:
+        return f"{whole // 60} minute" + ("" if whole == 60 else "s")
+    return f"{whole} second" + ("" if whole == 1 else "s")
+
+
+def takes_seconds(ui) -> bool:
+    """Whether this UI's Allow card takes a time limit (approve_live(..., seconds=)); a UI without it asks with none."""
+    import inspect
+    live = getattr(type(ui), "approve_live", None)
+    try:
+        return callable(live) and "seconds" in inspect.signature(live).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 @contextmanager
 def asked_by_rule(flag: bool):
     """While an Allow box is asked on this thread: whether the user's own ask rule is what asks
@@ -2096,7 +2129,7 @@ class _SubUI:
         self._emit("tool_images", self._call_id(call_id), images, caption, **extra)
 
     def _interact(self, name: str, fallback, *args, feedback_attr: str = "", recheck=None,
-                  keep_on_always: bool = False):
+                  keep_on_always: bool = False, seconds=None):
         def invoke():
             # The innermost child sets it first and a parent _SubUI leaves it alone: the innermost
             # child's token already reads every ancestor's stop.
@@ -2107,7 +2140,8 @@ class _SubUI:
             if not outer_label:
                 _INTERACTION.helper_label = self._label
             try:
-                value = self._direct(name, *args, **({"recheck": recheck} if recheck is not None else {}))
+                value = self._direct(name, *args, **({"recheck": recheck} if recheck is not None else {}),
+                                     **({"seconds": seconds} if seconds is not None else {}))
             finally:
                 _INTERACTION.cancel = outer
                 _INTERACTION.helper_label = outer_label
@@ -2151,12 +2185,13 @@ class _SubUI:
         self.deny_reason = reason
         return verdict
 
-    def approve_live(self, name, args, call_id=None, *, recheck=None):
+    def approve_live(self, name, args, call_id=None, *, recheck=None, seconds=None):
         if not callable(getattr(type(self._parent), "approve_live", None)):
             return self.approve(name, args, call_id)
         verdict, reason = self._interact(
             "approve_live", "no", name, args, self._call_id(call_id),
-            feedback_attr="deny_reason", recheck=recheck, keep_on_always=True)
+            feedback_attr="deny_reason", recheck=recheck, keep_on_always=True,
+            seconds=seconds if takes_seconds(self._parent) else None)
         self.deny_reason = reason
         return verdict
 
@@ -2571,6 +2606,9 @@ class Agent(GoalLifecycle):
         from .wakeups import Book as _WakeupBook
         self.wakeups = _WakeupBook(self._monitor_journal_target)
         self.ctx.wakeups = self.wakeups      # only a top-level chat is offered the tools (_wakeup_exposed)
+        # A wake-up set while a goal runs is that goal's: it goes when the goal completes (GoalLifecycle).
+        self.wakeups.goal_of = lambda: (str((self._goal_details or {}).get("id") or "")
+                                        if self.goal and self.goal_status == "active" else "")
         self._monitor_restart_due = False
         self._monitor_restart_awaited = None     # work whose previous DGC was still exiting at reopen
         self.subagents = SubagentRegistry()      # this chat's task sub-agents (children share it)
@@ -4141,6 +4179,8 @@ class Agent(GoalLifecycle):
     # ---- auto mode's safety check (his call, 17 Nov; dgc/auto_guard.py) ---------------------------------------------
     GUARD_STREAK = 3              # stops in a row before ONE Allow/Deny card
     GUARD_SESSION = 20            # stops in a session before every further stop is a card
+    CRITICAL_ANSWER_S = 120       # a step DGC never runs on its own: its card is answered in this time, or denied
+    CRITICAL_UNANSWERED = 3       # its cards left unanswered in a row before no more are shown until the next message
 
     def _note_user_words(self, text) -> None:
         """What the user typed in a turn their own message started: the only words the safety check asks about.
@@ -4159,25 +4199,47 @@ class Agent(GoalLifecycle):
         while len(words) > 1 and (len(words) > 30 or sum(len(w) for w in words) > 20000):
             words.pop(0)
 
-    def _auto_guard(self, name: str, args: dict, call_id, display_args, secrets):
+    def _auto_guard(self, name: str, args: dict, call_id, display_args, secrets, only_protected: bool = False):
         """Auto mode's safety check for one step the rules would let run. None: it runs. A str: it was stopped, and
         this is the line the model gets. An auto_guard.Block: stopped once too often, so the user gets ONE card."""
         from . import auto_guard
         try:
             from .tools import own_background_commands
             block = auto_guard.check(name, args, root=self.config.project_root,
-                                     started=own_background_commands(self.ctx))
+                                     started=own_background_commands(self.ctx), protected_only=only_protected)
         except Exception:  # noqa: BLE001 -- a step the rules can't read runs as auto mode always ran it
             return None
+        top = self._holding_agent()
+        # What the user said not to do ("don't push", "leave tests/ alone") holds until a later message lifts it.
+        held = auto_guard.breaks(self._user_boundaries(), name, args, self.config.project_root, block)
+        if held is not None:
+            block = auto_guard.Block(block.kind if block is not None else "Your words",
+                                     f'you said "{held.said}"', True)
         if block is None:
             return None
-        top = self._holding_agent()
-        if block.intent and self._guard_intent(block, name, args):
+        nobody = (getattr(self, "_monitor_turn", False) or getattr(top, "_monitor_turn", False)
+                  or getattr(self.ui, "non_interactive", False) is True)
+        if held is None and not block.intent:
+            # Clearing the whole computer or home, writing straight to a disk: no words allow it, and it asks at once
+            # on a card answered within two minutes, as Claude Code's terminal does. After three cards in a row went
+            # unanswered, none until the user's next message.
+            serial = int(getattr(top, "_user_turn_serial", 0) or 0)
+            quiet = top.__dict__.get("_critical_quiet") or (serial, 0)
+            unanswered = quiet[1] if quiet[0] == serial else 0
+            if nobody or unanswered >= self.CRITICAL_UNANSWERED:
+                note = ("" if nobody else " DGC asked the user three times and nobody answered, so it doesn't ask "
+                        "again until their next message.")
+                self.ui.tool_denied(name, display_args, redact_text(
+                    f"Blocked by DGC's safety check ({block.kind}): {block.reason}" + (
+                        "" if nobody else " (not asked again: three cards went unanswered)"), secrets), call_id)
+                return redact_text(auto_guard.line(block) + note, secrets)
+            self.ui.info(redact_text(f"DGC's safety check: {block.reason}. DGC never does this on its own: allow it "
+                                     f"once within {_minutes(self.CRITICAL_ANSWER_S)}, or it is denied.", secrets))
+            return block
+        if held is None and self._guard_intent(block, name, args):
             return None
         top._guard_streak = int(top.__dict__.get("_guard_streak", 0) or 0) + 1
         top._guard_total = int(top.__dict__.get("_guard_total", 0) or 0) + 1
-        nobody = (getattr(self, "_monitor_turn", False) or getattr(top, "_monitor_turn", False)
-                  or getattr(self.ui, "non_interactive", False) is True)
         if not nobody and (top._guard_streak >= self.GUARD_STREAK or top._guard_total >= self.GUARD_SESSION):
             times = (f"{top._guard_streak} times in a row" if top._guard_streak >= self.GUARD_STREAK
                      else f"{top._guard_total} times in this session")
@@ -4187,7 +4249,33 @@ class Agent(GoalLifecycle):
             return block
         self.ui.tool_denied(name, display_args, redact_text(f"Blocked by DGC's safety check ({block.kind}): "
                                                             f"{block.reason}", secrets), call_id)
-        return redact_text(auto_guard.line(block), secrets)
+        return redact_text(auto_guard.boundary_line(held) if held is not None else auto_guard.line(block), secrets)
+
+    def _user_boundaries(self):
+        """What the user's own messages in this session said not to do, still holding (auto_guard.Boundary items).
+        Asked of the session's model once per new message with words like "don't" or "leave ... alone"; no such words,
+        or no answer, holds nothing new."""
+        from . import auto_guard
+        top = self._holding_agent()
+        words = [self._safe_text(w)[:2000] for w in (top.__dict__.get("_user_words") or [])][-12:]
+        while len(words) > 1 and sum(len(w) for w in words) > 8000:
+            words.pop(0)
+        if not words or not auto_guard.has_boundary_words(words):
+            return ()
+        key = (int(getattr(top, "_user_turn_serial", 0) or 0), len(top.__dict__.get("_user_words") or []), words[-1])
+        kept = top.__dict__.get("_boundaries")
+        if kept and kept[0] == key:
+            return kept[1]
+        found = ()
+        try:
+            res = self._aux_client(max_tokens=400, read_timeout=45).chat(
+                auto_guard.boundary_messages(words), tools=None, reasoning_effort="off", cancel=self.cancelled)
+            self._record_usage(getattr(res, "usage", None), "other")
+            found = auto_guard.parse_boundaries(getattr(res, "content", "") or "") or ()
+        except Exception:  # noqa: BLE001 -- no answer holds nothing new; the usual check still runs
+            found = ()
+        top._boundaries = (key, found)
+        return found
 
     def _guard_intent(self, block, name: str, args: dict) -> bool:
         """Did the user's own messages in this session ask for exactly this step? The session's model answers YES or
@@ -11340,10 +11428,11 @@ class Agent(GoalLifecycle):
                 return "error: there is no active goal to update."
             if status not in ("completed", "blocked"):
                 return "error: status must be 'completed' or 'blocked'."
-            report = clean_report({"status": status, "summary": args.get("summary"),
-                                   "evidence": args.get("evidence")})
+            asked = {"status": status, "summary": args.get("summary"), "evidence": args.get("evidence")}
+            report = clean_report(asked)
             if report is None:
-                return "error: include a concise summary and a nonempty evidence list for the entire goal."
+                from .goals import report_problem
+                return f"error: the goal report wasn't recorded: {report_problem(asked)}."
             self._pending_goal_report = self._safe_value(report)
             return (f"Goal {status} report recorded for review. The transition is applied only after "
                     "this work cycle finishes successfully. Give the user a concise final explanation.")
@@ -11447,6 +11536,14 @@ class Agent(GoalLifecycle):
             from .tools import signed_in_page
             policy_args = {**args, "_page": signed_in_page(self.ctx)}
         decision, reason = perms.decide(name, policy_args)
+        # A plugin the user set to Always ask (a plugin's page in Settings, or Pips settings → Plugins): each call of its
+        # tools asks, in every mode, as their own ask rule does (auto mode holds it in the chat); a deny rule still wins.
+        route = (name if isinstance(name, str) and name.startswith("mcp__")
+                 else str(args.get("name") or "") if name == "mcp_call" and isinstance(args, dict) else "")
+        if decision != DENY and route:
+            asking = _plugin_always_asks(route)
+            if asking and not (decision == ASK and str(reason).startswith("rule:")):
+                decision, reason = ASK, f"rule: {asking} is set to Always ask"
         # The user's own ask rule matched: an allow rule never beats it, so its card offers no Always allow.
         ruled = decision == ASK and str(reason).startswith("rule:")
         image_plan = self.__dict__.get("_image_plans", {}).get(call_id) if name == "generate_image" else None
@@ -11516,8 +11613,14 @@ class Agent(GoalLifecycle):
         # is checked; one the user's own allow rule lets through is theirs. In DGC's own editor, and in a run DGC's
         # runner started with the check on (a Pip's sub-agent with Work tools: auto_holds.guard_wanted).
         guard_card = None
-        if decision == ALLOW and reason == "auto mode" and self.mode == "auto" and auto_holds.guard_wanted():
-            stopped = self._auto_guard(name, args, call_id, display_args, secrets)
+        # A user's allow rule in auto mode (his call, 20 Nov, as Claude Code does): a broad one ("every command", any
+        # script) doesn't skip the check; a narrow one still lets its steps run, except a write to a protected file.
+        from .permissions import broad_allow
+        allow_ruled = decision == ALLOW and str(reason).startswith("rule: ")
+        if decision == ALLOW and (reason == "auto mode" or allow_ruled) and self.mode == "auto" \
+                and auto_holds.guard_wanted():
+            stopped = self._auto_guard(name, args, call_id, display_args, secrets,
+                                       only_protected=allow_ruled and not broad_allow(reason))
             if isinstance(stopped, str):
                 return stopped
             if stopped is not None:
@@ -11557,8 +11660,13 @@ class Agent(GoalLifecycle):
                     "retry it now: say briefly what you would run and why; the user can approve it "
                     "on their next prompt.")
         if decision == ASK:
+            # A step DGC never runs on its own: its card, answered within CRITICAL_ANSWER_S or denied; never Always.
+            critical = guard_card is not None and not guard_card.intent
+
             def recheck():
                 result, why = current_permissions().decide(name, policy_args)
+                if critical:                    # only the user answers it: no allow rule, no mode
+                    return "no" if result == DENY else None
                 if guard_card is not None:      # auto mode's own "allow" never answers the safety check's card
                     return "no" if result == DENY else "once" if result == ALLOW and why != "auto mode" else None
                 if mod_asked:                   # a rule that allows it doesn't answer the mod's Ask
@@ -11573,15 +11681,34 @@ class Agent(GoalLifecycle):
             waiting_id = getattr(self, "_subagent_id", None)
             if waiting_id:                       # the agents list shows this child waiting on you
                 self.subagents.waiting(waiting_id, "permission")
+            limit = self.CRITICAL_ANSWER_S if critical and takes_seconds(self.ui) else None
+            asked_at = time.monotonic()
             try:
-                with asked_by_rule(ruled):               # every Allow box reads it (interaction_offers_always)
-                    verdict = (live_approve(self.ui, name, display_args, call_id, recheck=recheck)
+                with asked_by_rule(ruled or critical):   # every Allow box reads it (interaction_offers_always)
+                    verdict = (live_approve(self.ui, name, display_args, call_id, recheck=recheck,
+                                            **({"seconds": limit} if limit is not None else {}))
                                if callable(live_approve) else self.ui.approve(name, display_args, call_id))
             finally:
                 if waiting_id:
                     self.subagents.waiting(waiting_id, None)
+            if critical:
+                top = self._holding_agent()
+                serial = int(getattr(top, "_user_turn_serial", 0) or 0)
+                quiet = top.__dict__.get("_critical_quiet") or (serial, 0)
+                unanswered = (limit is not None and verdict == "no" and not self.cancelled.is_set()
+                              and not str(getattr(self.ui, "deny_reason", "") or "")
+                              and time.monotonic() - asked_at >= limit * 0.95)
+                top._critical_quiet = (serial, (quiet[1] if quiet[0] == serial else 0) + 1) if unanswered \
+                    else (serial, 0)
+                if unanswered:
+                    self._approval_records[call_id] = {"name": name, "args": self._safe_value(display_args),
+                                                       "decision": "no", "reason": "no answer"}
+                    self.ui.tool_denied(name, display_args, f"No answer in {_minutes(limit)}: denied", call_id)
+                    return (f"Nobody answered DGC's safety check ({guard_card.kind}: {guard_card.reason}) within "
+                            f"{_minutes(limit)}, so it was denied. Nothing ran. Don't retry it; carry on with other "
+                            "work, or tell the user in one plain sentence what they would run themselves, and why.")
             answered_always = verdict == "always"
-            if verdict == "always" and (name in ALWAYS_ASK_TOOLS or video_plan is not None or ruled):
+            if verdict == "always" and (name in ALWAYS_ASK_TOOLS or video_plan is not None or ruled or critical):
                 # Each DGC Router change, and each look on the network, asks again, and so does a call the user's ask
                 # rule asks about. No card offers Always for them (permission_request.choices); an answer that says it
                 # anyway (an older editor) counts as once.

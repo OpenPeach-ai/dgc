@@ -103,6 +103,14 @@ def first(db, pip_id, *, workspace_id=None, now=None) -> str:
     return db.execute("SELECT id FROM pip_conversations WHERE pip_id=? AND first=1", (pip_id,)).fetchone()[0]
 
 
+def latest(db, pip_id) -> str:
+    """The Pip's conversation with the newest activity that isn't archived: the one its page opens on, where a turn DGC
+    writes for the person to see (an @ job) belongs. Its first one when it has no other."""
+    row = db.execute("SELECT id FROM pip_conversations WHERE pip_id=? AND archived_at IS NULL "
+                     "ORDER BY updated_at DESC, seq DESC LIMIT 1", (pip_id,)).fetchone()
+    return row[0] if row else first(db, pip_id)
+
+
 def first_id(db, pip_id):
     """The Pip's first conversation if it has one; never makes it (for reads that may be rolled back)."""
     row = db.execute("SELECT id FROM pip_conversations WHERE pip_id=? AND first=1", (pip_id,)).fetchone()

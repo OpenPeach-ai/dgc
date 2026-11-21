@@ -56,6 +56,21 @@ class BookTests(unittest.TestCase):
         self.assertEqual(self.book.items(), [])
         self.assertTrue(self.changes, "each change is said, for the chat's row")
 
+    def test_a_goals_wake_ups_go_when_it_completes(self):
+        # (His 21 Nov session: the Wakes pill stayed for a 07:36 health check the finished goal no longer needed.)
+        goal = {"id": "g1"}
+        self.book.goal_of = lambda: goal["id"]
+        self.book.add(30, "Health check", "Check the servers.")
+        goal["id"] = ""
+        mine = self.book.add(60, "Remind me", "Say hi.")
+        gone = self.book.cancel_goal("g1")
+        self.assertEqual([i["why"] for i in gone], ["Health check"])
+        self.assertEqual([i["id"] for i in self.book.items()], [mine["id"]], "one set outside the goal stays")
+        self.assertEqual(self.book.cancel_goal(""), [])
+        again = wakeups.Book(lambda: (self.session, self.dir), clock=self.clock)
+        again.load() if hasattr(again, "load") else None
+        self.assertTrue(all(i.get("goal", "") in ("", "g1") for i in again.items()))
+
     def test_the_earliest_comes_first_and_cancel_removes_one(self):
         late = self.book.add(60, "Later", "b")
         soon = self.book.add(5, "Soon", "a")

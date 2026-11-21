@@ -28,6 +28,7 @@ const svg = (d) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" 
 const BACK = svg('<path d="M9.5 3.5 5 8l4.5 4.5"/>'), FORWARD = svg('<path d="M6.5 3.5 11 8l-4.5 4.5"/>'), RELOAD = svg('<path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2"/><path d="M12.5 3v2.6H9.9"/>');
 const WINDOW = svg('<rect x="2.5" y="3.5" width="11" height="9" rx="1.5"/><path d="M2.5 6h11"/>');
 const PLUS = svg('<path d="M8 3.5v9M3.5 8h9"/>'), CROSS = svg('<path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/>');
+const GLOBE = svg('<circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11M8 2.5c1.6 1.7 2.4 3.5 2.4 5.5S9.6 11.8 8 13.5M8 2.5C6.4 4.2 5.6 6 5.6 8s.8 3.8 2.4 5.5"/>');
 
 const app = document.getElementById('app');
 app.innerHTML = `<header class="yb-bar">
@@ -91,7 +92,9 @@ function paintOwn() {
   app.classList.add('yb-own-mode');
   tabs.setAttribute('aria-label', 'Your tabs');
   const html = S.tabs.map((t) => { const name = t.title || t.url || 'New tab';
-    return `<div class="yb-own${t.current ? ' yb-on' : ''}"><button type="button" role="tab" class="yb-tab" data-tab="${esc(t.id)}" aria-selected="${t.current}" title="${esc(`${name}${t.url && t.url !== name ? ` · ${t.url}` : ''}`)}"><span class="yb-tab-title">${esc(name)}</span></button>`
+    // Like Chrome's: the site's icon (a globe until DGC has it), the title, its Close.
+    const mark = t.icon ? `<img class="yb-fav" src="${esc(t.icon)}" alt="" aria-hidden="true">` : `<span class="yb-fav yb-fav-none" aria-hidden="true">${GLOBE}</span>`;
+    return `<div class="yb-own${t.current ? ' yb-on' : ''}"><button type="button" role="tab" class="yb-tab" data-tab="${esc(t.id)}" aria-selected="${t.current}" title="${esc(`${name}${t.url && t.url !== name ? ` · ${t.url}` : ''}`)}">${mark}<span class="yb-tab-title">${esc(name)}</span></button>`
       + `<button type="button" class="yb-x" data-close="${esc(t.id)}" title="Close tab" aria-label="${esc(`Close ${name}`)}">${CROSS}</button></div>`; }).join('')
     + `<button type="button" class="yb-btn yb-new" title="New tab" aria-label="New tab"${ready() ? '' : ' disabled'}>${PLUS}</button>`;
   if (tabs.__html !== html) { tabs.__html = html; tabs.innerHTML = html; }
@@ -99,7 +102,8 @@ function paintOwn() {
 }
 function tookOwn(said) {
   if (!said || typeof said !== 'object') return;
-  if (Array.isArray(said.tabs)) S.tabs = said.tabs.filter((t) => t && typeof t.id === 'string').slice(0, 50).map((t) => ({ id: t.id, title: String(t.title || ''), url: String(t.url || ''), current: t.current === true }));
+  if (Array.isArray(said.tabs)) S.tabs = said.tabs.filter((t) => t && typeof t.id === 'string').slice(0, 50).map((t) => ({ id: t.id, title: String(t.title || ''), url: String(t.url || ''), current: t.current === true,
+    icon: typeof t.icon === 'string' && /^data:image\/(png|x-icon|svg\+xml|gif|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(t.icon) && t.icon.length < 140000 ? t.icon : '' }));
   if (typeof said.current === 'string') S.current = said.current;
   if (said.ok && typeof said.image === 'string' && said.image.startsWith('data:image/jpeg;base64,')) {
     S.frame = { image: said.image, url: String(said.url || ''), title: String(said.title || ''), width: Number(said.width) || 0, height: Number(said.height) || 0 };
@@ -147,6 +151,17 @@ async function sendInput() {
     }
   } finally { sending = false; }
 }
+/** Your page's selected text onto this editor's clipboard (Copy, Cut in your tab). */
+async function copyOut() {
+  if (!ready()) return;
+  try {
+    const got = await ask('use_your_browser_view', { op: 'selection' });
+    const text = typeof got?.text === 'string' ? got.text : '';
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); }
+    catch { keys.value = text; keys.select(); document.execCommand('copy'); keys.value = ''; }
+  } catch { /* the key still goes to the page */ }
+}
 async function actOwn(op, fields = {}) {
   if (!ready()) return;
   try { tookOwn(await ask('use_your_browser_view', { op, ...fields })); }
@@ -189,6 +204,14 @@ keys.addEventListener('keydown', (e) => {
   if (['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock'].includes(e.key)) return;
   const shortcut = e.ctrlKey || e.metaKey;
   if (shortcut && (e.key === 'v' || e.key === 'V')) return;          // a paste: the paste event brings the editor's text
+  if (shortcut && !e.altKey && /^[cx]$/i.test(e.key)) {
+    // Copy and Cut: what is selected on your page goes on this editor's clipboard (Chrome's own is on the other
+    // computer), read before the key reaches the page, so a Cut still has its text.
+    e.preventDefault();
+    const key = { t: 'key', key: e.key.slice(0, 40), code: e.code.slice(0, 40), mods: mods(e) };
+    void copyOut().finally(() => push(key));
+    return;
+  }
   if (e.key.length === 1 && !shortcut && !(e.altKey && !e.getModifierState?.('AltGraph'))) {
     e.preventDefault(); push({ t: 'key', key: e.key, code: e.code.slice(0, 40), text: e.key, mods: mods(e) & 8 }); return;
   }

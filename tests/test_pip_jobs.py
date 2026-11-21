@@ -217,6 +217,34 @@ class TheAnswerComesBackToBoth(JobWorld, unittest.TestCase):
         self.assertEqual(asked["job"]["state"], "done")
         self.assertIsNone(self.view(job)["change"], "an answer only")
 
+    def test_it_lands_in_the_chat_used_last_not_its_first(self):
+        # (His 20 Nov test: the answer went to the Pip's first chat, untouched for a week, while the chat he opens is the
+        # one he used last: its list said unread and the chat he opened didn't have it.)
+        self.level(self.helper, pip_levels.APPROVE)
+        later = self.control("create_pip_conversation", pip_id=self.helper["id"], title="Visit the shop's site")
+        later_id = (later.get("conversation") or later)["id"]
+        self.control("send_pip_message", pip_id=self.helper["id"], text="hello there", idempotency_key="hello-1",
+                     conversation_id=later_id)
+        self.store.finish(self.store.claim_next()["id"], result={"text": "Hi."})
+        job = self.ask()
+        self.answer(job, edit=False, text="Rounding is right: nothing to change.")
+        page = self.control("list_pip_messages", pip_id=self.helper["id"], conversation_id=later_id)
+        self.assertTrue([m for m in page["messages"] if m.get("job")], "the job is in the chat used last")
+        self.assertIn("Rounding is right: nothing to change.", [m["text"] for m in page["messages"]])
+        first = self.control("list_pip_messages", pip_id=self.helper["id"])
+        self.assertFalse([m for m in first["messages"] if m.get("job")], "not in its first chat")
+        self.assertEqual(self.view(job)["state"], "done")
+
+    def test_an_archived_last_chat_is_skipped(self):
+        self.level(self.helper, pip_levels.APPROVE)
+        later = self.control("create_pip_conversation", pip_id=self.helper["id"], title="Old")
+        later_id = (later.get("conversation") or later)["id"]
+        self.control("archive_pip_conversation", pip_id=self.helper["id"], conversation_id=later_id)
+        job = self.ask()
+        self.answer(job, edit=False, text="Fine.")
+        first = self.control("list_pip_messages", pip_id=self.helper["id"])
+        self.assertTrue([m for m in first["messages"] if m.get("job")])
+
     def test_at_do_it_all_the_change_is_in_your_folder_with_undo_and_the_card_says_applied(self):
         self.level(self.helper, pip_levels.FULL)
         job = self.ask()

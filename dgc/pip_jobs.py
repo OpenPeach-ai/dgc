@@ -12,7 +12,8 @@ places: a card in the asking chat (the answer, and its change with Apply) and th
                  prompt's wording; an @ mark makes the named Pip known to that model (named_line). Work and ChatDGC call
                  ask() from their own process; a Pip's chat asks through its reply (pip_jobs on the result), kept by the
                  supervisor (commit) as every other thing a reply asks for.
-  the Pip's side the job is a turn DGC writes in the Pip's own (first) chat, under JOB_KEY: never the user's words, never
+  the Pip's side the job is a turn DGC writes in the Pip's chat used last (pip_conversations.latest: the one its page
+                 opens on), under JOB_KEY: never the user's words, never
                  consent, and it changes no setting. It runs at the Pip's own level. A folder Pip of that same folder works
                  on its own copy, as always; any other Pip gets the @ project copy in its computer's Files
                  (pip_project_copies.prepare). A Pip busy with a reply: the turn waits and starts after it (the chat's owed
@@ -361,7 +362,7 @@ def ask(registry, config, *, pip, words, about="", asked, folder=None, request_k
 
 
 def send(store, config, job_id) -> None:
-    """The job's turn in the Pip's first chat, now; kept and sent once the chat is free when a reply runs there. Its
+    """The job's turn in the Pip's chat used last, now; kept and sent once the chat is free when a reply runs there. Its
     folder's copy is made first where it isn't the Pip's own. Never inside a transaction (a copy is file work)."""
     from . import pip_chat
     from . import pip_project_copies as copies
@@ -403,8 +404,12 @@ def send(store, config, job_id) -> None:
         files = int(snap["files"]) if snap else 0
         as_is = bool(snap and copies._as_is(registry, snap["id"]))
     text = turn_text(row, folder_name=folder_name, folder=folder, files=files, note=note, plain=as_is)
+    from .pip_conversations import latest
     try:
-        sent = pip_chat._owed_turn(store, row["pip_id"], text, key, ACTOR, config)
+        # In the chat the person used last (its page opens there), never a first chat left for a week: its list said
+        # unread while the chat it opened didn't have the answer.
+        sent = pip_chat._owed_turn(store, row["pip_id"], text, key, ACTOR, config,
+                                   conversation_id=latest(db, row["pip_id"]))
     except RegistryError as exc:
         if exc.code == "conversation_busy":
             return                                # kept: it starts after the reply running now

@@ -310,7 +310,7 @@ body.cd-blank .cd-fine { display: none; }
 /* This box's words are a pixel larger than Work's, so a mark's place against them is half a pixel off Work's. */
 .cd-input .composer-artifact-mark { top: 0; }
 .cd-input .composer-plugin-mark { top: .5px; }
-.cd-input .composer-pip-face { top: -.5px; }
+.cd-input .composer-pip-face { top: -1.5px; }
 .cd-input.is-empty::before, .cd-input::placeholder { color: var(--muted); }
 /* One row however narrow the box. Below 640px the tools keep their icons and drop their words (each keeps its name
    for a screen reader, and its tooltip), so the meter, the model and Send hold their places on the right; the model's

@@ -109,6 +109,18 @@ STEERING_PREFIX = ("<user-interjection>\nThe user sent this WHILE you were worki
                    "new work and you keep a checklist, add it there with the `todo` tool, so it isn't "
                    "lost when the turn ends. Then carry on:\n")
 STEERING_SUFFIX = "\n</user-interjection>"
+_STEERING_HEAD = "<user-interjection>\nThe user sent this WHILE you were working."
+
+
+def steering_body(text: str) -> str | None:
+    """The person's words inside DGC's mid-turn wrapper, in any version of its wording (a session saved before the
+    wording changed showed the whole wrapper in its bubble), or None when `text` isn't one. The wrapper's own words
+    are one line after the tag."""
+    text = str(text or "")
+    if not (text.startswith(_STEERING_HEAD) and text.endswith(STEERING_SUFFIX)):
+        return None
+    head, newline, rest = text[len("<user-interjection>\n"):].partition("\n")
+    return rest[:-len(STEERING_SUFFIX)] if newline and len(rest) >= len(STEERING_SUFFIX) else None
 
 # `message_task` lets the PARENT MODEL send a note to a running child. It went out under the
 # steering prefix above, so the child was told "The user sent this WHILE you were working" and every
@@ -194,8 +206,9 @@ def display_prompt(text: str) -> str:
     # Peer context is appended after the clock. Remove that generated suffix first.
     text = strip_model_line(text)
     text = strip_turn_clock(text)           # DGC's per-turn clock line, not something anyone typed
-    if text.startswith(STEERING_PREFIX) and text.endswith(STEERING_SUFFIX):
-        text = text[len(STEERING_PREFIX):-len(STEERING_SUFFIX)]
+    body = steering_body(text)
+    if body is not None:
+        text = body
     start = text.find("<dgc-workflow-json>\n", 0, 1024)
     if start < 0 or not re.fullmatch(r"(?:\$[a-z0-9][a-z0-9._-]{0,63}\s*)*", text[:start]):
         return text

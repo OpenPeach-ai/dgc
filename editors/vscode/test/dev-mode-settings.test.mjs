@@ -386,5 +386,5 @@ test("the host hands Settings the table with the config, saves both keys only to
   assert.match(panel, /devLimitsTable\(this\.lastReadyEvent\?\.capabilities\)/, "from ready.capabilities");
   assert.match(panel, /if \(this\.devLimits\(\)\.length\) \{\s*values\.dev_mode = v\.dev_mode === true;\s*values\.dev_limits = devLimitValues\(v\.dev_limits\);/, "an older DGC is never sent a key it would refuse the whole save for");
   assert.match(panel, /msg\?\.type === "devModeWarned"\) \{[^}]*globalState\.update\(DEV_WARNED_KEY, true\)/s, "the warning shows once in this editor");
-  assert.match(panel, /"dev_mode", "dev_limits"\]/, "asked for with the config's other opt-in fields");
+  assert.match(panel, /"dev_mode", "dev_limits"[,\]]/, "asked for with the config's other opt-in fields");
 });

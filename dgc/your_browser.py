@@ -774,7 +774,8 @@ def place_window(bounds) -> dict | None:
 VIEW_OPS = ("frame", "click", "move", "type", "key", "scroll", "go", "back", "forward", "reload", "close")
 # Your own tabs, streamed into an editor tab where this computer has no screen (API 107, his call 18 Nov): its frames,
 # your own hand in it (input: mouse, keys, text in order), the address bar, your tabs, and the editor tab's size.
-OWN_OPS = ("frame", "input", "go", "back", "forward", "reload", "new_tab", "tab", "close_tab", "size", "close")
+OWN_OPS = ("frame", "input", "go", "back", "forward", "reload", "new_tab", "tab", "close_tab", "size", "close",
+           "selection")          # the text selected on your page, for your editor's clipboard (Copy, Cut)
 OPEN_KEY = "your_browser_open"      # metadata: the person's "Open Your Browser" asks, for the supervisor (newest last)
 STATE_KEY = "your_browser_state"    # metadata: what the supervisor says of it: {open, tabs, lanes, error, at}
 VIEW_KEY = "your_browser_view"      # metadata: its view socket ({socket, token}), while it runs
@@ -1193,6 +1194,68 @@ OWN_FRAME_SECONDS = 1 / 30      # your own tab, streamed where there is no scree
 OWN_WAIT_SECONDS = 0.5          # a frame asked for waits this long for one newer than the last the tab has
 OWN_QUALITY = 70                # its frames' JPEG quality
 OWN_SIZE = (1280, 800)          # the headless window before the editor tab says its size
+# Where the computer has no screen (Remote-SSH, a server) and Xvfb is there, Chrome runs as a real window on a screen of
+# its own, as a Pip's computer does: headless Chrome says "HeadlessChrome", and Google's sign-in and reCAPTCHA turn it
+# away (20 Nov). Drawn at twice the pixels, so its pictures stay sharp on a Retina screen; the page's own size is unchanged.
+SCREEN_SCALE = 2
+SCREEN_PIXELS = (5120, 3200)
+
+
+ICON_BYTES = 100_000
+_ICON_TYPES = ("image/png", "image/x-icon", "image/vnd.microsoft.icon", "image/svg+xml", "image/gif", "image/jpeg",
+               "image/webp")
+
+
+def icon_data(body: bytes, kind: str) -> str | None:
+    """A site's icon as a data: address for a tab, or None when it isn't a small picture."""
+    import base64
+    kind = str(kind or "").split(";")[0].strip().lower()
+    if kind == "image/vnd.microsoft.icon":
+        kind = "image/x-icon"
+    if not body or len(body) > ICON_BYTES or kind not in _ICON_TYPES:
+        return None
+    return f"data:{kind};base64," + base64.b64encode(body).decode("ascii")
+
+
+def fetch_icon(url: str):
+    """A site's public icon, as anyone would get it (no cookies, no sign-in): (bytes, type), or None."""
+    import urllib.request
+    if not re.match(r"^https?://", str(url or ""), re.I):
+        return None
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "image/*"})
+        with urllib.request.urlopen(request, timeout=4) as response:   # noqa: S310 -- http(s) only, checked above
+            return response.read(ICON_BYTES + 1), response.headers.get("Content-Type", "")
+    except (OSError, ValueError):
+        return None
+
+
+def start_virtual_screen(which=shutil.which):
+    """A private X screen for Your Browser's Chrome: (":N", its process), or None when there is no Xvfb or it didn't
+    come up. Its own display number, never one another program holds."""
+    xvfb = which("Xvfb")
+    if not xvfb:
+        return None
+    for number in range(140, 200):
+        if Path(f"/tmp/.X11-unix/X{number}").exists() or Path(f"/tmp/.X{number}-lock").exists():
+            continue
+        try:
+            proc = subprocess.Popen([xvfb, f":{number}", "-screen", "0", f"{SCREEN_PIXELS[0]}x{SCREEN_PIXELS[1]}x24",
+                                     "-nolisten", "tcp"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            return None
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            if Path(f"/tmp/.X11-unix/X{number}").exists():
+                return f":{number}", proc
+            if proc.poll() is not None:
+                break                            # someone took the number first: the next one
+            time.sleep(0.05)
+        else:
+            proc.terminate()
+            return None
+    return None
 OWN_MOST = (3840, 2400)
 # What Chrome needs from this computer's environment, and nothing else (never a key or token the supervisor holds): the
 # screen it draws on, the session bus the computer's password store answers on, the language and the time zone.
@@ -1239,7 +1302,7 @@ def store_unlocked(env: dict, *, run=subprocess.run, which=shutil.which) -> bool
 
 
 def chrome_argv(chrome, profile: Path, url: str = "", place: dict | None = None, test_flags=(), *,
-                headless: bool = False, own_store: bool = False) -> list[str]:
+                headless: bool = False, own_store: bool = False, virtual: bool = False) -> list[str]:
     """Full Google Chrome as the person's own window: DGC's profile, its DevTools over a pipe only DGC holds (never a
     port another program could reach), and nothing turned off. Its sandbox, sync, extensions, saved passwords and the
     computer's password store all stay on; it isn't marked as automated (Google's sign-in refuses a browser that is).
@@ -1250,7 +1313,13 @@ def chrome_argv(chrome, profile: Path, url: str = "", place: dict | None = None,
     (Chrome 158, 18 Nov) and then did the same."""
     argv = [str(chrome), "--remote-debugging-pipe", f"--user-data-dir={profile}", "--no-first-run",
             "--no-default-browser-check", "--disable-blink-features=AutomationControlled", *test_flags]
-    if headless:
+    if headless and virtual:
+        # A real window on its own screen (start_virtual_screen), streamed like a headless one.
+        argv += ["--window-position=0,0", f"--window-size={OWN_SIZE[0]},{OWN_SIZE[1]}",
+                 f"--force-device-scale-factor={SCREEN_SCALE}"]
+        if own_store:
+            argv.append("--password-store=basic")
+    elif headless:
         argv += ["--headless=new", f"--window-size={OWN_SIZE[0]},{OWN_SIZE[1]}"]
         if own_store:
             argv.append("--password-store=basic")
@@ -1289,10 +1358,22 @@ def launch_chrome(argv: list[str], env: dict, log_path: Path):
 class _Running:
     """What BoxedBrowser keeps as its box: Chrome on this computer, stopped by its process group."""
 
-    def __init__(self, proc, pipe):
-        self.proc, self.pipe = proc, pipe
+    def __init__(self, proc, pipe, screen=None):
+        self.proc, self.pipe, self.screen = proc, pipe, screen
 
     def stop(self) -> None:
+        screen, self.screen = self.screen, None
+        try:
+            self._stop_chrome()
+        finally:
+            if screen is not None and screen.poll() is None:
+                try:
+                    screen.terminate()
+                    screen.wait(timeout=5)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+
+    def _stop_chrome(self) -> None:
         proc = self.proc
         if proc is not None and proc.poll() is None and hasattr(proc, "wait"):
             try:
@@ -1339,10 +1420,24 @@ class HostBrowser(BoxedBrowser):
         profile_prefs(self.profile)
         env = chrome_env()
         own_store = self.headless and store_unlocked(env) is not True
-        proc, pipe = self.launch_with(chrome_argv(self.binary, self.profile, self.start_url, self.start_place,
-                                                  self.test_flags, headless=self.headless, own_store=own_store),
-                                      env, self.log_path)
-        self._box, self._pipe = _Running(proc, pipe), pipe
+        screen = None
+        if self.headless and getattr(self, "virtual", False):
+            screen = self.start_screen() if callable(getattr(self, "start_screen", None)) else None
+            if screen is None:
+                self.virtual = False             # no screen of its own came up: headless, as before
+            else:
+                env = {**env, "DISPLAY": screen[0]}
+                env.pop("WAYLAND_DISPLAY", None)
+        try:
+            proc, pipe = self.launch_with(chrome_argv(self.binary, self.profile, self.start_url, self.start_place,
+                                                      self.test_flags, headless=self.headless, own_store=own_store,
+                                                      virtual=screen is not None),
+                                          env, self.log_path)
+        except BaseException:
+            if screen is not None:
+                screen[1].terminate()
+            raise
+        self._box, self._pipe = _Running(proc, pipe, screen[1] if screen else None), pipe
         try:
             self._browser_call("Browser.getVersion", timeout=25)
             # Every tab is known with its address and title (the person's own make Home's last visited links), and
@@ -1465,6 +1560,10 @@ class YourBrowserHost:
         # Your own tab, streamed where there is no screen (headless): which tab it is, the editor tab's size, its last
         # frame (seq, jpeg base64, width, height, when: in memory only, never written), and when the tab last asked.
         self.headless = False
+        self.icons: dict[str, str] = {}           # icon address -> data: address ("" when it wasn't a small picture)
+        self.icon_of: dict[str, str] = {}         # page address -> its icon's address
+        self.icon_pending: set[str] = set()
+        self.fetch_icon, self.icon_wait = fetch_icon, False
         self.own: str | None = None
         self.own_size = OWN_SIZE
         self.own_cast: tuple | None = None       # (target, size) being cast
@@ -1510,6 +1609,10 @@ class YourBrowserHost:
                 self.headless = bool(headless or not has_screen())
                 self.browser.start_url, self.browser.start_place = url, None if self.headless else place
                 self.browser.headless = self.headless
+                # No screen here: a real Chrome on a screen of its own where Xvfb is (start_virtual_screen).
+                self.browser.virtual = (self.headless and str(self.platform).startswith("linux")
+                                        and bool(self.which("Xvfb")))
+                self.browser.start_screen = lambda: start_virtual_screen(self.which)
                 try:
                     self.browser.start()
                 except (BoxError, BrowserError, OSError) as error:
@@ -1903,6 +2006,10 @@ class YourBrowserHost:
         browser, own = self.browser, self.own_tab()
         tabs = [{"id": t, "title": browser.infos.get(t, {}).get("title", ""), "url": browser.infos.get(t, {}).get("url", ""),
                  "current": t == own} for t in self.person_tabs()[:MAX_TABS]] if browser else []
+        for tab in tabs:                          # each site's icon, once DGC has it (_want_icon)
+            icon = self.icons.get(self.icon_of.get(tab["url"], ""))
+            if icon:
+                tab["icon"] = icon
         info = browser.infos.get(own, {}) if browser and own else {}
         return {"own": True, "current": own or "", "url": info.get("url", ""), "title": info.get("title", ""), "tabs": tabs}
 
@@ -1948,8 +2055,10 @@ class YourBrowserHost:
         self._size_window(target)
         session = self.browser._attached[target]
         self.browser._fire("Page.enable", {}, session)
-        self.browser._fire("Page.startScreencast", {"format": "jpeg", "quality": OWN_QUALITY, "maxWidth": self.own_size[0],
-                                                    "maxHeight": self.own_size[1], "everyNthFrame": 1}, session)
+        scale = SCREEN_SCALE if getattr(self.browser, "virtual", False) else 1   # its pixels, for a sharp picture
+        self.browser._fire("Page.startScreencast", {"format": "jpeg", "quality": OWN_QUALITY,
+                                                    "maxWidth": self.own_size[0] * scale,
+                                                    "maxHeight": self.own_size[1] * scale, "everyNthFrame": 1}, session)
         self.own_cast, self.own_cast_at = (target, self.own_size), self.clock()
 
     def view_own(self, op: str, fields: dict) -> dict:
@@ -1965,6 +2074,11 @@ class YourBrowserHost:
             if op == "close":
                 self._stop_own_cast()
                 return {"ok": True, "closed": True}
+            if op == "selection":
+                try:
+                    return {"ok": True, "text": self._own_selection(self.own_tab()), **self._own_state()}
+                except (BrowserError, socket.timeout, OSError, ValueError) as error:
+                    return {"ok": False, "error": str(error)[:300] or "Your Browser didn't answer.", **self._own_state()}
             try:
                 refused = self._own_act(op, self.own_tab(), fields)
             except (BrowserError, socket.timeout, OSError, ValueError) as error:
@@ -1989,6 +2103,7 @@ class YourBrowserHost:
                         self.browser.told(info)
                 except (BrowserError, socket.timeout, OSError):
                     pass
+                self._want_icon(target)
         with self.frame_ready:
             if self.own_wait > 0 and not (self.own_frame is not None and self.own_frame[0] > seq):
                 self.frame_ready.wait_for(lambda: self.own_frame is not None and self.own_frame[0] > seq,
@@ -2005,6 +2120,46 @@ class YourBrowserHost:
             elif frame is not None:
                 reply.update(width=frame[2], height=frame[3])
             return reply
+
+    _ICON_SOURCE = ("(() => { const l = [...document.querySelectorAll('link[rel~=\"icon\"], link[rel=\"shortcut icon\"]')]"
+                    ".map(n => n.href).find(h => /^https?:/.test(h)); return l || (/^https?:/.test(location.href) ?"
+                    " location.origin + '/favicon.ico' : ''); })()")
+
+    def _want_icon(self, target) -> None:
+        """The site's icon for this tab: where its page says it is (asked once per address), downloaded once and kept
+        by that address (in memory only), off the lock; a tab whose address has one already wears it."""
+        url = self.browser.infos.get(target, {}).get("url", "") if self.browser else ""
+        if not url.startswith(("http://", "https://")) or url in self.icon_of:
+            return
+        session = self.browser._attached.get(target)
+        if session is None:
+            return
+        try:
+            reply = self.browser._session_call(session, "Runtime.evaluate", {"expression": self._ICON_SOURCE,
+                                                                              "returnByValue": True}, timeout=3)
+        except (BrowserError, socket.timeout, OSError):
+            return
+        href = (reply.get("result") or {}).get("value") if isinstance(reply, dict) else None
+        if not isinstance(href, str) or not href.startswith(("http://", "https://")):
+            return
+        self.icon_of[url] = href[:2000]
+        if href in self.icons or href in self.icon_pending:
+            return
+        self.icon_pending.add(href)
+
+        def download():
+            got = self.fetch_icon(href)
+            data = icon_data(*got) if got else None
+            with self.lock:
+                self.icon_pending.discard(href)
+                if len(self.icons) > 300:            # a long session's worth; never grows without end
+                    self.icons.clear()
+                    self.icon_of.clear()
+                self.icons[href] = data or ""
+        if self.icon_wait:
+            download()
+        else:
+            threading.Thread(target=download, daemon=True, name="your-browser-icon").start()
 
     def _own_capture(self):
         target = self.own_tab()
@@ -2033,6 +2188,22 @@ class YourBrowserHost:
                 pass
             self.own = target
         return target or None
+
+    _SELECTION = ("(() => { const a = document.activeElement;"
+                  " if (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|url|email|tel|number)$/i.test(a.type)))"
+                  " && typeof a.selectionStart === 'number') return a.value.slice(a.selectionStart, a.selectionEnd);"
+                  " return String(getSelection() || ''); })()")
+
+    def _own_selection(self, target) -> str:
+        """What is selected on your own page (a field's selected text, else the page's selection), for Copy and Cut in
+        the editor's tab: it lands on the editor's clipboard, not Chrome's on this computer. Never a password field's."""
+        session = self.browser._attached.get(target) if target else None
+        if session is None:
+            return ""
+        reply = self.browser._session_call(session, "Runtime.evaluate", {"expression": self._SELECTION,
+                                                                          "returnByValue": True}, timeout=5)
+        value = (reply.get("result") or {}).get("value") if isinstance(reply, dict) else None
+        return value[:100_000] if isinstance(value, str) else ""
 
     def _own_act(self, op: str, target, fields: dict) -> str:
         browser = self.browser

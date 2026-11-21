@@ -69,6 +69,31 @@ class Hub(unittest.TestCase):
         [batch] = self.notes()
         self.assertIn("nothing new for 10 min", batch.lines[0])
 
+    def test_a_quiet_server_is_checked_in_on_once_not_every_five_minutes(self):
+        # (His 21 Nov session: an idle dev server woke the session every five minutes, hours after its turn ended,
+        # and the model said "no action needed" each time.)
+        self.watch(5)
+        self.out = 1
+        self.assertEqual(self.due(5), 1, "past its time: once")
+        self.notes()
+        woke = sum(self.due(m) for m in range(6, 240))
+        self.assertEqual(woke, 0, "nothing new since it was looked at: no more wakes")
+        self.out = 2                                   # it printed again (a rebuild)
+        self.assertEqual(sum(self.due(m) for m in range(240, 400)), 1, "something new: one more look")
+
+    def test_quiet_check_ins_follow_the_growing_gap(self):
+        self.watch(600)
+        self.out = 1
+        self.due(1)
+        self.assertEqual(self.due(11), 1)
+        self.notes()
+        self.out = 2
+        self.due(12)
+        self.assertEqual(sum(self.due(m) for m in range(13, 16)), 0, "its next look waits for the gap")
+        self.assertEqual(self.due(16), 1)
+        self.notes()
+        self.assertEqual(sum(self.due(m) for m in range(17, 120)), 0, "and nothing new: none after")
+
     def test_a_job_that_ended_or_has_no_time_is_never_checked_in_on(self):
         self.watch(10)
         self.alive = False

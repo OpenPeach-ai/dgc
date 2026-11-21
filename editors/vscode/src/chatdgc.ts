@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { trashFile } from "./trash";
 import { createHash } from "crypto";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -1347,10 +1348,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
             // beside it (and a video's poster): the Library lists only files that are still there.
             const TRASH = "Move to Trash";
             const choice = await vscode.window.showWarningMessage(`Remove “${name}”?`,
-              { modal: true, detail: `${path} goes to your computer's trash, where it can be recovered. It leaves the Library.` }, TRASH);
+              { modal: true, detail: `${path} goes to the trash of the computer it's on, where it can be recovered. It leaves the Library.` }, TRASH);
             if (choice !== TRASH) return;
-            await vscode.workspace.fs.delete(uri, { useTrash: true });
-            for (const beside of await this.besideMade(path)) { try { await vscode.workspace.fs.delete(vscode.Uri.file(beside), { useTrash: true }); } catch { /* the item itself is what was asked for */ } }
+            // (Over Remote-SSH the editor has no trash for the remote's files: DGC uses that computer's own, src/trash.ts.)
+            await trashFile(() => vscode.workspace.fs.delete(uri, { useTrash: true }), uri.fsPath || path);
+            for (const beside of await this.besideMade(path)) { try { await trashFile(() => vscode.workspace.fs.delete(vscode.Uri.file(beside), { useTrash: true }), beside); } catch { /* the item itself is what was asked for */ } }
             if (kind === "image") this.workImagePaths.delete(path);
             void panel.webview.postMessage({ type: "refresh" });
             this.imagesMade();

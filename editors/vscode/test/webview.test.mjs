@@ -967,12 +967,12 @@ test("a restored session replays into real turns, pages by turn, and keeps live 
   send({ type: "event", event: { type: "turn_start", turn_id: "live" } });
   send({ type: "event", event: { type: "text_delta", text: "Live response" } });
   const items = [{ role: "notice", text: "Showing the most recent saved context." }];
-  for (let n = 1; n <= 12; n++) items.push(...savedTurn(n));
+  for (let n = 1; n <= 30; n++) items.push(...savedTurn(n));
   send({ type: "event", event: { type: "history", items } });
   const pages = doc.querySelector(".history-pages");
-  // A page is whole turns -- 50 events deep, never cut through the middle of one.
-  assert.equal(pages.querySelectorAll(".msg.dgc").length, 7);
-  assert.equal(pages.querySelectorAll(".msg.dgc .thinking.done").length, 7, "every restored turn is closed");
+  // A page is 25 whole turns, as Codex loads a thread, never cut through the middle of one.
+  assert.equal(pages.querySelectorAll(".msg.dgc").length, 25);
+  assert.equal(pages.querySelectorAll(".msg.dgc .thinking.done").length, 25, "every restored turn is closed");
   assert.match(doc.getElementById("log").lastElementChild.textContent, /Live response/,
     "the live turn keeps streaming below the restored transcript");
   // In its own box (0.47 pinned prompt), after the history container, never inside it.
@@ -993,11 +993,11 @@ test("a restored session replays into real turns, pages by turn, and keeps live 
   // The backend designated the answer; the panel promotes exactly that block and demotes the rest.
   const finals = [...block.querySelectorAll(".text.final")];
   assert.equal(finals.length, 1);
-  assert.equal(finals[0].textContent.trim(), "Answer 12");
-  assert.equal(finals[0].dataset.messageId, "h12:2");
+  assert.equal(finals[0].textContent.trim(), "Answer 30");
+  assert.equal(finals[0].dataset.messageId, "h30:2");
   assert.ok(finals[0].closest(".answer"), "the restored answer gets the same block a live one gets");
   assert.equal(block.querySelectorAll(".answer > .response-actions").length, 1);
-  assert.equal(block.querySelector(".text.commentary").textContent.trim(), "Checking 12");
+  assert.equal(block.querySelector(".text.commentary").textContent.trim(), "Checking 30");
   assert.equal([...pages.querySelectorAll(".text")]
     .filter((t) => !t.classList.contains("commentary") && !t.classList.contains("final")).length, 0,
     "after a turn ends no prose is left unclassified");
@@ -1006,9 +1006,26 @@ test("a restored session replays into real turns, pages by turn, and keeps live 
     "a restored turn has no elapsed time to report and does not invent one");
   assert.equal(pages.querySelectorAll(".dot.run").length, 0);
   doc.querySelector(".history-older").click();
-  assert.equal(pages.querySelectorAll(".msg.dgc").length, 12);
+  assert.equal(pages.querySelectorAll(".msg.dgc").length, 30);
   assert.match(pages.querySelector(".sys").textContent, /most recent saved context/);
   assert.deepEqual(errors, []);
+});
+
+test("scrolled to the top, earlier messages load by themselves (no button on screen)", async () => {
+  const { doc, send, errors, dom } = makeDom();
+  const items = [];
+  for (let n = 1; n <= 30; n++) items.push(...savedTurn(n));
+  send({ type: "event", event: { type: "history", items } });
+  const pages = doc.querySelector(".history-pages");
+  assert.equal(pages.querySelectorAll(".msg.dgc").length, 25);
+  const older = doc.querySelector(".history-older");
+  assert.ok(older.classList.contains("history-auto"), "no button on screen");
+  assert.match(mainCss, /\.history-older\.history-auto \{ display: none; \}/);
+  doc.getElementById("log").dispatchEvent(new dom.window.Event("scroll"));
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(pages.querySelectorAll(".msg.dgc").length, 30, "reaching the top loaded the rest");
+  assert.deepEqual(errors, []);
+  dom.window.close();
 });
 
 test("a history payload only ever drives the replayable events", () => {
@@ -2493,6 +2510,76 @@ test("single question offers free text and cancellation never submits a default"
   pointer(dom, card.querySelector(".ask-act"));
   assert.equal(posted.some((m) => m.type === "options_response"), false);
   assert.equal(doc.querySelector(".cinput").hidden, false, "the text box comes back");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("a finished turn's Tasks card folds into its Worked for row", () => {
+  const { send, doc, errors, dom } = makeDom();
+  const ev = (event) => send({ type: "event", event });
+  ev({ type: "turn_start", turn_id: "t1", prompt: "do the three things" });
+  const todos = [{ content: "One", status: "done" }, { content: "Two", status: "done" }, { content: "Three", status: "done" }];
+  ev({ type: "tool_call", call_id: "p1", name: "todo", args: { todos }, summary: "3 steps" });
+  ev({ type: "todos", todos });
+  ev({ type: "tool_result", call_id: "p1", name: "todo", output: "ok", is_error: false, is_diff: false });
+  ev({ type: "tool_call", call_id: "c1", name: "read_file", args: { path: "a.py" }, summary: "a.py" });
+  ev({ type: "tool_result", call_id: "c1", name: "read_file", output: "x", is_error: false, is_diff: false });
+  ev({ type: "text_delta", text: "All three are done." });
+  ev({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+  ev({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: "t1:1" });
+  const card = doc.querySelector("#log .todos-card");
+  assert.ok(card, "the turn drew its Tasks card");
+  assert.ok(card.classList.contains("work-step"), "folded with the turn's work");
+  assert.ok(doc.querySelector("#log .msg.dgc.work-folded > .work-toggle"), "under its Worked for row");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("a file link's icon sits on the middle of the text and wraps with its name", () => {
+  // Seti's ink centre is ~0.5em above the baseline: -0.17em left the Markdown mark floating above the line (21 Nov).
+  const rule = mainCss.match(/:is\(\.md-link, \.chip\.made-file\)\[data-file-kind\]::before \{[^}]*\}/)?.[0] || "";
+  assert.match(rule, /vertical-align: -0\.25em/);
+  assert.match(rule, /display: inline;/, "inline: no break between the icon and its name");
+  assert.match(rule, /margin: 0 0\.06em 0 -0\.1em/, "the glyph's empty sides taken back");
+});
+
+test("how DGC ran a step's reads is not a line in the chat", () => {
+  const { send, doc, errors, dom } = makeDom();
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "look" } });
+  send({ type: "event", event: { type: "info", message: "↯ running 3 independent reads in parallel" } });
+  send({ type: "event", event: { type: "info", message: "Something else to say" } });
+  const lines = [...doc.querySelectorAll("#log .sys")].map((n) => n.textContent);
+  assert.equal(lines.some((t) => /independent reads/.test(t)), false);
+  assert.equal(lines.some((t) => /Something else to say/.test(t)), true, "other notices still show");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("an Allow card with a time limit counts down, and stops when it is answered or closed", () => {
+  const { dom, errors, posted, send, doc, advance } = makeDom({ clock: true });
+  send({ type: "event", event: { type: "turn_start" } });
+  for (const id of ["timed", "answered"]) {
+    send({ type: "event", event: { type: "permission_request", id, name: "bash", command: "mkfs.ext4 /dev/sdz",
+      suggested_rule: "bash(mkfs.ext4 /dev/sdz)", args: { command: "mkfs.ext4 /dev/sdz" }, choices: ["once", "deny"] } });
+    send({ type: "event", event: { type: "request_deadline", id, seconds: 120 } });
+  }
+  const timed = doc.querySelector('.card[data-request-id="timed"]');
+  const line = () => timed.querySelector(".card-countdown");
+  assert.ok(line(), "the countdown sits on the card");
+  assert.equal(line().textContent, "Denied in 2:00 if you don't answer");
+  assert.equal(line().nextElementSibling, timed.querySelector(".btns"), "just above the buttons");
+  advance(61_000);
+  assert.equal(line().textContent, "Denied in 0:59 if you don't answer");
+  assert.equal(timed.querySelector('[data-d="always"]'), null, "never Always");
+  send({ type: "event", event: { type: "request_expired", id: "timed" } });
+  assert.equal(timed.classList.contains("resolved"), true);
+  assert.equal(line(), null, "closed: the countdown goes");
+  const answered = doc.querySelector('.card[data-request-id="answered"]');
+  answered.querySelector('[data-d="once"]').click();
+  advance(2_000);
+  assert.equal(answered.querySelector(".card-countdown"), null, "answered: the countdown goes");
+  assert.equal(posted.filter((m) => m.type === "permission_response").length, 1);
+  send({ type: "event", event: { type: "request_deadline", id: "nobody", seconds: 5 } });   // no such card: nothing
   assert.deepEqual(errors, []);
   dom.window.close();
 });
@@ -4042,6 +4129,49 @@ test("a monitor wake turn renders as a monitor note, not a user bubble, and leav
   event({ type: "turn_start", turn_id: "t3", prompt: "", kind: "resume" });
   assert.equal(queued(), "");
   assert.deepEqual(errors, []);
+});
+
+test("a reply streamed in pieces with thinking or a closed stream between them stays one paragraph (20 Nov)", () => {
+  // Live (kimi on Ollama): "The / live / history changes are i / n place." drew as five paragraphs; the saved reply was whole.
+  const { doc, send } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  event({ type: "turn_start", turn_id: "t1", prompt: "carry on", kind: "prompt" });
+  event({ type: "text_delta", text: "The" });
+  event({ type: "thinking_delta", block: "r1", text: "checking", source: "raw" });
+  event({ type: "thinking_end", block: "r1", placement: "collapsed", source: "raw" });
+  event({ type: "text_delta", text: " live history changes are i" });
+  event({ type: "stream_end" });
+  event({ type: "text_delta", text: "n place." });
+  const turn = [...doc.querySelectorAll(".msg.dgc")].at(-1);
+  const texts = [...turn.querySelectorAll(".text")].map((n) => n.textContent.trim()).filter(Boolean);
+  assert.deepEqual(texts, ["The live history changes are in place."], "one paragraph, as it was written");
+  // A tool's step between two pieces still starts a new one.
+  event({ type: "tool_call", call_id: "c1", name: "read_file", args: { path: "a.ts" }, summary: "a.ts" });
+  event({ type: "text_delta", text: "Next part." });
+  const after = [...turn.querySelectorAll(".text")].map((n) => n.textContent.trim()).filter(Boolean);
+  assert.deepEqual(after, ["The live history changes are in place.", "Next part."]);
+});
+
+test("a monitor's card starts folded like a tool's step, and opens to its lines (his call, 20 Nov)", () => {
+  const { doc, send } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  event({ type: "turn_start", turn_id: "t1", prompt: "watch the dev server", kind: "prompt" });
+  event({ type: "monitor_event", id: "mon1", description: "npm run dev", event_index: 2,
+          lines: ["check-in: nothing new for 85 min", "hmr update /src/index.css"], kind: "output", delivery: "inline", turn_id: "t1" });
+  const card = [...doc.querySelectorAll(".msg.dgc")].at(-1).querySelector(".monitor-event");
+  const toggle = card.querySelector(".monitor-event-head");
+  assert.equal(toggle.tagName, "BUTTON", "its head is the button that opens it");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false", "folded at first");
+  assert.equal(card.classList.contains("open"), false);
+  assert.ok(toggle.querySelector(".chev"), "with the tools' chevron");
+  assert.match(toggle.textContent, /Monitor · npm run dev/);
+  toggle.click();
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.ok(card.classList.contains("open"), "opened, its lines show");
+  toggle.click();
+  assert.equal(card.classList.contains("open"), false, "and folds again");
+  const css = readFileSync(new URL("../media/main.css", import.meta.url), "utf8");
+  assert.match(css, /\.monitor-event:not\(\.open\) > :not\(\.monitor-event-head\) \{ display: none; \}/, "folded, only its head shows");
 });
 
 test("monitor_event renders a bounded card inside the current turn; the rail's chips post stopMonitor", () => {

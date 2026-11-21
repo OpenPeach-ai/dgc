@@ -1850,6 +1850,39 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "request_deadline"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "id": {
+              "type": "string"
+            },
+            "seconds": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "id",
+            "seconds"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "rule_added"
             },
             "seq": {
@@ -2486,6 +2519,12 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "artifact_bind": {
+              "type": "string"
+            },
+            "artifact_hostname": {
+              "type": "string"
             },
             "fallback_engine": {
               "type": "string"
@@ -10930,6 +10969,9 @@
             },
             "agent_faces": {
               "type": "boolean"
+            },
+            "request_deadline": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -11988,6 +12030,41 @@
             "request_id",
             "name",
             "enabled"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "set_plugin_permission"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            },
+            "level": {
+              "type": "string",
+              "enum": [
+                "always_ask",
+                "any_changes",
+                "important",
+                "never_ask"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "plugin",
+            "level"
           ],
           "additionalProperties": false
         },

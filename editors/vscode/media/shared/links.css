@@ -6,9 +6,11 @@
    costs no network request -- a favicon fetch would leak every URL a model mentions to whoever
    hosts it, and the panel's CSP forbids it anyway. */
 .md-link[data-link-source]::before {
-  font-family: codicon; font-size: var(--t-sm); font-weight: normal; font-style: normal;
-  line-height: 1; display: inline-block; vertical-align: -1px;
-  margin-right: 4px; color: var(--muted); text-decoration: none;   /* grey: a site's stand-in, never its brand in our purple */
+  /* The size, baseline and gap of a site's own icon (.link-favicon below), so a link with DGC's mark reads as clearly
+     as one with a favicon (it was a small, faint glyph beside 15 px text: 21 Nov). */
+  font-family: codicon; font-size: 1.05em; font-weight: normal; font-style: normal;
+  line-height: 1; display: inline-block; vertical-align: -0.17em;
+  margin-right: 5px; color: var(--muted); text-decoration: none;   /* grey: a site's stand-in, never its brand in our purple */
 }
 .md-link[data-link-source="github"]::before      { content: "\eba1"; }  /* github-inverted */
 .md-link[data-link-source="gitlab"]::before      { content: "\ea62"; }  /* repo */

@@ -333,11 +333,10 @@ test("a replayed chat builds the boxes the live one built, and keeps a prompt re
 
 test("a turn nobody typed at the top of a newer history page joins the older page's last box", () => {
   const p = panel();
-  // Twenty whole turns of four events each: the newest page is the last thirteen (52 events), and it
-  // begins with the continuation.
+  // Forty whole turns: the newest page is the last twenty-five, and it begins with the continuation.
   const items = [];
-  for (let i = 0; i < 20; i += 1) {
-    items.push(...(i === 7 ? turn("c7", "Continue the interrupted turn", { kind: "continue" }) : turn(`h${i}`, `Question ${i}`)));
+  for (let i = 0; i < 40; i += 1) {
+    items.push(...(i === 15 ? turn("c15", "Continue the interrupted turn", { kind: "continue" }) : turn(`h${i}`, `Question ${i}`)));
   }
   p.event({ type: "history", items });
   const pages = p.log.querySelector(".history-pages");
@@ -345,10 +344,10 @@ test("a turn nobody typed at the top of a newer history page joins the older pag
   assert.ok(first.firstElementChild.matches(".resume-note.continue-note"), "the newest page opens with the continuation, in a box of its own");
   p.log.querySelector(".history-older").click();
   const boxes = [...pages.querySelectorAll(":scope > .turn")];
-  assert.equal(boxes.length, 19, "twenty turns, one of them a continuation: nineteen boxes");
+  assert.equal(boxes.length, 39, "forty turns, one of them a continuation: thirty-nine boxes");
   const joined = boxes.find((box) => box.querySelector(".continue-note"));
   assert.deepEqual(shape(pages.parentElement).find((box) => Array.isArray(box) && box.includes("note")),
-    ["HEAD:Question 6", "dgc", "note", "dgc"], "the continuation joined the box of the prompt it continues");
+    ["HEAD:Question 14", "dgc", "note", "dgc"], "the continuation joined the box of the prompt it continues");
   assert.ok(joined.children[2].matches(".resume-note.continue-note"));
   assert.ok(boxes.every((box) => box.firstElementChild.classList.contains("turn-head")), "no box without a prompt is left at the seam");
   assert.ok([...pages.querySelectorAll(".msg.dgc")].every((block) => block.parentElement.classList.contains("turn")));
@@ -855,8 +854,9 @@ test("the stylesheet: one box, one sticky prompt, every override winning on spec
   const steerSticky = find(".turn > .msg.dgc > .msg.user.turn-steer");
   for (const want of [/position:\s*sticky/, /top:\s*0/, /z-index:\s*3/, /content-visibility:\s*visible/]) assert.match(steerSticky.body, want);
   const positioned = all.filter((rule) => /\.turn-head/.test(subject(rule.selector)) && !/::/.test(rule.selector) && declares(rule, "position"));
-  assert.deepEqual(positioned.map((rule) => rule.selector), [".turn > .msg.user.turn-head", ".turn > .msg.user.turn-head.pin-off",
-    '.turn > .msg.user.turn-head:has(> .bubble[data-fold="open"])'], "only the pin and the two ways out of it place a turn's prompt");
+  assert.deepEqual(positioned.map((rule) => rule.selector), [".turn:has(> .msg.dgc > .msg.user.turn-steer) > .msg.user.turn-head",
+    ".turn > .msg.user.turn-head", ".turn > .msg.user.turn-head.pin-off", '.turn > .msg.user.turn-head:has(> .bubble[data-fold="open"])'],
+    "only the pin and the three ways out of it place a turn's prompt (the third: a message sent mid-turn pins instead)");
 
   const ground = find(".turn > .msg.user.turn-head::before");
   for (const want of [/var\(--bg\)/, /var\(--surface\)/, /pointer-events:\s*none/, /z-index:\s*-1/, /mask-image:\s*linear-gradient/,

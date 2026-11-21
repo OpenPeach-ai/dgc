@@ -31,9 +31,9 @@ const { faviconUrl } = markdown;
 // ---- the icon URL itself -------------------------------------------------------------
 
 test("only the origin is sent to the icon service", () => {
-  const url = faviconUrl("https://jira.internal.corp/browse/SEC-1?token=s3cr3t#comment-9");
+  const url = faviconUrl("https://jira.example.com/browse/SEC-1?token=s3cr3t#comment-9");
   assert.ok(url, "an https link should resolve an icon");
-  assert.match(url, /domain=https%3A%2F%2Fjira\.internal\.corp&/);
+  assert.match(url, /domain=https%3A%2F%2Fjira\.example\.com&/);
   for (const secret of ["SEC-1", "browse", "token", "s3cr3t", "comment-9"]) {
     assert.equal(url.includes(secret), false,
       `the icon request must not carry ${secret}: the path and query never leave the machine`);
@@ -45,8 +45,15 @@ test("it is Google's icon service, keyed on the origin alone", () => {
     "https://www.google.com/s2/favicons?domain=https%3A%2F%2Fvibedgc.com&sz=32");
 });
 
-test("a port is part of the origin, so a dev server gets its own icon", () => {
-  assert.match(faviconUrl("http://localhost:3000/app"), /localhost%3A3000/);
+test("an address no public site has gets DGC's own sharp mark, never Google's blurry stand-in", () => {
+  // (His 21 Nov note: a link to http://100.71.117.72:4173 wore a soft default globe. Google can't reach a private
+  // address, so it sends its stand-in; and the address never needs to leave the machine.)
+  for (const local of ["http://localhost:3000/app", "http://127.0.0.1:5173/", "http://100.71.117.72:4173/", "http://192.168.1.148:46200/",
+                       "http://[::1]:8080/", "https://gb10.tail1234.ts.net/x", "http://printer.local/", "https://jira.internal.corp/a",
+                       "http://devbox:3000/", "https://wiki.lan/", "https://app.home.arpa/"]) {
+    assert.equal(faviconUrl(local), undefined, local);
+  }
+  assert.ok(faviconUrl("https://github.com/x"), "a public site still wears its own icon");
 });
 
 test("only http and https resolve an icon", () => {

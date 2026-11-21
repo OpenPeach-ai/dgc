@@ -131,7 +131,7 @@ test("clicking an agent's name opens the inner page with the child's tools, dura
   assert.equal($("agent-page").hidden, false);
   assert.equal($("agent-back").hidden, false);
   assert.equal($("thread-title").textContent, "Safari logo fix");
-  assert.match($("agent-page-meta").textContent, /Worked for 7m 42s/);
+  assert.match($("agent-log").querySelector(".agent-act").textContent, /Worked for 7m 42s/);
   assert.match($("agent-log").textContent, /Aligned the mark/);
   assert.ok($("agent-log").querySelector('.tool[data-tool-name="edit_file"]'));
   assert.equal($("agent-log").querySelector('.tool[data-tool-name="task"]'), null, "the parent spawn card stays off the inner page");

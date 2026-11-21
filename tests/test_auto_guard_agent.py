@@ -33,12 +33,16 @@ BLOCKED = "BLOCKED by DGC's safety check"
 
 
 class Model:
-    """The session's model answering the safety check's one question."""
+    """The session's model answering the safety check's one question (and, when the user's words hold a boundary, the
+    question of what they said not to do: `bounds`, its JSON answer, asked about in `bounded`)."""
 
     def __init__(self, answer="NO", fail=False):
-        self.answer, self.fail, self.asked = answer, fail, []
+        self.answer, self.fail, self.asked, self.bounds, self.bounded = answer, fail, [], '{"boundaries": []}', []
 
     def __call__(self, client, messages, *args, **kwargs):
+        if "said NOT to do" in str(messages[0].get("content")):
+            self.bounded.append(messages)
+            return SimpleNamespace(content=self.bounds, usage=None, tool_calls=[])
         self.asked.append(messages)
         if self.fail:
             raise ConnectionError("no model here")
@@ -121,6 +125,39 @@ class Stops(Case):
         out = harness.agent._handle_call(ToolCall("c1", "bash", {"command": "rm -rf src", "user_said_yes": True}))
         self.assertTrue(out.startswith(BLOCKED), out)
         self.assertTrue((harness.root / "src").exists())
+
+
+class AllowRulesInAuto(Case):
+    """In auto mode a broad allow rule ("every command", any script, any run) doesn't skip the safety check; a narrow
+    one still lets its steps run, except a write to a protected file (his call, 20 Nov, as Claude Code does)."""
+
+    def rules(self, harness, *allow):
+        harness.agent.config.permissions = {"allow": list(allow), "ask": [], "deny": []}
+
+    def test_a_broad_allow_rule_does_not_skip_the_check(self):
+        for rule in ("Bash(*)", "Bash", "Bash(python*)", "Bash(npx *)"):
+            with self.subTest(rule=rule):
+                harness = self.harness()
+                self.rules(harness, rule)
+                out = self.call(harness, "rm -rf src")
+                self.assertTrue(out.startswith(BLOCKED + " (Destructive)"), (rule, out))
+                self.assertTrue((harness.root / "src" / "app.py").exists())
+
+    def test_a_narrow_rule_runs_its_steps_but_not_a_protected_file(self):
+        harness = self.harness()
+        self.rules(harness, "Bash(echo *)")
+        self.assertIn("hi", self.call(harness, "echo hi"))
+        (harness.root / ".git" / "hooks").mkdir(parents=True)
+        out = self.call(harness, "echo x > .git/hooks/pre-commit", call_id="c2")
+        self.assertTrue(out.startswith(BLOCKED + " (System changes)"), out)
+        self.assertFalse((harness.root / ".git" / "hooks" / "pre-commit").exists())
+
+    def test_a_protected_write_is_caught_even_beside_a_worse_step(self):
+        harness = self.harness()
+        self.rules(harness, "Bash(echo *)")
+        (harness.root / ".git" / "hooks").mkdir(parents=True)
+        out = self.call(harness, "echo $(cat ~/.ssh/id_rsa) > .git/hooks/pre-commit")
+        self.assertTrue(out.startswith(BLOCKED), out)
 
 
 class Counting(Case):
@@ -239,12 +276,14 @@ class UsersWords(Case):
         self.assertTrue(self.call(harness, "rm -rf src").startswith(BLOCKED))
 
     def test_some_steps_no_words_can_allow(self):
-        # (A disk that isn't there: even if the check failed, nothing could be harmed.)
+        # (A disk that isn't there: even if the check failed, nothing could be harmed.) Words never answer it: the
+        # step asks on a card of its own (CriticalSteps), and no question goes to the model.
         self.model.answer = "YES"
         harness = self.harness(words="format the disk /dev/dgc-guard-no-such-disk, I mean it")
+        harness.answer("permission_request", {"decision": "no"})
         out = self.call(harness, "mkfs.ext4 /dev/dgc-guard-no-such-disk")
-        self.assertTrue(out.startswith(BLOCKED + " (Destructive)"), out)
-        self.assertIn("DGC never runs this on its own", out)
+        self.assertIn("DENIED", out)
+        self.assertEqual(len(self.cards(harness)), 1)
         self.assertEqual(self.model.asked, [])
 
     def test_a_turn_dgc_started_brings_no_new_words(self):
@@ -254,6 +293,168 @@ class UsersWords(Case):
         self.call(harness, "rm -rf src")
         asked = "\n".join(str(m.get("content")) for m in self.model.asked[0])
         self.assertNotIn("delete the src folder", asked)
+
+
+DISK = "mkfs.ext4 /dev/dgc-guard-no-such-disk"       # a disk that isn't there: nothing can be harmed
+
+
+class CriticalSteps(Case):
+    """The few steps DGC never runs on its own (clearing the whole computer or home, writing straight to a disk) ask on
+    a card at once, as Claude Code's terminal does: answered within two minutes or denied; after three unanswered in a
+    row, no more cards until the user's next message. Words in the chat never answer it, nor does an allow rule."""
+
+    def setUp(self):
+        super().setUp()
+        limit = patch.object(Agent, "CRITICAL_ANSWER_S", 0.3)
+        limit.start()
+        self.addCleanup(limit.stop)
+
+    def deadlines(self, harness):
+        return [f for f in harness.stream.frames() if f["type"] == "request_deadline"]
+
+    def test_it_asks_at_once_with_a_time_limit(self):
+        harness = self.harness()
+        harness.ui._request_deadline_enabled = True       # the editor said it draws the countdown
+        harness.answer("permission_request", {"decision": "once"})
+        out = self.call(harness, DISK)
+        self.assertFalse(out.startswith(BLOCKED), out)
+        cards = self.cards(harness)
+        self.assertEqual(len(cards), 1, "the first time: a card, not a stopped line")
+        self.assertEqual(cards[0]["choices"], ["once", "deny"], "never Always")
+        self.assertEqual([(d["id"], d["seconds"]) for d in self.deadlines(harness)], [(cards[0]["id"], 1)])
+        self.assertTrue(any("2 minutes" in m or "denied" in m for m in self.infos(harness)), self.infos(harness))
+
+    def test_an_older_editor_gets_no_deadline_event(self):
+        harness = self.harness()
+        harness.answer("permission_request", {"decision": "no"})
+        self.assertIn("DENIED", self.call(harness, DISK))
+        self.assertEqual(self.deadlines(harness), [])
+
+    def test_unanswered_it_is_denied_and_the_model_told(self):
+        harness = self.harness()
+        out = self.call(harness, DISK)
+        self.assertIn("Nobody answered", out)
+        self.assertIn("Nothing ran", out)
+        frames = [f["type"] for f in harness.stream.frames()]
+        self.assertIn("request_expired", frames)
+        denied = [f for f in harness.stream.frames() if f["type"] == "tool_denied"]
+        self.assertTrue(denied and "No answer" in denied[-1].get("reason", ""), denied)
+
+    def test_three_unanswered_stop_asking_until_the_next_message(self):
+        harness = self.harness()
+        for n in range(3):
+            self.assertIn("Nobody answered", self.call(harness, DISK, f"c{n}"))
+        self.assertEqual(len(self.cards(harness)), 3)
+        out = self.call(harness, DISK, "c3")
+        self.assertTrue(out.startswith(BLOCKED), out)
+        self.assertIn("three times", out)
+        self.assertEqual(len(self.cards(harness)), 3, "no fourth card")
+        self.user_says(harness, "ok I'm back")
+        harness.answer("permission_request", {"decision": "no"})
+        self.assertIn("DENIED", self.call(harness, DISK, "c4"))
+        self.assertEqual(len(self.cards(harness)), 4, "the user's next message: it asks again")
+
+    def test_an_answer_resets_the_unanswered_count(self):
+        harness = self.harness()
+        for n in range(2):
+            self.call(harness, DISK, f"c{n}")
+        harness.answer("permission_request", {"decision": "no"})
+        self.assertIn("DENIED", self.call(harness, DISK, "c2"))
+        harness.replies.clear()
+        for n in range(3, 5):
+            self.assertIn("Nobody answered", self.call(harness, DISK, f"c{n}"))
+        self.assertEqual(len(self.cards(harness)), 5)
+
+    def test_a_narrow_allow_rule_does_not_answer_it(self):
+        harness = self.harness()
+        harness.agent.config.permissions = {"allow": ["Bash(mkfs.ext4 *)"], "ask": [], "deny": []}
+        harness.answer("permission_request", {"decision": "no"})
+        self.assertIn("DENIED", self.call(harness, DISK))
+        self.assertEqual(len(self.cards(harness)), 1)
+
+    def test_nobody_at_the_keyboard_no_card(self):
+        harness = self.harness()
+        harness.agent._monitor_turn = True
+        out = self.call(harness, DISK)
+        self.assertTrue(out.startswith(BLOCKED), out)
+        self.assertIn("DGC never runs this on its own", out)
+        self.assertEqual(self.cards(harness), [])
+
+
+class TheUsersBoundaries(Case):
+    """What the user said not to do ("don't push", "leave tests/ alone", "no npm install") holds in auto mode until a
+    later message of theirs lifts it, as Claude Code's auto mode does: one question to the session's model per new user
+    message with words like these, then each step is matched by rule. Even their earlier yes doesn't pass it."""
+
+    def bounds(self, *items):
+        import json
+        self.model.bounds = json.dumps({"boundaries": [dict(item) for item in items]})
+
+    def write(self, harness, path, call_id="w1"):
+        return harness.agent._handle_call(ToolCall(call_id, "write_file", {"path": path, "content": "x = 1\n"}))
+
+    def test_dont_push_holds_a_push_even_after_an_earlier_yes(self):
+        self.model.answer = "YES"
+        harness = self.harness(words="fix the bug and push it")
+        self.user_says(harness, "actually don't push, I'll review first")
+        self.bounds({"kind": "Publishing", "command": "git push", "said": "don't push"})
+        out = self.call(harness, "git push origin main")
+        self.assertTrue(out.startswith("BLOCKED"), out)
+        self.assertIn("don't push", out)
+        self.assertEqual(self.model.asked, [], "a boundary is not a question about their yes")
+
+    def test_a_command_they_ruled_out_is_held_and_others_run(self):
+        harness = self.harness(words="update the readme, no npm install please")
+        self.bounds({"command": "npm install", "said": "no npm install"})
+        out = self.call(harness, "cd web && npm install lodash")
+        self.assertTrue(out.startswith("BLOCKED"), out)
+        self.assertIn("no npm install", out)
+        self.assertIn("hi", self.call(harness, "echo hi", "c2"))
+
+    def test_a_folder_they_said_to_leave_alone(self):
+        harness = self.harness(words="refactor src, leave the build folder alone")
+        self.bounds({"path": "build/", "said": "leave the build folder alone"})
+        out = self.write(harness, "build/out.py")
+        self.assertTrue(out.startswith("BLOCKED"), out)
+        self.assertFalse((harness.root / "build" / "out.py").exists())
+        self.assertNotIn("BLOCKED", self.write(harness, "src/new.py", "w2"))     # (its own refusal: no turn here)
+        self.assertNotIn("BLOCKED", self.call(harness, "echo done > src/x.txt", "c2"))
+        self.assertTrue((harness.root / "src" / "x.txt").exists())
+        out = self.call(harness, "rm build/old.txt; echo done > build/x.txt", "c3")
+        self.assertTrue(out.startswith("BLOCKED"), out)
+
+    def test_a_later_message_lifts_it(self):
+        self.model.answer = "YES"
+        harness = self.harness(words="don't push yet")
+        self.bounds({"kind": "Publishing", "command": "git push", "said": "don't push yet"})
+        self.assertTrue(self.call(harness, "git push --dry-run origin HEAD").startswith("BLOCKED"))
+        self.user_says(harness, "ok, push it now")
+        self.bounds()
+        out = self.call(harness, "git push --dry-run origin HEAD", "c2")
+        self.assertNotIn("said not to", out)
+        self.assertEqual(len(self.model.bounded), 2, "asked again for the new message")
+
+    def test_asked_once_per_message_and_never_without_such_words(self):
+        harness = self.harness(words="don't touch the tests")
+        self.bounds({"path": "tests/", "said": "don't touch the tests"})
+        for n in range(3):
+            self.call(harness, "echo hi", f"c{n}")
+        self.assertEqual(len(self.model.bounded), 1)
+        plain = self.harness(words="tidy the readme")
+        self.call(plain, "echo hi")
+        self.assertEqual(len(self.model.bounded), 1, "no such words: no question")
+
+    def test_no_answer_holds_nothing_new(self):
+        harness = self.harness(words="don't push")
+        self.model.bounds = "I can't tell"
+        self.assertIn("hi", self.call(harness, "echo hi"))
+
+    def test_only_in_auto_mode(self):
+        harness = self.harness(mode="default", words="no npm install")
+        self.bounds({"command": "npm install", "said": "no npm install"})
+        harness.answer("permission_request", {"decision": "no"})
+        self.call(harness, "npm install lodash")
+        self.assertEqual(self.model.bounded, [])
 
 
 class UsersRules(Case):

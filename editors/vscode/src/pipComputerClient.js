@@ -389,7 +389,11 @@ function startScreen(explicit=false){
   viewer.addEventListener?.('disconnect',()=>{if(!['closed','elsewhere','restarting'].includes(S.screen.state)){S.screen={state:'closed',reason:S.screen.reason||'The screen closed.'};render();}});
   // What was copied on the computer (ServerCutText): text only, at most 1 MB.
   viewer.addEventListener?.('clipboard',event=>{const text=event?.detail?.text;if(typeof text!=='string')return;
-   const over=bytesOf(text)>CLIP_BYTES;S.clip={...S.clip,there:over?null:text,over,fresh:S.panel!=='clip'};render();});
+   const over=bytesOf(text)>CLIP_BYTES;S.clip={...S.clip,there:over?null:text,over,fresh:S.panel!=='clip'};
+   // Your own Copy or Cut on its screen a moment ago: what it copied lands on your clipboard too. A copy the Pip makes
+   // by itself never touches yours.
+   if(!over&&text&&Date.now()-copyKeyAt<4000){copyKeyAt=0;void navigator.clipboard?.writeText?.(text)?.catch?.(()=>{});}
+   render();});
  }catch(error){S.screen={state:'closed',reason:errorText(error)};render();return;}
  vscode.postMessage({type:'pipDesktop',op:'open',...(S.numbers?which():{})});
 }
@@ -971,6 +975,26 @@ document.addEventListener('submit',event=>{
 document.addEventListener('input',event=>{const box=event.target;if(!box?.dataset?.codeField)return;tidyCodeField(box);
  const state=S.codes.get(box.dataset.codeField);if(state?.error){state.error='';render();}});
 document.addEventListener('paste',event=>{const box=event.target;if(box?.dataset?.codeField&&!box.readOnly)pasteCode(box,event);});
+// Copy and paste straight through its screen (his 20 Nov ask; the clipboard panel stays for the rest). Ctrl+C or Ctrl+X
+// there: its copy comes to your clipboard (the 'clipboard' listener). Ctrl+V there: the key waits for the paste with your
+// text, which goes onto its clipboard first, then Ctrl+V reaches it.
+let copyKeyAt=0,pasteFor=null;
+const onScreen=node=>!!node?.closest?.('#pc-vnc');
+document.addEventListener('keydown',event=>{
+ if(!viewer||!onScreen(event.target)||event.altKey||!(event.ctrlKey||event.metaKey))return;
+ const key=String(event.key||'').toLowerCase();
+ if(key==='c'||key==='x'){copyKeyAt=Date.now();return;}
+ if(key==='v'&&mayType()&&typeof viewer.clipboardPasteFrom==='function'){event.stopImmediatePropagation();pasteFor=viewer;}
+},true);
+document.addEventListener('paste',event=>{
+ const into=pasteFor;pasteFor=null;
+ if(!into||into!==viewer||!onScreen(event.target))return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const text=event.clipboardData?.getData?.('text/plain')||'';
+ if(text&&bytesOf(text)<=CLIP_BYTES)into.clipboardPasteFrom(text);
+ const CONTROL=0xffe3,V=0x76;
+ into.sendKey(CONTROL,'ControlLeft',true);into.sendKey(V,'KeyV',true);into.sendKey(V,'KeyV',false);into.sendKey(CONTROL,'ControlLeft',false);
+},true);
 document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.terminal.draft=event.target.value;if(event.target.id==='pc-url')S.address=event.target.value;
  if(event.target.id==='pc-paste-text'){S.clip.draft=event.target.value;if(S.clip.note)clipSay('');}});
 // Escape leaves full screen. Not while the screen itself has the keys: the viewer keeps those for the computer, and the

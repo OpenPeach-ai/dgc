@@ -49,7 +49,7 @@ after(async () => { await browser?.close(); });
 test("the host lets only Your Browser's own tab ask for your own tab", () => {
   const ok = (request) => assert.equal(host.yourOwnTabRefusal(request), "", JSON.stringify(request));
   const no = (request, why) => assert.match(host.yourOwnTabRefusal(request), /only shows your own tabs/, why || JSON.stringify(request));
-  for (const op of ["frame", "input", "go", "back", "forward", "reload", "new_tab", "tab", "close_tab", "size", "close"]) ok({ type: "use_your_browser_view", own: true, op });
+  for (const op of ["frame", "input", "go", "back", "forward", "reload", "new_tab", "tab", "close_tab", "size", "close", "selection"]) ok({ type: "use_your_browser_view", own: true, op });
   ok({ type: "use_your_browser_view", own: true, op: "input", events: [{ t: "text", text: "hi" }] });
   ok({ type: "use_your_browser_view", own: true, op: "frame", seq: 4 });
   no({ type: "use_your_browser_view", own: true, op: "frame", pip_id: AVA }, "never a Pip's lane from it");
@@ -86,7 +86,7 @@ async function openOwn(theme = "dark", { width = 900, height = 600, api = 107, r
   await page.setContent(`<!doctype html><html><head><style>${pageCss}</style><style>body{background:${theme === "dark" ? "#1e1e1e" : "#ffffff"};color:${theme === "dark" ? "#ccc" : "#222"}}</style><style>:root{${THEMES[theme === "dark" ? "dark-modern" : "light-modern"]}}</style></head><body class="${theme === "dark" ? "vscode-dark" : "vscode-light"}"><main id="app"></main></body></html>`);
   await page.evaluate(([api, real, ownSeq]) => {
     window.__sent = []; window.__posted = [];
-    const B = window.__b = { seq: 0, size: [640, 400], current: "T1", tabs: [{ id: "T1", title: "Sign in to your account", url: "https://accounts.example.com/signin" }, { id: "T2", title: "Inbox (3)", url: "https://mail.example.net/" }], real };
+    const B = window.__b = { seq: 0, size: [640, 400], current: "T1", tabs: [{ id: "T1", title: "Sign in to your account", url: "https://accounts.example.com/signin" }, { id: "T2", title: "Inbox (3)", url: "https://mail.example.net/", icon: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" }], real };
     const picture = () => {
       if (B.real) return B.real;
       const [w, h] = B.size, c = document.createElement("canvas"); c.width = w; c.height = h; const g = c.getContext("2d");
@@ -150,6 +150,10 @@ test("your own tab: it streams frame after frame, at the editor tab's size, with
     assert.deepEqual(seen.tabs, [["Sign in to your account", "true"], ["Inbox (3)", "false"]]);
     assert.equal(seen.closes, 2);
     assert.equal(seen.newTab, true);
+    // Like Chrome's: each wears its site's icon, a globe until DGC has one (his 20 Nov ask).
+    const marks = await x.page.evaluate(() => [...document.querySelectorAll(".yb-own .yb-tab")].map((b) => b.querySelector("img.yb-fav") ? "icon" : b.querySelector(".yb-fav-none") ? "globe" : "none"));
+    assert.deepEqual(marks, ["globe", "icon"]);
+    if (process.env.DGC_SHOTS_DIR) await x.page.locator(".yb-bar").screenshot({ path: `${process.env.DGC_SHOTS_DIR}/yb-tabs.png` });
     assert.equal(seen.window, false, "no window to show it in: this is Your Browser");
     assert.ok(Math.abs(seen.frame[0] - (size.width + 2)) <= 1 && Math.abs(seen.frame[1] - (size.height + 2)) <= 1, `drawn one to one (${seen.frame} for ${size.width}x${size.height})`);
   } finally { await x.close(); }
@@ -179,6 +183,19 @@ test("your own tab: a click where it was made, typing, keys and a paste reach it
     const order = events.filter((e) => e.t !== "move").map((e) => (e.t === "key" ? e.text || `[${e.key}]` : e.t === "text" ? `{${e.text}}` : e.t)).join("");
     assert.equal(order, "downupme@example.com[Tab]s3cr3t!{ pässwörd}[Enter]", "in the order they were made");
     assert.ok((await x.sent("input")).every((r) => r.own === true && r.events.length <= 20));
+  } finally { await x.close(); }
+});
+
+test("your own tab: Copy asks for the page's selection first, then the key goes (a Cut keeps its text)", async (t) => {
+  if (skipOrFail(t)) return;
+  const x = await openOwn();
+  try {
+    await x.shown();
+    await x.page.locator(".yb-frame").click();
+    await x.page.keyboard.press("Control+c");
+    await x.page.waitForFunction(() => window.__sent.filter((r) => r.op === "input").flatMap((r) => r.events).some((e) => e.key === "c"), null, { timeout: 5000 });
+    const order = await x.page.evaluate(() => window.__sent.filter((r) => r.op === "selection" || (r.op === "input" && r.events.some((e) => e.key === "c"))).map((r) => r.op));
+    assert.deepEqual(order.slice(0, 2), ["selection", "input"], "its text is read before the page gets the key");
   } finally { await x.close(); }
 });
 

@@ -179,8 +179,10 @@
     const where = words(from.title, 200) || { work: "a Work session", chatdgc: "a ChatDGC chat", pip: "a Pip" }[kind];
     const mark = root.DgcCard?.icon ? root.DgcCard.icon(MARKS[kind]) : "";
     const link = opts.openAsker ? `<button type="button" class="pipjob-from-link" data-pipjob-act="asker" data-pipjob="${esc(value.id)}" data-kind="${kind}" data-id="${esc(from.id)}" data-title="${esc(where)}">${esc(where)}</button>` : `<em>${esc(where)}</em>`;
+    // Where it was asked, in words: "your Work session …", "your ChatDGC chat …" (a Pip's own name says itself).
+    const what = words(from.title, 200) ? { work: "your Work session ", chatdgc: "your ChatDGC chat ", pip: "" }[kind] : "";
     return `<div class="pipjob-from" data-pipjob="${esc(value.id)}"><span class="pipjob-from-mark" aria-hidden="true">${mark}</span>`
-      + `<p class="pipjob-from-words">From ${link}: ${esc(words(value.words, 600))}</p></div>`;
+      + `<p class="pipjob-from-words">From ${what}${link}: ${esc(words(value.words, 600))}</p></div>`;
   }
 
   /** A job waiting at Ask me first, in the Pip's own chat: where it came from, its words, Start and Not now. */

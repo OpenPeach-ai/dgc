@@ -350,11 +350,32 @@ test('Save to… refuses malformed or oversized webview bytes before opening the
 
 function fakeViewer(){
  const made=[];
- class Viewer{constructor(target,channel,options){this.target=target;this.channel=channel;this.options=options;this.listeners={};made.push(this);
+ class Viewer{constructor(target,channel,options){this.target=target;this.channel=channel;this.options=options;this.listeners={};this.keys=[];this.pasted=[];made.push(this);
   channel.onopen=()=>{this.opened=true;};channel.onmessage=e=>{(this.got||=[]).push(new Uint8Array(e.data));};channel.onclose=e=>{this.closed=e;};}
-  addEventListener(kind,fn){this.listeners[kind]=fn;}}
+  addEventListener(kind,fn){this.listeners[kind]=fn;}sendKey(sym,code,down){this.keys.push([sym,down]);}clipboardPasteFrom(text){this.pasted.push(text);}}
  return {Viewer,made};
 }
+
+test('copy and paste go straight through the computer\'s screen (his 20 Nov ask)',async()=>{
+ const {Viewer,made}=fakeViewer();
+ const x=setup({screen:true,viewer:Viewer});await x.drain();
+ x.message({type:'pipDesktopData',data:Buffer.from('RFB 003.008\n').toString('base64')});made[0].listeners.connect();
+ const written=[];x.w.navigator.clipboard={writeText:async t=>{written.push(t);}};
+ const canvas=x.d.createElement('canvas');x.d.getElementById('pc-vnc').appendChild(canvas);canvas.tabIndex=0;canvas.focus();
+ // Ctrl+C on the computer: what it copies lands on your clipboard.
+ canvas.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'c',ctrlKey:true,bubbles:true}));
+ made[0].listeners.clipboard({detail:{text:'copied there'}});await x.drain();
+ assert.deepEqual(written,['copied there']);
+ // A copy the Pip makes by itself, with no key of yours: your clipboard is left alone.
+ made[0].listeners.clipboard({detail:{text:'the Pip copied'}});await x.drain();
+ assert.deepEqual(written,['copied there']);
+ // Ctrl+V: your clipboard goes onto the computer's first, then Ctrl+V reaches it.
+ const down=new x.w.KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true});canvas.dispatchEvent(down);
+ assert.equal(down.defaultPrevented,false,'the paste itself still happens');
+ const paste=new x.w.Event('paste',{bubbles:true,cancelable:true});paste.clipboardData={getData:()=>'from your clipboard'};canvas.dispatchEvent(paste);
+ assert.deepEqual(made[0].pasted,['from your clipboard']);
+ assert.deepEqual(made[0].keys.map(k=>k.join(':')),['65507:true','118:true','118:false','65507:false'],'then Ctrl+V on the computer');
+});
 
 test('with the desktop installed, the tab is the Pip\'s real screen, streamed through the host',async()=>{
  const {Viewer,made}=fakeViewer();

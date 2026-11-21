@@ -56,7 +56,8 @@ def _clean(record) -> dict | None:
         return None
     return {"id": record["id"], "at": float(record["at"]), "created_at": float(record["created_at"]),
             "why": record["why"][:WHY_CHARS], "prompt": record["prompt"][:PROMPT_CHARS],
-            "owner": record.get("owner") if isinstance(record.get("owner"), dict) else {}}
+            "owner": record.get("owner") if isinstance(record.get("owner"), dict) else {},
+            "goal": record["goal"][:64] if isinstance(record.get("goal"), str) else ""}
 
 
 def clock_words(at: float) -> str:
@@ -151,6 +152,9 @@ class Book:
         self.journal = journal or SESSION_JOURNAL
         self._lock = threading.Lock()
         self._items: list[dict] = []
+        # The standing goal running now ("" when none): a wake-up set while it runs is that goal's, and goes when the
+        # goal completes or is cleared (cancel_goal). Set by the agent.
+        self.goal_of = None
 
     # ---- what the chat holds ----------------------------------------------------------------
     def items(self) -> list[dict]:
@@ -179,8 +183,12 @@ class Book:
         with self._lock:
             if len(self._items) >= MAX_PER_CHAT:
                 raise ValueError(f"A chat can wait on at most {MAX_PER_CHAT} wake-ups. Cancel one first (wake_cancel).")
+            try:
+                goal = str(self.goal_of() or "")[:64] if callable(self.goal_of) else ""
+            except Exception:  # noqa: BLE001 -- a wake-up of no goal
+                goal = ""
             item = {"id": f"wake{next(_ids)}", "at": now + float(minutes) * 60, "created_at": now,
-                    "why": why, "prompt": prompt, "owner": owner()}
+                    "why": why, "prompt": prompt, "owner": owner(), "goal": goal}
             self._items.append(item)
         self._save()
         return dict(item)
@@ -193,6 +201,17 @@ class Book:
             self._items.remove(found)
         self._save()
         return True
+
+    def cancel_goal(self, goal: str) -> list[dict]:
+        """The wake-ups a goal set, cancelled when it completes or is cleared: returned, soonest first."""
+        if not goal:
+            return []
+        with self._lock:
+            gone = [i for i in self._items if i.get("goal") == goal]
+            self._items = [i for i in self._items if i.get("goal") != goal]
+        if gone:
+            self._save()
+        return sorted((dict(i) for i in gone), key=lambda i: i["at"])
 
     def take_due(self) -> dict | None:
         """The soonest wake-up whose time has come, taken out of the book; None while none is due."""

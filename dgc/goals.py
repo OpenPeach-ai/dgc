@@ -47,20 +47,42 @@ def _count(value, maximum=10**12) -> int:
     return min(maximum, max(0, value)) if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def clean_report(value) -> dict | None:
+REPORT_SUMMARY_CHARS, REPORT_LINE_CHARS, REPORT_LINES = 2000, 1000, 12
+
+
+def report_problem(value) -> str:
+    """What makes a goal report unusable, in words the model can act on; "" when it is usable. Length is never a
+    problem: a long report is kept (clean_report folds and trims it)."""
     if not isinstance(value, dict) or set(value) != {"status", "summary", "evidence"}:
-        return None
+        return "a report needs exactly status, summary and evidence"
     if value.get("status") not in ("active", "completed", "blocked"):
-        return None
+        return "status must be completed or blocked"
     summary, evidence = value.get("summary"), value.get("evidence")
-    if not isinstance(summary, str) or not summary.strip() or len(summary) > 2000:
+    if not isinstance(summary, str) or not summary.strip():
+        return "the summary is empty: say in a few sentences what the whole goal came to"
+    if not isinstance(evidence, list):
+        return "evidence must be a list of lines, one per requirement"
+    if any(not isinstance(item, str) for item in evidence):
+        return "each evidence line must be text"
+    if value["status"] != "active" and not [item for item in evidence if item.strip()]:
+        return "the evidence list is empty: give one line per requirement with what proves it"
+    return ""
+
+
+def clean_report(value) -> dict | None:
+    """A usable report, kept whatever its length: past REPORT_LINES lines the rest fold into the last one ("… and N
+    more: …"), and a long summary or line is trimmed. None only when report_problem says what is wrong."""
+    if report_problem(value):
         return None
-    if (not isinstance(evidence, list) or len(evidence) > 12
-            or any(not isinstance(item, str) or not item.strip() or len(item) > 1000 for item in evidence)
-            or value["status"] != "active" and not evidence):
-        return None
-    return {"status": value["status"], "summary": summary.strip(),
-            "evidence": [item.strip() for item in evidence]}
+    lines = [" ".join(item.split()) for item in value["evidence"] if item.strip()]
+    if len(lines) > REPORT_LINES:
+        rest = lines[REPORT_LINES - 1:]
+        lines = lines[:REPORT_LINES - 1] + [f"{rest[0]} (and {len(rest) - 1} more: " + "; ".join(rest[1:]) + ")"]
+    lines = [item if len(item) <= REPORT_LINE_CHARS else item[:REPORT_LINE_CHARS - 1] + "…" for item in lines]
+    summary = value["summary"].strip()
+    if len(summary) > REPORT_SUMMARY_CHARS:
+        summary = summary[:REPORT_SUMMARY_CHARS - 1] + "…"
+    return {"status": value["status"], "summary": summary, "evidence": lines}
 
 
 def new_details() -> dict:
@@ -982,10 +1004,30 @@ class GoalLifecycle:
             self._refresh_system()
             if self._persist():
                 self._notify_goal()
+                if status == "completed":
+                    self._drop_goal_wakeups(str(self._goal_details.get("id") or ""))
                 return True
             self.goal_status, self._goal_elapsed_seconds, self._goal_active_since, self._goal_details = previous
             self._refresh_system()
             return False
+
+    def _drop_goal_wakeups(self, goal_id: str) -> None:
+        """A finished goal's wake-ups go with it (the Wakes pill stayed for a check the finished goal no longer needed),
+        said in one line."""
+        book = getattr(self, "wakeups", None)
+        cancel = getattr(book, "cancel_goal", None)
+        if not goal_id or not callable(cancel):
+            return
+        try:
+            gone = cancel(goal_id)
+        except Exception:  # noqa: BLE001 -- they stay, and the pill still offers Cancel
+            return
+        if gone:
+            from .wakeups import clock_words
+            shown = ", ".join(f"{clock_words(float(i['at']))} ({i['why']})" for i in gone[:3])
+            more = f" and {len(gone) - 3} more" if len(gone) > 3 else ""
+            self.ui.info(f"The goal is done, so its wake-up{'s' if len(gone) > 1 else ''} {shown}{more} "
+                         f"{'were' if len(gone) > 1 else 'was'} cancelled.")
 
     def _cancel_reason(self) -> str:
         """Why the cycle stopped. `Agent.stopping` means the backend is going down — a person

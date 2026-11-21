@@ -463,6 +463,7 @@ body[data-agent-page] #to-latest { display: none; }
 .agent-page-meta { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 /* An agent's work, on its page and in the agent map's transcript window (one builder draws both). */
 #agent-log, .am-transcript-log { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+#agent-log { gap: var(--sp-4); }   /* its page reads like a session: a turn's own spacing (.turn) */
 .agent-change-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-3); background: var(--surface); }
 .agent-change-title { display: flex; align-items: center; gap: var(--sp-2); font: var(--w-med) var(--t-sm)/1.3 var(--sans); margin: 0 0 var(--sp-2); }
 #log .agent-owned { display: none; }
@@ -579,12 +580,26 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
 .history-pages { display: contents; }
 /* ...which makes "Show earlier messages" a column item too. It keeps its own width. */
 .history-older { align-self: flex-start; }
+/* Loaded by reaching the top, as Codex does: no button, and no loading line either (its coming and going moved what you
+   were reading; the archive is a local read). The keyboard reaches the top the same way (PageUp, Home). */
+.history-older.history-auto { display: none; }
 /* Visually redundant -- the layout already says who spoke -- but a screen reader has no layout,
    and without this every message in the transcript is unattributed. */
 .role { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
 /* Pending and queued delivery states sit below the bubble. A completed steer joins the timestamp
    inside `.msg-time`, where it inherits the same size and colour. */
+/* "Steering · 12:56 PM": the words pulse until the model has read the message (then "Steered · …", still). */
+.msg-time > .steer-time-prefix.steering { animation: steer-pulse 1.4s ease-in-out infinite; }
+@keyframes steer-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .msg-time > .steer-time-prefix.steering { animation: none; } }
+/* Of the messages you sent while a turn worked, only the latest pins to the top: pinned together, a shorter one sat
+   over a taller one and the taller one's time lines showed under it, stacked (21 Nov). */
+.turn > .msg.dgc > .msg.user.turn-steer:has(~ .msg.user.turn-steer) { position: relative; z-index: auto; }
+.turn > .msg.dgc > .msg.user.turn-steer:has(~ .msg.user.turn-steer)::before { content: none; }
+/* ...and the turn's own prompt doesn't pin under it: a taller prompt's time line showed beneath the pinned message. */
+.turn:has(> .msg.dgc > .msg.user.turn-steer) > .msg.user.turn-head { position: relative; z-index: auto; }
+.turn:has(> .msg.dgc > .msg.user.turn-steer) > .msg.user.turn-head::before { content: none; }
 .msg.user > .steer-note {
   /* Keep the delivery state with the message it describes. A left-aligned line looked attached
      to the previous work row in a wide editor, especially after reopening a chat. */
@@ -738,8 +753,11 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 }
 :is(.md-link, .chip.made-file)[data-file-kind]::before {
   font-family: seti; font-size: 1.32em; font-weight: normal; font-style: normal;
-  line-height: 1; display: inline-block; vertical-align: -0.17em;
-  margin-right: 4px; color: var(--fk-neutral); text-decoration: none;
+  /* Seti draws its glyphs high in the em box (their ink centre ~0.5em above the baseline) with ~0.17em of empty side on
+     each side: -0.25em puts the ink on the middle of the text, and the margins take back most of the empty sides
+     (the Markdown mark floated above the line, with a wide gap after it: 21 Nov). */
+  line-height: 1; display: inline; vertical-align: -0.25em;   /* inline: it never wraps away from its name */
+  margin: 0 0.06em 0 -0.1em; color: var(--fk-neutral); text-decoration: none;
   content: "\e023";                                 /* seti _default */
 }
 /* Seti has no folder glyph ("folder": null in its theme), so this one stays a codicon. */
@@ -1486,10 +1504,20 @@ li.todo.todo-gone .todo-label { color: var(--muted); text-decoration: line-throu
 .monitor-chip[data-state="stopping"] { color: var(--faint); }
 .monitors-paused { flex: none; padding: 0 var(--sp-2); border-radius: var(--r-sm); background: var(--bg);
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.6 var(--sans); }
-.monitor-event { margin: var(--sp-2) 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border);
-  border-radius: var(--r-sm); background: var(--surface); }
-.monitor-event-head { display: flex; min-width: 0; align-items: center; gap: var(--sp-2);
+/* A monitor's card reads like a tool's step: one row, folded, its border and ground only when hovered or open. */
+.monitor-event { margin: var(--sp-1) 0; padding: 0; border: 1px solid transparent;
+  border-radius: var(--r-md); background: transparent; overflow: hidden; }
+.monitor-event:hover, .monitor-event.open { border-color: var(--border); background: var(--term); }
+.monitor-event:not(.open) > :not(.monitor-event-head) { display: none; }
+.monitor-event.open > :not(.monitor-event-head) { margin-left: var(--sp-3); margin-right: var(--sp-3); }
+.monitor-event.open > :last-child { margin-bottom: var(--sp-2); }
+.monitor-event-head { display: flex; width: 100%; min-width: 0; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2); border: 0; background: transparent; cursor: pointer; text-align: left;
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.monitor-event-head:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.monitor-event-head .chev { width: 8px; flex: none; color: var(--faint); font-size: var(--t-base); line-height: 1; transition: transform .12s ease; }
+.monitor-event.open .monitor-event-head .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .monitor-event-head .chev { transition: none; } }
 .monitor-event-head .ic { color: var(--accent-text); }
 .monitor-event-head .me-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text); }
@@ -3804,6 +3832,9 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
    question. The three answers stay the family's own boxes: a button as wide as a sentence is not one of DGC's. */
 .card.perm-card > .perm-always { grid-row: 2; margin: var(--sp-1) 0 0; color: var(--muted-firm, var(--muted)); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .card.perm-card.resolved > .perm-always, .card.perm-card[data-deny] > .perm-always { display: none; }
+/* An Allow card with a time limit (a step DGC never runs on its own): "Denied in 1:59 if you don't answer", a quiet
+   line under what it shows, gone once it is answered or closed. */
+.card > .card-countdown { margin: var(--sp-1) 0 0; color: var(--muted-firm, var(--muted)); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
 /* (Under about 560 px the three answers don't fit beside "Run write_file": they lay on its words. On this card they
    go under what it shows, as in a narrow panel, and the line under them: a card taller than its dock keeps its
    answers in sight, and the line is one scroll away.) */

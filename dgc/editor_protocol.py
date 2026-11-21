@@ -262,6 +262,10 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "call_id": _NS(False), "name": _S(), "args": _O(),
         "decision": _f("string", enum=("once", "always", "no")), "message": _S(),
     },
+    # 0.52: an Allow card answered within `seconds` or closed (request_expired), sent right after its
+    # permission_request and again when open requests are announced again (with the time left). Only to a client
+    # that sent set_workspace_roots.request_deadline (ready.capabilities.request_deadline).
+    "request_deadline": {"id": _S(), "seconds": _I()},
     "rule_added": {"rule": _S()},
     "plan_proposal": {"id": _S(), "plan": _S(), "choices": _A()},
     # v14: ``questions`` = [{id, header, question, multi_select, options: [{label, description,
@@ -335,6 +339,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "memory": _B(False), "chatdgc_web": _B(False), "chatdgc_followups": _B(False),
         # Opt-in too: tokens one turn may spend, sub-agents included; 0 is no cap (Settings -> General).
         "turn_token_budget": _I(False),
+        # Opt-in too (0.52): where pages open from ("localhost" | "lan": your network and Tailscale) and the address
+        # links use (Settings -> Security -> Previews).
+        "artifact_bind": _S(False), "artifact_hostname": _S(False),
         # Opt-in too: a Work session's fallback when it is Claude Code ("claude") or Codex ("codex"), else "" (D14).
         "fallback_engine": _S(False),
         # Opt-in too (0.52, capabilities.subagent_fallback): the sub-agents' fallback, and whether its key is to hand.
@@ -788,7 +795,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # advertised capabilities.agent_faces, for the same reason as open_asks.
     "set_workspace_roots": {"roots": _A(), "request_id": _S(False), "question_forms": _B(False),
                             "open_asks": _B(False), "ask_options": _B(False),
-                            "agent_faces": _B(False)},
+                            "agent_faces": _B(False), "request_deadline": _B(False)},
     "permission_response": {
         "id": _S(), "decision": _f("string", enum=("once", "always", "deny", "no")),
         "rule": _S(False), "reason": _S(False),
@@ -891,6 +898,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "reload_skills": {"request_id": _S()},
     "get_skill": {"request_id": _S(), "name": _S()},
     "set_skill_enabled": {"request_id": _S(), "name": _S(), "enabled": _B()},
+    # 0.52 (capability plugin_levels): what one plugin may do without asking, from its page in Settings; answered by
+    # plugin_catalog (rows carry `permission`, `moves_money`), or command_rejected with the reason in words.
+    "set_plugin_permission": {"request_id": _S(), "plugin": _S(),
+                              "level": _f("string", enum=("always_ask", "any_changes", "important", "never_ask"))},
     "create_skill": {"request_id": _S(), "name": _S(), "description": _S(False), "scope": _S(False)},
     "install_skill": {"request_id": _S(), "source": _S(), "scope": _S(False), "allow_external": _B(False)},
     "list_mcp_context": {"request_id": _S(), "server": _S(), "kind": _S()},

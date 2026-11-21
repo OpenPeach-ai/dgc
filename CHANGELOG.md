@@ -6,6 +6,65 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Your Browser's tabs look like Chrome's**: each wears its site's icon (a globe until DGC has it), its title and its
+  Close; the current tab stands on the address row. The icon is the site's own, fetched once without cookies.
+- **A link to a private address wears DGC's own sharp globe**: a link to an IP address, localhost or a private or
+  Tailscale name asked Google's icon service, which can't reach it and sent a soft stand-in; it never leaves the
+  machine now. DGC's link marks are the size of a site's icon.
+- **Your Browser signs in to Google over Remote-SSH**: with no screen where DGC runs, it was headless Chrome, which
+  Google's sign-in and reCAPTCHA turn away; now it's a real Chrome window on a screen of its own (where Xvfb is), as
+  a Pip's computer is, drawn at twice the pixels so it's sharp on a Retina screen.
+- **Copy and paste both ways**: Copy or Cut in Your Browser's tab puts the page's selected text on your editor's
+  clipboard (it went to Chrome's on the other computer); on a Pip's computer, your Copy there lands on your clipboard
+  and Ctrl+V pastes yours in, without the clipboard panel (still there for the rest).
+- A file link's icon sits on the middle of the text and wraps with its name (the Markdown mark floated above it).
+- **A quiet background command is checked in on once, not every five minutes**: once it went quiet, DGC checked in
+  every five minutes for hours (an idle dev server woke a session dozens of times, each "no action needed"). Now a
+  check-in waits for the growing gap, and nothing new since the last look means no new wake; Pip computers' too.
+- **A message you send during DGC's own check-in turn** says what happens ("DGC's own check-in turn stops at its next
+  step, and your message runs right after"), not "this operation cannot accept live steering".
+- **A goal's completion report is never refused for its length**: more than 12 evidence lines fold into the last one
+  and a long line is trimmed (a 61-item goal's report was turned away each time with a vague error); a report that is
+  truly unusable says exactly what's wrong.
+- **A finished goal's wake-ups go with it**, said in one line, so the Wakes pill doesn't stay for a check the goal no
+  longer needs.
+- **No "Goal · turn N" line between a goal's turns**, no "↯ running N independent reads in parallel" lines, and a
+  finished turn's Tasks card folds under its Worked for row.
+- **"Steering · 1:09 PM", pulsing, under a message you send mid-turn**, then "Steered · 1:09 PM"; of the messages you
+  sent mid-turn only the latest pins to the top (pinned together, their time lines stacked under one another).
+- **Messages you sent mid-turn in an older session show your words again**, not DGC's wrapper ("<user-interjection>
+  The user sent this WHILE you were working…"), whatever version of the wrapper they were saved with.
+- **Earlier messages load as you reach the top**, 25 turns at a time as Codex does, with no "Show earlier messages"
+  button.
+- **Pages open from your other devices**: Settings → Security → Previews has "Open pages from" (this computer only,
+  or your network and Tailscale) and an address for links; a page opened through a Tailscale address is no longer
+  blocked inside DGC's page list ("This content is blocked").
+- A Pip's reply has its time once, under the reply, not beside its name too.
+- **A sub-agent's page reads like a Work session**: the prompt it was given as the session draws a prompt, its steps
+  grouped as the session groups them ("Read 1 file, ran 1 command"), the session's "Working (12s · isolated checkout)"
+  row while it works, and once it ends its work folded under "Worked for 41s ›" with its answer and files below.
+- **A Pip's answer to an @ job is in the chat you open**: the job goes to the Pip's chat used last, not its first one
+  (its list said unread while the chat it opened didn't have the answer), and the line above it says where it came
+  from: "From your Work session …".
+- **Auto mode's safety check, more like Claude Code's.** What you say not to do holds: "don't push", "leave tests/
+  alone", "no npm install" stop the matching steps until a later message of yours lifts them (one short question to
+  the session's model per message with words like these). The few steps DGC never runs on its own (clearing your whole
+  computer or home folder, writing straight to a disk) now ask at once on a card with a two-minute countdown ("Denied in
+  1:59 if you don't answer"), never with Always allow; unanswered, it's denied, and after three unanswered in a row no
+  more cards until your next message. Your allow rules: a broad one ("every command", any script) no longer skips the
+  check, and a narrow one still runs its steps except a write to a protected file (.git, .vscode, .idea, .husky,
+  .devcontainer, .dgc, .claude, .mcp.json, .npmrc). More risky kinds are caught: tearing down infrastructure, cloud
+  access and DNS changes, reading secrets stores, changing a package registry or a Git remote, opening a tunnel out.
+- **A plugin set to Always ask asks in Work too**, in every mode: a card with no Always allow, or in auto mode a question
+  in the chat that your next message answers; your allow rules don't skip it, a deny rule still wins. The choice is on
+  each plugin's page in Settings ("Asking first"), the same setting as Pips settings → Plugins.
+- **Monitor blocks fold like other tools**: one line, click to see their output.
+- **"This project has no Git HEAD" is said on a sub-agent's page**, not under the sub-agents in the main session.
+- **Remove in the Library works over Remote-SSH**: the file goes to the trash of the computer it's on (the remote's
+  file system has no trash of its own, so it said "provider does not support it").
+- **A reply that goes on after a step keeps its paragraph**: text that resumed after a tool row started a new paragraph
+  mid-word ("i n place").
+- The @ Pip chip's face sits 1 px higher, level with its name.
 - **A goal can't loop on words**: each goal turn says the goal is still open until a completion is accepted, and three
   turns in a row with no work and the same reply pause it (a real goal took 57 turns saying it was done after its
   completion report was dropped).

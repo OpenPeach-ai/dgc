@@ -103,13 +103,13 @@ test("the Work chat's rail: from five prompts a tick each in the transcript's ri
       { type: "stream_end", message_id: "t1:1", phase: "answer" }, { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0, final_message_id: "t1:1" }]);
     await s.settle();
     assert.deepEqual(await s.state(), { shown: true, ticks: 5, now: 4 }, "the fifth prompt brings it, the newest bright at the end");
-    // A session of 23.
-    await s.events([{ type: "session", kind: "resumed", message_count: 46, session_id: "s1" }, { type: "history", items: history(23) }]);
-    await s.send({ type: "event", event: { type: "outline", request_id: `outline-${(await s.posted("getOutline")).at(-1).token}`, session_id: "s1", prompts: outlineOf(23) } });
+    // A session of 40 (more than a page: 25 turns, as Codex).
+    await s.events([{ type: "session", kind: "resumed", message_count: 80, session_id: "s1" }, { type: "history", items: history(40) }]);
+    await s.send({ type: "event", event: { type: "outline", request_id: `outline-${(await s.posted("getOutline")).at(-1).token}`, session_id: "s1", prompts: outlineOf(40) } });
     await s.settle();
     // Only its latest pages are on screen; the outline lists the rest.
-    assert.ok(await s.page.evaluate(() => window.__rail.heads().length) < 23, "opened on its latest pages");
-    assert.equal((await s.state()).ticks, 23);
+    assert.ok(await s.page.evaluate(() => window.__rail.heads().length) < 40, "opened on its latest pages");
+    assert.equal((await s.state()).ticks, 40);
     // Where it sits: in the log's right padding, left of its scroll bar, clear of every bubble and line; centred.
     const box = await s.page.evaluate(() => {
       const R = window.__rail, rail = document.getElementById("prompt-rail").getBoundingClientRect(), log = R.log.getBoundingClientRect();
@@ -138,8 +138,8 @@ test("the Work chat's rail: from five prompts a tick each in the transcript's ri
     const card = s.page.locator("#prompt-rail-card");
     await card.waitFor({ state: "visible" });
     assert.equal(await s.page.locator("#prompt-rail").getAttribute("aria-expanded"), "true");
-    assert.match(await card.locator(".prompt-rail-head").innerText(), /^23 prompts/);
-    assert.equal(await card.locator(".prompt-rail-row").count(), 23);
+    assert.match(await card.locator(".prompt-rail-head").innerText(), /^40 prompts/);
+    assert.equal(await card.locator(".prompt-rail-row").count(), 40);
     const days = (await card.locator(".prompt-rail-day").allInnerTexts()).map((d) => d.toLowerCase());
     assert.ok(days.length >= 2 && days.at(-1) === "today", `day headings (${days})`);
     assert.equal(await card.locator(".prompt-rail-row.now").getAttribute("data-i"), String(at));
@@ -179,7 +179,7 @@ test("the Work chat's rail: from five prompts a tick each in the transcript's ri
     await s.page.keyboard.press("Escape");
     assert.equal(await card.isHidden(), true);
     assert.equal(await s.page.evaluate(() => document.activeElement?.id), "prompt-rail");
-    assert.match(await s.page.locator("#prompt-rail").getAttribute("aria-label"), /^Prompts in this session: 23\./);
+    assert.match(await s.page.locator("#prompt-rail").getAttribute("aria-label"), /^Prompts in this session: 40\./);
     assert.equal(await s.page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth), 0, "no sideways scroll");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }

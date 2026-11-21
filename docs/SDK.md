@@ -795,6 +795,7 @@ most applications use:
 | `tool_result` | `call_id`, `name`, `output`, `is_error`, `is_diff`, `diff` |
 | `tool_denied` | `call_id`, `name`, `args`, `reason` |
 | `permission_request` | `id`, `name`, `args`, `command`, `summary`, `diff`, `suggested_rule`, `choices` |
+| `request_deadline` | `id`, `seconds` — that card is answered within this time or closed (`request_expired`); only after `set_workspace_roots.request_deadline` (0.52+) |
 | `options_request` | `id`, `questions` |
 | `plan_proposal` | `id`, `plan`, `choices` |
 | `todos` | `todos` |

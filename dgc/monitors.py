@@ -978,8 +978,12 @@ class MonitorHub:
                 continue
             if seen != entry["seen"]:
                 entry["seen"], entry["seen_at"] = seen, now
-            quiet = now - entry["seen_at"] >= CHECK_IN_QUIET_S
             last = entry["last_check"]
+            if last is not None and seen == entry.get("checked_seen"):
+                # Nothing new since it was last looked at: no wake. An idle dev server woke a session every five
+                # minutes for hours, and each time the model said "no action needed".
+                continue
+            quiet = now - entry["seen_at"] >= CHECK_IN_QUIET_S
             spaced = last is None or now - last >= CHECK_IN_MIN_GAP_S
             if not (now >= entry["due"] or (quiet and spaced)):
                 continue
@@ -994,7 +998,7 @@ class MonitorHub:
             except Exception:
                 rows = []
             gap = entry["gap"]
-            entry["last_check"], entry["due"] = now, now + gap
+            entry["last_check"], entry["due"], entry["checked_seen"] = now, now + gap, seen
             entry["gap"] = min(CHECK_IN_MAX_GAP_S, gap * 2)
             if entry["kind"] == "agent":
                 advice = (f"Look at its latest steps: if it's on track, carry on and DGC checks in again in {gap // 60} "

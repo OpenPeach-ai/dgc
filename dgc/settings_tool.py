@@ -70,7 +70,7 @@ NEVER = {
     "sandbox": "Settings › Safety", "sandbox_network": "Settings › Safety", "sandbox_env_allow": "Settings › Safety",
     "browser_allow_unsandboxed": "Settings › Safety", "session_redaction": "Settings › Safety",
     "hooks": "your settings file, by hand", "mcp_servers": "Settings › Plugins", "language_servers": "your settings file",
-    "browser_path": "Settings › Browser", "artifact_bind": "Settings › Pages", "artifact_hostname": "Settings › Pages",
+    "browser_path": "Settings › Browser", "artifact_bind": "Settings › Security › Previews", "artifact_hostname": "Settings › Security › Previews",
     "artifact_port": "Settings › Pages", "base_url": "Settings › Models", "fallback_base_url": "Settings › Models",
     "subagent_base_url": "Settings › Models", "subagent_worktree_root": "your settings file",
     "fleet_worktree_root": "your settings file", "plugin_credentials_store": "Settings › Plugins",

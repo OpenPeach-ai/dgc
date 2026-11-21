@@ -70,6 +70,10 @@ test("every delivery state is visible, with completed steering on the timestamp 
     if (state === "applied") {
       assert.equal(note, null);
       assert.match(row.querySelector(":scope > .msg-time")?.textContent || "", /^Steered · /);
+    } else if (state === "pending") {
+      assert.equal(note, null, "said on the time line, where Steered will be (21 Nov)");
+      assert.match(row.querySelector(":scope > .msg-time")?.textContent || "", /^Steering · /);
+      assert.ok(row.querySelector(":scope > .msg-time > .steer-time-prefix.steering"), "it pulses");
     } else {
       assert.ok(note, `${state} draws nothing, so it would be invisible like .role is`);
       assert.match(note.textContent, words);
@@ -94,17 +98,21 @@ test("completed steering inherits the timestamp's size and colour", () => {
                       "the prefix has no colour or font override");
 });
 
-test("a pending note sits under the bubble, not inside it", () => {
+test("pending steering is said under the bubble, not inside it", () => {
   // It lived in the bubble for one release-candidate, purely to keep the transcript's spacing
   // measurements quiet. Inside, a status line about the message reads as words the user typed --
-  // a user caught it in a recording. The spacing check now measures the prompt's real foot.
+  // a user caught it in a recording. Since 21 Nov it is the time line's own "Steering · ".
   const p = panel();
   const id = steerDuringTurn(p);
   p.event({ type: "prompt_accepted", request_id: id, state: "steered" });
   const row = bubble(p.doc);
-  assert.ok(row.querySelector(":scope > .steer-note"), "the note is a child of the message row");
-  assert.equal(row.querySelector(".bubble .steer-note"), null,
+  assert.ok(row.querySelector(":scope > .msg-time > .steer-time-prefix.steering"), "on the message row's time line");
+  assert.equal(row.querySelector(".bubble .steer-time-prefix, .bubble .steer-note"), null,
                "and never inside the bubble, where it would read as something you said");
+  assert.match(mainCss, /\.turn-steer:has\(~ \.msg\.user\.turn-steer\) \{ position: relative/,
+               "only the latest message sent mid-turn pins");
+  assert.match(mainCss, /\.turn:has\(> \.msg\.dgc > \.msg\.user\.turn-steer\) > \.msg\.user\.turn-head \{ position: relative/,
+               "and the turn's own prompt doesn't pin under it");
   assert.doesNotMatch(mainCss, /\.bubble::after/,
                       "no pseudo-element route back into the bubble either");
 });

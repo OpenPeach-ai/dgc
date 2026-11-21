@@ -9,6 +9,7 @@ import '../media/shared/tip.js';
 import '../media/shared/rulewords.js';   // globalThis.DgcRuleWords: a permission rule in a person's words (Security)
 import {watchButtons} from './buttonFit.js';
 import {parseMcpPaste} from './mcpPaste.js';
+import { PLUGIN_LEVELS } from './pluginLevels.js';
 import zapierLogo from '../media/plugin-logos/zapier.ico';
 import makeLogo from '../media/plugin-logos/make.ico';
 import n8nLogo from '../media/plugin-logos/n8n.ico';
@@ -71,6 +72,8 @@ let usageView = 'all', pipUsage = null;
 let usageSystem = '';
 const usageShared = { getSystem: () => usageSystem, setSystem: (id) => { usageSystem = String(id || ''); } };
 let sequence = 0;
+// A plugin's level being saved ({plugin, level, said}), and the last word about it on its page ({plugin, said, error}).
+let levelPending = null, levelSaid = null;
 let directory = false, marketFilter = 'all', marketplaces = [], pluginNotice = '', modal = null, modalKind = '', reviewName = '', preview = null, dialogReturn = null, createdPath = '';
 let operationPending = false;
 let connectingPlugin = null;
@@ -199,7 +202,7 @@ for (const [page, keys] of Object.entries({
         'subagent_model', 'subagent_base_url', 'subagent_api_mode', 'subagent_api_key', 'subagent_context_size', 'subagent_thinking', 'max_parallel_tasks', 'fallback_model', 'fallback_base_url', 'fallback_api_mode', 'fallback_api_key', 'pips_model'],
     web: ['search_provider', 'search_url', 'search_api_key'],
     chatdgc: ['chatdgc_about', 'chatdgc_style', 'chatdgc_personality', 'chatdgc_window', 'chatdgc_web', 'chatdgc_followups'],
-    security: ['sandbox', 'sandbox_network', 'plan_artifact', 'artifact_autostart', 'artifact_in_plan'],
+    security: ['sandbox', 'sandbox_network', 'plan_artifact', 'artifact_autostart', 'artifact_in_plan', 'artifact_bind', 'artifact_hostname'],
     dev: ['dev_mode', 'dev_limits', 'dev_mode_tools'] })) for (const key of keys) PAGE_OF[key] = page;
 /** "Unsaved changes on Models and Agents": Save covers every page, so its line names the pages it will save. */
 function unsavedLine() {
@@ -1256,6 +1259,14 @@ function bindPlugins(main) {
     main.querySelectorAll('[data-mcp-toggle]').forEach(b => b.onclick = () => { b.disabled = true; send({ type: 'mcpToggle', name: b.dataset.mcpToggle, enabled: b.getAttribute('aria-checked') !== 'true' }); });
     main.querySelectorAll('[data-mcp-edit]').forEach(b => b.onclick = () => { if (APP_CONNECTORS[b.dataset.mcpEdit]) { openConnector(b.dataset.mcpEdit); return; } mcpEditing = servers.find(s => s.name === b.dataset.mcpEdit); mcpConfirm = ''; render(); });
     main.querySelectorAll('[data-composio-catalog]').forEach(b => b.onclick = () => send({type:'composioCatalog'}));
+    main.querySelectorAll('select[data-plugin-level]').forEach(s => s.onchange = () => {
+        const level = PLUGIN_LEVELS.find(l => l[0] === s.value);
+        if (!level) return;
+        const row = items.find(r => r.name === s.dataset.pluginLevel);
+        levelPending = { plugin: s.dataset.pluginLevel, level: level[0], said: `Saved. ${row?.display_name || s.dataset.pluginLevel}: ${level[1].toLowerCase()}.` };
+        s.disabled = true;
+        send({ type: 'pluginLevel', plugin: s.dataset.pluginLevel, level: level[0] });
+    });
     main.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { detail = b.dataset.open; render(); $('main').scrollTop = 0; });
     main.querySelectorAll('[data-install]').forEach(b => b.onclick = () => reviewPlugin(b.dataset.install));
     main.querySelectorAll('[data-connect]').forEach(b => b.onclick = () => { const row=items.find(r=>r.name===b.dataset.connect); if(!row) return; if (APP_CONNECTORS[row.name]) openConnector(row.name); else if (keyPlugin(row)) { pending.set(row.name, true); errors.delete(row.name); send({type: 'installPlugin', name: row.name}); render(); } else showConnection(row); });
@@ -1421,11 +1432,30 @@ function renderDetail(main) {
     if (row.installed && offered(row) && connections.length) {
         main.querySelector('.meta').previousElementSibling.insertAdjacentHTML('beforebegin', '<section class="plugin-connections"><h3>Connection</h3>' + serverRows(connections) + '</section>');
     }
+    if (row.installed && offered(row) && PLUGIN_LEVELS.some(l => l[0] === row.permission)) {
+        main.querySelector('.meta').previousElementSibling.insertAdjacentHTML('beforebegin', levelSection(row));
+    }
     if (keys.length) { main.querySelector('.hero').insertAdjacentHTML('afterend', keyPanels(row, keys)); bindKeys(main, row); }
     if (row.name === 'composio') main.querySelector('.hero').insertAdjacentHTML('afterend', composioPanel(true));
     if (APP_CONNECTORS[row.name]) main.querySelector('.hero').insertAdjacentHTML('afterend', connectorPanels(row.name));
     $('back').onclick = () => { detail = ''; render(); };
     bindPlugins(main);
+}
+// What this plugin may do without asking: the same setting as Pips settings → Plugins. Work asks before each use only
+// at Always ask (in auto mode too); every Pip follows each choice. A plugin that can move money is never Never ask.
+function levelSection(row) {
+    const level = PLUGIN_LEVELS.find(l => l[0] === row.permission);
+    const name = row.display_name || row.name;
+    const options = PLUGIN_LEVELS.map(([value, label]) => {
+        const off = value === 'never_ask' && row.moves_money;
+        return `<option value="${value}"${value === row.permission ? ' selected' : ''}${off ? ' disabled' : ''}>${esc(label)}${off ? ' (not for money)' : ''}</option>`;
+    }).join('');
+    return `<section class="plugin-level" aria-labelledby="plugin-level-title"><h3 id="plugin-level-title">Asking first</h3>`
+        + `<div class="row"><span class="copy"><label for="plugin-level"><strong>What ${esc(name)} may do without asking</strong></label>`
+        + `<span class="description">${esc(level[2])}.</span></span>`
+        + `<select id="plugin-level" data-plugin-level="${esc(row.name)}"${levelPending ? ' disabled' : ''}>${options}</select></div>`
+        + (levelSaid?.plugin === row.name ? `<p class="${levelSaid.error ? 'error-message' : 'note'}" role="status">${esc(levelSaid.said)}</p>` : '')
+        + `<p class="note">Work asks before each use only at Always ask, in auto mode too; otherwise Work follows its mode. Your Pips follow every choice.</p></section>`;
 }
 function serverRows(list) {
     return list.map(s => `<article class="row"><span class="mark">${icon('mcp')}</span><span class="copy"><strong>${esc(s.name)}</strong><span class="summary">${esc(s.url || s.command || 'MCP server')} · ${esc(s.state || 'Configured')}${s.tool_count ? ' · ' + s.tool_count + ' tools' : ''}</span>${s.error ? `<span class="description">${esc(s.error)}</span>` : ''}</span><div class="actions">${switchHTML(s.enabled !== false, `Enable ${s.name}`, `data-mcp-toggle="${esc(s.name)}"`)}<button class="icon-button" aria-label="Configure ${esc(s.name)}" data-mcp-edit="${esc(s.name)}">${icon('gear')}</button></div></article>`).join('');
@@ -1614,6 +1644,9 @@ window.addEventListener('message', event => {
     }
     else if (msg.type === 'plugins') {
         items = Array.isArray(msg.items) ? msg.items : [];
+        if (levelPending && items.some(r => r.name === levelPending.plugin && r.permission === levelPending.level)) {
+            levelSaid = { plugin: levelPending.plugin, said: levelPending.said }; levelPending = null;
+        }
         for (const r of items) {
             if (r.connected)
                 pending.delete(r.name);
@@ -1651,7 +1684,9 @@ window.addEventListener('message', event => {
     }
     else if (msg.type === 'pluginOperationCancelled') { operationPending=false; if (modal) statusDialog('Cancelled.'); else render(); }
     else if (msg.type === 'pluginOperationError') {
-        operationPending=false; pluginNotice=msg.message;
+        operationPending=false;
+        if (levelPending) { levelSaid = { plugin: levelPending.plugin, said: String(msg.message || 'It was not saved.'), error: true }; levelPending = null; }
+        else pluginNotice=msg.message;
         if (modal) statusDialog(msg.message,true); else if (['plugins','mcp'].includes(section)) render();
     }
     else if (msg.type === 'signInReturned') {

@@ -69,7 +69,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       await x.openPip(GST);
       await x.waitIn(".pipjob-from");
       const from = await look(x, ".pipjob-from");
-      assert.equal(from.text, "From Tidy the October invoices: check the credit-note code before I commit");
+      assert.equal(from.text, "From your Work session Tidy the October invoices: check the credit-note code before I commit");
       assert.ok(from.shown);
       assert.equal(await x.inPips((root) => root.querySelector(".pipjob-from").closest(".pip-message.user")), null, "DGC's line, never a bubble of yours");
       assert.match((await look(x, ".pip-message.assistant")).text, /partial return is worked out on the full invoice/);

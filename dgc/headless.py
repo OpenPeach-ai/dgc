@@ -255,6 +255,7 @@ _MAX_MCP_SERVERS = 64
 # that proves it: it is read only when a sub-agent starts, and a running one keeps the client it
 # started with, so a new sub-agent model (as a new main model) applies from the next one on.
 _LIVE_SAFE_CONFIG_KEYS = frozenset({
+    "artifact_bind", "artifact_hostname",   # read at the next page DGC serves
     "context_size", "subagent_context_size", "subagent_thinking", "show_reasoning", "preserve_thinking", "suggest",
     "plan_artifact",
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
@@ -722,7 +723,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_background_shells", "stop_background_shell", "get_background_output",
     "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
     "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
-    "set_plugin_key", "remove_plugin_key", "set_plugin_sign_in_scopes",
+    "set_plugin_key", "remove_plugin_key", "set_plugin_sign_in_scopes", "set_plugin_permission",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
 # Config fields added to protocol v14 after it first shipped. An editor validates every event it
@@ -736,6 +737,7 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
                                    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
                                    "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
+                                   "artifact_bind", "artifact_hostname",
                                    "fallback_engine", "dev_mode", "dev_limits", "dev_mode_tools",
                                    # 0.52: the sub-agents' fallback, for Settings > Sub-agents
                                    "subagent_fallback_model", "subagent_fallback_base_url",
@@ -748,6 +750,7 @@ _CONFIG_BOOLEAN_KEYS = frozenset({
     "thinking_inline", "memory", "chatdgc_web", "chatdgc_followups",
 })
 _CONFIG_STRING_LIMITS = {
+    "artifact_hostname": 253,              # the address links to a page use (a Tailscale name, a host:port)
     "subagent_model": 512,
     "subagent_base_url": 4096,
     "subagent_api_key": 16_384,
@@ -794,6 +797,8 @@ _CONFIG_ENUMS = {
     "subscription_effort": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
     # How long an Anthropic prompt-cache entry lives (dgc/llm.py PROMPT_CACHE_TTLS).
     "prompt_cache_ttl": frozenset({"5m", "1h"}),
+    # Where pages (artifacts) open from: this computer only, or your network and Tailscale too (Settings -> Security).
+    "artifact_bind": frozenset({"localhost", "lan"}),
 }
 _CONFIG_INTEGER_RANGES = {
     "capability_cache_ttl_s": (1, MAX_SAFE_INTEGER),
@@ -1242,16 +1247,17 @@ def _history_steering_texts(message: dict) -> list[str] | None:
     """The messages a saved ``<user-interjection>`` folded together, as the user wrote them, or None
     when ``message`` is not one. Each keeps its own bubble on replay (``_dgc_steering`` records where
     one ends; an older save without it is one message)."""
-    from .workflows import STEERING_PREFIX, STEERING_SUFFIX, display_prompt
+    from .workflows import display_prompt, steering_body
     content = message.get("content")
     parts = content if isinstance(content, list) else [{"type": "text", "text": content}]
     text = "".join(str(part.get("text") or "") for part in parts
                    if isinstance(part, dict) and part.get("type") == "text")
-    if not (text.startswith(STEERING_PREFIX) and text.endswith(STEERING_SUFFIX)):
+    body = steering_body(text)           # any version of the wrapper's wording
+    if body is None:
         return None
     recorded = message.get("_dgc_steering")
     pieces = ([str(piece) for piece in recorded[:32] if isinstance(piece, str)]
-              if isinstance(recorded, list) and recorded else [text[len(STEERING_PREFIX):-len(STEERING_SUFFIX)]])
+              if isinstance(recorded, list) and recorded else [body])
     texts = [display_prompt(_strip_editor_context(piece)).strip()[:50_000] for piece in pieces]
     texts = [piece for piece in texts if piece] or [""]
     if isinstance(content, list) and any(isinstance(part, dict) and part.get("type") == "image_url" for part in content):
@@ -1875,6 +1881,23 @@ def helper_connections(raw) -> list:
         if len(out) >= 30:
             break
     return out
+
+
+def with_plugin_levels(rows: list, config) -> list:
+    """Each plugin row with what it may do without asking (plugins.permission), for its page in Settings: only a plugin
+    with a hosted server turned on (pip_plugins.installed), the only kind a level acts on. `moves_money`: it can't be
+    Never ask. Work honours Always ask (every call asks, in every mode); Pips honour every level."""
+    try:
+        from .pip_plugins import installed, level
+        infos = installed(config)
+    except Exception:  # noqa: BLE001 -- the rows as they were
+        return rows
+    for row in rows:
+        info = infos.get(row.get("name")) if isinstance(row, dict) and row.get("installed") else None
+        if info is not None:
+            row["permission"] = level(row["name"], info)
+            row["moves_money"] = bool(info.get("money"))
+    return rows
 
 
 def permission_request_fields(name: str, args: dict, call_id, preview_root) -> dict:
@@ -2554,9 +2577,18 @@ class HeadlessUI:
             self.__dict__.setdefault("_open_requests", {})[rid] = (event, fields)
             self.em.emit(event, id=rid, **fields)
 
+    def _announce_deadline(self, rid: str, seconds: float) -> None:
+        """A request answered within `seconds` or closed: said to an editor that declared request_deadline
+        (set_workspace_roots), again with the time left when the open requests are announced again."""
+        with self._requests_lock():
+            self.__dict__.setdefault("_request_deadlines", {})[rid] = time.monotonic() + seconds
+            if getattr(self, "_request_deadline_enabled", False):
+                self.em.emit("request_deadline", id=rid, seconds=max(1, math.ceil(seconds)))
+
     def _settle_request(self, rid: str) -> None:
         with self._requests_lock():
             self.__dict__.setdefault("_open_requests", {}).pop(rid, None)
+            self.__dict__.setdefault("_request_deadlines", {}).pop(rid, None)
 
     def reannounce_open_requests(self) -> int:
         """Emit every still-open permission, plan and question request again, oldest first, followed
@@ -2567,6 +2599,10 @@ class HeadlessUI:
                 if self.pending.is_open(rid):
                     self.em.emit(event, id=rid, **fields)
                     sent += 1
+                    deadline = self.__dict__.get("_request_deadlines", {}).get(rid)
+                    if deadline is not None and getattr(self, "_request_deadline_enabled", False):
+                        self.em.emit("request_deadline", id=rid,
+                                     seconds=max(1, math.ceil(deadline - time.monotonic())))
             turn_id = getattr(self, "turn_id", "")
             key = getattr(self, "_activity_key", None) if turn_id else None
             if key:
@@ -2622,12 +2658,17 @@ class HeadlessUI:
             return {"error": "the editor didn't answer"}
         return payload
 
-    def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
+    def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None,
+                     seconds: float | None = None) -> str:
+        """The Allow card for one step. `seconds`: answered within that time or denied (the safety check's card for a
+        step DGC never runs on its own); an editor that draws the countdown gets request_deadline beside the card."""
         rid, ev = self.pending.register()
         try:
             self._announce_request(rid, "permission_request",
                                    permission_request_fields(name, args, call_id, getattr(self, "preview_root", None)))
-            payload = self._await(rid, ev, recheck=recheck, human=True) or {}
+            if seconds is not None:
+                self._announce_deadline(rid, float(seconds))
+            payload = self._await(rid, ev, recheck=recheck, human=seconds is None, seconds=seconds) or {}
         finally:
             self._settle_request(rid)
         if payload.get("rule"):
@@ -3124,6 +3165,12 @@ class Backend:
                           # The client answers with set_workspace_roots.agent_faces when it draws
                           # the registry's face slots; only then do agent frames carry face_slot.
                           "agent_faces": True,
+                          # The client answers with set_workspace_roots.request_deadline when it draws a card's
+                          # countdown; only then is request_deadline sent beside an Allow card with a time limit.
+                          "request_deadline": True,
+                          # set_plugin_permission: a plugin's page in Settings sets what it may do without asking;
+                          # plugin_catalog rows carry `permission` and `moves_money`.
+                          "plugin_levels": True,
                           "resume_turn": True, "monitors": True, "wakeups": True, "goal_runs": True, "usage_ledger": True, "pip_usage_report": True,
                           # get_usage / get_pip_usage_report take `system`, and each by_model row names the
                           # system it ran on (system, system_id, system_kind): Token usage by system.
@@ -5687,6 +5734,8 @@ class Backend:
         # On the chat's UI, beside the two above: each chat on a shared `dgc serve` opts in for
         # itself. Read by _on_subagent and _emit_agents.
         self.ui._agent_faces_enabled = bool(cmd.get("agent_faces"))
+        # An Allow card with a time limit (request_deadline): only to a chat that draws the countdown.
+        self.ui._request_deadline_enabled = bool(cmd.get("request_deadline"))
         # v14: ``question_forms`` is still declared and ignored; every v14 client takes one
         # structured request per question batch.
         roots, visible = [], []
@@ -6823,6 +6872,10 @@ class Backend:
                 extra[key] = str(c.get(key, fallback) or fallback)
         if "memory" in self._config_fields:
             extra["memory"] = c.get("memory", True) is not False
+        if "artifact_bind" in self._config_fields:
+            extra["artifact_bind"] = "lan" if str(c.get("artifact_bind", "localhost")).lower() == "lan" else "localhost"
+        if "artifact_hostname" in self._config_fields:
+            extra["artifact_hostname"] = str(c.get("artifact_hostname", "") or "")[:253]
         if "chatdgc_web" in self._config_fields:
             extra["chatdgc_web"] = c.get("chatdgc_web", True) is not False
         if "chatdgc_followups" in self._config_fields:
@@ -8381,7 +8434,8 @@ class Backend:
         raw = self.config.get("disabled_skills", [])
         disabled = {item for item in raw if isinstance(item, str)} if isinstance(raw, list) else set()
         current = set(self.agent.mcp.servers) if connected is None else connected
-        rows = catalog_for_editor(opening=opening, connected=current, disabled=disabled, config=self.config)
+        rows = with_plugin_levels(catalog_for_editor(opening=opening, connected=current, disabled=disabled,
+                                                     config=self.config), self.config)
         for row in rows:
             failure = next((self.agent.mcp.failures.get(n) for n in row.get("server_names", [row["name"]]) if self.agent.mcp.failures.get(n)), None)
             if failure:
@@ -8952,9 +9006,13 @@ class Backend:
                     **({"request_id": request_id} if request_id else {}),
                     **({"delivery": cmd["delivery"]} if "delivery" in cmd else {}))
             if request_id and state in ("started", "queued"):
+                # A turn DGC started itself (a check-in, a monitor's event) stops for the person: their message runs
+                # next. Said as that, not as a refusal ("this operation cannot accept live steering").
+                yielded = state == "queued" and getattr(self, "_wake_yield", False) is True
+                said = ("DGC's own check-in turn stops at its next step, and your message runs right after."
+                        if yielded else "Queued for the next turn; this operation cannot accept live steering.")
                 self.em.emit("prompt_accepted", request_id=request_id, state=state,
-                             **({"message": "Queued for the next turn; this operation cannot accept live steering."}
-                                if state == "queued" and cmd.get("delivery") == "steer" else {}))
+                             **({"message": said} if state == "queued" and cmd.get("delivery") == "steer" else {}))
             if state == "queued":
                 self.em.emit("queued", count=count, text=text)
             elif state == "full":
@@ -10793,6 +10851,23 @@ class Backend:
             if callable(terminal): terminal()
         elif t == "list_plugins":
             self.em.emit("plugin_catalog", items=self._editor_plugins(), **_request_fields(request_id))
+        elif t == "set_plugin_permission":
+            # What one plugin may do without asking, from its page in Settings: the same setting Pips settings →
+            # Plugins sets. Work honours Always ask; the next call reads it, mid-turn too.
+            from .plugins import PluginError, set_permission
+            from .pip_plugins import installed as plugin_infos
+            name, level = str(cmd.get("plugin") or "")[:64], str(cmd.get("level") or "")
+            try:
+                infos = plugin_infos(self.config)
+                if name not in infos:
+                    raise PluginError(f"{name or 'That plugin'} isn't added in Settings → Plugins, or it's turned off "
+                                      "there.")
+                set_permission(name, level, money=bool(infos[name].get("money")))
+            except PluginError as exc:
+                self.em.emit("command_rejected", command=t, reason="invalid", message=str(exc)[:500],
+                             **_request_fields(request_id))
+            else:
+                self.em.emit("plugin_catalog", items=self._editor_plugins(), **_request_fields(request_id))
         elif t in ("set_plugin_key", "remove_plugin_key", "set_plugin_sign_in_scopes"):
             # On the package slot like Connect: saving a key changes what DGC can reach, not what a turn may do.
             run = self._plugin_sign_in_scopes if t == "set_plugin_sign_in_scopes" else self._plugin_key
