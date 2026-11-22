@@ -17,6 +17,8 @@
 // line says what can't work here. Only this tab's own events drive it (the host lets no other page ask for your tab, and
 // DGC lets no Pip, model or tool); its pictures stay in this tab.
 import '../media/shared/tokens.css';
+import '../media/shared/dismiss.css';   // one × for every line that stays (window.DgcDismiss)
+import '../media/shared/dismiss.js';
 import './yourBrowserTab.css';
 
 const vscode = acquireVsCodeApi();
@@ -56,6 +58,8 @@ function ask(type, fields = {}) {
 }
 const ready = () => (S.own || !!S.pip) && S.connected && S.api >= API;
 
+// The note is written only when its words change: it keeps its × (and stays closed) between two pictures.
+function sayNote() { if (note.dataset.said !== S.note) { note.dataset.said = S.note; note.textContent = S.note; } note.hidden = !S.note; }
 function paint() {
   if (S.own) { paintOwn(); return; }
   document.title = S.pip ? `${S.pip.name} · Your Browser` : 'Your Browser';
@@ -65,8 +69,7 @@ function paint() {
   frame.alt = f ? `${S.pip?.name || 'The Pip'}'s tab: ${f.title || f.url}` : '';
   if (f && !S.typing && document.activeElement !== url) url.value = f.url || '';
   url.placeholder = S.pip ? `${S.pip.name}'s tab: an address or a search` : '';
-  note.textContent = S.note;
-  note.hidden = !S.note;
+  sayNote();
   // The Pips' tabs: this Pip's first and chosen; another opens its own editor tab.
   const lanes = S.lanes.length ? S.lanes : S.pip ? [{ pip_id: S.pip.id, name: S.pip.name, title: f?.title || '' }] : [];
   const html = lanes.map((l) => `<button type="button" role="tab" class="yb-tab" data-pip="${esc(l.pip_id)}" data-name="${esc(l.name || '')}" aria-selected="${l.pip_id === S.pip?.id}" title="${esc(`${l.name || 'A Pip'}: ${l.title || l.url || ''}`)}"><span class="yb-tab-name">${esc(l.name || 'A Pip')}</span>${l.title ? `<span class="yb-tab-title">${esc(l.title)}</span>` : ''}</button>`).join('');
@@ -84,9 +87,9 @@ function paintOwn() {
   if (!S.typing && document.activeElement !== url) url.value = f?.url || current?.url || '';
   url.placeholder = 'Search Google or type an address';
   url.setAttribute('aria-label', 'Your tab: an address or a search, then Enter');
-  note.textContent = S.note;
-  note.hidden = !S.note;
-  line.textContent = OWN_LINE; line.hidden = false;
+  sayNote();
+  if (line.textContent !== OWN_LINE) line.textContent = OWN_LINE;
+  line.hidden = false;
   keys.hidden = false;
   $('.yb-window').hidden = true;
   app.classList.add('yb-own-mode');
@@ -374,5 +377,7 @@ window.addEventListener('message', (event) => {
     if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error?.message || 'DGC couldn’t do that.'));
   }
 });
+// What went wrong, and the line about what can't work here, can each be closed; "Connecting…" is work in progress.
+window.DgcDismiss?.watch({ root: app, lines: [{ sel: '.yb-note', when: (l) => !/…$/.test(l.textContent.trim()), focus: () => url }, { sel: '.yb-line', focus: () => url }] });
 paint();
 vscode.postMessage({ type: 'pipsReady' });

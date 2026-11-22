@@ -76,6 +76,13 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       apart(m.error, m.add, "the words and Add file…"); apart(m.error, m.list, "the words and the list");
       assert.equal(m.add.text, "Add file…"); assert.equal(m.copying.length, 0);
       assert.ok(!m.paneScrollsSideways && !m.pageScrollsSideways, "nothing scrolls sideways");
+      // The words stay until something else happens: their × (media/shared/dismiss.js) puts them away.
+      const cross = await x.p.evaluate(() => { const b = document.querySelector(".pc-files .pc-error > .dgc-dismiss"), r = b?.getBoundingClientRect(), l = b?.parentElement.getBoundingClientRect();
+        return b && { title: b.title, name: b.getAttribute("aria-label"), w: r.width, h: r.height, inside: r.right <= l.right + 1 && r.left >= l.left - 1 }; });
+      assert.deepEqual(cross, { title: "Dismiss", name: "Dismiss this message", w: 26, h: 26, inside: true });
+      await x.p.click(".pc-files .pc-error > .dgc-dismiss");
+      assert.equal(await x.p.evaluate(() => document.querySelector(".pc-files .pc-error").checkVisibility()), false, "closed");
+      assert.notEqual(await x.p.evaluate(() => document.activeElement?.tagName), "BODY", "the focus is on something");
       // A big file's Download
       await x.p.click('[data-file="dataset.bin"]');
       await x.p.waitForSelector("#pc-save-as");

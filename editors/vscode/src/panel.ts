@@ -24,7 +24,7 @@ import { checkForExtensionUpdates } from "./extensionupdate";
 import { workspaceFile, workspaceImage } from "./navigation";
 import { FILE_ACTS, projectFileAct } from "./fileActs";
 import { downloadBytes, takeSave } from "./download";
-import { handleLinkPreview, LINK_PREVIEW_MESSAGE, linkPreviewsOn, setLinkPreviews } from "./linkPreview";
+import { handleLinkPreview, LINK_PREVIEW_MESSAGE, linkPreviews, linkPreviewsOn, sentToday, setLinkPreviews } from "./linkPreview";
 import { GitRefs } from "./gitRefs";
 import { openCommit } from "./gitCommitDoc";
 import { McpBrowserRequest, editorIsRemote, handSignInBack, openMcpBrowser } from "./mcpAuth";
@@ -10329,6 +10329,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Settings -> General -> Dock: the editor's own three, shown as they are now.
     // Settings -> Security -> Links: the editor's own setting too (dgc.linkPreviews), shown as it is now.
     this.settingsEditor?.webview.postMessage({ type: "linkPreviews", on: linkPreviewsOn() });
+    // And what previews read today, one row per site (never a page's address).
+    this.settingsEditor?.webview.postMessage({ type: "linkPreviewsSent", sites: sentToday(linkPreviews().sent()) });
     this.settingsEditor?.webview.postMessage({ type: "dockSettings", ...dockSettings() });
     this.refreshEditorSettings();
   }
@@ -10594,6 +10596,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // Applies at once, in every window: each chat's pictures nobody folded or opened follow it (src/pictureFolds.ts).
       await setPicturesInReplies(msg.value);
       this.settingsEditor?.webview.postMessage({ type: "picturesInReplies", value: picturesFolded() ? "folded" : "shown" });
+    } else if (msg?.type === "linkPreviewsSent") {
+      this.settingsEditor?.webview.postMessage({ type: "linkPreviewsSent", sites: sentToday(linkPreviews().sent()) });
     } else if (msg?.type === "linkPreviews") {
       // Applies at once, in every window: each host reads it before it reads a page (src/linkPreview.ts).
       await setLinkPreviews(msg.on);
@@ -11920,6 +11924,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const homeCardsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "homecards.js"));
     // The header row every page of the side bar wears (media/shared/pagehead.js, window.DgcPageHead).
     const pageHeadJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "pagehead.js"));
+    // One × for every warning, error or done line that stays, the same on every surface (media/shared/dismiss.js, window.DgcDismiss).
+    const dismissJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "dismiss.js"));
     // The Library: the ONE module that draws it here, in the Library tab, and in its own editor tab (media/library.js, window.DgcLibrary).
     const libraryPageJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "library.js"));
     // Notes, the notes app in Home's Notes card (media/shared/notes.js, window.DgcNotes): loaded before the cards.
@@ -12268,7 +12274,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script><script nonce="${nonce}" src="${pipJobJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${usageMeterJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${usageMeterJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${dismissJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

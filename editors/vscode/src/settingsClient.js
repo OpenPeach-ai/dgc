@@ -6,6 +6,9 @@ import './settings.css';
 // DGC's own hover label, drawn in the page: the browser's own `title` tooltip is cut by the window's edge (window.DgcTip).
 import '../media/shared/tip.css';
 import '../media/shared/tip.js';
+import '../media/shared/icons.js';
+import '../media/shared/dismiss.css';   // one × for every line that stays, the same on every surface (window.DgcDismiss)
+import '../media/shared/dismiss.js';
 import '../media/shared/rulewords.js';   // globalThis.DgcRuleWords: a permission rule in a person's words (Security)
 import {watchButtons} from './buttonFit.js';
 import {parseMcpPaste} from './mcpPaste.js';
@@ -53,6 +56,15 @@ import { createSeeing } from './settingsSeeing.js';
 import '../media/mods.js';
 const vscode = acquireVsCodeApi();
 if (typeof DgcTip !== 'undefined') DgcTip.install();   // a control's `title` as DGC's own label, inside the page
+// A page's own lines that say what went wrong or what was done (a banner, a card's note, a connection's error) can be
+// closed. Not a field's line beside its input, a dialog's own words, a question to confirm, or a line that explains a
+// setting.
+if (typeof DgcDismiss !== 'undefined') DgcDismiss.watch({ lines: [{
+  sel: '.banner.error, .banner[role="alert"], .banner[role="status"], p.notice[role="status"], .router-note, .error-message, .signin-return-note',
+  // (A banner with its own buttons and no error, a sign-in waiting for its code, is answered, not closed.)
+  when: (line) => !line.matches('.key-error, .mcp-paste-says, .danger-confirm, [role="alertdialog"]') && !line.closest('dialog, [role="dialog"], [role="alertdialog"], .dgc-dialog')
+    && !(line.matches('.banner:not(.error)') && line.querySelector('button')),
+}] });
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const paths = { dev: 'M8 3h5 M9 3v5.5L4.6 16a1.4 1.4 0 0 0 1.2 2.1h9.4a1.4 1.4 0 0 0 1.2-2.1L12 8.5V3 M6.8 13h7.4', voice: 'M10 2a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M5 10a5 5 0 0 0 10 0 M10 15v3 M7 18h6', web: 'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15z M3 10.5h15 M10.5 3c-2.2 2.1-3.2 4.6-3.2 7.5s1 5.4 3.2 7.5 M10.5 3c2.2 2.1 3.2 4.6 3.2 7.5s-1 5.4-3.2 7.5', chatdgc: 'M5 4h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9.5L6 17v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z M7.6 11.4l1.3-4.3 M10 11.4l1.3-4.3 M12.4 11.4l1.3-4.3', memory: 'M6 3h9a1 1 0 0 1 1 1v14l-5.5-3.5L5 18V4a1 1 0 0 1 1-1z M8.5 8h4', general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13', running: 'M3 5h9v8H3z M15 9h3v8H8v-2 M6 9l2 2 3-3' };
@@ -540,6 +552,12 @@ function render() {
     const pictures = $('pictures_in_replies');
     if (pictures) pictures.onchange = () => { draft.pictures_in_replies = pictures.value; send({ type: 'picturesInReplies', value: pictures.value }); };
     // A link's preview card is the editor's own setting too (dgc.linkPreviews): the switch applies at once.
+    // (Opened: what previews read today, asked again so it is current.)
+    const sentBox = document.querySelector('details[data-more="link-previews-sent"]');
+    if (sentBox) {
+        sentBox.addEventListener('toggle', () => { if (sentBox.open) send({ type: 'linkPreviewsSent' }); });
+        send({ type: 'linkPreviewsSent' });          // (drawn: its count, now)
+    }
     const previews = $('link_previews');
     if (previews) previews.onclick = () => { const on = previews.getAttribute('aria-checked') !== 'true'; draft.link_previews = on;
         previews.classList.toggle('on', on); previews.setAttribute('aria-checked', String(on)); send({ type: 'linkPreviews', on }); };
@@ -1597,6 +1615,17 @@ window.addEventListener('message', event => {
         draft.pictures_in_replies = msg.value === 'folded' ? 'folded' : 'shown';
         const select = $('pictures_in_replies');
         if (select && select.value !== draft.pictures_in_replies) select.value = draft.pictures_in_replies;
+    }
+    else if (msg.type === 'linkPreviewsSent') {
+        const sites = Array.isArray(msg.sites) ? msg.sites.filter((x) => x && typeof x.host === 'string').slice(0, 200) : [];
+        const count = $('link-previews-sent-count'), list = $('link-previews-sent-list');
+        if (count) count.textContent = String(sites.length);
+        if (list) {
+            const time = (ms) => new Date(Number(ms) || 0).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+            list.replaceChildren(...(sites.length ? sites.map((x) => { const li = document.createElement('li');
+                const n = Number(x.times) || 1; li.textContent = `${x.host} · ${n} time${n === 1 ? '' : 's'} · last at ${time(x.last)}`; return li; })
+                : [Object.assign(document.createElement('li'), { className: 'sent-none', textContent: 'None yet today.' })]));
+        }
     }
     else if (msg.type === 'linkPreviews') {
         draft.link_previews = msg.on !== false;

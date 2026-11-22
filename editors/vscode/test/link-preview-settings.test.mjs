@@ -84,6 +84,35 @@ test("Settings → Security has the switch, on by default, and a change is sent 
   } finally { await context.close(); }
 });
 
+test("Settings → Security › Links says which sites previews read today, the list one click away, asked again when opened", async (t) => {
+  if (skipOrFail(t)) return;
+  const context = await browser.newContext({ viewport: { width: 700, height: 900 } }), p = await context.newPage();
+  const errors = []; p.on("pageerror", (e) => errors.push(String(e)));
+  try {
+    await p.route("https://settings.test/**", (r) => r.fulfill({ body: page, contentType: "text/html" }));
+    await p.goto("https://settings.test/view");
+    await p.waitForSelector("#settings-links #link-previews-sent-count");
+    assert.equal(await p.textContent("#link-previews-sent-count"), "0");
+    assert.ok(await p.evaluate(() => window.__posted.some((m) => m.type === "linkPreviewsSent")), "drawn: it asks for its count at once");
+    await p.evaluate(() => { window.__posted = []; });
+    const at = new Date("2026-11-22T09:40:00").getTime();
+    await p.evaluate((ms) => window.postMessage({ type: "linkPreviewsSent", sites: [{ host: "openrouter.ai", times: 3, last: ms, bytes: 900000 }, { host: "github.com", times: 1, last: ms - 60000, bytes: 1000 }] }, "*"), at);
+    await p.waitForFunction(() => document.getElementById("link-previews-sent-count").textContent === "2");
+    const box = p.locator('#settings-links details[data-more="link-previews-sent"]');
+    assert.match(await box.locator("summary").innerText(), /^Sites read for previews today: 2$/);
+    assert.equal(await box.evaluate((d) => d.open), false, "the list is one click away");
+    await box.locator("summary").click();
+    // (Opened: asked again so it is current. The toggle event comes a moment after the click.)
+    await p.waitForFunction(() => window.__posted.some((m) => m.type === "linkPreviewsSent"), null, { timeout: 3000 });
+    const rows = await box.locator("#link-previews-sent-list li").allInnerTexts();
+    assert.equal(rows.length, 2);
+    assert.match(rows[0], /^openrouter\.ai · 3 times · last at /);
+    assert.match(rows[1], /^github\.com · 1 time · last at /);
+    assert.ok(rows.every((r) => !/\//.test(r.replace(/ at .*$/, ""))), "sites only, never a page's address");
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
 test("the setting is the editor's own (dgc.linkPreviews, on by default), shown as it is when Settings opens and saved at once", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const setting = pkg.contributes.configuration.properties["dgc.linkPreviews"];

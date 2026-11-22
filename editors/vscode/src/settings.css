@@ -118,6 +118,9 @@ input[type=password]{font-family:var(--mono)}
 details.more{border-top:1px solid var(--border)}.group-more details.more{border-top:0}
 details.more>summary{display:flex;align-items:center;gap:8px;padding:11px 14px;list-style:none;cursor:pointer;color:var(--muted);font-size:12px}
 details.more>summary::-webkit-details-marker{display:none}
+/* What link previews read today: one quiet row per site. */
+.sent-list{margin:0;padding:0 14px 12px 27px;list-style:none;display:grid;gap:4px;color:var(--muted);font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+.sent-list .sent-none{color:var(--faint,var(--muted))}
 details.more>summary::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .12s ease}
 details.more[open]>summary::before{transform:rotate(45deg)}
 details.more>summary:hover{color:var(--text)}

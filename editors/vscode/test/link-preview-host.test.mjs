@@ -248,7 +248,7 @@ test("only the head is read: it stops at </head>, and at 256 KB when a page neve
   assert.equal(big.closed, 2);
   const read = previews.sent().filter((s) => s.host === "big.test").at(-1).received_bytes;
   assert.ok(read >= 256 * 1024 && read <= 256 * 1024 + 128 * 1024, `about 256 KB was taken, no more (${read})`);
-  assert.equal(lp.LIMITS.headBytes, 256 * 1024); assert.equal(lp.LIMITS.timeoutMs, 6000); assert.equal(lp.LIMITS.pictureBytes, 600 * 1024); assert.equal(lp.LIMITS.redirects, 3);
+  assert.equal(lp.LIMITS.headBytes, 256 * 1024); assert.equal(lp.LIMITS.timeoutMs, 6000); assert.equal(lp.LIMITS.pictureBytes, 1024 * 1024); assert.equal(lp.LIMITS.redirects, 3);
 });
 
 test("six seconds, then it is given up (here: a site that never answers, and one that stalls mid-head)", async () => {
@@ -264,15 +264,15 @@ test("six seconds, then it is given up (here: a site that never answers, and one
   assert.equal(slow.sockets.size, 0, "and hung up");
 });
 
-test("a picture: only an image, only 600 KB, only from a public host; a page that isn't HTML has no words", async () => {
+test("a picture: only an image, only 1 MB, only from a public host; a page that isn't HTML has no words", async () => {
   let pictureAsked = 0;
   await site("pics.test", (req, res) => {
     const image = { "/huge": "/huge.png", "/said-huge": "/said-huge.png", "/not-image": "/page.html", "/private": "http://192.168.1.20/cat.png", "/private-name": "http://printer.local/cat.png",
       "/redirected": "/jump.png", "/svg": "/logo.svg" }[req.url];
     if (image) { html(res, OG(`<meta property="og:image" content="${image}">`)); return; }
     pictureAsked++;
-    if (req.url === "/huge.png") { res.writeHead(200, { "Content-Type": "image/png" }); res.end(Buffer.alloc(700 * 1024, 1)); return; }
-    if (req.url === "/said-huge.png") { res.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(900 * 1024) }); res.write(Buffer.alloc(1024)); return; }
+    if (req.url === "/huge.png") { res.writeHead(200, { "Content-Type": "image/png" }); res.end(Buffer.alloc(1200 * 1024, 1)); return; }
+    if (req.url === "/said-huge.png") { res.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(1500 * 1024) }); res.write(Buffer.alloc(1024)); return; }
     if (req.url === "/page.html") { html(res, "<html></html>"); return; }
     if (req.url === "/jump.png") { res.writeHead(302, { Location: "http://127.0.0.1:1/cat.png" }); res.end(); return; }
     if (req.url === "/logo.svg") { res.writeHead(200, { "Content-Type": "image/svg+xml" }); res.end(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`); return; }
@@ -377,4 +377,15 @@ test("many at once: one read for one address, and no more than a few sites at a 
   const many = await Promise.all(Array.from({ length: 12 }, (_, i) => previews.preview(`http://crowd.test/p/${i}`)));
   assert.ok(most <= lp.LIMITS.atOnce, `never more than ${lp.LIMITS.atOnce} at once (${most})`);
   assert.ok(many.every((p) => p.state === "page"), "the rest waited their turn");
+});
+
+test("today's record: one row per site, newest first, counting each read; yesterday's left out", () => {
+  const now = new Date("2026-11-22T15:00:00").getTime(), hour = 3_600_000;
+  const rows = lp.sentToday([
+    { at: now - 26 * hour, host: "old.example", kind: "page", status: 200, received_bytes: 10 },
+    { at: now - 3 * hour, host: "github.com", kind: "page", status: 200, received_bytes: 1000 },
+    { at: now - 2 * hour, host: "openrouter.ai", kind: "page", status: 200, received_bytes: 5000 },
+    { at: now - 2 * hour + 1, host: "openrouter.ai", kind: "picture", status: 200, received_bytes: 400000 },
+  ], now);
+  assert.deepEqual(rows.map((r) => [r.host, r.times, r.bytes]), [["openrouter.ai", 2, 405000], ["github.com", 1, 1000]]);
 });

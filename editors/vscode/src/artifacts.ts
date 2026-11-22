@@ -184,7 +184,7 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 <div class="art-banner" id="art-banner" role="alert" hidden></div>
 <main class="art-main" id="art-main"><p class="art-empty" id="art-loading">Loading…</p></main>
 <div class="sr-only" id="art-announce" aria-live="polite"></div>
-${s("media/shared/icons.js")}${s("media/shared/download.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifact.js")}
+${s("media/shared/icons.js")}${s("media/shared/dismiss.js")}${s("media/shared/download.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifact.js")}
 </body></html>`;
 }
 

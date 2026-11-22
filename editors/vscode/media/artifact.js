@@ -247,6 +247,8 @@
     box.hidden = false;
   }
   function hideBanner() { $("art-banner").hidden = true; state.conflict = false; }
+  // A banner that only says something (a refusal, a removal) can be closed; one that asks (Reload, Keep editing) is answered.
+  window.DgcDismiss?.watch({ lines: [{ sel: "#art-banner", when: (box) => !box.querySelector(".art-banner-actions") }] });
   function conflict(version) {
     state.conflict = true;
     banner("warn", `This changed somewhere else${version ? ` (now version ${version})` : ""} since you opened it, so your changes weren't saved. `

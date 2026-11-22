@@ -274,6 +274,8 @@
     const els = { search: $("library-search"), tabs: $("library-tabs"), filters: $("library-filters"), status: $("library-status"), list: $("library-list"), load: $("library-load"), more: $("library-more"), said: $("library-said") };
     // In its own tab the list scrolls inside the page (library.css) and takes the keyboard for that.
     if (place === "tab") els.list.tabIndex = 0;
+    // What went wrong reading the Library stays over the list: it can be closed (media/shared/dismiss.js).
+    root.DgcDismiss?.watch({ root: host, lines: [{ sel: '#library-status[data-kind="error"]', focus: () => els.search }] });
     const saved = kept?.() || {};
     const savedF = saved.filters && typeof saved.filters === "object" ? saved.filters : {};
     const str = (v) => (typeof v === "string" ? v.slice(0, 200) : "");

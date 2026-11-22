@@ -4446,6 +4446,8 @@
     return nodes;
   }
   function hideNotice() { notice.hidden = true; notice.textContent = ""; delete notice.dataset.noProvider; }
+  // The notice stays until something else is said: its × puts it away (media/shared/dismiss.js), and the next one shows.
+  window.DgcDismiss?.watch({ root: notice.parentElement || document, lines: [{ sel: "#cd-notice", focus: () => $("cd-input"), onDismiss: hideNotice }] });
   const announce = (text) => { $("cd-announce").textContent = text; };
 
   // ---- what the host says

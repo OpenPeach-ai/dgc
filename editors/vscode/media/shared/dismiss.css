@@ -1,0 +1,11 @@
+/* One × for every line that stays (media/shared/dismiss.js, window.DgcDismiss): the Close glyph in a 26px box with
+   the button family's 6px corner, no line, a wash under the pointer. It sits in its line's top right; the words keep
+   clear of it. A closed line is out of sight and out of the reading order until its page says something new. */
+.dgc-dismiss{flex:none;display:inline-grid;place-items:center;box-sizing:border-box;width:26px;height:26px;min-width:0;min-height:0;margin:0;padding:0;border:0;border-radius:var(--btn-r,6px);background:transparent;color:var(--muted,var(--vscode-descriptionForeground));font:inherit;line-height:1;cursor:pointer;-webkit-appearance:none;appearance:none}
+.dgc-dismiss:hover{background:var(--wash,var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.16)));color:var(--text,var(--vscode-foreground))}
+.dgc-dismiss:focus-visible{outline:var(--btn-ring,1px solid var(--vscode-focusBorder));outline-offset:1px}
+.dgc-dismiss>svg,.dgc-dismiss>svg.dgc-icon{display:block;flex:none;width:14px;height:14px;fill:currentColor;stroke:none}
+.dgc-dismissible{position:relative;padding-right:36px!important}
+.dgc-dismissible>.dgc-dismiss{position:absolute;top:2px;right:4px}
+[data-dgc-dismissed]{display:none!important}
+@media(forced-colors:active){.dgc-dismiss{color:ButtonText}.dgc-dismiss:hover{background:Highlight;color:HighlightText;forced-color-adjust:none}}

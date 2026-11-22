@@ -544,7 +544,10 @@ export function renderFields(section, main, config, providers, ui) {
                     "A Tailscale name (gb10.tail1234.ts.net) or a host:port. Empty: links use this computer's own address.") : ""))
             // A link's preview card (src/linkPreview.ts): the editor's own setting, so it applies at once, apart from Save.
             + group("Links", field("Show a preview when you point at a link", "Reads public pages only.", ui.editorBool("link_previews", c.link_previews !== false, "Show a preview when you point at a link"),
-                    "Rest the pointer on a link in a chat and a card shows the site's name, picture, title and description. DGC reads only the top of a public page, with no sign-in and no cookies: never a private, local or tailnet address, a one-time link, or an address that holds a secret. Off: nothing is read."), "", "settings-links")
+                    "Rest the pointer on a link in a chat and a card shows the site's name, picture, title and description. DGC reads only the top of a public page, with no sign-in and no cookies: never a private, local or tailnet address, a one-time link, or an address that holds a secret. Off: nothing is read.")
+                    // What previews read today: the count, and each site one click away (src/linkPreview.ts sentToday).
+                    + more("link-previews-sent", `<span>Sites read for previews today: <span id="link-previews-sent-count">0</span></span>`,
+                           `<ul id="link-previews-sent-list" class="sent-list"><li class="sent-none">None yet today.</li></ul>`, false), "", "settings-links")
             // What an Always allow on a card made, in words, each with Remove (user test W8). Removed at once: not
             // part of Save.
             + group("Always allowed", ui.rules == null ? '<div class="row-line rule-line"><span class="words"><span class="hint" role="status">Reading the rules from DGC…</span></span></div>'

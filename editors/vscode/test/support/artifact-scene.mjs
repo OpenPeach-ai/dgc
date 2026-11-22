@@ -66,12 +66,12 @@ export function panelPage() {
   if (pageCache) return pageCache;
   const { artifactDocument } = artifactsModule();
   const html = artifactDocument((name) => name, "data:", "TESTNONCE");
-  const scripts = [...html.matchAll(/<script nonce="TESTNONCE" src="(media\/[\w.]+\.js)"><\/script>/g)].map((m) => m[1]);
+  const scripts = [...html.matchAll(/<script nonce="TESTNONCE" src="(media\/(?:shared\/)?[\w.]+\.js)"><\/script>/g)].map((m) => m[1]);
   const styles = [...html.matchAll(/<link rel="stylesheet" href="(media\/[\w.]+\.css)">/g)].map((m) => m[1]);
   const inline = (name) => (name === "media/codicon.css" ? codicon() : readStylesheet(join(extensionRoot, name)));
   const page = html.replace(/<link rel="stylesheet" href="media\/[\w.]+\.css">/g, "")
     .replace("</head>", `${styles.map((s) => `<style>${inline(s)}</style>`).join("")}</head>`)
-    .replace(/<script nonce="TESTNONCE" src="media\/[\w.]+\.js"><\/script>/g, "");
+    .replace(/<script nonce="TESTNONCE" src="media\/(?:shared\/)?[\w.]+\.js"><\/script>/g, "");
   pageCache = { html: page, js: scripts.map(read).join("\n;\n"), scripts };
   return pageCache;
 }

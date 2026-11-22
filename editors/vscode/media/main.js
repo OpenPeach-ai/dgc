@@ -2370,6 +2370,14 @@
       onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry() });
     hubNew = window.DgcHub.create({ host: newHost, groups: ["new"], empty: "",
       onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry() });
+    // The side bar's own lines that say what went wrong (a list that couldn't be read, a Home note, Your Browser's
+    // card) can be closed. Not a note with Retry in it, an install that is running, or the line that goes with an
+    // install's own buttons.
+    if (window.DgcDismiss && $("sessions-host")) window.DgcDismiss.watch({ root: $("sessions-host"), lines: [
+      '#sessions-status[data-kind="error"]', '#chats-status[data-kind="error"]',
+      { sel: ".dgc-hub-note", when: (line) => !line.querySelector(".dgc-hub-retry") },
+      { sel: 'p.hc-browse-why[role="status"]', when: (line) => !line.matches(".hc-installing") && !line.nextElementSibling?.matches(".hc-cmd, .hc-install-row") },
+    ] });
     if (window.DgcHomeCards) home = window.DgcHomeCards.create({ host: $("home-hub"), data: homeData, act: homeAct, post: (message) => vscode.postMessage(message),
       slot: (name) => (name === "needs" ? needsHost : name === "new" ? newHost : null),
       // How many of its cards a hub shows follows the form of the card it is in: one on a short card, three on a Medium one, eight opened.
@@ -5050,6 +5058,7 @@
     const said = document.createElement("span"); said.textContent = words;
     const times = document.createElement("span"); times.className = "mod-notice-times";
     line.append(mark, said, times);
+    if (tone === "bad") closable(line);
     const stay = following;
     appendConversationContent(line);
     if (stay) scroll();
@@ -9063,10 +9072,13 @@ function permissionChoices(ev) {
   function sysLine(msg, isErr, mark) {
     const line = el("div", "sys" + (isErr ? " err" : "") + (mark ? " sys-marked" : ""),
       (mark ? icon(mark) : "") + esc(msg));
-    if (isErr) line.setAttribute("role", "alert");
+    if (isErr) { line.setAttribute("role", "alert"); closable(line); }
     appendConversationContent(line);
     return line;
   }
+  // A line that says what went wrong stays in the transcript; its × puts it away (media/shared/dismiss.js). The focus
+  // goes to the message box.
+  function closable(line) { window.DgcDismiss?.add(line, { focus: () => $("input") }); return line; }
 
   // ---- memory that learns (dgc/memory_review.py, dgc/skill_learn.py) ------------------------------
   // What a look back over this session kept: one quiet line, with Forget (the one memory every surface shares).
@@ -19315,6 +19327,7 @@ function permissionChoices(ev) {
       + '<span class="model-error-headline"></span></div><p class="model-error-hint" hidden></p>';
     row.querySelector(".model-error-headline").textContent = words?.headline || "";
     fillModelFix(row.querySelector(".model-error-hint"), words);
+    closable(row);
     appendConversationContent(row);
   }
   // The final model error, when the backend said why. False when there is no usable cause, so the
@@ -19379,6 +19392,7 @@ function permissionChoices(ev) {
       flashAction(event.currentTarget, "check");
     });
     speak(`DGC error: ${headline}`);
+    closable(row);
     appendConversationContent(row);
     endToolGroup();
     // This failure ends those retries and says it all: the "Gave up after 3 retries" row above it (it named a host and

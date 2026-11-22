@@ -229,6 +229,16 @@ test('while it turns on, the switch says so; a slow manager is a closable line, 
  assert.match(line.textContent,/was busy and didn't answer within 60 seconds/);
  const close=line.parentElement.querySelector('[data-dismiss-note="error"]');
  assert.ok(close,'it has a ×');assert.equal(close.getAttribute('title'),'Dismiss');
+ // The one × every surface shares (media/shared/dismiss.js): a real button with the Close glyph, named for a screen reader.
+ assert.ok(close.classList.contains('dgc-dismiss'));assert.equal(close.type,'button');assert.equal(close.getAttribute('aria-label'),'Dismiss this message');
+ assert.equal(close.querySelector('svg').dataset.icon,'close');
+ assert.equal(line.querySelector('.dgc-dismiss'),null,'one ×, not two: the page\'s own line is not dressed a second time');
  close.click();await x.drain();
  assert.equal(x.d.querySelector('.page-note .notice.error'),null,'and it goes');
+ assert.notEqual(x.d.activeElement,x.d.body,'the focus is on something');
+ // The same thing fails again: its line shows again.
+ x.change(true);await flush();
+ x.answer(x.requests('set_pips_keep_running')[1],"The system's user service manager was busy and didn't answer within 60 seconds. Try again in a moment.",false);await x.drain();
+ assert.ok(x.d.querySelector('.page-note .notice.error'),'the next one shows');
+ assert.ok(x.d.querySelector('.page-note [data-dismiss-note="error"]'));
 });

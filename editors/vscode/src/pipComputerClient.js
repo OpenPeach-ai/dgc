@@ -15,6 +15,8 @@ import './pipComputer.css';
 import '../media/shared/menu.js';
 import '../media/shared/download.js';   // window.DgcDownload: a file saved on the person's own computer, from this page
 import '../media/shared/icons.js';
+import '../media/shared/dismiss.css';   // one × for every line that stays, the same on every surface (window.DgcDismiss)
+import '../media/shared/dismiss.js';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
 import {esc,errorText,record,requestBroker,pipLogin,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer,pipComputerApps} from './pipsModel.js';
@@ -493,8 +495,8 @@ function put(id,html){const el=$(id);if(!el||drawn.get(id)===html&&(el.innerHTML
 function applyFit(){if(viewer&&'scaleViewport' in viewer&&viewer.scaleViewport!==S.fit){viewer.clipViewport=false;viewer.scaleViewport=S.fit;}}
 // What the tab says (an error, a notice, the apps offer) floats at the foot of the screen, each with a way to put it away.
 function saysMarkup(){
- return (S.error?`<div class="pc-note"><p class="pc-error" role="alert">${esc(S.error)}</p>${crossButton('data-dismiss="error"','Dismiss')}</div>`:'')
-  +(S.notice?`<div class="pc-note"><p class="pc-notice" role="status">${esc(S.notice)}</p>${crossButton('data-dismiss="notice"','Dismiss')}</div>`:'')+appsMarkup();
+ return (S.error?`<div class="pc-note"><p class="pc-error" role="alert">${esc(S.error)}</p>${window.DgcDismiss.html({attrs:'data-dismiss="error"'})}</div>`:'')
+  +(S.notice?`<div class="pc-note"><p class="pc-notice" role="status">${esc(S.notice)}</p>${window.DgcDismiss.html({attrs:'data-dismiss="notice"'})}</div>`:'')+appsMarkup();
 }
 const PANELS={files:'Files',keys:'Keyboard',clip:'Clipboard'};
 function renderScreen(fresh){
@@ -1083,5 +1085,10 @@ const DAY=[7,19];
 function applyLook(){const h=new Date().getHours();document.body.classList.toggle('pc-night',!(h>=DAY[0]&&h<DAY[1]));}
 applyLook();setInterval(applyLook,60000);addEventListener('focus',applyLook);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)applyLook();});
+// The page's other lines that say what went wrong or why its computer can't be used (the flat page's, the Files and
+// Terminal panels') can be closed too. Not the floating notes (their × is in the markup), an offer or a note with its
+// own button, setting up (work in progress), or a dialog's own line.
+window.DgcDismiss?.watch({lines:[{sel:'.pc-error,p.pc-notice',when:l=>!l.closest('.pc-note,dialog,[role="dialog"],.dgc-dialog')&&!l.matches('.pc-setup,.pc-dialog-notice,#login-error')&&!(l.matches('.pc-apps')&&/…$/.test(l.textContent.trim())),
+ onDismiss:l=>{if(l.parentElement?.id!=='pc-top')return;if(l.matches('.pc-error')&&l.textContent.trim()===S.error){S.error='';S.actionError=false;}else if(l.textContent.trim()===S.notice)S.notice='';}}]});
 render();
 vscode.postMessage({type:'pipsReady'});

@@ -5,7 +5,8 @@
 - **A link's preview when you point at it**, in Work, ChatDGC and a Pip's chat: the site's icon, its picture, title and
   description, and Open. DGC reads public pages only: never a local, private or Tailscale address, and never a
   one-time link (a sign-in, a reset, a confirm or unsubscribe link), which shows its address alone. Only the page's
-  head is read, without your cookies, and kept for a day. Turn it off in Settings › Security › Links.
+  head is read, without your cookies, and kept for a day. Settings › Security › Links says which sites previews read
+  today, and turns them off.
 - **The Library's tab comes back after a window reload**, with its tab, search and filters as you left them.
 - **Favorites in the Library**: star anything (a purple star on its row, or Add to Favorites in its ⋯ menu), and
   filter any tab by Favorites, with search and the other filters. A star on Home's Artifacts card shows only your
@@ -15,6 +16,10 @@
   min" says so. A failed refresh keeps the numbers it has and tries again later, twice as long each time (at most an
   hour). The choice is kept per dashboard by the editor; it isn't a change to the dashboard.
 - **ChatDGC's @ list is as tall as its rows**, as a Pip's chat's is: one match is one row, never a tall empty box.
+- **Every warning can be closed**: a line that says what went wrong, or what was done, and stays on screen now has a ×
+  ("Dismiss"), the same one everywhere: Work's error lines, ChatDGC's notice, Home and the Work and Chat lists, the
+  Library, Settings, the Pips page and a Pip's chat, a Pip's computer, Your Browser's tab and an artifact's page.
+  Closing one hides that message only; the next one shows again, and the keyboard's focus moves to the next control.
 - **What's new, whenever you want it**: DGC's version and "What's new" sit at the far right of the side bar's logo
   line (Home and the Library), in grey; a click opens the slides again.
 - **Your Browser's tabs read like Chrome's**: the current tab is the address row's colour and joins it, on a strip a

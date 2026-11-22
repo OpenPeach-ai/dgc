@@ -36,7 +36,7 @@ export const LIMITS = Object.freeze({
   headBytes: 256 * 1024,
   /** One read, redirects and all. */
   timeoutMs: 6000,
-  pictureBytes: 600 * 1024,
+  pictureBytes: 1024 * 1024,
   iconBytes: 100 * 1024,
   redirects: 3,
   /** How many sites are read at the same time; the rest wait their turn. */
@@ -564,6 +564,19 @@ function sameAddress(a: string, b: string): boolean {
 
 // ---- the editor's one -------------------------------------------------------------------------------------------------------
 /** Settings -> Security -> "Show a preview when you point at a link" (dgc.linkPreviews): on unless it was turned off. */
+/** Today's record of what previews read, one row per site, newest first (Settings › Security › Links shows it). */
+export function sentToday(list: readonly Sent[], now = Date.now()): { host: string; times: number; last: number; bytes: number }[] {
+  const start = new Date(now); start.setHours(0, 0, 0, 0);
+  const bySite = new Map<string, { host: string; times: number; last: number; bytes: number }>();
+  for (const s of list) {
+    if (!(s.at >= start.getTime()) || !s.host) continue;
+    const row = bySite.get(s.host) ?? { host: s.host, times: 0, last: 0, bytes: 0 };
+    row.times += 1; row.last = Math.max(row.last, s.at); row.bytes += Number(s.received_bytes) || 0;
+    bySite.set(s.host, row);
+  }
+  return [...bySite.values()].sort((a, b) => b.last - a.last);
+}
+
 export function linkPreviewsOn(): boolean {
   try { return vscode.workspace.getConfiguration("dgc").get<boolean>("linkPreviews", true) !== false; } catch { return false; }
 }

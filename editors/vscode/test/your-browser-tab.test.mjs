@@ -173,6 +173,13 @@ test("the page: a Pip with no tab there yet says so, and an older DGC asks for n
   try {
     await y.page.waitForFunction(() => /Update DGC/.test(document.querySelector(".yb-note").textContent), null, { timeout: 10000 });
     assert.equal((await y.sent()).length, 0);
+    // What the tab says stays until something else is said: its × (media/shared/dismiss.js) puts it away, the focus
+    // goes to the address bar, and the next picture's poll doesn't bring the same words back.
+    const x0 = await y.page.evaluate(() => { const b = document.querySelector(".yb-note > .dgc-dismiss"); return b && { title: b.title, name: b.getAttribute("aria-label"), w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height, radius: getComputedStyle(b).borderTopLeftRadius }; });
+    assert.deepEqual(x0, { title: "Dismiss", name: "Dismiss this message", w: 26, h: 26, radius: "6px" });
+    await y.page.click(".yb-note > .dgc-dismiss"); await y.page.waitForTimeout(800);
+    assert.equal(await y.page.evaluate(() => document.querySelector(".yb-note").checkVisibility()), false, "closed, and it stays closed");
+    assert.equal(await y.page.evaluate(() => document.activeElement?.className), "yb-url");
   } finally { await y.close(); }
 });
 
