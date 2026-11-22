@@ -547,6 +547,11 @@ API111_READS = frozenset({'get_pip_job', 'list_pip_jobs'})
 API111_MUTATIONS = frozenset({'start_pip_job', 'decline_pip_job'})
 READ_COMMANDS |= API111_READS
 MUTATION_COMMANDS |= API111_MUTATIONS
+# API 112: Clear browsing data in Your Browser. clear_your_browser {history, sign_ins, passwords} clears what was ticked
+# from DGC's own profile there (never your own Chrome's), closing and opening it again where it runs; get_your_browser
+# and get_your_browser_recent carry chrome_account. Local only.
+API112_MUTATIONS = frozenset({'clear_your_browser'})
+MUTATION_COMMANDS |= API112_MUTATIONS
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -719,6 +724,7 @@ COMMAND_FIELDS = {
     'use_your_browser_view': frozenset({'op', 'x', 'y', 'text', 'key', 'dy', 'url', 'pip_id', 'own', 'seq', 'events', 'tab',
                                         'width', 'height'}),
     'install_google_chrome': frozenset(),
+    'clear_your_browser': frozenset({'history', 'sign_ins', 'passwords'}),
     'commit_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'set_pip_goal': frozenset({'pip_id', 'objective', 'conversation_id'}),
     'get_pip_goal': frozenset({'pip_id', 'conversation_id'}),
@@ -1051,7 +1057,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API111_READS | API111_MUTATIONS:
+        if command in API112_MUTATIONS:
+            minimum = 112
+        elif command in API111_READS | API111_MUTATIONS:
             minimum = 111
         elif command in API110_MUTATIONS:
             minimum = 110

@@ -53,6 +53,10 @@ class OwnHost(unittest.TestCase):
         screen = patch.object(your_browser, "has_screen", return_value=False)
         screen.start()
         self.addCleanup(screen.stop)
+        # (No VNC program unless a test says so: tests/test_your_browser_screen.py.)
+        vnc = patch.object(your_browser, "vnc_program", return_value=None, create=True)
+        vnc.start()
+        self.addCleanup(vnc.stop)
         self.host = your_browser.YourBrowserHost(self.directory, chrome=Path("/opt/google/chrome/chrome"), launch=launch,
                                                  run=lambda argv, **kw: None, which=lambda name: None, platform="linux",
                                                  clock=lambda: self.now[0], pump_thread=False)

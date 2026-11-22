@@ -19,6 +19,7 @@ from .workspace_registry import RegistryError, WorkspaceRegistry
 
 OPEN_SECONDS = 20
 CHUNK = 192 * 1024                 # one event carries at most this much of the screen (256 KiB base64)
+GATHER_SECONDS = 0.004             # what comes this soon after goes in the same event
 MAX_SEND = 1024 * 1024             # what the viewer may send in one command, decoded
 MAX_OPENING = 8
 MAX_STREAMS = 8
@@ -35,9 +36,16 @@ class DesktopStreams:
         self._opening = 0
         self._closed_all = False
 
+    NOT_OPEN = "The computer's screen did not open. Is the Pips runner on?"
+    ENDED = "The computer's screen closed."
+
+    @staticmethod
+    def _key_ok(key) -> bool:
+        return isinstance(key, str) and re.fullmatch(r"pip_[A-Za-z0-9]{1,64}", key) is not None
+
     def handle(self, command: dict) -> None:
         pip_id, op = command.get("pip_id"), command.get("op")
-        if not isinstance(pip_id, str) or not re.fullmatch(r"pip_[A-Za-z0-9]{1,64}", pip_id):
+        if not self._key_ok(pip_id):
             return
         if op == "open":
             # Which of its computers (capability pips_desktop_numbers; 1 for the first; none: the one at work, else
@@ -83,6 +91,32 @@ class DesktopStreams:
     def _closed(self, pip_id: str, reason: str) -> None:
         self.emit("pip_desktop_closed", pip_id=pip_id, reason=reason[:300])
 
+    def _refused(self, pip_id: str, reply: dict) -> None:
+        self._closed(pip_id, str(reply.get("error") or "The computer's screen is not available."))
+
+    def _data(self, pip_id: str, data: bytes) -> None:
+        self.emit("pip_desktop_data", pip_id=pip_id, data=base64.b64encode(data).decode("ascii"))
+
+    def _ask(self) -> dict:
+        """What the view socket is asked, beside its token: a Pip computer's whole screen."""
+        return {"op": "desktop"}
+
+    def _endpoint(self, pip_id: str, generation: int, number: int | None):
+        """The Pip computer's view socket ({socket, token}) once its screen is asked open; None if it never came (or
+        the stream was closed meanwhile)."""
+        from . import pip_computer
+        with WorkspaceRegistry() as registry:
+            pip_computer.request_open(registry, pip_id, "editor-user", number)
+            deadline = time.monotonic() + OPEN_SECONDS
+            while time.monotonic() < deadline:
+                if not self._current(pip_id, generation):
+                    return None
+                endpoint = pip_computer.view_endpoint(registry, pip_id, number)
+                if endpoint is not None:
+                    return endpoint
+                time.sleep(0.25)
+        return None
+
     def _current(self, pip_id: str, generation: int) -> bool:
         with self.lock:
             return not self._closed_all and self._generation.get(pip_id) == generation
@@ -99,28 +133,17 @@ class DesktopStreams:
             pass
 
     def _open(self, pip_id: str, generation: int, number: int | None = None) -> None:
-        from . import pip_computer
         stream = None
         try:
-            with WorkspaceRegistry() as registry:
-                pip_computer.request_open(registry, pip_id, "editor-user", number)
-                deadline = time.monotonic() + OPEN_SECONDS
-                endpoint = None
-                while time.monotonic() < deadline:
-                    if not self._current(pip_id, generation):
-                        return
-                    endpoint = pip_computer.view_endpoint(registry, pip_id, number)
-                    if endpoint is not None:
-                        break
-                    time.sleep(0.25)
+            endpoint = self._endpoint(pip_id, generation, number)
             if endpoint is None:
                 if self._current(pip_id, generation):
-                    self._closed(pip_id, "The computer's screen did not open. Is the Pips runner on?")
+                    self._closed(pip_id, self.NOT_OPEN)
                 return
             stream = socket.socket(socket.AF_UNIX)
             stream.settimeout(30)
             stream.connect(endpoint["socket"])
-            stream.sendall(json.dumps({"token": endpoint["token"], "op": "desktop"}).encode("utf-8") + b"\n")
+            stream.sendall(json.dumps({"token": endpoint["token"], **self._ask()}).encode("utf-8") + b"\n")
             line = b""
             while not line.endswith(b"\n") and len(line) < 4096:
                 chunk = stream.recv(1)
@@ -132,7 +155,7 @@ class DesktopStreams:
                 self._close_socket(stream)
                 stream = None
                 if self._current(pip_id, generation):
-                    self._closed(pip_id, str(reply.get("error") or "The computer's screen is not available."))
+                    self._refused(pip_id, reply)
                 return
         except (RegistryError, OSError, ValueError, TypeError, KeyError) as error:
             if stream is not None:
@@ -160,14 +183,28 @@ class DesktopStreams:
         threading.Thread(target=self._read, args=(pip_id, stream), name="pip-desktop-read", daemon=True).start()
 
     def _read(self, pip_id: str, stream: socket.socket) -> None:
-        reason = "The computer's screen closed."
+        import select
+        reason = self.ENDED
         try:
-            while True:
+            ended = False
+            waiting = select.poll()                # (never select: past 1024 open files it refuses a socket)
+            waiting.register(stream.fileno(), select.POLLIN | select.POLLHUP | select.POLLERR)
+            while not ended:
                 data = stream.recv(CHUNK)
                 if not data:
                     break
-                self.emit("pip_desktop_data", pip_id=pip_id, data=base64.b64encode(data).decode("ascii"))
-        except OSError:
+                # A screen's picture comes in many small writes: what follows within a few milliseconds goes in the same
+                # event, so the editor gets fewer, larger messages (each one costs its own trip through the editor).
+                while len(data) < CHUNK:
+                    if not waiting.poll(GATHER_SECONDS * 1000):
+                        break
+                    more = stream.recv(CHUNK - len(data))
+                    if not more:
+                        ended = True
+                        break
+                    data += more
+                self._data(pip_id, data)
+        except (OSError, ValueError):
             pass
         finally:
             self._close_socket(stream)
@@ -195,7 +232,7 @@ class DesktopStreams:
         try:
             stream.sendall(raw)
         except OSError:
-            self.close(pip_id, "The computer's screen closed.")
+            self.close(pip_id, self.ENDED)
 
     def close(self, pip_id: str, reason: str, *, announce: bool = True) -> None:
         with self.lock:
@@ -214,3 +251,50 @@ class DesktopStreams:
             self.streams.clear()
         for stream in streams:
             self._close_socket(stream)
+
+
+class YourBrowserScreen(DesktopStreams):
+    """Your Browser's own tab where this computer has no screen: ONE stream of Chrome's real window on its VNC screen,
+    carried as a Pip computer's screen is (the same stream, the same viewer in the editor). Its bytes travel as base64
+    in `your_browser_screen` commands and `your_browser_screen_data` events; here they are joined to the supervisor's view
+    socket for Your Browser (token-checked, op "screen", own), which joins them to that screen's own socket. The editor
+    never gets a socket, a path or the token, and only the person's own window is ever on that screen."""
+
+    KEY = "your-browser"
+    NOT_OPEN = "Your Browser isn't open yet. Open it from the dock."
+    ENDED = "Your Browser's screen closed."
+
+    @staticmethod
+    def _key_ok(key) -> bool:
+        return key == YourBrowserScreen.KEY
+
+    def handle(self, command: dict) -> None:
+        op = command.get("op")
+        if op not in ("open", "send", "close"):
+            return
+        super().handle({"pip_id": self.KEY, "op": op, **({"data": command.get("data")} if op == "send" else {})})
+
+    def _closed(self, key: str, reason: str, pictures: bool = False) -> None:
+        self.emit("your_browser_screen_closed", reason=str(reason)[:300], pictures=bool(pictures))
+
+    def _refused(self, key: str, reply: dict) -> None:
+        self._closed(key, str(reply.get("error") or "Your Browser's screen is not available."), reply.get("pictures") is True)
+
+    def _data(self, key: str, data: bytes) -> None:
+        self.emit("your_browser_screen_data", data=base64.b64encode(data).decode("ascii"))
+
+    def _ask(self) -> dict:
+        return {"own": True, "op": "screen"}
+
+    def _endpoint(self, key: str, generation: int, number: int | None):
+        from . import your_browser
+        with WorkspaceRegistry() as registry:
+            deadline = time.monotonic() + OPEN_SECONDS
+            while time.monotonic() < deadline:
+                if not self._current(key, generation):
+                    return None
+                endpoint = your_browser.view_endpoint(registry)
+                if endpoint is not None:
+                    return endpoint
+                time.sleep(0.25)
+        return None

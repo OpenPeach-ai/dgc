@@ -39,6 +39,9 @@ const skipOrFail = (t) => {
   t.skip(skipReason());
   return true;
 };
+// (Built before any test is declared: a test file whose tests come after a top-level await can see its after() run first.)
+const bundle = await build({ entryPoints: [src + "yourBrowserTab.js"], bundle: true, write: false, format: "esm", platform: "browser", outdir: "out", target: "chrome108" });
+const pageJs = bundle.outputFiles.find((f) => f.path.endsWith(".js")).text, pageCss = bundle.outputFiles.find((f) => f.path.endsWith(".css")).text;
 before(async () => {
   if (!chromium) return;
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] }); } catch { browser = null; }
@@ -76,8 +79,6 @@ test("the host lets only Your Browser's own tab ask for your own tab", () => {
 });
 
 // ---- your own tab, streamed ---------------------------------------------------------------------------------------------
-const bundle = await build({ entryPoints: [src + "yourBrowserTab.js"], bundle: true, write: false, format: "iife", platform: "browser", outdir: "out", target: "chrome108" });
-const pageJs = bundle.outputFiles.find((f) => f.path.endsWith(".js")).text, pageCss = bundle.outputFiles.find((f) => f.path.endsWith(".css")).text;
 
 /** The own tab's page against a scripted DGC: your tabs, a picture at whatever size the tab asked, a new picture now and then. */
 async function openOwn(theme = "dark", { width = 900, height = 600, api = 107, real = "", ownSeq = false } = {}) {
@@ -121,7 +122,7 @@ async function openOwn(theme = "dark", { width = 900, height = 600, api = 107, r
       reply(m, { ok: true, ...state() });
     } });
   }, [api, real, ownSeq]);
-  await page.addScriptTag({ content: pageJs });
+  await page.addScriptTag({ content: pageJs, type: "module" });
   const sent = (op) => page.evaluate((o) => window.__sent.filter((r) => !o || r.op === o), op);
   const events = async () => (await sent("input")).flatMap((r) => r.events);
   const shown = () => page.waitForFunction(() => { const f = document.querySelector(".yb-frame"); return f && !f.hidden && f.naturalWidth > 0; }, null, { timeout: 10000 });

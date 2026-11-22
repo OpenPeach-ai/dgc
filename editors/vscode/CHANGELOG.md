@@ -8,6 +8,12 @@
   unpin it: each is saved at once as your version, and if DGC changed the list meanwhile your change is made on the
   newer list. The Library lists checklists with their own icon and a Checklists kind, and Work shows the project's
   pinned checklists above its sessions, each with how far along it is and what is next (or which item needs you).
+- **Your Browser's tab as quick as a Pip's computer** (no screen where DGC runs, as over Remote-SSH): the tab shows
+  Chrome's real window as it changes, with the Pip computer's own viewer; your clicks and keys go straight to it. Copy
+  there lands on your clipboard; a paste brings yours.
+- **Clear browsing data…** in Your Browser's dock menu (right-click it): tick Browsing history, Sign-ins or Saved
+  passwords, each with one line of what it removes, then the button that says what it clears. Nothing is cleared
+  before that button.
 - **Small things made right**: on light themes the green of added lines, ticks and dots is deep enough to read (the
   "+2" of a changed file was barely visible); "Use another account" wraps instead of being cut in a narrow side bar; a
   redraw of the Pips list no longer drops the keyboard's place on a menu button; when Keep running or Desktop

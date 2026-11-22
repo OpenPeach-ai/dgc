@@ -672,7 +672,7 @@ def get(registry) -> dict:
             "install": _offer(registry.directory, available, reason), "view": _view_here(),
             "sites": sites(registry), "signing_out": signing_out(registry) if _has_metadata(registry) else [],
             "yours": {"open": state.get("open") is True, "tabs": tabs, "error": str(state.get("error") or "")[:400]},
-            "lanes": _lanes(registry, state)}
+            "lanes": _lanes(registry, state), "chrome_account": chrome_account(registry.directory)}
 
 
 def _lanes(registry, state) -> list[dict]:
@@ -777,6 +777,11 @@ VIEW_OPS = ("frame", "click", "move", "type", "key", "scroll", "go", "back", "fo
 OWN_OPS = ("frame", "input", "go", "back", "forward", "reload", "new_tab", "tab", "close_tab", "size", "close",
            "selection")          # the text selected on your page, for your editor's clipboard (Copy, Cut)
 OPEN_KEY = "your_browser_open"      # metadata: the person's "Open Your Browser" asks, for the supervisor (newest last)
+CLEAR_KEY = "your_browser_clear"    # metadata: the person's Clear browsing data ask, for the supervisor (API 112)
+CLEARED_KEY = "your_browser_cleared"    # metadata: what the supervisor did with it, by the ask's id
+CLEAR_WAIT_SECONDS = 60             # Chrome closed, its files cleared and Chrome open again: well within this
+CLEAR_POLL_SECONDS = 0.25
+_nap = time.sleep                   # (between two looks for the supervisor's answer)
 STATE_KEY = "your_browser_state"    # metadata: what the supervisor says of it: {open, tabs, lanes, error, at}
 VIEW_KEY = "your_browser_view"      # metadata: its view socket ({socket, token}), while it runs
 MAX_ASKS = 5
@@ -906,6 +911,59 @@ def open_window(registry, request) -> dict:
             "view": view}
 
 
+def _clear_kinds(request) -> list[str]:
+    """What the person ticked (history, sign_ins, passwords: each true or false, at least one true), checked."""
+    for name in CLEAR_KINDS:
+        value = request.get(name)
+        if value is not None and type(value) is not bool:
+            raise RegistryError("invalid_request", f"{name} is true or false.")
+    kinds = [name for name in CLEAR_KINDS if request.get(name) is True]
+    if not kinds:
+        raise RegistryError("invalid_request", "Choose what to clear: browsing history, sign-ins or saved passwords.")
+    return kinds
+
+
+def clear(registry, request) -> dict:
+    """clear_your_browser {history, sign_ins, passwords} (API 112, the person's own ask, local only): clears what was
+    ticked from DGC's own profile for Your Browser. Chrome's files are cleared only with Chrome stopped, so with the Pips
+    runner on (it owns Your Browser's Chrome) the supervisor closes it, clears and opens it again if it was open; with
+    the runner off nothing of DGC's runs Chrome and it is cleared here at once (never under a Chrome that still holds
+    the profile). Answers {ok, cleared, reopened, chrome_account}."""
+    kinds = _clear_kinds(request)
+    account = chrome_account(registry.directory)
+    if not _runner_live(registry):
+        if _profile_in_use(registry.directory):
+            raise RegistryError("busy", "Your Browser is still open on this computer. Close it, then clear again.")
+        return {"ok": True, "cleared": clear_profile(registry.directory, kinds), "reopened": False, "chrome_account": account}
+    import secrets
+    ask = {"id": secrets.token_hex(8), **{name: name in kinds for name in CLEAR_KINDS}, "at": registry.clock()}
+    with registry.transaction():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (CLEAR_KEY, json.dumps(ask)))
+    deadline = time.monotonic() + CLEAR_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (CLEARED_KEY,)).fetchone()
+        try:
+            said = json.loads(row[0]) if row else None
+        except (TypeError, ValueError):
+            said = None
+        if isinstance(said, dict) and said.get("id") == ask["id"]:
+            with registry.transaction():
+                registry.db.execute("DELETE FROM metadata WHERE key=?", (CLEARED_KEY,))
+            if said.get("ok") is not True:
+                raise RegistryError("clear_failed", str(said.get("error") or "Your Browser couldn't clear that.")[:400])
+            return {"ok": True, "cleared": [k for k in CLEAR_KINDS if k in (said.get("cleared") or [])],
+                    "reopened": said.get("reopened") is True, "chrome_account": account}
+        _nap(CLEAR_POLL_SECONDS)
+    raise RegistryError("timeout", "Your Browser didn't answer in time, so it may not have cleared everything. Try again.")
+
+
+def answer_clear(registry, ask_id, result: dict) -> None:
+    """The supervisor's answer to a Clear browsing data ask, for the editor's side waiting on it."""
+    with registry.transaction():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                            (CLEARED_KEY, json.dumps({**result, "id": str(ask_id or "")[:40]})))
+
+
 def recent(registry) -> dict:
     """get_your_browser_recent (API 107): the last links the person visited in Your Browser (their own tabs only, never
     a Pip's lane), the newest first: titles and addresses, for Home's Browser card; the Pips' lanes, which the dock's
@@ -918,17 +976,27 @@ def recent(registry) -> dict:
     state = _state(registry)
     return {"links": recent_links(registry.directory, RECENT_SHOWN), "open": state.get("open") is True,
             "available": available, "reason": reason, "lanes": _lanes(registry, state),
-            "install": _offer(registry.directory, available, reason), "view": _view_here()}
+            "install": _offer(registry.directory, available, reason), "view": _view_here(),
+            "chrome_account": chrome_account(registry.directory)}
 
 
-def _view_socket(registry, request: dict) -> dict:
-    """One request to the supervisor's view socket (its token from the registry); its reply."""
+def view_endpoint(registry) -> dict | None:
+    """The supervisor's view socket for Your Browser ({socket, token}) while it runs, else None. For the editor's side
+    only: the token never leaves the backend."""
     row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (VIEW_KEY,)).fetchone()
     try:
         endpoint = json.loads(row[0]) if row else None
     except (TypeError, ValueError):
         endpoint = None
     if not isinstance(endpoint, dict) or not isinstance(endpoint.get("socket"), str):
+        return None
+    return {"socket": endpoint["socket"], "token": str(endpoint.get("token", ""))}
+
+
+def _view_socket(registry, request: dict) -> dict:
+    """One request to the supervisor's view socket (its token from the registry); its reply."""
+    endpoint = view_endpoint(registry)
+    if endpoint is None:
         return {"ok": False, "closed": True, "error": "Your Browser is closed. Open it from the dock."}
     try:
         with socket.socket(socket.AF_UNIX) as client:
@@ -994,11 +1062,13 @@ def control(registry, command: str, request: dict, actor: str) -> dict:
         return view_call(registry, request, actor)
     if command == "install_google_chrome":
         return install_chrome(registry)
+    if command == "clear_your_browser":
+        return clear(registry, request)
     raise RegistryError("unsupported_command", "This runner does not support that Pip command.")
 
 
 COMMANDS = frozenset({"get_your_browser", "set_your_browser_site", "sign_out_your_browser_site", "open_your_browser",
-                      "use_your_browser_view", "get_your_browser_recent", "install_google_chrome"})
+                      "use_your_browser_view", "get_your_browser_recent", "install_google_chrome", "clear_your_browser"})
 COMMAND_ARGS = {
     "get_your_browser": set(),
     "get_your_browser_recent": set(),
@@ -1008,6 +1078,7 @@ COMMAND_ARGS = {
     "use_your_browser_view": {"op", "x", "y", "text", "key", "dy", "url", "pip_id",
                               "own", "seq", "events", "tab", "width", "height"},
     "install_google_chrome": set(),
+    "clear_your_browser": {"history", "sign_ins", "passwords"},
 }
 
 
@@ -1035,6 +1106,11 @@ def profile_prefs(profile: Path) -> bool:
         return True
     except (OSError, ValueError):
         return False
+
+
+# --------------------------------------------------------------------------- Clear browsing data (API 112)
+# What it clears, and how, is in its own module (your_browser_clear): only ever DGC's own profile for Your Browser.
+from .your_browser_clear import CLEAR_KINDS, chrome_account, clear_profile, _profile_in_use  # noqa: E402,F401
 
 
 # --------------------------------------------------------------------------- what each lane sent
@@ -1213,6 +1289,7 @@ from .pip_computer_box import (PERSON, BoxError, BoxedBrowser, HeldWrite, _PageC
                                _PIPE_EXEC)
 
 IDLE_SECONDS = 15 * 60          # no Pip lane and no window of the person's: it closes (its profile stays)
+CLOSE_SECONDS = 4.0             # how long a closing Chrome is given to close by itself before it is stopped
 FRAME_SECONDS = 0.25            # the streamed tab gets at most four pictures a second
 FRESH_SECONDS = 1.0             # a screencast frame this new is the lane as it is
 CAST_SECONDS = 10.0             # a lane nobody has looked at for this long stops being cast
@@ -1284,6 +1361,85 @@ def start_virtual_screen(which=shutil.which):
             proc.terminate()
             return None
     return None
+
+
+# Where the computer has no screen, Your Browser's screen is the program a Pip's computer draws on (TigerVNC's Xtigervnc):
+# an X screen that is also a VNC screen, so the editor's tab shows it with the Pip computer's own viewer and stream (the
+# picture as it changes, the person's own mouse and keys straight to it), never a picture asked for at a time. It is
+# Chrome's real window: its tabs, address bar, menus, dropdowns and password manager. It listens on one Unix socket in
+# this user's private socket folder (mode 0600), never a port; the supervisor's view socket joins the editor to it.
+# One of the screen's pixels for each of the page's, as a Pip's computer draws (measured 22 Nov in the editor's tab, the
+# same page size: 35 pictures a second scrolling and 32 for a video at this, 15 and 10 at twice the pixels, for the
+# same bytes; a click or a key shows in about 30 ms at both). The plain screen's pictures stay at SCREEN_SCALE.
+VNC_SCALE = 1
+VNC_START_SECONDS = 6
+SCREEN_IDLE_SECONDS = 6 * 3600  # a screen stream with nothing on it for this long ends (the tab opens it again)
+LANE_GAP = 400                  # how far left of the screen's edge a Pip's lane window sits, so it is never on it
+
+
+def vnc_program() -> Path | None:
+    """The program a Pip's computer draws its screen with (Xtigervnc: DGC's own downloaded copy first, else the
+    system's), or None where there is neither (then Your Browser's screen is a plain one and its tab shows pictures)."""
+    try:
+        from . import pip_screen
+        found = pip_screen.components()["found"].get("vnc")
+    except Exception:                        # noqa: BLE001 - no program: the plain screen and pictures, as before
+        return None
+    return Path(found) if found else None
+
+
+def screen_pixels(size) -> tuple[int, int]:
+    """The VNC screen's pixels for a page of ``size`` (the editor tab's), drawn at VNC_SCALE."""
+    return int(size[0]) * VNC_SCALE, int(size[1]) * VNC_SCALE
+
+
+def start_vnc_screen(size=None, *, program=None, popen=subprocess.Popen, folder=None, x11=Path("/tmp/.X11-unix")):
+    """Your Browser's own VNC screen: (":N", its process, its socket), or None when there is no program or it didn't come
+    up. Its own display number, never one another program holds; its pictures and the person's input only through its
+    one socket (no TCP at all, no password: the socket's folder and mode are the door, this user's only)."""
+    program = Path(program) if program is not None else vnc_program()
+    if program is None:
+        return None
+    if folder is None:
+        from .pip_computer import socket_dir
+        folder = socket_dir()
+    width, height = screen_pixels(size or OWN_SIZE)
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    from . import browser_setup
+    libs = browser_setup.library_path(program)             # DGC's own copy brings its libraries
+    if libs:
+        env["LD_LIBRARY_PATH"] = libs
+    for number in range(140, 200):
+        if (Path(x11) / f"X{number}").exists() or Path(f"/tmp/.X{number}-lock").exists():
+            continue
+        sock = Path(folder) / f"yb-{os.getpid()}-{number}.vnc"
+        try:
+            sock.unlink()
+        except OSError:
+            pass
+        # (-terminate: it ends by itself once its last window program, Chrome, is gone, even when the supervisor that
+        # started it was stopped without closing it.)
+        argv = [str(program), f":{number}", "-geometry", f"{width}x{height}", "-depth", "24", "-SecurityTypes", "None",
+                "-AlwaysShared", "-rfbunixpath", str(sock), "-rfbunixmode", "0600", "-rfbport", "-1",
+                "-nolisten", "tcp", "-terminate", "-desktop", "Your Browser"]
+        try:
+            proc = popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        except OSError:
+            return None
+        deadline = time.monotonic() + VNC_START_SECONDS
+        while time.monotonic() < deadline:
+            if (Path(x11) / f"X{number}").exists() and sock.exists():
+                return f":{number}", proc, sock
+            if proc.poll() is not None:
+                break                            # someone took the number first: the next one
+            time.sleep(0.05)
+        else:
+            proc.terminate()
+            return None
+    return None
+
+
 OWN_MOST = (3840, 2400)
 # What Chrome needs from this computer's environment, and nothing else (never a key or token the supervisor holds): the
 # screen it draws on, the session bus the computer's password store answers on, the language and the time zone.
@@ -1330,7 +1486,7 @@ def store_unlocked(env: dict, *, run=subprocess.run, which=shutil.which) -> bool
 
 
 def chrome_argv(chrome, profile: Path, url: str = "", place: dict | None = None, test_flags=(), *,
-                headless: bool = False, own_store: bool = False, virtual: bool = False) -> list[str]:
+                headless: bool = False, own_store: bool = False, virtual: bool = False, scale: int = SCREEN_SCALE) -> list[str]:
     """Full Google Chrome as the person's own window: DGC's profile, its DevTools over a pipe only DGC holds (never a
     port another program could reach), and nothing turned off. Its sandbox, sync, extensions, saved passwords and the
     computer's password store all stay on; it isn't marked as automated (Google's sign-in refuses a browser that is).
@@ -1339,12 +1495,14 @@ def chrome_argv(chrome, profile: Path, url: str = "", place: dict | None = None,
     computer's password store locked or unknown (store_unlocked), Chrome keeps sign-ins with its own built-in key from
     the start instead of asking the store to unlock, which nobody can answer there: every start waited ~21-25 s for it
     (Chrome 158, 18 Nov) and then did the same."""
+    # --test-type: Chrome otherwise puts "You are using an unsupported command-line flag" across the top of every
+    # start for the flag that keeps it from being marked as automated; it keeps only Chrome's start-up bars away.
     argv = [str(chrome), "--remote-debugging-pipe", f"--user-data-dir={profile}", "--no-first-run",
-            "--no-default-browser-check", "--disable-blink-features=AutomationControlled", *test_flags]
+            "--no-default-browser-check", "--disable-blink-features=AutomationControlled", "--test-type", *test_flags]
     if headless and virtual:
         # A real window on its own screen (start_virtual_screen), streamed like a headless one.
         argv += ["--window-position=0,0", f"--window-size={OWN_SIZE[0]},{OWN_SIZE[1]}",
-                 f"--force-device-scale-factor={SCREEN_SCALE}"]
+                 f"--force-device-scale-factor={scale}"]
         if own_store:
             argv.append("--password-store=basic")
     elif headless:
@@ -1435,6 +1593,7 @@ class HostBrowser(BoxedBrowser):
         self.on_info, self.on_frame = on_info, on_frame
         self.test_flags = tuple(test_flags)
         self.start_url, self.start_place, self.headless = "", None, False
+        self.screen_socket: Path | None = None  # its VNC screen's socket, when it draws on one (start_vnc_screen)
         self.infos: dict[str, dict] = {}        # targetId -> {url, title, openerId}: what Chrome says of each tab
         self.born: dict[str, int] = {}          # targetId -> the order DGC first heard of it (the tabs' row, in order)
 
@@ -1456,14 +1615,17 @@ class HostBrowser(BoxedBrowser):
             else:
                 env = {**env, "DISPLAY": screen[0]}
                 env.pop("WAYLAND_DISPLAY", None)
+                self.screen_socket = Path(screen[2]) if len(screen) > 2 and screen[2] else None
         try:
             proc, pipe = self.launch_with(chrome_argv(self.binary, self.profile, self.start_url, self.start_place,
                                                       self.test_flags, headless=self.headless, own_store=own_store,
-                                                      virtual=screen is not None),
+                                                      virtual=screen is not None,
+                                                      scale=VNC_SCALE if self.screen_socket is not None else SCREEN_SCALE),
                                           env, self.log_path)
         except BaseException:
             if screen is not None:
                 screen[1].terminate()
+                self.screen_socket = None
             raise
         self._box, self._pipe = _Running(proc, pipe, screen[1] if screen else None), pipe
         try:
@@ -1604,11 +1766,39 @@ class YourBrowserHost:
         self.own_wait = OWN_WAIT_SECONDS
         self.frame_ready = threading.Condition(threading.Lock())
         self._followed: set[str] = set()
+        # Its VNC screen, where it has one: how many editor tabs show it now, and the pages a Pip's lane opened, to be
+        # moved off it (only the person's own window is ever on it).
+        self.screen_viewers = 0
+        self._off_screen_due: set[str] = set()
+        self._off_screen: set[str] = set()
 
     # -- running -------------------------------------------------------------------------------------
 
     def running(self) -> bool:
         return self.browser is not None and self.browser.alive()
+
+    def screen_socket(self) -> Path | None:
+        """Its VNC screen's own socket while Chrome draws on one (no screen here: the editor's tab shows that screen);
+        None everywhere else (its window beside the editor, a plain screen, headless)."""
+        browser = self.browser
+        if browser is None or not self.headless or not browser.alive():
+            return None
+        return getattr(browser, "screen_socket", None)
+
+    def screen_opened(self) -> None:
+        """An editor tab shows its screen now: while one does, it is being looked at (never closed for being idle)."""
+        with self.lock:
+            self.screen_viewers += 1
+            self.own_viewed = self.clock()
+
+    def screen_closed(self) -> None:
+        with self.lock:
+            self.screen_viewers = max(0, self.screen_viewers - 1)
+            self.own_viewed = self.clock()
+
+    def person_input(self) -> None:
+        """The person's own hand on its screen (a click, a key): their tab is in use."""
+        self.own_viewed = self.clock()
 
     def _new_browser(self) -> HostBrowser:
         chrome = self.chrome or find_chrome()[0]
@@ -1638,10 +1828,14 @@ class YourBrowserHost:
                 self.headless = bool(headless or not has_screen())
                 self.browser.start_url, self.browser.start_place = url, None if self.headless else place
                 self.browser.headless = self.headless
-                # No screen here: a real Chrome on a screen of its own where Xvfb is (start_virtual_screen).
-                self.browser.virtual = (self.headless and str(self.platform).startswith("linux")
-                                        and bool(self.which("Xvfb")))
-                self.browser.start_screen = lambda: start_virtual_screen(self.which)
+                # No screen here: a real Chrome on a screen of its own. The Pip computer's VNC screen where its program is
+                # here (the editor's tab then shows it as a Pip's computer is shown), else a plain one where Xvfb is
+                # (start_virtual_screen: pictures, as before).
+                linux = str(self.platform).startswith("linux")
+                vnc = vnc_program() if self.headless and linux else None
+                self.browser.virtual = self.headless and linux and bool(vnc or self.which("Xvfb"))
+                self.browser.start_screen = lambda: ((start_vnc_screen(self.own_size, program=vnc) if vnc else None)
+                                                     or start_virtual_screen(self.which))
                 try:
                     self.browser.start()
                 except (BoxError, BrowserError, OSError) as error:
@@ -1772,8 +1966,33 @@ class YourBrowserHost:
                     pass
         if self.browser is not None and self.browser.lane_sent is not None:
             self.browser.lane_sent.flush_due()
+        for target in list(self._off_screen_due):
+            self._off_screen_due.discard(target)
+            self._move_off_screen(target)
         self.refresh()
         self.recent.write_due()
+
+    def _move_off_screen(self, target: str) -> None:
+        """A page a Pip's lane opened (a popup in a window of its own) never stays on the person's VNC screen: its window
+        goes left of the screen's edge, where nobody sees or drives it from the editor's tab."""
+        if target in self._off_screen or self.browser is None or self.screen_socket() is None:
+            return
+        self._off_screen.add(target)
+        while len(self._off_screen) > 400:
+            self._off_screen.pop()
+        try:
+            got = self.browser._browser_call("Browser.getWindowForTarget", {"targetId": target}, timeout=5)
+            window, bounds = got.get("windowId"), got.get("bounds") or {}
+            if window is None:
+                return
+            width = int(bounds.get("width") or self.own_size[0])
+            if int(bounds.get("left") or 0) + width <= 0:
+                return                             # (already off it: a lane's own window)
+            self.browser._browser_call("Browser.setWindowBounds", {"windowId": window, "bounds": {"windowState": "normal"}})
+            self.browser._browser_call("Browser.setWindowBounds", {"windowId": window, "bounds": {
+                "left": -(width + LANE_GAP), "top": 0}})
+        except (BrowserError, socket.timeout, OSError, TypeError, ValueError):
+            pass
 
     def close(self) -> None:
         with self.lock:
@@ -1782,16 +2001,33 @@ class YourBrowserHost:
                     self.browser._fire("Browser.close")
                 except OSError:
                     pass
+                # A moment for Chrome to close by itself: it saves what it still holds (the last pages' history) as
+                # it does, which stopping it at once loses.
+                proc = getattr(self.browser._box, "proc", None)
+                if proc is not None and hasattr(proc, "wait"):
+                    try:
+                        proc.wait(timeout=CLOSE_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        pass
             self._drop()
             self.recent.write_due(force=True)
 
     def _drop(self) -> None:
         browser, self.browser = self.browser, None
         if browser is not None:
+            sock = getattr(browser, "screen_socket", None)
             try:
                 browser._cleanup()
             except Exception:                    # noqa: BLE001 - it is gone either way
                 pass
+            if sock is not None:
+                browser.screen_socket = None
+                try:
+                    Path(sock).unlink()          # (its screen stopped with it: the socket file is all that is left)
+                except OSError:
+                    pass
+        self._off_screen_due.clear()
+        self._off_screen.clear()
         self.frames.clear()
         self.casting.clear()
         self.acks.clear()
@@ -1842,8 +2078,14 @@ class YourBrowserHost:
             browser = self.browser
             target = self.lane_of(pip_id)
             if target is None:
-                target = str(browser._browser_call("Target.createTarget", {"url": "about:blank", "background": True})
-                             .get("targetId", ""))
+                made = {"url": "about:blank", "background": True}
+                if self.screen_socket() is not None:
+                    # On the VNC screen the editor's tab shows, only the person's own window is there: a lane is a
+                    # window of its own left of the screen's edge, never a tab in theirs (the dock's Watch shows it).
+                    width, height = self.own_size
+                    made.update(newWindow=True, left=-(width + LANE_GAP), top=0, width=width, height=height)
+                target = str(browser._browser_call("Target.createTarget", made).get("targetId", ""))
+                self._off_screen.add(target)
                 browser._wait_attached(target)
                 browser._opened.add(target)
                 browser._make_lane(target, pip_id, grants)
@@ -1858,7 +2100,11 @@ class YourBrowserHost:
     def _noticed(self, target: str, visit: bool = True) -> None:
         """Chrome said a tab's address or title: the person's own visits are kept for Home's card, never a lane's."""
         browser = self.browser
-        if browser is None or browser.whose(target) != PERSON:
+        if browser is None:
+            return
+        if browser.whose(target) != PERSON:
+            if target not in self._off_screen and getattr(browser, "screen_socket", None) is not None and self.headless:
+                self._off_screen_due.add(target)   # (moved between reads of the pipe, never inside one)
             return
         info = browser.infos.get(target, {})
         url = info.get("url")
@@ -2076,6 +2322,22 @@ class YourBrowserHost:
         except (BrowserError, socket.timeout, OSError):
             pass
 
+    def _fill_screen(self, target) -> None:
+        """Chrome's window over the whole VNC screen at the editor tab's size (the tab's viewer asks the screen for the
+        same size, in its pixels): Chrome's own bar, tabs and page, laid out for the tab."""
+        if not target:
+            return
+        width, height = self.own_size
+        try:
+            window = self.browser._browser_call("Browser.getWindowForTarget", {"targetId": target}, timeout=5).get("windowId")
+            if window is None:
+                return
+            self.browser._browser_call("Browser.setWindowBounds", {"windowId": window, "bounds": {"windowState": "normal"}})
+            self.browser._browser_call("Browser.setWindowBounds", {"windowId": window, "bounds": {
+                "left": 0, "top": 0, "width": width, "height": height}})
+        except (BrowserError, socket.timeout, OSError):
+            pass
+
     def _ensure_own_cast(self, target) -> None:
         """A screencast of the person's own tab, every frame, sized to the editor tab: started once per tab and size."""
         if target is None or target not in self.browser._attached:
@@ -2114,7 +2376,10 @@ class YourBrowserHost:
                 refused = self._own_act(op, self.own_tab(), fields)
             except (BrowserError, socket.timeout, OSError, ValueError) as error:
                 return {"ok": False, "error": str(error)[:300] or "Your Browser didn't answer.", **self._own_state()}
-            return {"ok": not refused, **({"error": refused} if refused else {}), **self._own_state()}
+            # (On its VNC screen, the size answers how many of the screen's pixels Chrome draws each of the page's with:
+            # the editor's tab asks the screen for its own size times that.)
+            scale = {"scale": VNC_SCALE} if op == "size" and self.screen_socket() is not None else {}
+            return {"ok": not refused, **({"error": refused} if refused else {}), **self._own_state(), **scale}
 
     def _own_frame(self, seq: int) -> dict:
         with self.lock:
@@ -2271,6 +2536,9 @@ class YourBrowserHost:
             if type(width) is not int or type(height) is not int:
                 return "The editor tab's size is its width and height."
             self.own_size = (max(320, min(OWN_MOST[0], width)), max(240, min(OWN_MOST[1], height)))
+            if self.screen_socket() is not None:
+                self._fill_screen(target)          # (its screen streams itself: no pictures to make)
+                return ""
             self._ensure_own_cast(target)
             return ""
         if op == "new_tab":
@@ -2361,6 +2629,34 @@ class YourBrowserHost:
         else:
             browser.drop(held.request_id)
 
+    # -- Clear browsing data (API 112) -----------------------------------------------------------------
+
+    def clear(self, kinds) -> dict:
+        """Clear browsing data, the person's own ask: Chrome is closed first (its files are only ever cleared with it
+        stopped), then the kinds asked go from DGC's profile, then it opens again as it was (its window, or your tab in
+        the editor), with a new tab of yours. Home's last links are forgotten here too for history, never written back."""
+        with self.lock:
+            was_open, headless = self.running(), self.headless
+            pid = getattr(getattr(self.browser._box, "proc", None), "pid", None) if was_open else None
+            real = was_open and hasattr(getattr(self.browser._box, "proc", None), "wait")
+            if was_open:
+                self.close()
+                if real and pid:
+                    _wait_group_gone(pid)          # (its helpers too: the network process holds the cookies)
+            elif self.browser is not None:
+                self._drop()
+            cleared = clear_profile(self.directory, kinds)
+            if "history" in cleared:
+                self.recent.links, self.recent.dirty = [], False
+            reopened = False
+            if was_open:
+                try:
+                    self.open("", None, headless=headless)
+                    reopened = True
+                except (RegistryError, BoxError, BrowserError, OSError) as error:
+                    self.error = str(error)[:400]
+            return {"ok": True, "cleared": cleared, "reopened": reopened}
+
     # -- now and then (the supervisor's tick) --------------------------------------------------------
 
     def tick(self, registry) -> None:
@@ -2375,7 +2671,7 @@ class YourBrowserHost:
             if self.headless:
                 # Headless, the person's tabs are always there: what keeps it open is the editor tab watching them
                 # (or a Pip's lane). Nobody watching for 15 minutes, it closes (the profile stays).
-                if not self.lanes() and self.clock() - self.own_viewed >= IDLE_SECONDS:
+                if not self.lanes() and not self.screen_viewers and self.clock() - self.own_viewed >= IDLE_SECONDS:
                     self.close()
                 self._publish(registry)
                 return
@@ -2478,6 +2774,25 @@ class ViewServer:
                 request = json.loads(raw.decode("utf-8"))
                 if not isinstance(request, dict) or not secrets.compare_digest(str(request.get("token", "")), self.token):
                     reply = {"ok": False, "error": "refused"}
+                elif request.get("op") == "screen":
+                    # Your own window on its VNC screen (no screen here): after one line of reply the connection is the
+                    # editor tab's stream, joined to that screen's socket as a Pip computer's viewer is to its own. Only
+                    # your own (never with a Pip), and only where it draws on such a screen; elsewhere, pictures.
+                    path = self.host.screen_socket() if request.get("own") is True and "pip_id" not in request else None
+                    if request.get("own") is not True or "pip_id" in request:
+                        reply = {"ok": False, "error": "refused"}
+                    elif path is None:
+                        reply = {"ok": False, "pictures": True, "error": "Your Browser shows pictures of your tab here."}
+                    else:
+                        client.sendall(b'{"ok": true}\n')
+                        from .pip_screen import splice
+                        self.host.screen_opened()
+                        try:
+                            splice(client, Path(path), watching=lambda: False, on_input=self.host.person_input,
+                                   idle_seconds=SCREEN_IDLE_SECONDS)
+                        finally:
+                            self.host.screen_closed()
+                        return
                 elif request.get("own") is True:
                     # The person's own tab: the editor's own side asked (view_call let only the person through).
                     reply = (self.host.view_own(str(request["op"]), request) if request.get("op") in OWN_OPS
@@ -2500,6 +2815,19 @@ class ViewServer:
             self.path.unlink()
         except OSError:
             pass
+
+
+def _wait_group_gone(pid: int, seconds: float = 8.0) -> None:
+    """Until every process of Chrome's group (it started its own session) has exited, or ``seconds`` pass."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(int(pid), 0)
+        except (ProcessLookupError, PermissionError, ValueError):
+            return
+        except OSError:
+            return
+        time.sleep(0.05)
 
 
 HOSTS: dict[str, YourBrowserHost] = {}
@@ -2526,10 +2854,27 @@ def tick(registry) -> None:
             asks = [a for a in json.loads(row[0]) if isinstance(a, dict)][-MAX_ASKS:]
         except (TypeError, ValueError):
             asks = []
+    # Clear browsing data (API 112) first: the person waits on it, and an open asked with it comes after.
+    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (CLEAR_KEY,)).fetchone()
+    cleaning = None
+    if row is not None:
+        with registry.transaction():
+            registry.db.execute("DELETE FROM metadata WHERE key=?", (CLEAR_KEY,))
+        try:
+            cleaning = json.loads(row[0])
+        except (TypeError, ValueError):
+            cleaning = None
+        cleaning = cleaning if isinstance(cleaning, dict) else None
     key = str(Path(registry.directory))
-    if not asks and key not in HOSTS:
+    if not asks and cleaning is None and key not in HOSTS:
         return
     host = host_for(registry.directory)
+    if cleaning is not None:
+        try:
+            result = host.clear([name for name in CLEAR_KINDS if cleaning.get(name) is True])
+        except (RegistryError, BoxError, BrowserError, OSError) as error:
+            result = {"ok": False, "error": str(error)[:400] or "Your Browser couldn't clear that."}
+        answer_clear(registry, cleaning.get("id"), result)
     for ask in asks:
         place = ask.get("place") if isinstance(ask.get("place"), dict) else None
         try:

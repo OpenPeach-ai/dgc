@@ -68,3 +68,14 @@ test('Your Browser, API 107: the recent links, the editor\'s bounds and frames, 
   assert.deepEqual([own.request.own, own.request.seq], [true, 3]);
   assert.equal((await current.session.pips.mutate('install_google_chrome', {}, { approved: true })).request.type, 'install_google_chrome');
 });
+
+test('Your Browser, API 112: Clear browsing data, refused before 112, then sent', async () => {
+  assert.deepEqual([...COMMAND_FIELDS.clear_your_browser].sort(), ['history', 'passwords', 'sign_ins']);
+  const older = fixture(111);
+  await assert.rejects(older.session.pips.mutate('clear_your_browser', { history: true }, { approved: true }),
+    (e) => e instanceof DGCUnsupportedError && /API 112/.test(e.message));
+  assert.equal(older.calls.length, 0);
+  const current = fixture(112);
+  const sent = await current.session.pips.mutate('clear_your_browser', { history: true, sign_ins: false, passwords: true }, { approved: true });
+  assert.deepEqual([sent.request.type, sent.request.history, sent.request.sign_ins, sent.request.passwords], ['clear_your_browser', true, false, true]);
+});

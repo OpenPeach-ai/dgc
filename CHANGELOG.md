@@ -13,6 +13,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   by that at its next look. It is pinned to its project: a new chat there carries on from the first item not done,
   Work lists it with how far along it is, and `/goal checklist` runs from it item by item, ending when every item is
   Done or stopping when one needs you (it says which and why).
+- **Your Browser over Remote-SSH is as quick as a Pip's computer**: where the computer has no screen, its Chrome draws
+  on the same kind of screen a Pip's computer uses, and the editor's tab streams it the same way, with no wait for each
+  picture. It is Chrome's real window (its tabs, address bar, menus, dropdowns and password manager). A Pip's tab opens
+  in a window of its own, off that screen. Without that screen program here it is as before.
+- **Clear browsing data in Your Browser** (`clear_your_browser`, Pips API 112): browsing history, sign-ins (cookies and
+  site data) or saved passwords, only from DGC's own profile for it. Your Browser closes and opens again to clear them.
 - **Showing a dashboard no longer adds a "Page" beside it in the Library**: its view, served to show it, was taken for
   a page of its own with the dashboard's name. Ones made that way go to DGC's trash, where they can be recovered.
 - **One artifact per name**: asked to change something it made, a model changes that one (a new version you can go

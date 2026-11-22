@@ -89,7 +89,7 @@ _MAX_PIPS_PENDING = 64
 # URI) and nothing else, or a list of nothing but those, is passed as it is; anything else in the field is redacted
 # like every other field.
 _BINARY_EVENT_FIELDS = {"voice_audio": ("audio",), "pip_desktop_data": ("data",), "tool_images": ("images",),
-                        "image": ("image",)}
+                        "image": ("image",), "your_browser_screen_data": ("data",)}
 _BASE64 = re.compile(r"(?:data:image/[A-Za-z0-9.+-]+;base64,)?[A-Za-z0-9+/]*={0,2}\Z")
 
 
@@ -654,7 +654,16 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # chat shows, so apply/discard/undo_pip_project_change in either place are one), list_pip_jobs {pip_id} (R: jobs),
 # start_pip_job and decline_pip_job {pip_id, job_id} (M: R job). list_pip_messages carries `asking_jobs` and a reply's
 # `pip_jobs` (the jobs it handed other Pips). The older handoff_to_pip is no longer offered. Local only.
-PIPS_API_VERSION = 111
+# API 112 (0.52, Clear browsing data in Your Browser): clear_your_browser {history, sign_ins, passwords}
+# (M, local only, at least one true) clears what was ticked from DGC's own profile for Your Browser, never the person's
+# own Chrome: history (pages visited, the downloads list, Home's last links), sign_ins (cookies and site data) and
+# passwords (Chrome's saved passwords there). Chrome's files are cleared only with Chrome stopped: with the runner on, the
+# supervisor closes it, clears and opens it again if it was open. Answers {ok, cleared, reopened, chrome_account}.
+# get_your_browser and get_your_browser_recent gain `chrome_account` (Chrome is signed in to a Google account there: with
+# sync on, the account keeps its own copy). Also in 0.52 (capability your_browser_screen): where there is no screen,
+# Your Browser's own tab streams Chrome's real window on a VNC screen of its own over your_browser_screen /
+# your_browser_screen_data, as a Pip computer's screen streams; Pip lanes there open in a window off that screen.
+PIPS_API_VERSION = 112
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}
@@ -3273,6 +3282,9 @@ class Backend:
                           "pips_desktop": 1,
                           # pip_desktop open takes `number`: which of the Pip's computers (Pips API 86).
                           "pips_desktop_numbers": 1,
+                          # Your Browser's own tab (no screen here) streams Chrome's real window over
+                          # your_browser_screen / your_browser_screen_data, as a Pip computer's screen does.
+                          "your_browser_screen": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
                           "troupe": 1,
                           # /learn (dgc/skill_learn.py): learn_skill drafts a skill (skill_draft), save_skill writes
@@ -6473,9 +6485,10 @@ class Backend:
         # Its background shells are killed below, and their ends are news to nobody now: a closed
         # chat publishes no more task lists.
         self._background_shells_on = False
-        streams = self.__dict__.get("_desktop_streams")
-        if streams is not None:
-            streams.close_all()
+        for name in ("_desktop_streams", "_your_browser_screens"):
+            streams = self.__dict__.get(name)
+            if streams is not None:
+                streams.close_all()
         inspection = getattr(self, "_editor_inspection", None)
         if inspection is not None:
             inspection.close()
@@ -8258,7 +8271,9 @@ class Backend:
         except RegistryError as exc:
             self._pips_failure(cmd, exc.code, str(exc))
             return
-        if detached.get("type") == "pips_control" and detached["request"].get("type") == "use_your_browser_view":
+        if detached.get("type") == "pips_control" and detached["request"].get("type") in ("use_your_browser_view",
+                                                                                         "clear_your_browser"):
+            # (Clear browsing data waits for Chrome to close and open again: never in front of the other Pip controls.)
             self._your_browser_view(detached)
             return
         # Separate from chat's foreground worker: jobs never mutate its Agent.
@@ -8351,6 +8366,30 @@ class Backend:
             streams = self.__dict__.get("_desktop_streams")
             if streams is None:
                 streams = self._desktop_streams = DesktopStreams(self.em.emit, self.config)
+        streams.handle(cmd)
+
+    def _your_browser_screen(self, cmd):
+        """Your Browser's own tab, streamed where this computer has no screen: refused exactly where Pips controls are,
+        and where it has a screen (its window beside the editor is the way). One stream, the person's own window."""
+        from .sandbox import AGENT_SHELL
+        from .pip_access import restricted, MESSAGE
+        from . import your_browser
+        refusal = ("This chat closed." if getattr(self, "_pips_closing", False)
+                   else AGENT_SHELL_PIPS_REFUSAL if os.environ.get(AGENT_SHELL) == "1"
+                   else MESSAGE if restricted(self.config)
+                   else "Pips are off." if self.config.get("pips_enabled", False) is not True
+                   else "On this computer Your Browser is its own window beside the editor." if your_browser.has_screen()
+                   else "")
+        if refusal:
+            if cmd.get("op") == "open":
+                self.em.emit("your_browser_screen_closed", reason=refusal[:300], pictures=False)
+            return
+        from .pip_screen_stream import YourBrowserScreen
+        lock = self.__dict__.setdefault("_pips_command_lock", threading.Lock())
+        with lock:
+            streams = self.__dict__.get("_your_browser_screens")
+            if streams is None:
+                streams = self._your_browser_screens = YourBrowserScreen(self.em.emit, self.config)
         streams.handle(cmd)
 
     def _pips_policy_refusal(self, cmd):
@@ -8776,6 +8815,10 @@ class Backend:
 
         if t == "pip_desktop":
             self._pip_desktop(cmd)
+            return
+
+        if t == "your_browser_screen":
+            self._your_browser_screen(cmd)
             return
 
         if t in ("images_list", "images_update", "images_generate", "images_library"):

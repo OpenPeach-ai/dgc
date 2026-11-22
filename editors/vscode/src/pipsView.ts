@@ -68,7 +68,11 @@ export function pipJobsRefusal(request: any, apiVersion: number): string {
  *  editor_bounds?}), Home's card reads the newest of your own tabs (get_your_browser_recent {}), and its Install button
  *  installs Google Chrome through the system's own password prompt (install_google_chrome {}). Only those fields; a Pip's
  *  own tab opens through its own editor tab, never from here. An older DGC is sent none of them. */
-export const YOUR_BROWSER_HOME_COMMANDS = ['open_your_browser', 'get_your_browser_recent', 'install_google_chrome'];
+export const YOUR_BROWSER_HOME_COMMANDS = ['open_your_browser', 'get_your_browser_recent', 'install_google_chrome', 'clear_your_browser'];
+/** Clear browsing data (Pips API 112), from Your Browser's dock menu: clear_your_browser {history?, sign_ins?,
+ *  passwords?}, each true or false, at least one true. An older DGC is sent none. */
+export const YOUR_BROWSER_CLEAR_API = 112;
+const CLEAR_KINDS = ['history', 'sign_ins', 'passwords'];
 const BOX_KEYS = ['x', 'y', 'width', 'height'];
 /** A box the side bar measured: {x, y, width, height} as finite numbers, nothing else. */
 const isBox = (b: any) => !!b && typeof b === 'object' && !Array.isArray(b) && Object.keys(b).every((key) => BOX_KEYS.includes(key))
@@ -78,6 +82,11 @@ export function yourBrowserHomeRefusal(request: any, apiVersion: number): string
   if (apiVersion < YOUR_BROWSER_API) return 'Update DGC to use Your Browser.';
   const refused = 'Your Browser can\'t be asked that from here.';
   const keys = Object.keys(request).filter((key) => key !== 'type');
+  if (request.type === 'clear_your_browser') {
+    if (apiVersion < YOUR_BROWSER_CLEAR_API) return 'Update DGC to clear Your Browser\'s data.';
+    if (keys.some((key) => !CLEAR_KINDS.includes(key) || typeof request[key] !== 'boolean')) return refused;
+    return keys.some((key) => request[key] === true) ? '' : 'Choose what to clear.';
+  }
   if (request.type !== 'open_your_browser') return keys.length ? refused : '';
   if (keys.some((key) => key !== 'url' && key !== 'editor_bounds')) return refused;
   if ('url' in request && (typeof request.url !== 'string' || request.url.length > 2000)) return refused;
@@ -465,12 +474,21 @@ export function yourOwnTabRefusal(request: any): string {
   if (!request || typeof request !== 'object' || request.type !== 'use_your_browser_view' || request.own !== true) return refused;
   return YOUR_OWN_OPS.has(request.op) && Object.keys(request).every((key) => YOUR_OWN_FIELDS.has(key)) ? '' : refused;
 }
+/** Your own tab's screen (capability your_browser_screen): open, the viewer's bytes (base64, as a Pip computer's), close;
+ *  only from your own tab. Why it is refused, or ''. */
+export function yourBrowserScreenRefusal(message: any, own: boolean): string {
+  const refused = 'Only Your Browser\'s own tab shows its screen.';
+  if (!own || !message || typeof message !== 'object' || !['open', 'send', 'close'].includes(message.op)) return refused;
+  if (Object.keys(message).some((key) => !['type', 'op', 'data'].includes(key))) return refused;
+  if (message.op === 'send') return typeof message.data === 'string' && message.data && message.data.length <= 1_400_000 && /^[A-Za-z0-9+/=]+$/.test(message.data) ? '' : refused;
+  return Object.prototype.hasOwnProperty.call(message, 'data') ? refused : '';
+}
 /** Whether a page other than Your Browser's own tab asks for your own tab: never let through. */
 export function asksForYourOwnTab(request: any): boolean {
   return !!request && typeof request === 'object' && request.type === 'use_your_browser_view' && Object.prototype.hasOwnProperty.call(request, 'own');
 }
 export function yourBrowserDocument(scriptUri = '', styleUri = '', cspSource = '', title = 'Your Browser'): string {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>${attr(title)}</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><script src="${attr(scriptUri)}"></script></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>${attr(title)}</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><script type="module" src="${attr(scriptUri)}"></script></body></html>`;
 }
 /** "Open in editor" for a Pip's chat: the Pip and the conversation a page names, each checked here. */
 export type ChatPip = { id: string; name: string; pip_type: string; body?: string };
@@ -665,6 +683,9 @@ export class PipsEditor implements vscode.Disposable {
   private desktopOwner = new Map<string, string>();
   /** The CLI streams a Pip computer's full screen (ready.capabilities.pips_desktop). */
   private desktopStream = false;
+  /** Your Browser's own tab streams Chrome's real window as a Pip computer's screen streams (capability
+   *  your_browser_screen; where the computer DGC runs on has no screen). */
+  private browserScreen = false;
   /** The CLI's screen stream takes which computer (ready.capabilities.pips_desktop_numbers). */
   private desktopNumbers = false;
   /** /learn in a Pip's chat (ready.capabilities.learn): learn_skill drafts, save_skill writes a personal skill. */
@@ -1029,6 +1050,7 @@ export class PipsEditor implements vscode.Disposable {
       // Your own tab closed: DGC stops its stream and forgets its last picture.
       if (!pip && this.state.connected && this.apiVersion >= YOUR_BROWSER_API) {
         this.send({ type: 'pips_control', request: { type: 'use_your_browser_view', own: true, op: 'close', request_id: 'pips-browser-' + randomBytes(12).toString('hex') } }, this.backendIdentity);
+        if (this.browserScreen) this.send({ type: 'your_browser_screen', op: 'close' }, this.backendIdentity);
       }
     });
     panel.webview.onDidReceiveMessage(message => this.receive(message, surface));
@@ -1041,8 +1063,15 @@ export class PipsEditor implements vscode.Disposable {
     const tab = this.browserTabs.get(surface.slice(8));
     if (!tab) return;
     if (message?.type === 'pipsReady' || message?.type === 'pipsReconnect') {
-      this.post(tab.pip ? { type: 'yourBrowserInit', pip: tab.pip } : { type: 'yourBrowserInit', own: true }, surface);
+      this.post(tab.pip ? { type: 'yourBrowserInit', pip: tab.pip } : { type: 'yourBrowserInit', own: true, screen: this.browserScreen }, surface);
       this.post({ type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, ...this.state }, surface);
+      return;
+    }
+    if (message?.type === 'yourBrowserScreen') {
+      // Your own tab's viewer: its screen's bytes in base64, from your own tab only (a Pip's tab never has one).
+      const refused = yourBrowserScreenRefusal(message, !tab.pip);
+      if (refused || !this.browserScreen || !this.state.connected || !this.state.supported || !this.state.enabled) return;
+      this.send({ type: 'your_browser_screen', op: message.op, ...(message.op === 'send' ? { data: message.data } : {}) }, this.backendIdentity);
       return;
     }
     if (message?.type === 'pipsOpenYourBrowser') {
@@ -1209,6 +1238,7 @@ export class PipsEditor implements vscode.Disposable {
     this.displayMentions = capabilities?.pip_display_mentions === 1;
     this.desktopStream = capabilities?.pips_desktop === 1;
     this.desktopNumbers = this.desktopStream && capabilities?.pips_desktop_numbers === 1 && this.apiVersion >= 86;
+    this.browserScreen = capabilities?.your_browser_screen === 1;
     this.desktopOwner.clear();
     this.learn = Number(capabilities?.learn?.version) >= 1;
     this.foldersOn = foldersOffered(capabilities);
@@ -1362,6 +1392,12 @@ export class PipsEditor implements vscode.Disposable {
       this.pending.delete(event.request_id);
       this.post({ type: 'pipsReply', id: owner.client, ok: event.ok === true, result: event,
         error: event.ok === true ? undefined : { message: String(event.message || 'DGC couldn’t do that.') } }, owner.surface);
+      return true;
+    }
+    if (event.type === 'your_browser_screen_data' || event.type === 'your_browser_screen_closed') {
+      // Your Browser's own screen goes to its own tab only (never a Pip's tab, never another page).
+      if (this.browserTabs.has('own')) this.post(event.type === 'your_browser_screen_data' ? { type: 'yourBrowserScreenData', data: event.data }
+        : { type: 'yourBrowserScreenClosed', reason: String(event.reason || ''), pictures: event.pictures === true }, 'browser:own');
       return true;
     }
     if (event.type === 'pip_desktop_data' || event.type === 'pip_desktop_closed') {

@@ -321,6 +321,10 @@ class ComputerTests(FakeContainerTests):
         windowed = box.chrome_argv()
         self.assertNotIn("--headless=new", windowed)
         self.assertIn("--no-startup-window", windowed)
+        # Shown on the Pip's screen, Chrome would put "You are using an unsupported command-line flag" across the top
+        # of every window for the flag that keeps it from being marked as automated; --test-type keeps that bar away.
+        self.assertIn("--disable-blink-features=AutomationControlled", windowed)
+        self.assertIn("--test-type", windowed)
 
     def test_the_pool_splices_each_channel_to_its_own_egress_proxy(self):
         # The Mac side of boxd's pool: an idle connection the VM uses on channel 1 (the browser)

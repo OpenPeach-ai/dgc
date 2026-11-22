@@ -794,11 +794,18 @@ def splice(client, screen_path: Path, *, watching, on_input, idle_seconds: float
     try:
         client.settimeout(None)
         screen.settimeout(None)
+        # poll, never select: a long-running process's sockets can be numbered past select's 1024 (it then refuses them
+        # and the screen closed at once).
+        sides = {client.fileno(): client, screen.fileno(): screen}
+        waiting = select.poll()
+        for fd in sides:
+            waiting.register(fd, select.POLLIN | select.POLLHUP | select.POLLERR)
         while True:
-            ready, _, _ = select.select([client, screen], [], [], idle_seconds)
+            ready = waiting.poll(idle_seconds * 1000)
             if not ready:
                 return
-            for side in ready:
+            for fd, _ in ready:
+                side = sides[fd]
                 chunk = side.recv(262144)
                 if not chunk:
                     return

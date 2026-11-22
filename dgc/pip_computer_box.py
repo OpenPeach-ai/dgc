@@ -227,6 +227,9 @@ _CHROME_FLAGS = (
     # answers instead of asking "are you a robot" every time (reported 2026-10-07). A check that
     # still appears stops the Pip and asks the user (pip_computer.human_check); it never solves one.
     "--disable-blink-features=AutomationControlled",
+    # Without it Chrome puts "You are using an unsupported command-line flag" (the one above) across the top of every
+    # window the person watches; it keeps only Chrome's start-up bars away.
+    "--test-type",
 )
 # What pages are told about the network: online, an ordinary connection (see BoxedBrowser._guard).
 ONLINE = {"offline": False, "latency": 40, "downloadThroughput": 12_500_000, "uploadThroughput": 2_500_000,

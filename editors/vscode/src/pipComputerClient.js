@@ -19,6 +19,7 @@ import '../media/shared/dismiss.css';   // one × for every line that stays, the
 import '../media/shared/dismiss.js';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
+import {ScreenChannel,clipboardThrough} from './screenView.js';
 import {esc,errorText,record,requestBroker,pipLogin,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer,pipComputerApps} from './pipsModel.js';
 
 const vscode=acquireVsCodeApi();
@@ -342,25 +343,8 @@ function terminalMarkup(){
  const rows=t.entries.map(e=>`<article class="pc-run"><p class="pc-prompt"><span class="pc-who">${e.by==='pip'?esc(S.pip?.name||'Pip'):'You'}</span> $ ${esc(e.command)}</p>${e.output?`<pre>${esc(e.output)}</pre>`:''}${e.exit!==0?`<p class="pc-exit">Exit ${esc(String(e.exit))}</p>`:''}${e.reached?.length?`<p class="pc-hosts">Reached ${esc(e.reached.join(', '))}</p>`:''}${e.blocked?.length?`<p class="pc-hosts pc-blocked">Blocked: ${esc(e.blocked.join(', '))}, on this computer or your network</p>`:''}</article>`).join('');
  return `<section class="pc-pane pc-terminal" aria-label="Terminal"><div class="pc-log" id="pc-log" role="log" aria-live="polite">${rows||'<p class="pc-muted">Commands you and the Pip run show here.</p>'}</div>${t.error?`<p class="pc-error" role="alert">${esc(t.error)}</p>`:''}<form id="pc-run" class="pc-bar"><span aria-hidden="true">$</span><input id="pc-command" aria-label="Command" autocomplete="off" spellcheck="false" value="${esc(t.draft)}"${t.running?' disabled':''}><button type="submit"${t.running?' disabled':''}>${t.running?'Running…':'Run'}</button></form><p class="pc-muted">Online: commands can reach public websites (to download or install, for example), never this computer or your home network. It works in its Files.</p></section>`;
 }
-// The screen's bytes ride the extension host's messages; noVNC sees a WebSocket-like channel.
-function toB64(bytes){let text='';for(let i=0;i<bytes.length;i+=0x8000)text+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));return btoa(text);}
-function fromB64(text){const raw=atob(text),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;}
-class ScreenChannel{
- constructor(){this.binaryType='arraybuffer';this.protocol='';this.readyState='connecting';this.onopen=null;this.onmessage=null;this.onclose=null;this.onerror=null;}
- send(data){if(this.readyState!=='open')return;const bytes=ArrayBuffer.isView(data)?new Uint8Array(data.buffer,data.byteOffset,data.byteLength):new Uint8Array(data);vscode.postMessage({type:'pipDesktop',op:'send',data:toB64(bytes)});}
- close(){if(this.readyState==='closed')return;this.readyState='closed';vscode.postMessage({type:'pipDesktop',op:'close'});this.onclose?.({code:1000,reason:'',wasClean:true});}
- // The viewer attaches a moment after it is made. Bytes that arrive before it listens wait for it, in order: handed to
- // no one, the server's first words were lost and the screen never opened.
- deliver(text,held=false){
-  if(this.readyState==='closed')return;
-  if(!held&&(this.early||!this.onmessage)){(this.early||=[]).push(text);if(!this.earlyTimer)this.earlyTimer=setInterval(()=>this.flushEarly(),5);return;}
-  if(this.readyState==='connecting'){this.readyState='open';this.onopen?.();}const bytes=fromB64(text);this.onmessage?.({data:bytes.buffer});}
- flushEarly(){
-  if(this.readyState!=='closed'&&!this.onmessage)return;
-  clearInterval(this.earlyTimer);this.earlyTimer=null;const early=this.early||[];this.early=null;
-  for(const text of early)this.deliver(text,true);}
- end(reason){if(this.readyState==='closed')return;this.readyState='closed';this.onclose?.({code:1000,reason,wasClean:false});}
-}
+// The screen's bytes ride the extension host's messages; noVNC sees a WebSocket-like channel (src/screenView.js, the
+// one screen piece Your Browser's own tab uses too).
 let channel=null,viewer=null;
 // Stop computer (user test P12). The stop is the user's own: its screen closing is what was asked for, so the tab shows
 // the stopped state where the screen was and nothing else. The closing stream's own words are not shown (DGC has taken
@@ -384,7 +368,7 @@ function startScreen(explicit=false){
  if(S.screen.state==='closed'&&S.screen.stopped&&!explicit)return;
  stopping=false;
  S.screen={state:'opening',reason:''};render();
- channel=new ScreenChannel();
+ channel=new ScreenChannel(m=>vscode.postMessage({type:'pipDesktop',...m}));
  const Viewer=globalThis.__dgcTestRFB||RFB;
  try{
   viewer=new Viewer($('pc-vnc'),channel,{shared:true});
@@ -396,7 +380,7 @@ function startScreen(explicit=false){
    const over=bytesOf(text)>CLIP_BYTES;S.clip={...S.clip,there:over?null:text,over,fresh:S.panel!=='clip'};
    // Your own Copy or Cut on its screen a moment ago: what it copied lands on your clipboard too. A copy the Pip makes
    // by itself never touches yours.
-   if(!over&&text&&Date.now()-copyKeyAt<4000){copyKeyAt=0;void navigator.clipboard?.writeText?.(text)?.catch?.(()=>{});}
+   if(!over)clip.copied(text);
    render();});
  }catch(error){S.screen={state:'closed',reason:errorText(error)};render();return;}
  vscode.postMessage({type:'pipDesktop',op:'open',...(S.numbers?which():{})});
@@ -982,23 +966,7 @@ document.addEventListener('paste',event=>{const box=event.target;if(box?.dataset
 // Copy and paste straight through its screen (his 20 Nov ask; the clipboard panel stays for the rest). Ctrl+C or Ctrl+X
 // there: its copy comes to your clipboard (the 'clipboard' listener). Ctrl+V there: the key waits for the paste with your
 // text, which goes onto its clipboard first, then Ctrl+V reaches it.
-let copyKeyAt=0,pasteFor=null;
-const onScreen=node=>!!node?.closest?.('#pc-vnc');
-document.addEventListener('keydown',event=>{
- if(!viewer||!onScreen(event.target)||event.altKey||!(event.ctrlKey||event.metaKey))return;
- const key=String(event.key||'').toLowerCase();
- if(key==='c'||key==='x'){copyKeyAt=Date.now();return;}
- if(key==='v'&&mayType()&&typeof viewer.clipboardPasteFrom==='function'){event.stopImmediatePropagation();pasteFor=viewer;}
-},true);
-document.addEventListener('paste',event=>{
- const into=pasteFor;pasteFor=null;
- if(!into||into!==viewer||!onScreen(event.target))return;
- event.preventDefault();event.stopImmediatePropagation();
- const text=event.clipboardData?.getData?.('text/plain')||'';
- if(text&&bytesOf(text)<=CLIP_BYTES)into.clipboardPasteFrom(text);
- const CONTROL=0xffe3,V=0x76;
- into.sendKey(CONTROL,'ControlLeft',true);into.sendKey(V,'KeyV',true);into.sendKey(V,'KeyV',false);into.sendKey(CONTROL,'ControlLeft',false);
-},true);
+const clip=clipboardThrough(document,{viewer:()=>viewer,onScreen:node=>!!node?.closest?.('#pc-vnc'),mayType:()=>mayType(),maxBytes:CLIP_BYTES});
 document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.terminal.draft=event.target.value;if(event.target.id==='pc-url')S.address=event.target.value;
  if(event.target.id==='pc-paste-text'){S.clip.draft=event.target.value;if(S.clip.note)clipSay('');}});
 // Escape leaves full screen. Not while the screen itself has the keys: the viewer keeps those for the computer, and the

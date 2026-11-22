@@ -81,6 +81,10 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # The screen's bytes for the viewer (base64), and the end of a stream with its reason.
     "pip_desktop_data": {"pip_id": _S(), "data": _S()},
     "pip_desktop_closed": {"pip_id": _S(), "reason": _S()},
+    # Your Browser's own tab where there is no screen (capability your_browser_screen): its screen's bytes (base64), and
+    # the end of the stream with its reason; `pictures` true where it shows pictures of your tab instead (no VNC screen).
+    "your_browser_screen_data": {"data": _S()},
+    "your_browser_screen_closed": {"reason": _S(), "pictures": _B()},
     "chat_changes": {"roots": _A(), "session_id": _S(), "request_id": _S()},
     "chat_change": {"root": _S(), "path": _S(), "before": _S(), "after": _S(), "kind": _S(),
                     "session_id": _S(), "request_id": _S()},
@@ -753,6 +757,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # 0.52): which of the Pip's computers, 1 for the first; one stream a Pip, so opening another moves it there.
     "pip_desktop": {"pip_id": _S(), "op": _f("string", enum=("open", "send", "close")), "data": _S(False),
                     "number": _I(False)},
+    # Your Browser's own tab, where this computer has no screen (capability your_browser_screen): open the stream of
+    # Chrome's real window, send the viewer's bytes (base64), close it. The person's own window only; never a socket,
+    # a path or a token in the editor.
+    "your_browser_screen": {"op": _f("string", enum=("open", "send", "close")), "data": _S(False)},
     "get_chat_changes": {"request_id": _S()},
     "get_chat_change": {"root": _S(), "path": _S(), "session_id": _S(), "request_id": _S()},
     "get_workspace_changes": {"request_id": _S()},

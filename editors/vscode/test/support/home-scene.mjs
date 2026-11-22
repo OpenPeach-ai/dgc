@@ -129,6 +129,9 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
       open_your_browser: (r) => (S().browser?.refuse ? { __error: S().browser.refuse } : { ok: true, kind: "host_profile", weaker: true, url: r.url || "", open: true, view: S().browser?.recent?.view || "window" }),
       // Install Google Chrome (18 Nov): it starts (the card says so), unless the state answers otherwise.
       install_google_chrome: () => S().browser?.installAnswer || { available: false, install: { ...(S().browser?.recent?.install || {}), state: "running", error: "" } },
+      // Clear browsing data (Pips API 112): what was ticked is cleared, unless the state refuses it.
+      clear_your_browser: (r) => (S().browser?.clearRefuse ? { __error: S().browser.clearRefuse }
+        : { ok: true, cleared: ["history", "sign_ins", "passwords"].filter((k) => r[k] === true), reopened: S().browser?.recent?.open === true, chrome_account: S().browser?.recent?.chrome_account === true }),
     };
     function waitsNoMore(card) { const a = S().attention; if (!a) return;
       for (const list of ["items", "reviews"]) { const at = (a[list] || []).findIndex((i) => i.card === card); if (at < 0) continue;

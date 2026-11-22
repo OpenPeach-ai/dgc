@@ -137,8 +137,9 @@ async function main() {
     minify: production, sourcemap: false,
   });
   await esbuild.build({
-    // A Pip's tab in Your Browser, streamed into an editor tab (src/yourBrowserTab.js; Pips API 106).
-    entryPoints: ["src/yourBrowserTab.js"], bundle: true, format: "iife",
+    // A Pip's tab in Your Browser, streamed into an editor tab (src/yourBrowserTab.js; Pips API 106). An ES module: your
+    // own screen there is shown with noVNC (as a Pip computer's), which uses top-level await.
+    entryPoints: ["src/yourBrowserTab.js"], bundle: true, format: "esm",
     platform: "browser", target: "chrome108", outfile: "dist/yourBrowserTab.js",
     minify: production, sourcemap: false,
   });

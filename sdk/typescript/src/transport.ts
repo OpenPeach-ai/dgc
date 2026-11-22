@@ -48,6 +48,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "video_job", "video_jobs", "videos_library",
   "voice_audio", "voice_error", "voice_progress", "voice_state", "voice_text",
   "workspace_change", "workspace_changes", "workspace_roots",
+  "your_browser_screen_closed", "your_browser_screen_data",
   "composio_connection", "plugin_catalog", "plugin_marketplaces", "plugin_operation", "plugin_preview",
 ]);
 const DECISION_EVENTS = new Set(["permission_request", "plan_proposal", "options_request", "mcp_input_request"]);

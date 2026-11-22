@@ -66,6 +66,19 @@ class YourBrowserSDKTests(unittest.TestCase):
         self.assertEqual(current.pips.mutate("install_google_chrome", {}, approved=True)["request"]["type"],
                          "install_google_chrome")
 
+    def test_api112_clear_browsing_data_is_refused_before_112_then_sent(self):
+        from dgc.pips import _COMMAND_ARGS
+        self.assertEqual(COMMAND_FIELDS["clear_your_browser"], _COMMAND_ARGS["clear_your_browser"])
+        self.assertIn("clear_your_browser", MUTATION_COMMANDS)
+        wire = Wire(); older = session(wire, caps={**CAPS, "pips_api_version": 111})
+        with self.assertRaisesRegex(DGCUnsupportedError, "API 112"):
+            older.pips.mutate("clear_your_browser", {"history": True}, approved=True)
+        self.assertFalse(wire.calls)
+        wire = Wire(); current = session(wire, caps={**CAPS, "pips_api_version": 112})
+        sent = current.pips.mutate("clear_your_browser", {"history": True, "sign_ins": False, "passwords": True}, approved=True)
+        self.assertEqual({k: sent["request"][k] for k in ("type", "history", "sign_ins", "passwords")},
+                         {"type": "clear_your_browser", "history": True, "sign_ins": False, "passwords": True})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1504,9 +1504,11 @@
   // Copy. While it installs the card asks again every couple of seconds, and becomes the field and the links by itself.
   // Where the computer DGC runs on has no screen (view "tab"), "Open Your Browser" opens an editor tab that streams your
   // own tab instead of a window.
-  const YB_API = 107, YB_POLL_MS = 60000, YB_INSTALL_POLL_MS = 2000;
+  // Clear browsing data (Pips API 112): a right-click on Your Browser in the dock offers it; one small dialog ticks what
+  // goes, each kind with one line of what it removes, and the button says what it clears. Nothing is cleared before it.
+  const YB_API = 107, YB_CLEAR_API = 112, YB_POLL_MS = 60000, YB_INSTALL_POLL_MS = 2000;
   const yb = { generation: 0, connected: false, api: 0, links: [], lanes: [], available: true, reason: "", open: false, error: "", seq: 0, pending: new Map(), asked: 0,
-    install: null, view: "window", installTimer: 0 };
+    install: null, view: "window", installTimer: 0, account: false };
   const ybOffered = () => yb.connected && yb.api >= YB_API;
   /** Where this editor's window is and the work area of its screen, in screen pixels; null where the page can't tell. */
   function editorBounds() {
@@ -1516,10 +1518,10 @@
     const area = { x: n(s.availLeft ?? 0), y: n(s.availTop ?? 0), width: n(s.availWidth), height: n(s.availHeight) };
     return [area.x, area.y].every(Number.isFinite) && area.width > 0 && area.height > 0 ? { ...box, screen: area } : box;
   }
-  function ybAsk(type, fields = {}) {
+  function ybAsk(type, fields = {}, wait = 20000) {
     return new Promise((resolve, reject) => {
       const id = `your-browser-${yb.generation}-${++yb.seq}`;
-      const timer = setTimeout(() => { yb.pending.delete(id); reject(new Error("DGC didn't answer. Try again.")); }, 20000);
+      const timer = setTimeout(() => { yb.pending.delete(id); reject(new Error("DGC didn't answer. Try again.")); }, wait);
       yb.pending.set(id, { resolve, reject, timer });
       vscode.postMessage({ type: "pipsRequest", id, generation: yb.generation, request: { type, ...fields }, documentId: document.documentElement.dataset.pipsDocumentId });
     });
@@ -1534,6 +1536,7 @@
         .map((l) => ({ url: String(l.url).slice(0, 2000), title: String(l.title || "").slice(0, 200), host: String(l.host || "").slice(0, 253), icon: window.DgcSiteIcon?.ok(l.icon, 32001) || "" })) : [];
       yb.links = links; yb.available = said?.available !== false; yb.reason = yb.available ? "" : String(said?.reason || "").slice(0, 600); yb.open = said?.open === true;
       yb.install = yb.available ? null : ybInstallOf(said?.install); yb.view = said?.view === "tab" ? "tab" : "window";
+      yb.account = said?.chrome_account === true;
       ybInstallPoll();
       // The Pips working in it (each in its own tab): the dock's menu offers to watch one in a streamed tab.
       yb.lanes = Array.isArray(said?.lanes) ? said.lanes.filter((l) => l && /^pip_[A-Za-z0-9]{1,64}$/.test(String(l.pip_id)) && typeof l.name === "string" && l.name.trim()).slice(0, 8)
@@ -1614,6 +1617,69 @@
     first.focus();
     setTimeout(() => { if (ybDialog?.dialog === dialog && !dialog.contains(document.activeElement)) first.focus(); }, 0);
   }
+  // Clear browsing data: three kinds, each with one plain line of what it removes; history ticked to begin with. The
+  // button names what it does and is off with nothing ticked; Cancel and Escape close it, and nothing is cleared before
+  // the button. Where it runs, it says it closes and opens again; signed in to Chrome, that the account keeps its copy.
+  const YB_KINDS = [
+    { id: "history", name: "Browsing history", line: "Pages you visited, the downloads list and the recent links on Home’s Browser card.", on: true, one: "Clear history" },
+    { id: "sign_ins", name: "Sign-ins", line: "Cookies and site data: you’ll be signed out of sites.", on: false, one: "Clear sign-ins" },
+    { id: "passwords", name: "Saved passwords", line: "Passwords Chrome saved in Your Browser.", on: false, one: "Clear passwords" },
+  ];
+  let ybClearing = null;
+  function ybCloseClear(refocus = true) {
+    const current = ybClearing; if (!current) return;
+    ybClearing = null; current.dialog.remove();
+    if (refocus && current.focus?.isConnected) current.focus.focus();
+  }
+  /** What the button says for what is ticked ("Clear history", "Clear 2 kinds of data"; "Clear" with nothing ticked). */
+  function ybClearWords(ticked) {
+    if (ticked.length === 1) return YB_KINDS.find((k) => k.id === ticked[0]).one;
+    return ticked.length ? `Clear ${ticked.length} kinds of data` : "Clear";
+  }
+  function ybClear() {
+    if (!ybOffered() || yb.api < YB_CLEAR_API) return;
+    ybCloseClear(false); ybCloseDialog(false);
+    const dialog = document.createElement("dialog");
+    dialog.className = "new-session-dialog yb-clear-dialog dgc-dialog";
+    dialog.setAttribute("aria-labelledby", "yb-clear-title");
+    const notes = [yb.open ? "Your Browser closes for a moment and opens again." : "",
+      yb.account ? "Chrome is signed in to a Google account in Your Browser: if its sync is on, your account keeps its own copy." : ""].filter(Boolean);
+    dialog.innerHTML = `<div class="new-session-body"><h2 id="yb-clear-title">Clear browsing data</h2>
+      <fieldset class="yb-clear-kinds"><legend class="yb-clear-legend">What to clear</legend>${YB_KINDS.map((k) => `<label class="yb-clear-kind"><input type="checkbox" name="${k.id}"${k.on ? " checked" : ""}><span class="yb-clear-words"><span class="yb-clear-name">${esc(k.name)}</span><span class="yb-clear-line">${esc(k.line)}</span></span></label>`).join("")}</fieldset>
+      ${notes.map((n) => `<p class="new-session-intro yb-clear-note">${esc(n)}</p>`).join("")}<p class="yb-clear-error" role="alert" hidden></p></div>
+      <div class="new-session-buttons"><button type="button" class="act yb-clear-cancel">Cancel</button><button type="button" class="act primary yb-clear-go"></button></div>`;
+    const go = dialog.querySelector(".yb-clear-go"), boxes = [...dialog.querySelectorAll(".yb-clear-kind input")], error = dialog.querySelector(".yb-clear-error");
+    const ticked = () => boxes.filter((b) => b.checked).map((b) => b.name);
+    const words = () => { const t = ticked(); go.textContent = ybClearWords(t); go.disabled = !t.length; };
+    for (const box of boxes) box.addEventListener("change", words);
+    words();
+    dialog.querySelector(".yb-clear-cancel").onclick = () => ybCloseClear();
+    go.onclick = () => {
+      const t = ticked(); if (!t.length || go.dataset.busy) return;
+      go.dataset.busy = "1"; go.disabled = true; go.textContent = "Clearing…"; error.hidden = true;
+      for (const box of boxes) box.disabled = true;
+      // (Closing Chrome, clearing and opening it again takes some seconds: DGC itself waits up to a minute.)
+      ybAsk("clear_your_browser", Object.fromEntries(YB_KINDS.map((k) => [k.id, t.includes(k.id)])), 70000).then((said) => {
+        ybCloseClear();
+        const done = YB_KINDS.filter((k) => (Array.isArray(said?.cleared) ? said.cleared : t).includes(k.id)).map((k) => k.name.toLowerCase());
+        dock?.note?.("browser", `Cleared: ${done.join(", ") || "nothing"}.`);
+        if (done.length) { yb.links = t.includes("history") ? [] : yb.links; ybPaint(); }
+        yb.asked = 0; ybRecent();
+      }, (problem) => {
+        delete go.dataset.busy;
+        for (const box of boxes) box.disabled = false;
+        words();
+        error.textContent = String(problem?.message || "Your Browser couldn’t clear that.").slice(0, 400); error.hidden = false;
+      });
+    };
+    dialog.addEventListener("cancel", (e) => { e.preventDefault(); if (!go.dataset.busy) ybCloseClear(); });
+    dialog.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); if (!go.dataset.busy) ybCloseClear(); } });
+    ybClearing = { dialog, focus: document.activeElement };
+    document.body.appendChild(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+    boxes[0].focus();
+    setTimeout(() => { if (ybClearing?.dialog === dialog && !dialog.contains(document.activeElement)) boxes[0].focus(); }, 0);
+  }
   /** Open Your Browser with what was typed (a search or an address), a link, or nothing (its window comes forward). */
   function ybOpen(text) {
     if (!ybOffered()) return;
@@ -1662,7 +1728,9 @@
     // in an editor tab beside the chat.
     const watch = yb.lanes.map((l) => ({ id: `lane:${l.pip_id}`, label: `Watch ${l.name}'s tab`, icon: "open-in-editor" }));
     const first = yb.install ? { id: "open", label: "Install Google Chrome…", icon: "save" } : { id: "open", label: "Open Your Browser", icon: "open" };
-    return [{ key: "browser", kind: "browser", title: "Your Browser", state, icon: HALO, menu: [[first], ...(watch.length ? [watch] : [])] }];
+    // Clear browsing data (Pips API 112): only where it can run here, and with DGC that has it.
+    const clear = yb.api >= YB_CLEAR_API && yb.available && !yb.install ? [[{ id: "clear", label: "Clear browsing data…", icon: "delete" }]] : [];
+    return [{ key: "browser", kind: "browser", title: "Your Browser", state, icon: HALO, menu: [[first], ...(watch.length ? [watch] : []), ...clear] }];
   }
   /** The dock itself, made once on the side bar's page: the last thing on it, under every screen. */
   function mountDock() {
@@ -1686,6 +1754,7 @@
       // A tile's own menu rows (a folder's): New session here, Open in new window.
       onMenu: (key, what) => {
         if (key === "browser") {
+          if (what === "clear") { ybClear(); return; }
           // A Pip's own tab in Your Browser, streamed into an editor tab beside the chat.
           const lane = String(what).startsWith("lane:") ? yb.lanes.find((l) => l.pip_id === String(what).slice(5)) : null;
           if (lane) vscode.postMessage({ type: "pipsOpenYourBrowser", pip: { id: lane.pip_id, name: lane.name }, documentId: document.documentElement.dataset.pipsDocumentId });

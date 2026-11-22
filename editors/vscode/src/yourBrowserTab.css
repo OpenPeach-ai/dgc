@@ -83,3 +83,23 @@ body { background: var(--bg, var(--vscode-editor-background)); color: var(--text
 .yb-own-mode .yb-frame { cursor: default; user-select: none; -webkit-user-select: none; }
 .yb-keys { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; margin: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; }
 .yb-keys[hidden] { display: none; }
+/* Your own screen (yb-screen-mode): Chrome's real window fills the tab, its own bar and tabs in the picture, so DGC's own
+   bar steps aside; the quiet line stays. The picture is the tab's size (the screen is asked for it), drawn sharp at twice
+   its pixels. While it opens, or after it closed by itself, a small card over it says so (Open it again). */
+.yb-screen-mode .yb-bar { display: none; }
+.yb-screen-mode .yb-stage { padding: 0; place-items: stretch; }
+.yb-vnc { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg, var(--vscode-editor-background)); }
+.yb-vnc[hidden] { display: none; }
+.yb-vnc canvas { display: block; outline: none; }
+.yb-screen-mode .yb-note { position: absolute; left: 50%; top: 50%; translate: -50% -50%; max-width: calc(100% - 40px); padding: 6px 10px;
+  border: 1px solid var(--hair, rgba(128, 128, 128, .25)); border-radius: var(--btn-r, 6px); background: var(--surface2, var(--vscode-editorWidget-background));
+  color: var(--text, inherit); box-shadow: var(--lift-1, none); }
+.yb-again { position: absolute; left: 50%; top: 50%; translate: -50% -50%; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  max-width: calc(100% - 40px); padding: 12px 14px; border: 1px solid var(--hair, rgba(128, 128, 128, .25)); border-radius: var(--btn-r, 6px);
+  background: var(--surface2, var(--vscode-editorWidget-background)); color: var(--text, inherit); box-shadow: var(--lift-1, none); text-align: center; }
+.yb-again[hidden] { display: none; }
+.yb-again p { margin: 0; overflow-wrap: anywhere; }
+.yb-again-go { appearance: none; height: var(--btn-h, 26px); padding: 0 12px; border: 1px solid var(--hair-strong, rgba(128, 128, 128, .4)); border-radius: var(--btn-r, 6px);
+  background: var(--surface2, transparent); color: var(--text, inherit); font: inherit; cursor: pointer; }
+.yb-again-go:hover { background: var(--wash, rgba(128, 128, 128, .12)); }
+.yb-again-go:focus-visible { outline: 1.5px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }

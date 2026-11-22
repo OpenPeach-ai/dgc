@@ -131,7 +131,7 @@ body:not([data-agent-page]) #phead .pm ~ .thread-title { margin-left: calc(6px -
 #pips-host { display:flex; flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; width:100%; }
 /* (The Pips view stands on the side bar's own ground, as Home, Work and Chat do, 13 Nov: the tab bar and the dock keep
    the one ground on every tab. They took the editor's ground under the Pips view, which stood on it.) */
-body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(.dgc-linkcard):not(#whats-new):not(#pips-welcome):not(#pips-mac-note):not(.yb-install-dialog):not(script) { display:none !important; }
+body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(.dgc-linkcard):not(#whats-new):not(#pips-welcome):not(#pips-mac-note):not(.yb-install-dialog):not(.yb-clear-dialog):not(script) { display:none !important; }
 /* A page of the Pips view with a back arrow (a Pip's chat, its Settings, History and its other pages; Pips settings,
    Needs attention's View all, a project's New Pip, Workspace context and Notifications) has the side bar to itself: no
    dock and no tab bar (main.js, onInsidePip), and the page takes their room. DGC's own header stays. Not drawn, so
@@ -144,7 +144,7 @@ body.pips-active #phead .pm { display:inline-flex; flex:1; align-self:center; }
    way the Pips are: everything but the header, the list, the announcer and the hover label hides. */
 /* (The dialog a session's delete opens when it owns Project Pips is this page's own: it shows over it.) */
 /* ("What's new" is the side bar's own dialog too, #whats-new.) */
-body.sessions-active > :not(#phead):not(#side-tabs):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(#whats-new):not(#pips-welcome):not(#pips-mac-note):not(.yb-install-dialog):not(script) { display:none !important; }
+body.sessions-active > :not(#phead):not(#side-tabs):not(#sessions-host):not(#announcer):not(#hover-tip):not(#dgc-dock):not(.dgc-pop):not(#whats-new):not(#pips-welcome):not(#pips-mac-note):not(.yb-install-dialog):not(.yb-clear-dialog):not(script) { display:none !important; }
 body.sessions-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.sessions-active #phead .pm { display:inline-flex; flex:1; align-self:center; }
 /* The side bar's top: the header row with DGC's wordmark (its slashes breathing), then the tabs (media/shared/tabs.css):
@@ -360,6 +360,25 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
   overflow-x:auto; white-space:nowrap; scrollbar-width:thin; background:var(--surface2); color:var(--text); font:var(--t-xs)/1.5 var(--mono); user-select:all; -webkit-user-select:all; }
 .yb-install-dialog button.act { gap:6px; border-radius:var(--btn-r, 6px); }
 .yb-install-dialog button.act > svg { flex:none; width:14px; height:14px; }
+/* Clear browsing data (Your Browser's dock menu): New session's dialog and buttons; three kinds, each a checkbox with its
+   name and one line of what it removes, in rows with the one corner; the notes under them; the button names what it
+   clears and is off with nothing ticked. */
+.yb-clear-kinds { display:flex; flex-direction:column; gap:var(--sp-2); align-self:stretch; min-width:0; margin:var(--sp-1) 0 0; padding:0; border:0; }
+.yb-clear-legend { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+.yb-clear-kind { display:flex; align-items:flex-start; gap:var(--sp-2); min-width:0; padding:8px 10px; border:1px solid var(--hair); border-radius:var(--btn-r, 6px); cursor:pointer; }
+.yb-clear-kind:hover { background:var(--wash); }
+.yb-clear-kind:has(input:checked) { border-color:var(--hair-strong); }
+.yb-clear-kind:has(input:disabled) { cursor:default; opacity:.7; }
+.yb-clear-kind input { flex:none; width:14px; height:14px; min-height:0; margin:2px 0 0; padding:0; accent-color:var(--solid); cursor:pointer; }
+.yb-clear-kind input:focus-visible { outline:2px solid var(--vscode-focusBorder, var(--accent)); outline-offset:2px; }
+.yb-clear-words { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.yb-clear-name { color:var(--text-strong); font:var(--w-med) var(--t-sm)/1.35 var(--sans); }
+.yb-clear-line { color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); overflow-wrap:anywhere; }
+.yb-clear-note { margin:0; font-size:var(--t-xs); }
+.yb-clear-error { margin:0; color:var(--err-text); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); overflow-wrap:anywhere; }
+.yb-clear-error[hidden] { display:none; }
+.yb-clear-dialog button.act { border-radius:var(--btn-r, 6px); }
+.yb-clear-dialog button.act:disabled { opacity:.5; cursor:default; }
 /* ChatDGC: your chats above this project's sessions. A chat opens with one click (a session needs
    Open in Editor: opening one starts a backend in its folder), so its row says so with the pointer. */
 #sessions-host .home-chats, #sessions-host .home-work { display:flex; flex-direction:column; gap:var(--sp-2); }

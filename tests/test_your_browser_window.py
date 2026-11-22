@@ -93,6 +93,18 @@ class Placement(unittest.TestCase):
     def test_no_bounds_lets_chrome_place_itself(self):
         self.assertIsNone(your_browser.place_window(None))
 
+    def test_chrome_shows_no_unsupported_flag_bar_and_is_not_marked_as_automated(self):
+        # Its window (and the editor's tab, which streams that window) had "You are using an unsupported command-line
+        # flag: --disable-blink-features=AutomationControlled. Stability and security will suffer." across the top of
+        # every start. The flag stays (Google's sign-in refuses a browser marked as automated); --test-type keeps
+        # Chrome's start-up bars away. Checked with the installed Chrome: no bar, navigator.webdriver still false.
+        for kind in ({}, {"headless": True}, {"headless": True, "virtual": True}):
+            with self.subTest(**kind):
+                argv = your_browser.chrome_argv("/usr/bin/google-chrome", Path("/p"), "https://example.com/", **kind)
+                self.assertIn("--disable-blink-features=AutomationControlled", argv)
+                self.assertIn("--test-type", argv)
+                self.assertNotIn("--enable-automation", argv)
+
     def test_bounds_are_checked(self):
         for bad in ("left", [1, 2], {"x": 0}, {"x": 0, "y": 0, "width": 0, "height": 10},
                     {"x": 0, "y": 0, "width": 10, "height": 10, "screen": "big"},

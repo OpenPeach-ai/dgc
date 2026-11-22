@@ -30,6 +30,9 @@ const skipOrFail = (t) => {
   t.skip(skipReason());
   return true;
 };
+// (Built before any test is declared: a test file whose tests come after a top-level await can see its after() run first.)
+const bundle = await build({ entryPoints: [src + "yourBrowserTab.js"], bundle: true, write: false, format: "esm", platform: "browser", outdir: "out", target: "chrome108" });
+const pageJs = bundle.outputFiles.find((f) => f.path.endsWith(".js")).text, pageCss = bundle.outputFiles.find((f) => f.path.endsWith(".css")).text;
 before(async () => {
   if (!chromium) return;
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] }); } catch { browser = null; }
@@ -69,8 +72,6 @@ test("the host opens one streamed tab per Pip, beside the chat, named for the Pi
 });
 
 // ---- the page -------------------------------------------------------------------------------------------------------
-const bundle = await build({ entryPoints: [src + "yourBrowserTab.js"], bundle: true, write: false, format: "iife", platform: "browser", outdir: "out", target: "chrome108" });
-const pageJs = bundle.outputFiles.find((f) => f.path.endsWith(".js")).text, pageCss = bundle.outputFiles.find((f) => f.path.endsWith(".css")).text;
 /** A picture of a page 640 by 400 CSS pixels, drawn at twice its size (a sharp screen), with a mark at (200, 100). */
 async function shotOf(page) {
   return page.evaluate(() => { const c = document.createElement("canvas"); c.width = 1280; c.height = 800; const g = c.getContext("2d");
@@ -100,7 +101,7 @@ async function openTab(theme = "dark", { width = 900, height = 600, frames = tru
       if (r.type === "open_your_browser") return reply(m, { ok: true, kind: "host_profile", weaker: true, url: "", open: true });
     } });
   }, [image, frames, api, AVA, BEN]);
-  await page.addScriptTag({ content: pageJs });
+  await page.addScriptTag({ content: pageJs, type: "module" });
   return { page, close: () => context.close(), sent: (op) => page.evaluate((o) => window.__sent.filter((r) => !o || r.op === o), op) };
 }
 

@@ -16,16 +16,30 @@
 // bar (an address, else a Google search), Back, Forward, Reload, and your tabs as a row with New tab and Close. One quiet
 // line says what can't work here. Only this tab's own events drive it (the host lets no other page ask for your tab, and
 // DGC lets no Pip, model or tool); its pictures stay in this tab.
+//
+// Your own screen (`yourBrowserInit {own: true, screen: true}`, where DGC can): Chrome draws on a screen of its own, the
+// kind a Pip's computer has, and this tab shows that screen with the Pip computer's own viewer and stream
+// (src/screenView.js): the picture as it changes, your mouse and keys straight to it, no picture asked for at a time.
+// It is Chrome's real window (its tabs, address bar, menus, dropdowns and password manager), so DGC's own bar steps
+// aside. The screen is asked for this tab's size, in the pixels DGC says Chrome draws at. Where DGC says it shows
+// pictures here instead, the tab is the streamed tab above.
 import '../media/shared/tokens.css';
 import '../media/shared/dismiss.css';   // one × for every line that stays (window.DgcDismiss)
 import '../media/shared/dismiss.js';
 import '../media/shared/siteicon.js';   // a site's icon: what may be drawn, and a dark one lifted on a dark editor (window.DgcSiteIcon)
 import './yourBrowserTab.css';
+import RFB from '@novnc/novnc';
+import { ScreenChannel, clipboardThrough, askScreenSize } from './screenView.js';
 
 const vscode = acquireVsCodeApi();
 const API = 107, POLL_MS = 330;
 const S = { pip: null, own: false, generation: 0, connected: false, api: 0, frame: null, lanes: [], tabs: [], current: '', note: '', typing: false, busy: false, seq: 0, pending: new Map(), shown: 0, frameSeq: 0, last: 0 };
+// Your own screen: whether DGC streams it here (`screen`), or said it shows pictures instead (`pictures`); `live` while
+// it shows; `tries` after it closed by itself (it opens again, a few times).
+Object.assign(S, { screen: false, pictures: false, live: false, tries: 0 });
 const OWN_LINE = 'Passkeys, security keys and your computer’s password manager don’t work in this tab.';
+const SCREEN_LINE = 'Passkeys and security keys don’t work in this tab.';
+let screenScale = 1;                // how many of the screen's pixels Chrome draws each of your page's with (DGC says)
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const svg = (d) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const BACK = svg('<path d="M9.5 3.5 5 8l4.5 4.5"/>'), FORWARD = svg('<path d="M6.5 3.5 11 8l-4.5 4.5"/>'), RELOAD = svg('<path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2"/><path d="M12.5 3v2.6H9.9"/>');
@@ -45,9 +59,10 @@ app.innerHTML = `<header class="yb-bar">
   </div>
 </header>
 <p class="yb-line" hidden></p>
-<div class="yb-stage"><img class="yb-frame" tabindex="0" alt="" hidden draggable="false"><textarea class="yb-keys" aria-label="What you type goes to your tab" autocomplete="off" autocapitalize="off" spellcheck="false" hidden></textarea><p class="yb-note" role="status"></p></div>`;
+<div class="yb-stage"><img class="yb-frame" tabindex="0" alt="" hidden draggable="false"><div class="yb-vnc" hidden></div><textarea class="yb-keys" aria-label="What you type goes to your tab" autocomplete="off" autocapitalize="off" spellcheck="false" hidden></textarea><p class="yb-note" role="status"></p><div class="yb-again" hidden><p></p><button type="button" class="yb-again-go">Open it again</button></div></div>`;
 const $ = (sel) => app.querySelector(sel);
 const tabs = $('.yb-tabs'), url = $('.yb-url'), frame = $('.yb-frame'), note = $('.yb-note'), line = $('.yb-line'), keys = $('.yb-keys'), stage = $('.yb-stage');
+const vnc = $('.yb-vnc'), again = $('.yb-again');
 
 function ask(type, fields = {}) {
   return new Promise((resolve, reject) => {
@@ -62,6 +77,7 @@ const ready = () => (S.own || !!S.pip) && S.connected && S.api >= API;
 // The note is written only when its words change: it keeps its × (and stays closed) between two pictures.
 function sayNote() { if (note.dataset.said !== S.note) { note.dataset.said = S.note; note.textContent = S.note; } note.hidden = !S.note; }
 function paint() {
+  if (S.own && screenMode()) { paintScreen(); return; }
   if (S.own) { paintOwn(); return; }
   document.title = S.pip ? `${S.pip.name} · Your Browser` : 'Your Browser';
   const f = S.frame;
@@ -77,6 +93,73 @@ function paint() {
   if (tabs.__html !== html) { tabs.__html = html; tabs.innerHTML = html; }
   for (const b of app.querySelectorAll('.yb-btn')) b.disabled = !ready() || !f;
 }
+
+// ---- your own screen ------------------------------------------------------------------------------------------------
+const screenMode = () => S.screen && !S.pictures;
+let channel = null, viewer = null, againTimer = 0, fitTimer = 0, wanted = '';
+function paintScreen() {
+  document.title = 'Your Browser';
+  app.classList.add('yb-own-mode', 'yb-screen-mode');
+  frame.hidden = true; keys.hidden = true;
+  vnc.hidden = false;
+  if (line.textContent !== SCREEN_LINE) line.textContent = SCREEN_LINE;
+  line.hidden = false;
+  sayNote();
+  const closed = !S.live && !channel && S.tries >= MAX_TRIES;
+  again.hidden = !closed;
+  if (closed) again.querySelector('p').textContent = S.note || 'Your Browser’s screen closed.';
+  if (closed) note.hidden = true;
+}
+const MAX_TRIES = 6;
+function startScreen() {
+  if (channel || !screenMode() || !ready()) return;
+  clearTimeout(againTimer); againTimer = 0;
+  S.live = false; S.note = 'Opening Your Browser…'; paint();
+  channel = new ScreenChannel((m) => vscode.postMessage({ type: 'yourBrowserScreen', ...m }));
+  const Viewer = globalThis.__dgcTestRFB || RFB;
+  try {
+    vnc.textContent = '';
+    viewer = new Viewer(vnc, channel, { shared: true });
+    viewer.scaleViewport = true; viewer.resizeSession = false; viewer.clipViewport = false; viewer.focusOnClick = true; viewer.background = 'transparent';
+    viewer.addEventListener?.('connect', () => { S.live = true; S.tries = 0; S.note = ''; wanted = ''; paint(); fitScreen(); });
+    viewer.addEventListener?.('disconnect', () => { if (viewer && channel) screenEnded(''); });
+    // What was copied there: onto your clipboard after your own Copy or Cut on it (never a copy made there by itself).
+    viewer.addEventListener?.('clipboard', (event) => { const text = event?.detail?.text; if (typeof text === 'string' && text.length <= 1000000) clip.copied(text); });
+  } catch (error) { channel = null; viewer = null; S.note = String(error?.message || 'Your Browser’s screen didn’t open.'); S.tries = MAX_TRIES; paint(); return; }
+  vscode.postMessage({ type: 'yourBrowserScreen', op: 'open' });
+}
+/** The screen closed by itself: it opens again a few times (Chrome reopened, the editor reconnected), then says so. */
+function screenEnded(reason) {
+  const old = channel; channel = null; viewer = null; S.live = false;
+  old?.end(reason || '');
+  S.tries += 1;
+  S.note = reason || 'Your Browser’s screen closed.';
+  if (S.tries < MAX_TRIES && !document.hidden) { S.note = 'Opening Your Browser…'; againTimer = setTimeout(startScreen, 700 + 400 * S.tries); }
+  paint();
+}
+/** The screen at this tab's size: Chrome's window laid out for it (DGC sizes the window), and the screen asked for the
+ *  same size in its pixels, so the picture is drawn sharp and fills the tab. */
+function fitScreen() {
+  if (!screenMode() || !viewer || !S.live) return;
+  const width = Math.floor(vnc.clientWidth), height = Math.floor(vnc.clientHeight);
+  if (width < 50 || height < 50) return;
+  const said = `${width}x${height}`;
+  if (said !== wanted) { wanted = said; void sizeScreen(width, height); }
+  askScreenSize(viewer, width * screenScale, height * screenScale);
+}
+/** Chrome's window at the tab's size; DGC answers the scale it draws at, and the screen is asked for its pixels. */
+async function sizeScreen(width, height) {
+  try {
+    const said = await ask('use_your_browser_view', { op: 'size', width, height });
+    const scale = Number(said?.scale);
+    if (Number.isFinite(scale) && scale >= 1 && scale <= 3) screenScale = scale;
+    if (viewer && S.live) askScreenSize(viewer, width * screenScale, height * screenScale);
+  } catch (error) { S.note = String(error?.message || 'Your Browser didn’t answer.'); paint(); }
+}
+const clip = clipboardThrough(document, { viewer: () => viewer, onScreen: (node) => !!node?.closest?.('.yb-vnc'), mayType: () => S.live });
+again.querySelector('.yb-again-go').addEventListener('click', () => { S.tries = 0; startScreen(); });
+// A screen that said its size a moment ago may not take another yet: asked again until it is this tab's.
+setInterval(() => { if (S.live && !document.hidden) fitScreen(); }, 1000);
 
 // ---- your own tab ---------------------------------------------------------------------------------------------------
 function paintOwn() {
@@ -129,7 +212,7 @@ function tookOwn(said) {
 // One frame asked for as soon as the last came (DGC waits a moment for a newer one): up to thirty a second, none hidden.
 let streaming = false;
 async function streamOwn() {
-  if (streaming) return;
+  if (streaming || screenMode()) return;
   streaming = true;
   try {
     while (ready() && S.own && !document.hidden) {
@@ -236,7 +319,7 @@ keys.addEventListener('paste', (e) => {
 // The page is laid out at this tab's size (DGC sizes your tab to it), so its picture is drawn one to one.
 let sized = '', sizeTimer = 0;
 function sizeOwn() {
-  if (!S.own || !ready()) return;
+  if (!S.own || !ready() || screenMode()) return;
   const width = Math.floor(stage.clientWidth - 18), height = Math.floor(stage.clientHeight - 18);
   if (width < 50 || height < 50) return;
   const said = `${width}x${height}`;
@@ -244,10 +327,11 @@ function sizeOwn() {
   clearTimeout(sizeTimer);
   sizeTimer = setTimeout(() => { sized = said; void actOwn('size', { width, height }); }, sized ? 250 : 0);
 }
-if (typeof ResizeObserver === 'function') new ResizeObserver(() => sizeOwn()).observe(stage);
+if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (screenMode()) { clearTimeout(fitTimer); fitTimer = setTimeout(fitScreen, 150); } else sizeOwn(); }).observe(stage);
 
 let polling = 0;
 async function poll() {
+  if (S.own && screenMode()) { startScreen(); return; }
   if (S.own) { void streamOwn(); return; }
   if (!ready() || document.hidden || S.busy) return;
   S.busy = true;
@@ -267,6 +351,7 @@ function took(said) {
   paint();
 }
 function start() {
+  if (S.own && screenMode()) { startScreen(); return; }
   if (S.own) { sizeOwn(); void streamOwn(); return; }
   if (!polling) polling = setInterval(poll, POLL_MS); void poll();
 }
@@ -325,11 +410,23 @@ tabs.addEventListener('click', (e) => {
   const tab = e.target.closest('.yb-tab');
   if (tab && tab.dataset.pip !== S.pip?.id) vscode.postMessage({ type: 'pipsOpenYourBrowser', pip: { id: tab.dataset.pip, name: tab.dataset.name } });
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void poll(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { if (screenMode() && !channel && S.tries < MAX_TRIES) startScreen(); else void poll(); } });
 
 window.addEventListener('message', (event) => {
   const msg = event.data || {};
-  if (msg.type === 'yourBrowserInit' && msg.own === true) { S.own = true; S.pip = null; paint(); if (ready()) start(); return; }
+  if (msg.type === 'yourBrowserInit' && msg.own === true) { S.own = true; S.pip = null; S.screen = msg.screen === true; paint(); if (ready()) start(); return; }
+  if (msg.type === 'yourBrowserScreenData' && typeof msg.data === 'string') { channel?.deliver(msg.data); return; }
+  if (msg.type === 'yourBrowserScreenClosed') {
+    if (msg.pictures === true) {
+      // DGC shows pictures of your tab here (no screen of its own came up): the streamed tab, as before.
+      const old = channel; channel = null; viewer = null; S.live = false; old?.end('');
+      S.pictures = true; S.note = ''; vnc.hidden = true; vnc.textContent = ''; again.hidden = true;
+      app.classList.remove('yb-screen-mode'); paint(); if (ready()) start();
+      return;
+    }
+    if (channel || S.live) screenEnded(typeof msg.reason === 'string' && msg.reason !== 'closed' ? msg.reason.slice(0, 300) : '');
+    return;
+  }
   if (msg.type === 'yourBrowserInit' && msg.pip && typeof msg.pip.id === 'string') { S.pip = { id: msg.pip.id, name: String(msg.pip.name || 'A Pip') }; paint(); if (ready()) start(); return; }
   if (msg.type === 'pipsConnection') {
     if (msg.generation !== S.generation) { for (const p of S.pending.values()) { clearTimeout(p.timer); p.reject(new Error('The connection changed.')); } S.pending.clear(); }
