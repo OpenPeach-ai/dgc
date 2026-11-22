@@ -3,7 +3,7 @@ import { MIC_MESSAGES, SPEAK_MESSAGES, type Dictation, type DictationOwner, type
 import { randomBytes } from 'crypto';
 import { homedir } from 'os';
 import { FILE_ACTS, keptFileAct } from './fileActs';
-import { downloadBytes, downloadFile, downloadMade } from './download';
+import { downloadBytes, downloadFile, downloadMade, takeSave } from './download';
 import { GitRefs } from './gitRefs';
 import { openCommit } from './gitCommitDoc';
 import { isAbsolute } from 'path';
@@ -1814,6 +1814,8 @@ export class PipsEditor implements vscode.Disposable {
     // (A chat's own tab is the Pips page on another surface: what the Pips page may ask, it may, answered to it.)
     const chat = surface.startsWith('chat:') ? this.chats.get(surface.slice(5)) : undefined;
     if (surface !== 'main' && !computer && !chat) return;
+    // (A picture, a chart or a computer's file the page holds, to be saved on the person's computer: src/download.ts.)
+    if (takeSave((m) => this.post(m, surface), message)) return;
     if (message?.type === 'pipsOpenChat' && !computer) {
       // Open in editor: this Pip's chat, this conversation, in a tab of its own. The page names both; anything that is
       // not a Pip and a conversation opens nothing. The window's one keeper of these tabs opens it (or this bridge).

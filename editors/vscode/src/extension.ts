@@ -10,6 +10,7 @@ import { wslCli } from "./wslSetup";
 import { setEditorEnv } from "./backend";
 import { notesOf } from "./notes";
 import { NoteTabs, notesEnv } from "./notesTab";
+import { rememberDownloadsIn } from "./download";
 
 export function activate(context: vscode.ExtensionContext): void | object {
   if (vscode.workspace.isTrusted === false) {
@@ -19,6 +20,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
   }
   // A remote window (SSH, WSL, a container): its browser is on another computer, so a plugin sign-in waits longer.
   setEditorEnv({ DGC_EDITOR_REMOTE: vscode.env?.remoteName || undefined });
+  // (A download's Save dialog starts in the folder of the last one: src/download.ts.)
+  rememberDownloadsIn(context.globalState);
   const provider = new DgcViewProvider(context);
   // Artifacts: everything DGC makes that you keep, opened from any chat's cards and the Library, answered by the side
   // bar's dgc serve (as ChatDGC is) whichever chat made them.

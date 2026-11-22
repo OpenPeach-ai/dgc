@@ -20,6 +20,8 @@ import RFB from '@novnc/novnc';
 import {esc,errorText,record,requestBroker,pipLogin,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer,pipComputerApps} from './pipsModel.js';
 
 const vscode=acquireVsCodeApi();
+// (A file this page holds is saved by the host, which knows how this editor saves a file: media/shared/download.js.)
+globalThis.DgcDownload?.connect(message=>vscode.postMessage(message));
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
 // The computer opens on its desktop with nothing open, like a computer you switch on (a user:
 // "show default OS screen, with nothing opened"). The browser comes up when you open it from the

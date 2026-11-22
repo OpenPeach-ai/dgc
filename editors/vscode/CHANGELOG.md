@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **What's new, whenever you want it**: DGC's version and "What's new" sit at the far right of the side bar's logo
+  line (Home and the Library), in grey; a click opens the slides again.
+- **Your Browser's tabs read like Chrome's**: the current tab is the address row's colour and joins it, on a strip a
+  shade apart; the others are quieter, their titles fade at the end. A dark site's one-colour icon (GitHub's) is drawn
+  light on a dark editor, as its own dark-mode icon looks.
+- **Download works in the desktop app**: the Library's Save a copy stayed on "Preparing…", and a card's, a picture's or a
+  chart's Download did nothing. The app drops a download a page starts, with no file and no dialog. Now the editor's
+  own Save dialog opens on your computer. It starts in Downloads, then in the folder you used last. Over Remote-SSH,
+  WSL or a container it browses your own computer, never the remote one, and if the editor can't save there your
+  browser downloads the file instead. In the editor in a browser, the page still saves it.
 - **Chat sessions name themselves CHAT** after the wordmark; Work stays VIBE.
 - **Clean bubbles**: a goal's prompt bubble has no stripe down its side.
 - **A colour's swatch sits level with its code** on a Mac's monospace font.

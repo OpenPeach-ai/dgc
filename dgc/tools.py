@@ -5413,6 +5413,10 @@ def edit_artifact(args, ctx):
     return _artifact_call("edit_artifact", args, ctx)
 
 
+def find_artifacts(args, ctx):
+    return _artifact_call("find_artifacts", args, ctx)
+
+
 def pips_context(args, ctx):
     from .pip_context_tool import read
     return read(args, ctx)
@@ -5503,7 +5507,7 @@ EXECUTORS = {
     "draft_pip_calendar_event": draft_pip_calendar_event,
     "draft_pip_connector_action": draft_pip_connector_action,
     "present_document": present_document,
-    "make_artifact": make_artifact, "edit_artifact": edit_artifact,
+    "make_artifact": make_artifact, "edit_artifact": edit_artifact, "find_artifacts": find_artifacts,
     "show_file": show_file,
     "read_file": read_file, "view_image": view_image, "write_file": write_file, "edit_file": edit_file, "multi_edit": multi_edit,
     "apply_patch": apply_patch_tool,

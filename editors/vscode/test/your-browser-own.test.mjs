@@ -159,6 +159,41 @@ test("your own tab: it streams frame after frame, at the editor tab's size, with
   } finally { await x.close(); }
 });
 
+test("your own tab's row reads like Chrome's: the current tab is the address row's colour on a darker strip, and a dark site icon is lifted on a dark editor", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const theme of ["dark", "light"]) {
+    const x = await openOwn(theme);
+    try {
+      await x.shown();
+      // Three tabs: the current one with no icon yet, one with a black one-colour icon (a dark site's), one with a red one.
+      await x.page.evaluate(() => {
+        const icon = (fill) => { const c = document.createElement("canvas"); c.width = c.height = 16; const g = c.getContext("2d"); g.fillStyle = fill; g.beginPath(); g.arc(8, 8, 7, 0, 7); g.fill(); return c.toDataURL("image/png"); };
+        window.__b.tabs = [{ id: "T1", title: "Sign in to your account", url: "https://accounts.example.com/signin" },
+          { id: "T2", title: "GitHub · Build and ship software", url: "https://github.com/", icon: icon("#111111") },
+          { id: "T3", title: "Red site", url: "https://red.example/", icon: icon("#d02020") }];
+      });
+      await x.page.waitForFunction(() => document.querySelectorAll(".yb-own img.yb-fav").length === 2 && [...document.querySelectorAll(".yb-own img.yb-fav")].every((i) => i.complete), null, { timeout: 10000 });
+      await x.page.waitForTimeout(300);
+      const look = await x.page.evaluate(() => {
+        const bg = (el) => getComputedStyle(el).backgroundColor;
+        const on = document.querySelector(".yb-own.yb-on"), off = document.querySelector(".yb-own:not(.yb-on)");
+        const lifted = [...document.querySelectorAll(".yb-own img.yb-fav")].map((i) => i.classList.contains("yb-fav-lift"));
+        return { strip: bg(document.querySelector(".yb-tabs")), bar: bg(document.querySelector(".yb-bar")), on: bg(on),
+          onLine: getComputedStyle(on).borderBottomWidth, titleOn: getComputedStyle(on.querySelector(".yb-tab-title")).color,
+          titleOff: getComputedStyle(off.querySelector(".yb-tab-title")).color, lifted,
+          gap: Math.round(document.querySelector(".yb-row").getBoundingClientRect().top - on.getBoundingClientRect().bottom) };
+      });
+      assert.notEqual(look.strip, look.bar, `${theme}: the strip is its own shade`);
+      assert.equal(look.on, look.bar, `${theme}: the current tab is the address row's colour`);
+      assert.equal(look.onLine, "0px", "no line between the current tab and the address row");
+      assert.ok(look.gap >= 0 && look.gap <= 8, `${theme}: the current tab stands on the address row (${look.gap}px)`);
+      assert.notEqual(look.titleOn, look.titleOff, "the other tabs' titles are quieter");
+      assert.deepEqual(look.lifted, theme === "dark" ? [true, false] : [false, false], `${theme}: only a dark one-colour icon on a dark editor`);
+      if (process.env.DGC_SHOTS_DIR) await x.page.locator(".yb-bar").screenshot({ path: `${process.env.DGC_SHOTS_DIR}/yb-tabs-chrome-${theme}.png` });
+    } finally { await x.close(); }
+  }
+});
+
 test("your own tab: a click where it was made, typing, keys and a paste reach it in order", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openOwn();

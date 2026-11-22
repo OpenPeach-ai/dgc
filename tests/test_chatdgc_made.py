@@ -299,6 +299,38 @@ class MadeInChat(unittest.TestCase):
         self.assertNotIn('"blocks"', markdown)
         self.assertIn("dgc-ui", self.engine.export(chat["id"], "json"), "machine export preserves the actual reply")
 
+    def test_a_second_file_with_the_same_name_in_a_chat_is_named_apart(self):
+        chat, reply = self.say("Write me a brief as a Word file.",
+                               {"parts": ["Here it is."], "calls": [("make_file", {"name": "LRS brief", "format": "docx", "content": BRIEF})]},
+                               {"parts": [" Done."]})
+        self.assertEqual([f["name"] for f in reply["files"]], ["LRS brief.docx"])
+        chat, again = self.say("Shorter, please, as a new file.",
+                               {"parts": ["Here."], "calls": [("make_file", {"name": "lrs BRIEF", "format": "docx", "content": BRIEF})]},
+                               {"parts": [" Named apart."], "calls": [("make_file", {"name": "LRS brief short", "format": "docx", "content": BRIEF})]},
+                               {"parts": [" Done."]}, chat=chat)
+        told = "\n".join(c for n in range(len(self.world["read"])) for c in self.told(n))
+        self.assertIn("this chat already has a file named LRS brief.docx", told)
+        self.assertIn("“LRS brief 2”", told)
+        self.assertEqual([f["name"] for f in again["files"]], ["LRS brief short.docx"], "the first stays; the second is named apart")
+        # Another format is another name.
+        chat, pdf = self.say("And a PDF.", {"parts": ["PDF."], "calls": [("make_file", {"name": "LRS brief", "format": "pdf", "content": BRIEF})]},
+                             {"parts": [" Done."]}, chat=chat)
+        self.assertEqual([f["name"] for f in pdf["files"]], ["LRS brief.pdf"])
+
+    def test_a_second_document_with_a_taken_name_is_refused_with_the_one_there(self):
+        chat, first = self.say("A trip plan, please.", {"parts": ["Here."], "calls": [("canvas_create", {"title": "Trip plan", "kind": "document", "content": "# Trip\n"})]},
+                               {"parts": [" Done."]})
+        chat, again = self.say("Another one.", {"parts": ["Here."], "calls": [("make_artifact", {"type": "doc", "title": "trip PLAN", "content": "# T\n"}),
+                                                                              ("canvas_create", {"title": "Trip  plan", "kind": "document", "content": "# T\n"})]},
+                               {"parts": [" Named apart."], "calls": [("canvas_create", {"title": "Trip plan (short)", "kind": "document", "content": "# T\n"})]},
+                               {"parts": [" Done."]}, chat=chat)
+        told = [c for n in range(len(self.world["read"])) for c in self.told(n)]
+        refusals = [t for t in told if t.startswith("error: there's already a document named “Trip plan”")]
+        self.assertEqual(len(set(refusals)), 2, "make_artifact's and canvas_create's, each once")
+        self.assertTrue(all("ar_" in t for t in refusals))
+        titles = sorted(c["title"] for c in self.engine._canvas_list(self.engine.get(chat["id"]) if hasattr(self.engine, "get") else chat))
+        self.assertEqual(titles, ["Trip plan", "Trip plan (short)"])
+
     def test_a_file_is_made_shown_kept_and_read_back(self):
         live = []
         chat, reply = self.say("Write me a one-page brief on the LRS as a Word file.",
@@ -334,8 +366,8 @@ class MadeInChat(unittest.TestCase):
         self.assertTrue(self.told(1)[0].startswith("error: Choose a format"))
 
     def test_three_files_a_reply_then_the_tool_goes(self):
-        sheet = {"name": "t", "format": "csv", "rows": [["a"], [1]]}
-        chat, reply = self.say("Three tables.", {"calls": [("make_file", sheet)] * 3}, {"parts": ["Done."]})
+        sheets = [{"name": f"t{n}", "format": "csv", "rows": [["a"], [1]]} for n in (1, 2, 3)]
+        chat, reply = self.say("Three tables.", {"calls": [("make_file", sheet) for sheet in sheets]}, {"parts": ["Done."]})
         self.assertEqual(len(reply["files"]), 3)
         self.assertNotIn("make_file", self.world["read"][-1]["tools"])
 

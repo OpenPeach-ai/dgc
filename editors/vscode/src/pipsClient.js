@@ -8147,7 +8147,7 @@ document.addEventListener('click',event=>{
       const token=scope();try{const result=documentationDraft(S.run?.result);if(S.run?.manifest?.run_kind!=='draft'||S.run.status!=='succeeded')return;checkedRunSource(S.run);if(!window.navigator.clipboard?.writeText)throw new Error('Clipboard access is unavailable. Select the draft text and copy it manually.');void window.navigator.clipboard.writeText(result.draft.markdown).then(()=>{if(token===scope()){S.notice='Draft copied. Nothing was published or applied.';render();}},()=>{if(token===scope())setError('Clipboard access was refused. Select the draft text and copy it manually.');});}catch(error){setError(error);}break;
     }
     case 'download-draft':{
-      if(!remoteHost||options.downloadDraft===false)return;try{const result=documentationDraft(S.run?.result);if(S.run?.manifest?.run_kind!=='draft'||S.run.status!=='succeeded')return;checkedRunSource(S.run);const blob=new window.Blob([result.draft.markdown],{type:'text/markdown;charset=utf-8'});if(globalThis.DgcDownload)globalThis.DgcDownload.save(owner,{name:'quill-draft.md',data:blob});else{const url=window.URL.createObjectURL(blob),link=owner.createElement('a');link.href=url;link.download='quill-draft.md';link.hidden=true;owner.body.append(link);link.click();link.remove();window.setTimeout(()=>window.URL.revokeObjectURL(url),0);}}catch(error){setError(error);}break;
+      if(!remoteHost||options.downloadDraft===false)return;try{const result=documentationDraft(S.run?.result);if(S.run?.manifest?.run_kind!=='draft'||S.run.status!=='succeeded')return;checkedRunSource(S.run);const blob=new window.Blob([result.draft.markdown],{type:'text/markdown;charset=utf-8'});if(globalThis.DgcDownload)globalThis.DgcDownload.here(owner.activeElement,{name:'quill-draft.md',data:blob,mime:'text/markdown'});else{const url=window.URL.createObjectURL(blob),link=owner.createElement('a');link.href=url;link.download='quill-draft.md';link.hidden=true;owner.body.append(link);link.click();link.remove();window.setTimeout(()=>window.URL.revokeObjectURL(url),0);}}catch(error){setError(error);}break;
     }
     case 'run':runNow();break;
     case 'toggle-pip':if(archived())break;if(S.apiVersion>=16&&!canLifecycle()){setError('Refresh, then try again.');break;}void mutate({type:S.pip.status==='paused'?'resume_pip':'pause_pip',pip_id:S.selected,...(S.apiVersion>=16?{expected_lifecycle_revision:S.pip.lifecycle_revision}:{})});break;
@@ -8515,6 +8515,7 @@ return {async navigate(value){attentionAll.open=false;   // the host asks for an
 if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar,mountHomePips};
 if(typeof window!=='undefined'&&typeof acquireVsCodeApi==='function'&&!window.document.getElementById('pips-host')){
   const api=acquireVsCodeApi();
+  window.DgcDownload?.connect(message=>api.postMessage(message));
   // Plugins' cards in a Pip's replies (MCP Apps): what one asks goes to the extension host, its answers come back here.
   window.DgcMcpApps?.setup({post:message=>api.postMessage(message),surface:'pip'});
   window.addEventListener('message',event=>{const m=event.data;if(window.DgcMcpApps?.host(m))return;if(m?.type==='event'&&/^mcp_app_/.test(String(m.event?.type||'')))window.DgcMcpApps?.event(m.event);});

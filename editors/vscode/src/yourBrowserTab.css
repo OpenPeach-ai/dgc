@@ -48,17 +48,32 @@ body { background: var(--bg, var(--vscode-editor-background)); color: var(--text
   overflow-wrap: anywhere; }
 .yb-line[hidden] { display: none; }
 .yb-own-mode .yb-bar { border-bottom: 0; padding-bottom: 6px; }
-/* Your tabs like Chrome's (his 20 Nov ask), in DGC's own shapes: a strip with a hairline under it; the current tab, its
-   6 px top corners and hairline sides, stands on the address row (it hides the strip's line under it); the others are
-   quiet, a thin divider between two of them, a wash on hover. Each wears its site's icon, its title and its Close. */
-.yb-own-mode .yb-tabs { gap: 0; align-items: flex-end; margin: -2px -10px 0; padding: 0 8px; border-bottom: 1px solid var(--hair, rgba(128, 128, 128, .25)); }
-.yb-own-mode .yb-own { position: relative; flex: 0 1 220px; height: var(--btn-h, 26px); margin-bottom: -1px; border: 1px solid transparent; border-bottom: 0;
+/* Your tabs like Chrome's, in DGC's own shapes: a strip a shade apart from the address row; the current tab is the
+   address row's own colour, its 6 px top corners and small curved feet joining it to the row with no line between; the
+   others sit quiet on the strip, a thin divider between two of them, a wash on hover. Each wears its site's icon, its
+   title (faded at its end, as Chrome's) and its Close. On a dark editor the strip is the editor's colour and the row a
+   shade lighter; on a light one the strip is a shade darker. */
+.yb-own-mode { --yb-strip: color-mix(in srgb, var(--bg, #ffffff) 88%, #000); --yb-row: var(--bg, var(--vscode-editor-background)); }
+.yb-own-mode.yb-dark { --yb-strip: var(--bg, var(--vscode-editor-background)); --yb-row: color-mix(in srgb, var(--bg, #1e1e1e) 90%, #fff); }
+.yb-own-mode .yb-bar { padding-top: 0; background: var(--yb-row); border-bottom: 1px solid var(--hair, rgba(128, 128, 128, .25)); }
+.yb-own-mode .yb-tabs { gap: 0; align-items: flex-end; margin: 0 -10px; padding: 6px 14px 0; background: var(--yb-strip); border-bottom: 0; }
+.yb-own-mode .yb-own { position: relative; flex: 0 1 220px; height: var(--btn-h, 26px); margin-bottom: 0; border: 0;
   border-radius: var(--btn-r, 6px) var(--btn-r, 6px) 0 0; background: transparent; }
-.yb-own-mode .yb-own.yb-on { background: var(--bg, var(--vscode-editor-background)); border-color: var(--hair, rgba(128, 128, 128, .25)); }
+.yb-own-mode .yb-own.yb-on { background: var(--yb-row); }
+.yb-own-mode .yb-own.yb-on::before, .yb-own-mode .yb-own.yb-on::after { content: ""; position: absolute; bottom: 0; width: var(--btn-r, 6px);
+  height: var(--btn-r, 6px); pointer-events: none; }
+.yb-own-mode .yb-own.yb-on::before { left: calc(-1 * var(--btn-r, 6px)); background: radial-gradient(circle at 0 0, transparent calc(var(--btn-r, 6px) - .5px), var(--yb-row) var(--btn-r, 6px)); }
+.yb-own-mode .yb-own.yb-on::after { right: calc(-1 * var(--btn-r, 6px)); background: radial-gradient(circle at 100% 0, transparent calc(var(--btn-r, 6px) - .5px), var(--yb-row) var(--btn-r, 6px)); }
 .yb-own-mode .yb-own:not(.yb-on):hover { background: var(--wash, rgba(128, 128, 128, .12)); }
-.yb-own-mode .yb-own:not(.yb-on) + .yb-own:not(.yb-on)::before { content: ""; position: absolute; left: -1px; top: 6px; width: 1px; height: calc(var(--btn-h, 26px) - 12px);
+.yb-own-mode .yb-own:not(.yb-on) + .yb-own:not(.yb-on)::before { content: ""; position: absolute; left: 0; top: 6px; width: 1px; height: calc(var(--btn-h, 26px) - 12px);
   background: var(--hair-strong, rgba(128, 128, 128, .4)); }
-.yb-own-mode .yb-own:hover::before, .yb-own-mode .yb-own:hover + .yb-own::before { opacity: 0; }
+.yb-own-mode .yb-own:not(.yb-on):hover::before, .yb-own-mode .yb-own:hover + .yb-own:not(.yb-on)::before { opacity: 0; }
+.yb-own-mode .yb-tab-title { text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
+.yb-own-mode .yb-own:not(.yb-on) .yb-tab-title { color: var(--muted, var(--faint, inherit)); }
+.yb-own-mode .yb-own.yb-on .yb-tab-title { color: var(--text-strong, var(--text, inherit)); }
+/* A dark site's one-colour icon on a dark editor: its light side, as the site's own dark-mode icon looks. */
+.yb-fav.yb-fav-lift { filter: invert(1); }
 .yb-own-mode .yb-own .yb-tab { align-items: center; gap: 8px; height: 100%; padding: 0 2px 0 10px; }
 .yb-fav { flex: none; width: 16px; height: 16px; object-fit: contain; border-radius: 3px; }
 .yb-fav-none { display: grid; place-items: center; color: var(--faint, inherit); }

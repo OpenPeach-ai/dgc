@@ -149,7 +149,7 @@ body.sessions-active #phead .pm { display:inline-flex; flex:1; align-self:center
    Home, Work, Chat, Pips. The header holds the wordmark alone there: the buttons it once had are the tab bar's (Pips is
    a tab, and the tabs are Pips' way back), so nothing is offered twice. The tab bar sits close under it. */
 html[data-chat-place="home"] #phead { min-height: 34px; padding-bottom: 0; }
-html[data-chat-place="home"] #phead :is(button, .agent-mark) { display:none !important; }
+html[data-chat-place="home"] #phead :is(button:not(#phead-news), .agent-mark) { display:none !important; }
 html[data-chat-place="home"] #phead .pm { display:inline-flex; flex:1; align-self:center; }
 html[data-chat-place="home"] #side-tabs { padding-top: 4px; }
 /* ---- Frosted glass: the tab bar and the strip behind the dock (0.52) ----------------------------- */
@@ -395,6 +395,17 @@ body.vscode-light .project-icon[data-color="orange"] { color:#EA580C; }   /* #F9
 #phead .chat-add:hover { background: var(--surface2); color: var(--text); }
 #phead .chat-add:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 #phead .chat-add[disabled] { opacity: .35; cursor: default; }
+/* DGC's version and "What's new", at the far right of the logo line (Home and the Library in the side bar). */
+#phead .phead-news { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); height: var(--control-sm);
+  padding: 0 var(--sp-2); border: 0; border-radius: var(--btn-r, 6px); background: transparent; color: var(--muted); cursor: pointer;
+  font: var(--w-medium, 500) var(--t-xs)/14px var(--font, inherit); white-space: nowrap; }
+#phead .phead-news[hidden] { display: none; }
+#phead .phead-news .phead-ver { font-family: var(--mono); letter-spacing: .04em; color: var(--faint); }
+#phead .phead-news .phead-news-word { color: var(--muted); }
+#phead .phead-news:hover { background: var(--surface2); }
+#phead .phead-news:hover .phead-news-word { color: var(--text); }
+#phead .phead-news:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 239px) { #phead .phead-news .phead-ver { display: none; } }
 #phead .chat-add[disabled]:hover { background: transparent; color: var(--faint); }
 #phead #chat-add-folder { margin-left: 0; }
 

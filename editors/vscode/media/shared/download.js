@@ -13,18 +13,23 @@
 // all share window.DgcDownload. It listens for the host's answer itself: a host posts
 //   { type: "dgcDownload", name, mime, data }      data: bytes (Uint8Array or ArrayBuffer), or a data: URI
 // and the page saves it, then says "Downloaded" beside the control that asked (ask(control) marks it) for a moment.
+// In the editor's desktop app a page can't start a download (the app drops it), so there the host saves the file with
+// the editor's own Save dialog and only says so: { type: "dgcDownload", name, saved | cancelled | failed: true }. What a
+// page itself holds (here()) goes to its host the same way in the desktop app, as { type: "dgcSave", name, mime, data },
+// once the page has handed this module its way to the host (connect()); in a browser the page saves it itself.
 // "Save to project" is not here: that one's place IS the project, on the machine DGC runs on, so it keeps its dialog.
 (function () {
   "use strict";
   const root = typeof window !== "undefined" ? window : globalThis;
   if (root.DgcDownload) return;
 
-  const MESSAGE = "dgcDownload";
+  const MESSAGE = "dgcDownload", SAVE = "dgcSave";
   /** The most one download carries (the host refuses more, and says so: src/download.ts keeps the same number). */
   const MAX_BYTES = 512 * 1024 * 1024;
   /** How long the control that asked stays the one a host's answer is said beside. */
   const ASKED_MS = 120_000;
   let asked = null;            // { control, at }
+  let toHost = null;           // the page's acquireVsCodeApi().postMessage, once connect() is called
 
   /** A name safe as one file name on any computer: no folders, no control characters, never empty. */
   function nameOf(name, fallback = "download") {
@@ -40,6 +45,13 @@
     if (tag === "[object ArrayBuffer]" || tag === "[object SharedArrayBuffer]") return new Uint8Array(data);
     if (data && ArrayBuffer.isView?.(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     if (data && Array.isArray(data.data)) return Uint8Array.from(data.data);
+    // As VS Code hands a Uint8Array to a page: a plain list of numbers, or (JSON of a typed array) {"0": n, "1": n, …}.
+    const byte = (n) => Number.isInteger(n) && n >= 0 && n <= 255;
+    if (Array.isArray(data)) return data.length && data.every(byte) ? Uint8Array.from(data) : null;
+    if (data && typeof data === "object" && byte(data[0])) {
+      const list = []; for (let i = 0; i in data; i++) { if (!byte(data[i])) return null; list.push(data[i]); }
+      return Uint8Array.from(list);
+    }
     if (typeof data === "string") {
       const m = /^data:([^;,]*)((?:;[^;,]*)*?)(;base64)?,(.*)$/s.exec(data);
       if (!m) return null;
@@ -108,26 +120,63 @@
   /** A host's answer: saved, and said where the person clicked. */
   function take(message, doc = root.document) {
     if (!message || message.type !== MESSAGE) return false;
-    const ok = save(doc, { name: message.name, data: message.data, mime: message.mime });
     const control = asked && Date.now() - asked.at < ASKED_MS && asked.control?.isConnected ? asked.control : null;
     asked = null;
+    // (Saved by the host with the editor's own dialog: only said here. Cancelled in the dialog: nothing to say.)
+    if (message.cancelled === true) return false;
+    const ok = message.saved === true || (message.failed !== true && save(doc, { name: message.name, data: message.data, mime: message.mime }));
     said(control, ok ? "Downloaded" : "Couldn’t download here");
     return ok;
   }
+  /** The page's way to its host (its acquireVsCodeApi().postMessage). In the editor's desktop app (its pages are at
+   *  vscode-webview: addresses) what the page holds is saved by the host, with the editor's own dialog; in a browser the
+   *  page saves it itself. `desktop` says which, where the address can't (a test page). */
+  let inDesktop = null;
+  function connect(post, { desktop } = {}) {
+    toHost = typeof post === "function" ? post : null;
+    inDesktop = typeof desktop === "boolean" ? desktop : null;
+  }
+  const desktopApp = () => (inDesktop !== null ? inDesktop : root.location?.protocol === "vscode-webview:");
   /** Save what the page itself holds (a picture it shows, a chart it drew), and say so beside the control. */
   function here(control, file) {
+    if (toHost && desktopApp() && file && file.data) {
+      const send = (data) => {
+        try { ask(control); toHost({ type: SAVE, name: nameOf(file.name), mime: String(file.mime || ""), data }); return true; }
+        catch { return false; }
+      };
+      // (A Blob crosses as its bytes.)
+      if (typeof Blob !== "undefined" && file.data instanceof Blob) {
+        file.data.arrayBuffer().then((buffer) => send(new Uint8Array(buffer)), () => said(control, "Couldn’t download here"));
+        return true;
+      }
+      const bytes = typeof file.data === "string" ? file.data : bytesOf(file.data);
+      if (bytes && send(bytes)) return true;
+    }
     const ok = save(control?.ownerDocument || root.document, file);
     said(control, ok ? "Downloaded" : "Couldn’t download here");
     return ok;
   }
 
+  /** Whether `win` is a frame inside this page, at any depth (a plugin's card, a frame in a card). */
+  function inside(win) {
+    try {
+      for (let w = win, hops = 0; w && hops < 16; hops++) {
+        const up = w.parent;
+        if (!up || up === w) return false;
+        if (up === root) return true;
+        w = up;
+      }
+    } catch { return true; }
+    return true;
+  }
   // Only the host's own messages: a frame inside the page (a plugin's card) can post to this window too, and is never
-  // let start a download. The host's come from the editor's frame around the page (this window's parent), or with no
-  // source; a test page posts to itself.
+  // let start a download. The host's come from the editor's frame around the page, or with no source; a test page posts
+  // to itself. (Not "this window's parent" only: in VS Code the page's window.parent reads as the page itself, and the
+  // host's message comes from the editor's frame all the same, so a download never started.)
   if (typeof root.addEventListener === "function") root.addEventListener("message", (event) => {
     const from = event?.source;
-    if (event?.data?.type !== MESSAGE || (from && from !== root && from !== root.parent)) return;
+    if (event?.data?.type !== MESSAGE || (from && from !== root && inside(from))) return;
     take(event.data);
   });
-  root.DgcDownload = Object.freeze({ MESSAGE, MAX_BYTES, save, here, ask, said, take, bytesOf, nameOf });
+  root.DgcDownload = Object.freeze({ MESSAGE, SAVE, MAX_BYTES, save, here, ask, said, take, connect, bytesOf, nameOf });
 })();

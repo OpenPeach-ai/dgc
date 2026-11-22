@@ -4,6 +4,8 @@
 (() => {
   "use strict";
   const vscode = acquireVsCodeApi();
+  // (What this page holds, a picture or a chart, is saved by the host, which knows how this editor saves a file.)
+  window.DgcDownload?.connect((message) => vscode.postMessage(message));
   // A control's `title` shows as DGC's own label, inside the tab (media/shared/tip.js; Work's look, from main.css).
   window.DgcTip?.install({ look: "tip" });
   // Plugins' cards in a reply (MCP Apps, media/mcpApps.js): what one asks goes to the extension host from here.
@@ -2209,6 +2211,7 @@
           item.type = "button"; item.setAttribute("role", "menuitem"); item.dataset.format = format;
           item.addEventListener("click", () => {
             closeArtifactMenu(true);
+            window.DgcDownload?.ask(button);
             vscode.postMessage({ type: "artifactExport", id: card.id, format, artifactType: card.type, title: shown.title || "", exports: formats });
           });
           menu.append(item);

@@ -98,7 +98,46 @@ function paintOwn() {
       + `<button type="button" class="yb-x" data-close="${esc(t.id)}" title="Close tab" aria-label="${esc(`Close ${name}`)}">${CROSS}</button></div>`; }).join('')
     + `<button type="button" class="yb-btn yb-new" title="New tab" aria-label="New tab"${ready() ? '' : ' disabled'}>${PLUS}</button>`;
   if (tabs.__html !== html) { tabs.__html = html; tabs.innerHTML = html; }
+  liftIcons();
   for (const b of app.querySelectorAll('.yb-row .yb-btn')) b.disabled = !ready() || !f;
+}
+/** Whether the editor around this tab is dark (its own background, as drawn). */
+function darkEditor() {
+  const m = getComputedStyle(document.body).backgroundColor.match(/[\d.]+/g);
+  if (!m || m.length < 3) return false;
+  const [r, g, b] = m.slice(0, 3).map((v) => Number(v) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.4;
+}
+/** A site icon that is dark and of one colour (black, near-black, grey), by its own pixels: on a dark editor it is drawn
+ *  light, as the site's dark-mode icon would be. Coloured icons are left as they are. */
+const iconTones = new Map();
+function darkOneColour(img) {
+  const key = img.currentSrc || img.src;
+  if (iconTones.has(key)) return iconTones.get(key);
+  let tone = false;
+  try {
+    const c = document.createElement('canvas'); c.width = c.height = 16;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, 16, 16);
+    const d = g.getImageData(0, 0, 16, 16).data;
+    let n = 0, lum = 0, spread = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 128) continue;
+      const r = d[i] / 255, gr = d[i + 1] / 255, b = d[i + 2] / 255;
+      lum += 0.2126 * r + 0.7152 * gr + 0.0722 * b; spread += Math.max(r, gr, b) - Math.min(r, gr, b); n += 1;
+    }
+    tone = n > 8 && lum / n < 0.22 && spread / n < 0.15;
+  } catch { tone = false; }
+  if (iconTones.size > 300) iconTones.clear();
+  iconTones.set(key, tone);
+  return tone;
+}
+function liftIcons() {
+  const dark = darkEditor();
+  app.classList.toggle('yb-dark', dark);
+  for (const img of tabs.querySelectorAll('img.yb-fav')) {
+    const apply = () => img.classList.toggle('yb-fav-lift', dark && darkOneColour(img));
+    if (img.complete && img.naturalWidth) apply(); else img.addEventListener('load', apply, { once: true });
+  }
 }
 function tookOwn(said) {
   if (!said || typeof said !== 'object') return;

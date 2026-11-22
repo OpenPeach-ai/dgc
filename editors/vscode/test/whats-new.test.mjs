@@ -100,6 +100,14 @@ test("opened again from the menu, whenever asked: seen or not, and without chang
   assert.equal(state.kept.get(KEY), "0.52");
 });
 
+test("the side bar's \"What's new\" link asks for the news again, as the menu does", async () => {
+  const state = memory({ [KEY]: "0.52" });
+  const side = provider(state);
+  await side.p.onMessage({ type: "whatsNewShow" });
+  assert.deepEqual(side.news(), [{ type: "whatsNew", auto: false, release: "0.52" }]);
+  assert.equal(state.kept.get(KEY), "0.52", "what was seen stays as it was");
+});
+
 test("the menu: What's New is a command in the DGC view's ⋯ menu (both side bars), not one more icon in its title bar", () => {
   const manifest = JSON.parse(readFileSync(`${extensionRoot}/package.json`, "utf8"));
   const command = manifest.contributes.commands.find((c) => c.command === "dgc.whatsNew");
@@ -281,6 +289,37 @@ test("the lines: what isn't true at this commit is left out (ships: false), and 
     assert.equal(new Set(got.ids).size, got.ids.length, "every line has its own id");
     assert.ok(got.icons.every(Boolean), "every line shown has its glyph in media/shared/icons.js");
   } finally { await x.close(); }
+});
+
+test("the logo line: DGC's version and What's new at its far right, on Home and the Library; a click asks for the news", async (t) => {
+  if (!browser) { if (process.env.DGC_REQUIRE_CHROMIUM === "1") assert.fail("Chromium could not start"); t.skip("no Chromium"); return; }
+  for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 300, 440]) {
+    const x = await openHome(browser, { width, height: 600, theme });
+    try {
+      const link = x.page.locator("#phead-news");
+      assert.equal(await link.isVisible(), false, "nothing before DGC says its version");
+      await x.send({ type: "event", event: { type: "ready", version: "0.52.0", capabilities: {}, model: "m", mode: "default", think: "off" } });
+      await link.waitFor({ state: "visible" });
+      assert.equal((await link.innerText()).replace(/\s+/g, " ").trim(), width >= 300 ? "0.52.0 What's new" : "What's new");
+      const [l, h, logo] = await x.page.evaluate(() => [document.getElementById("phead-news").getBoundingClientRect(), document.getElementById("phead").getBoundingClientRect(),
+        document.querySelector("#phead .pm").getBoundingClientRect()].map((r) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom })));
+      assert.ok(h.right - l.right <= 14, `at the far right of the line (${theme} ${width})`);
+      assert.ok(Math.abs((l.top + l.bottom) / 2 - (logo.top + logo.bottom) / 2) <= 2, "level with the logo");
+      assert.ok(l.left >= logo.right, "never over the logo");
+      const look = await x.page.evaluate(() => { const b = document.getElementById("phead-news"), cs = getComputedStyle(b);
+        const grey = (c) => { const [r, g, bl] = c.match(/[\d.]+/g).map(Number); return Math.max(r, g, bl) - Math.min(r, g, bl) <= 12; };
+        return { cursor: cs.cursor, grey: [b.querySelector(".phead-ver"), b.querySelector(".phead-news-word")].every((n) => grey(getComputedStyle(n).color)) }; });
+      assert.equal(look.cursor, "pointer");
+      assert.equal(look.grey, true, "grey only, never the accent");
+      await link.click();
+      assert.deepEqual((await x.posted("whatsNewShow")).length, 1);
+      // Not where the line holds a session's own (its name and model): the Work tab.
+      await x.page.evaluate(() => document.getElementById("side-tab-work")?.click());
+      await x.page.waitForTimeout(150);
+      const onWork = await x.page.evaluate(() => !!document.getElementById("side-tab-work"));
+      if (onWork) assert.equal(await link.isVisible(), false, "the Work tab's line is the session's");
+    } finally { await x.close(); }
+  }
 });
 
 test("× and Esc close it for good; the arrows and the dots move; a click outside does not answer; focus goes back where it was", async (t) => {

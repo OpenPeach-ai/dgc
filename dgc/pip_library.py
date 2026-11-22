@@ -12,7 +12,7 @@ from __future__ import annotations
 import copy
 import re
 
-TOOLS = ("make_artifact", "edit_artifact")
+TOOLS = ("make_artifact", "edit_artifact", "find_artifacts")
 
 # What the Pip is told, on each tool: one item per purpose, kept current, never a flood (his call: instructions, no cap).
 KEEP_ONE = (" As a Pip: keep ONE page, sheet, document or dashboard per purpose. When one you made already covers it, "
@@ -29,7 +29,8 @@ def schemas() -> list:
         name = schema.get("function", {}).get("name")
         if name in TOOLS:
             item = copy.deepcopy(schema)
-            item["function"]["description"] = str(item["function"].get("description") or "") + KEEP_ONE
+            if name != "find_artifacts":
+                item["function"]["description"] = str(item["function"].get("description") or "") + KEEP_ONE
             out.append(item)
     return out
 
@@ -80,7 +81,7 @@ class Session:
                     "to keep current; make your own instead, or tell the user what you'd change.")
         # What it made or changed counts toward the reply's chosen output, as in Work (Agent._artifact_changed).
         return artifact_tools.run(op, args, origin={"surface": "pip", "pip": self.pip_id}, author=self.name,
-                                  on_change=self._changed)
+                                  on_change=self._changed, mine=lambda view: self._may_edit(str(view.get("id") or "")))
 
     def _changed(self, view, op) -> None:
         self.made.append(str(view.get("type") or ""))

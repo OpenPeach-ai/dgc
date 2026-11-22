@@ -17,7 +17,7 @@ import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPicture
 import { sessionIcon, dockOf, type DockPin } from "./dock";
 import { openCodePreview } from "./codePreview";
 import { promises as fs } from "fs";
-import { downloadBytes, downloadFile, downloadMade, DOWNLOAD_MESSAGE, type DownloadPage } from "./download";
+import { downloadBytes, downloadFile, downloadMade, DOWNLOAD_MESSAGE, takeSave, type DownloadPage } from "./download";
 import { displayMentions, workspaceFiles } from "./mentionsHost";
 
 /**
@@ -2386,6 +2386,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   private async fromTab(tab: Tab, message: any): Promise<void> {
     if (!message || typeof message !== "object" || typeof message.type !== "string") return;
+    if (takeSave(tab.panel.webview, message)) return;
     const conversation = tab.conversation;
     if (tab.elsewhere && READ_ONLY_REFUSES.has(message.type)) {
       // Read-only while another window writes to it (the page offers none of these then; its process refuses them too).

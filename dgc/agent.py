@@ -216,7 +216,7 @@ _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "present_document", "pr
                                  # Reading which image (or video) generators there are changes nothing.
                                  "list_image_generators", "list_video_generators",
                                  # An artifact is DGC's own, never a project file: a plan's design doc or deck.
-                                 "make_artifact", "edit_artifact",
+                                 "make_artifact", "edit_artifact", "find_artifacts",
                                  # Ending work this agent itself started, `monitor_stop`'s exact
                                  # case: a background child spawned before the user switched to
                                  # plan mode keeps running, and stopping it must not require
@@ -314,7 +314,7 @@ _OPTIONAL_TOOL_INTENT = {
     "web_fetch": "web", "web_search": "web", "deep_research": "web", "browser": "browser",
     "add_skill": "skill_install", "save_memory": "memory",
     "artifact": "artifact", "present_document": "document", "task": "delegate", "monitor": "monitor",
-    "make_artifact": "artifact", "edit_artifact": "artifact",
+    "make_artifact": "artifact", "edit_artifact": "artifact", "find_artifacts": "artifact",
     "view_image": "image",
 }
 

@@ -48,6 +48,61 @@ class ArtifactUseError(ValueError):
     """Asked for something an artifact can't do; the text says what to change, for the model or the user."""
 
 
+class ArtifactNameTaken(ArtifactUseError):
+    """A name another artifact of the same kind already has in the same place (place_of): a change is made to the one
+    that's there (a new version) or a second one gets a name of its own. ``existing`` is that one, as view() shows it."""
+
+    def __init__(self, existing: dict):
+        self.existing = existing
+        super().__init__(f"There's already a {LABELS.get(existing.get('type'), 'artifact').lower()} named "
+                         f"“{existing.get('title')}”. Choose another name.")
+
+
+def same_name(title) -> str:
+    """A name as two names are compared: case and spacing don't make it another name."""
+    return " ".join(str(title or "").split()).casefold()
+
+
+def place_of(origin) -> str:
+    """Where an artifact belongs, for its name: a project folder (Work's, a chat's or a Pip's folder: one place,
+    whichever made it), else the chat, the Pip or the app that made it. "logo" can be in every project; within one
+    place, a name is one item."""
+    o = origin if isinstance(origin, dict) else {}
+    project = str(o.get("project") or "")
+    if project:
+        try:
+            project = str(Path(project).expanduser().resolve())
+        except (OSError, RuntimeError, ValueError):
+            pass
+        return "project:" + project
+    surface = str(o.get("surface") or "")
+    ident = {"chat": o.get("chat"), "pip": o.get("pip"), "sdk": o.get("app"), "work": o.get("session")}.get(surface)
+    return f"{surface}:{ident or ''}"
+
+
+def taken(type_, title, *, place: str | None = None, except_id: str = "", store: Store | None = None) -> dict | None:
+    """The artifact of this kind (not removed) already named ``title`` in ``place`` (anywhere when None), or None."""
+    key = same_name(title)
+    if not key:
+        return None
+    for art in _store(store).list(type=_type(type_)):
+        if art.id != except_id and same_name(art.title) == key and (place is None or place_of(art.origin) == place):
+            return view(art.id, store=store, versions=False)
+    return None
+
+
+def free_name(type_, title=None, *, place: str | None = None, store: Store | None = None) -> str:
+    """``title`` (or the kind's own name) when no other artifact of the kind has it in ``place``, else the first free
+    "<it> 2", "<it> 3"."""
+    base = " ".join(str(title or "").split())[:190] or LABELS[_type(type_)]
+    if taken(type_, base, place=place, store=store) is None:
+        return base
+    for n in range(2, 1000):
+        if taken(type_, f"{base} {n}", place=place, store=store) is None:
+            return f"{base} {n}"
+    return base
+
+
 def _store(store: Store | None) -> Store:
     return store or artifact_store.store()
 
@@ -201,8 +256,16 @@ def make(type_, title, spec, *, origin: dict, author: str = "DGC", summary: str 
     content = _content(type_, spec, base=base, resolve=resolve)
     entry = _page_files(spec)[1] if type_ == "page" else ""
     st = _store(store)
+    # Names are unique per kind: a name that's taken is refused (the caller changes that one, or names this one apart);
+    # with no name at all, it gets the kind's own, numbered past the ones there are.
+    given, place = " ".join(str(title or "").split()), place_of(origin)
+    if given:
+        clash = taken(type_, given, place=place, store=store)
+        if clash is not None:
+            raise ArtifactNameTaken(clash)
+    name = given or free_name(type_, place=place, store=store)
     try:
-        art = st.create(type_, title or LABELS[type_], content, origin=origin, author=author,
+        art = st.create(type_, name, content, origin=origin, author=author,
                         summary=summary, entry=entry)
         if type_ == "doc":
             st.set_meta(art.id, legacy={"file": str(st._dir(art.id) / "work" / made.file_name(art.title, "md"))})
@@ -222,7 +285,15 @@ def edit(aid: str, *, edits=None, content=None, author: str = "DGC", note: str =
             art = st.get(aid)
         except ArtifactError as exc:
             raise ArtifactUseError(str(exc)) from None
-        if content is None and edits is None:
+        renaming = title is not None and same_name(title) != same_name(art.title)
+        if title is not None and not same_name(title):
+            raise ArtifactUseError("A name can't be empty.")
+        if renaming:
+            clash = taken(art.type, title, place=place_of(art.origin), except_id=aid, store=store)
+            if clash is not None:
+                raise ArtifactNameTaken(clash)
+        only_name = content is None and edits is None
+        if only_name and title is None:
             raise ArtifactUseError("Give content (the whole new artifact) or edits.")
         expected = None
         if art.type == "doc":
@@ -232,7 +303,11 @@ def edit(aid: str, *, edits=None, content=None, author: str = "DGC", note: str =
             else:
                 snapshot = _doc_snapshot(art)
                 expected = snapshot[1] if snapshot else None
-        if content is not None:
+        if only_name:
+            # Only a new name: the same content as it's kept, as a new version that says so.
+            new = st.files(aid, art.version) if art.type == "page" else st.source(aid, art.version)
+            note = note or "Renamed"
+        elif content is not None:
             new = _content(art.type, content, base=base, resolve=resolve)
         elif art.type == "doc":
             from .chatdgc.canvas import CanvasError, apply_edits

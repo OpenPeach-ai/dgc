@@ -6,6 +6,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **One artifact per name**: asked to change something it made, a model changes that one (a new version you can go
+  back to) instead of saving another beside it. Two docs, decks, sheets, dashboards or pages never share a name (case
+  and spacing don't count). A second one is made only when you want both, under a name that says how it differs; the
+  model is told which one is there and what to do. Any chat, Work session or Pip can look up what you already have
+  (new `find_artifacts`), so "change yesterday's report" changes yesterday's report. `edit_artifact` can rename, and
+  your own Rename in the Library follows the same rule. A Pip sees and changes only its own. In ChatDGC a chat never
+  holds two files with one name: a file keeps no versions, so a second is named apart and the first stays.
 - **Your Browser's tabs look like Chrome's**: each wears its site's icon (a globe until DGC has it), its title and its
   Close; the current tab stands on the address row. The icon is the site's own, fetched once without cookies.
 - **A link to a private address wears DGC's own sharp globe**: a link to an IP address, localhost or a private or

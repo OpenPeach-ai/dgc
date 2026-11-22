@@ -2673,6 +2673,15 @@ class ChatEngine:
         store = self._canvas_store(chat)
         args = call.arguments if isinstance(call.arguments, dict) else {}
         created = call.name == "canvas_create"
+        if created and not chat.get("temporary"):
+            # A canvas is a document in the user's Library: its name is unique among their documents.
+            from .. import artifact_service
+            clash = artifact_service.taken("doc", args.get("title"), place=self._artifact_place(chat))
+            if clash is not None:
+                return (f"error: there's already a document named “{clash['title']}” ({clash['id']}, version "
+                        f"{clash['version']}). If the user means that one, change it (canvas_edit for one in this chat, "
+                        "edit_artifact for another, after find_artifacts). If they want another beside it, call "
+                        "canvas_create again with a name that says how it differs.")
         try:
             if created:
                 view = store.create(chat["id"], title=args.get("title"), kind=args.get("kind"),
@@ -2697,6 +2706,12 @@ class ChatEngine:
 
     on_artifact = None       # set by the service: (view, op, conversation_id) -> None, the artifact_changed event
 
+    def _artifact_place(self, chat: dict) -> str:
+        """Where this chat's documents belong, for their names: its folder (shared with Work there), else the chat."""
+        from .. import artifact_service
+        folder = self.folder_of(chat)
+        return artifact_service.place_of({"surface": "chat", "chat": chat["id"], **({"project": str(folder)} if folder else {})})
+
     def _artifact_call(self, chat: dict, call, cards: list, state: dict, canvases: list, canvas_state: dict, at: int,
                        on_canvas) -> str:
         """make_artifact / edit_artifact in a chat (dgc/artifact_tools). A document is a canvas, beside the chat as
@@ -2704,7 +2719,17 @@ class ChatEngine:
         A temporary chat keeps none: nothing it makes outlives it."""
         args = call.arguments if isinstance(call.arguments, dict) else {}
         state["calls"] += 1
+        if call.name == "find_artifacts":
+            told = artifact_tools.find(args)
+            if told.startswith("ar_"):
+                state["any"] = True                         # one from another chat can be changed now
+            return told
         if call.name == "make_artifact" and str(args.get("type") or "") == "doc":
+            # (A chat's document is a canvas, but its name is unique among the user's documents all the same.)
+            from .. import artifact_service
+            clash = artifact_service.taken("doc", args.get("title"), place=self._artifact_place(chat))
+            if clash is not None:
+                return artifact_tools.taken_words(clash, "make_artifact")
             proxy = type(call)(id=call.id, name="canvas_create", arguments={
                 "title": args.get("title"), "kind": "document", "content": args.get("content")})
             told = self._canvas_call(chat, proxy, canvases, canvas_state, at, on_canvas)
@@ -2730,7 +2755,9 @@ class ChatEngine:
         def no_local_pictures(src):
             raise ValueError("a picture in a chat's deck comes from the web nowhere and from disk only as an "
                              "attachment: use a data: URI")
-        return artifact_tools.run(call.name, args, origin={"surface": "chat", "chat": chat["id"]},
+        folder = self.folder_of(chat)
+        return artifact_tools.run(call.name, args, origin={"surface": "chat", "chat": chat["id"],
+                                                          **({"project": str(folder)} if folder else {})},
                                   on_change=changed, resolve=no_local_pictures)
 
     def _make_file(self, chat: dict, call, files: list, at: int, on_file) -> str:
@@ -2742,6 +2769,18 @@ class ChatEngine:
             out = chat_made.make(spec, self.config)
         except chat_made.MadeError as exc:
             return f"error: {exc} Nothing was made; call make_file again with that changed."
+        # One file per name in a chat (made or attached): a file keeps no versions, so a second one is named apart and
+        # the first stays as it is.
+        held = {str(f.get("name") or "").casefold(): str(f.get("name") or "")
+                for m in [*(chat.get("messages") or []), {"files": files}]
+                for f in [*(m.get("attachments") or []), *(m.get("files") or [])] if isinstance(f, dict)}
+        if out.name.casefold() in held:
+            there = held[out.name.casefold()]
+            stem, _, ext = there.rpartition(".")
+            free = next((f"{stem} {n}" for n in range(2, 1000) if f"{stem} {n}.{ext}".casefold() not in held), f"{stem} 2")
+            return (f"error: this chat already has a file named {there}. A file keeps no versions: to keep both, call "
+                    f"make_file again with a name that says how this one differs (such as “{free}”); the earlier one "
+                    "stays as it is. Nothing was made.")
         meta = {"id": attached.new_attachment_id(), "kind": "document", "name": out.name, "mime": out.mime,
                 "size": len(out.raw), "chars": len(out.text), "format": out.format, "made": True, "at": at,
                 "created_at": now()}
@@ -3111,7 +3150,8 @@ class ChatEngine:
             if canvas_state["calls"] < MAX_CANVAS_CALLS and not spoken:
                 out += [CANVAS_CREATE_TOOL] + ([CANVAS_EDIT_TOOL] if canvas_state["any"] else [])
             if artifact_state["calls"] < MAX_ARTIFACT_CALLS and not spoken:
-                out += [artifact_tools.MAKE_ARTIFACT] + ([artifact_tools.EDIT_ARTIFACT] if artifact_state["any"] else [])
+                out += ([artifact_tools.MAKE_ARTIFACT, artifact_tools.FIND_ARTIFACTS]
+                        + ([artifact_tools.EDIT_ARTIFACT] if artifact_state["any"] else []))
             if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
                 out += [REMEMBER_TOOL, FORGET_TOOL]
             if self._wakes(chat):
@@ -3253,7 +3293,8 @@ class ChatEngine:
                             artifact_state["made"].append("doc")
                     elif call.name in artifact_tools.NAMES:
                         if on_activity is not None:
-                            on_activity("making", artifact_tools.args_preview(call.arguments)[:80])
+                            on_activity("looking" if call.name == "find_artifacts" else "making",
+                                        artifact_tools.args_preview(call.arguments)[:80])
                         told = self._artifact_call(chat, call, artifact_cards, artifact_state, canvases, canvas_state,
                                                    before + len("".join(streamed)), on_canvas)
                     elif call.name in chat_project_files.NAMES:

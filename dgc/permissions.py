@@ -61,7 +61,7 @@ DISPLAY = {
     "mcp_search": "MCPSearch", "mcp_call": "MCPCall",
     "present_plan": "PresentPlan", "present_document": "PresentDocument", "propose_options": "ProposeOptions",
     "ask_user": "AskUser", "artifact": "Artifact",
-    "make_artifact": "MakeArtifact", "edit_artifact": "EditArtifact",
+    "make_artifact": "MakeArtifact", "edit_artifact": "EditArtifact", "find_artifacts": "FindArtifacts",
     "task": "Task", "troupe": "Troupe", "external_directory": "ExternalDirectory",
 }
 DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
@@ -106,7 +106,7 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    "bash_output", "propose_options", "ask_user", "present_document", "mcp_search", "update_goal",
                    # An artifact is DGC's own, kept in ~/.dgc/artifacts with every version: like present_document,
                    # nothing in the project changes, so no card. A deny rule (MakeArtifact) still applies.
-                   "make_artifact", "edit_artifact",
+                   "make_artifact", "edit_artifact", "find_artifacts",
                    # DGC's own settings read and its docs (dgc/settings_tool.py): nothing changes.
                    "dgc_settings_read", "dgc_docs",
                    # Deep research (dgc/deep_research.py) reads the web, as web_search does: nothing changes.

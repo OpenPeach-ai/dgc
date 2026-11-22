@@ -1,5 +1,7 @@
 (function () {
   const vscode = acquireVsCodeApi();
+  // (What this page holds, a picture or a chart, is saved by the host, which knows how this editor saves a file.)
+  window.DgcDownload?.connect((message) => vscode.postMessage(message));
   // Plugins' cards (MCP Apps, media/mcpApps.js): what one asks goes to the extension host from here.
   window.DgcMcpApps?.setup({ post: (message) => vscode.postMessage(message), surface: "work" });
   const $ = (id) => document.getElementById(id);
@@ -1973,6 +1975,7 @@
   // The tabs that are a page of this home (Pips is its own view): where Pips' own "back" may return to.
   const LIST_TABS = ["home", "work", "chat", "library"];
   const pageState = () => { try { return vscode.getState() || {}; } catch { return {}; } };
+  let dgcVersion = "";            // DGC's own version, from its ready event (the logo line's What's new)
   let sideTab = SIDE_TABS.includes(pageState().sideTab) ? pageState().sideTab : "home";
   // The tab Pips' own "back" returns to: the last one that was not Pips.
   let lastListTab = sideTab !== "pips" ? sideTab : LIST_TABS.includes(pageState().sideList) ? pageState().sideList : "home";
@@ -1992,6 +1995,7 @@
       if (panels[name]) panels[name].hidden = !chosen;
     }
     libraryTabShown(sideTab === "library" && sessionsOpen);
+    paintNewsLink();
   }
   // ---- the Library tab (media/library.js): the ONE Library module, mounted narrow here; its editor tab mounts it wide ----
   // The Library's own host answers it (src/chatdgc.ts, through "sideLibrary"): the same messages its editor tab sends.
@@ -3703,7 +3707,7 @@
     present_plan: "clipboard-list", present_document: "file-text", propose_options: "circle-help",
     task: "bot", todo: "list-todo", skill: "sparkle", add_skill: "sparkle", notes: "notebook-pen",
     monitor: "activity", monitor_stop: "activity", artifact: "app-window", update_goal: "target",
-    make_artifact: "app-window", edit_artifact: "app-window",
+    make_artifact: "app-window", edit_artifact: "app-window", find_artifacts: "search",
     // Supervising sub-agents. Steering one wears a fixed mark, never the agent's own face: the
     // row is about the parent talking to it.
     list_tasks: "bot", wait_tasks: "bot", message_task: "message-square", close_task: "circle-slash", continue_task: "bot",
@@ -7454,6 +7458,8 @@
         item.dataset.format = format;
         item.onclick = () => {
           closeArtifactMenu(true);
+          // ("Downloaded" is said beside this card's Download: media/shared/download.js.)
+          window.DgcDownload?.ask(button);
           vscode.postMessage({ type: "artifactExport", id: a.id, format, artifactType: a.type, title: a.title || "", exports: formats });
         };
         menu.appendChild(item);
@@ -10181,6 +10187,7 @@ function permissionChoices(ev) {
     switch (ev.type) {
       case "ready": {
         projectRoot = typeof ev.project_root === "string" ? ev.project_root : "";      // (what "this project" is, for a rule's words)
+        if (typeof ev.version === "string" && /^[0-9][0-9A-Za-z.+-]{0,23}$/.test(ev.version)) { dgcVersion = ev.version; paintNewsLink(); }
         requestEpoch += 1;             // a backend (re)started: its request ids start again
         refreshDock();
         modsUi?.ready(ev.capabilities);
@@ -14422,6 +14429,16 @@ function permissionChoices(ev) {
   // action (Open Pips, Arrange Home, Open Library, Open Work) is an answer too: the host keeps it and says where to go
   // ({type: "sideTab"}, below).
   let whatsNew = null;
+  // DGC's version and "What's new" at the far right of the logo line, where that line holds nothing of a session's (Home
+  // and the Library in the side bar): the news again, whenever wanted. (dgcVersion is declared with the side bar's tabs.)
+  function paintNewsLink() {
+    const link = $("phead-news");
+    if (!link) return;
+    link.querySelector(".phead-ver").textContent = dgcVersion;
+    link.setAttribute("aria-label", `What's new in DGC ${dgcVersion}`.trim());
+    link.hidden = !(chatPlace === "home" && dgcVersion && (sideTab === "home" || sideTab === "library"));
+  }
+  $("phead-news")?.addEventListener("click", () => vscode.postMessage({ type: "whatsNewShow" }));
   function openWhatsNew(msg) {
     const layer = $("whats-new");
     if (!layer || !window.DgcWhatsNew || chatPlace !== "home") return;

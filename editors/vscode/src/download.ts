@@ -1,8 +1,14 @@
-// Download: a copy of a file for the person, saved on the computer the editor runs on (his asks, 18 Nov). The host's
-// half of ONE module (media/shared/download.js is the page's): every "Download" and "Save a copy" in DGC hands the file's
-// bytes to the page the person clicked on, and the page saves them where they are, a Blob and a hidden <a download>.
-// The editor's own save dialog, opened here, would browse THIS machine, which over a remote connection is not the
-// person's computer at all (he saw a folder picker of the remote when he pressed Download).
+// Download: a copy of a file for the person, saved on the computer the editor runs on. The host's half of ONE module
+// (media/shared/download.js is the page's): every "Download" and "Save a copy" in DGC comes here.
+//
+// Where it is saved from depends on the editor:
+//   its desktop app   the editor's own Save dialog, on the person's computer (saveWithDialog). A page in the desktop app
+//                     can't start a download: the app drops it without a word, no file and no dialog. In a window on this
+//                     machine the dialog is this machine's, starting in Downloads; in a remote window (Remote-SSH, WSL, a
+//                     container) the editor names the person's own disk "vscode-local", and a dialog started there
+//                     browses their computer, never the remote one.
+//   in a browser      the page saves it, a Blob and a hidden <a download>: the bytes go to the page the person clicked.
+// What a page itself holds (a picture it shows, a chart it drew) comes here too, as a "dgcSave" message (takeSave).
 //
 // Three ways in, by where the file is:
 //   downloadBytes   bytes the host already holds (a picture it read, a note's text, a plugin card's file)
@@ -14,14 +20,16 @@
 // (downloadThroughBrowser): an address on this machine, forwarded like any other, that answers with it as an attachment.
 import * as vscode from "vscode";
 import * as http from "node:http";
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, existsSync, statSync } from "node:fs";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 /** The page's message type (media/shared/download.js listens for it). */
 export const DOWNLOAD_MESSAGE = "dgcDownload";
+/** A page's own file (a picture it shows, a chart it drew), sent to its host to be saved (takeSave). */
+export const SAVE_MESSAGE = "dgcSave";
 /** The most one download carries; the page keeps the same number. */
 export const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 
@@ -45,7 +53,8 @@ export function downloadName(name: string, fallback = "download"): string {
   const clean = String(name || "").split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f<>:"|?*]+/g, " ").replace(/\s+/g, " ").trim();
   return clean.replace(/^\.+/, "").slice(0, 200) || fallback;
 }
-const sizeWords = (n: number) => (n >= 1024 * 1024 * 1024 ? `${(n / 1024 / 1024 / 1024).toFixed(1)} GB` : `${Math.round(n / 1024 / 1024)} MB`);
+const sizeWords = (n: number) => (n >= 1024 * 1024 * 1024 ? `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`
+  : n >= 1024 * 1024 ? `${Math.round(n / 1024 / 1024)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 /** Said when a file is too large for the page to carry. */
 export function tooLargeWords(name: string, bytes: number): string {
   return `${downloadName(name)} is ${sizeWords(bytes)}: larger than the ${sizeWords(MAX_DOWNLOAD_BYTES)} a download from DGC's pages can carry.`;
@@ -61,6 +70,15 @@ async function post(page: DownloadPage, message: unknown): Promise<boolean> {
 /** Hand `bytes` to the page as a file named `name`, for it to save on the person's computer. */
 export async function downloadBytes(page: DownloadPage | undefined, name: string, bytes: Uint8Array, mime = ""): Promise<boolean> {
   const file = downloadName(name);
+  if (savesWithDialog()) {
+    if (bytes.byteLength > MAX_DOWNLOAD_BYTES) return throughBrowserBytes(file, bytes);
+    const how = await saveWithDialog(file, bytes);
+    if (how === "failed") return throughBrowserBytes(file, bytes);
+    // (The page that asked says "Downloaded" beside its control; asked from a command, the editor says it.)
+    if (page) await post(page, { type: DOWNLOAD_MESSAGE, name: file, [how]: true });
+    else if (how === "saved") void vscode.window.showInformationMessage(`Downloaded “${file}”.`);
+    return true;
+  }
   if (!page) return downloadMade(undefined, file, async (target) => { await writeFile(target, bytes, { mode: 0o600 }); }, mime);
   if (bytes.byteLength > MAX_DOWNLOAD_BYTES) { void vscode.window.showWarningMessage(tooLargeWords(file, bytes.byteLength)); return false; }
   // (A Uint8Array crosses to the page as bytes, not as text; a view into a larger buffer, such as a pooled Buffer, is
@@ -78,7 +96,7 @@ export async function downloadFile(page: DownloadPage | undefined, path: string,
   // (Read through the editor's own file system, as every other read of a kept file is.)
   const uri = vscode.Uri.file(path), info = await vscode.workspace.fs.stat(uri);
   if (typeof info.type === "number" && (info.type & (vscode.FileType?.File ?? 1)) === 0) throw new Error(`${file} isn't a file.`);
-  if (!page || info.size > MAX_DOWNLOAD_BYTES) {
+  if ((!page && !savesWithDialog()) || info.size > MAX_DOWNLOAD_BYTES) {
     const opened = await downloadThroughBrowser(path, file);
     if (opened) void vscode.window.showInformationMessage(`Downloading “${file}” in your browser (${sizeWords(info.size)}).`);
     return opened;
@@ -97,12 +115,104 @@ export async function downloadMade(page: DownloadPage | undefined, name: string,
     const wrote = await make(target);
     const path = typeof wrote === "string" && wrote ? wrote : target;
     // (A file the browser is given is read for a few minutes: its folder goes after them.)
-    later = path.startsWith(folder) && (!page || (await stat(path)).size > MAX_DOWNLOAD_BYTES);
+    later = path.startsWith(folder) && ((!page && !savesWithDialog()) || (await stat(path)).size > MAX_DOWNLOAD_BYTES);
     return await downloadFile(page, path, file, mime);
   } finally {
     const gone = () => rm(folder, { recursive: true, force: true }).catch(() => undefined);
     if (later) setTimeout(() => void gone(), (DOWNLOAD_MINUTES + 1) * 60_000).unref?.(); else await gone();
   }
+}
+
+// ---- the editor's desktop app: its own Save dialog, on the person's computer ----------------------------------------
+/** Where the last download was saved, per disk ("file" here, "vscode-local" from a remote window): the dialog starts there. */
+const FOLDER_KEY = "dgc.downloadFolders";
+let memory: vscode.Memento | undefined;
+/** The extension's own store, for the folder the dialog starts in (set once, at activation). */
+export function rememberDownloadsIn(store: vscode.Memento | undefined): void { memory = store; }
+
+/** Whether this editor saves a download with its own dialog: its desktop app (a page there can't start a download). */
+export function savesWithDialog(): boolean {
+  const desktop = vscode.UIKind?.Desktop;
+  return desktop !== undefined && vscode.env?.uiKind === desktop;
+}
+
+/** Where the dialog starts, on the person's own disk: the folder of their last download there, else Downloads (in a
+ *  remote window that computer's folders aren't known here until the first save: it starts at the top of the disk). */
+export function dialogStart(name: string): vscode.Uri {
+  const remote = !!vscode.env?.remoteName, scheme = remote ? "vscode-local" : "file";
+  const last = memory?.get<Record<string, string>>(FOLDER_KEY)?.[scheme];
+  if (remote) {
+    const folder = typeof last === "string" && last.startsWith("/") ? last.replace(/\/+$/, "") : "";
+    return vscode.Uri.from({ scheme, path: `${folder}/${name}` });
+  }
+  const downloads = join(homedir(), "Downloads");
+  const folder = typeof last === "string" && last && existsSync(last) ? last : existsSync(downloads) ? downloads : homedir();
+  return vscode.Uri.file(join(folder, name));
+}
+
+/** Save `bytes` as `name` with the editor's own Save dialog. "failed" when the editor couldn't (the caller then hands it
+ *  to the person's browser). */
+export async function saveWithDialog(name: string, bytes: Uint8Array): Promise<"saved" | "cancelled" | "failed"> {
+  let target: vscode.Uri | undefined;
+  try {
+    target = await vscode.window.showSaveDialog({ title: `Download “${name}”`, saveLabel: "Download", defaultUri: dialogStart(name) });
+  } catch { return "failed"; }
+  if (!target) return "cancelled";
+  try { await vscode.workspace.fs.writeFile(target, bytes); } catch { return "failed"; }
+  try {
+    const folder = target.scheme === "file" ? join(target.fsPath, "..") : target.path.replace(/\/[^/]*$/, "") || "/";
+    void memory?.update(FOLDER_KEY, { ...(memory.get<Record<string, string>>(FOLDER_KEY) || {}), [target.scheme]: folder });
+  } catch { /* the next dialog starts in Downloads again */ }
+  return "saved";
+}
+
+/** Bytes the editor couldn't save, to the person's browser instead (written to a private folder for a few minutes). */
+async function throughBrowserBytes(file: string, bytes: Uint8Array): Promise<boolean> {
+  const folder = await mkdtemp(join(tmpdir(), "dgc-download-"));
+  const gone = () => void rm(folder, { recursive: true, force: true }).catch(() => undefined);
+  try {
+    const path = join(folder, file);
+    await writeFile(path, bytes, { mode: 0o600 });
+    const opened = await downloadThroughBrowser(path, file).catch(() => false);
+    if (opened) void vscode.window.showInformationMessage(`Downloading “${file}” in your browser (${sizeWords(bytes.byteLength)}).`);
+    else void vscode.window.showWarningMessage(`“${file}” wasn't downloaded: the editor couldn't save it, and no browser opened.`);
+    setTimeout(gone, (DOWNLOAD_MINUTES + 1) * 60_000).unref?.();
+    return opened;
+  } catch (err) { gone(); throw err; }
+}
+
+// ---- a page's own file: sent to its host, saved the same way --------------------------------------------------------
+/** The bytes of a page's own file, however they crossed: bytes, a list of byte values, or a data: URI. */
+export function pageBytes(data: unknown): Uint8Array | undefined {
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  const byte = (n: unknown) => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 255;
+  const list = Array.isArray(data) ? data : data && typeof data === "object" && Array.isArray((data as any).data) ? (data as any).data : null;
+  if (list) return list.length && list.length <= MAX_DOWNLOAD_BYTES && list.every(byte) ? Uint8Array.from(list) : undefined;
+  if (data && typeof data === "object" && byte((data as any)[0])) {
+    const out: number[] = [];
+    for (let i = 0; i in (data as any); i++) { if (!byte((data as any)[i]) || i >= MAX_DOWNLOAD_BYTES) return undefined; out.push((data as any)[i]); }
+    return Uint8Array.from(out);
+  }
+  if (typeof data !== "string") return undefined;
+  const m = /^data:([^;,]*)((?:;[^;,]*)*?)(;base64)?,(.*)$/s.exec(data);
+  if (!m) return undefined;
+  try { return m[3] ? Buffer.from(m[4].replace(/\s+/g, ""), "base64") : Buffer.from(decodeURIComponent(m[4]), "utf8"); } catch { return undefined; }
+}
+
+/** A page's "save this" (SAVE_MESSAGE): true when it was one (the host's router stops there). Saved like any download,
+ *  and the answer goes back to `page`, which says so beside the control that asked. */
+export function takeSave(page: DownloadPage, message: any): boolean {
+  if (!message || typeof message !== "object" || message.type !== SAVE_MESSAGE) return false;
+  const name = downloadName(String(message.name || ""), "download");
+  const bytes = pageBytes(message.data);
+  const mime = typeof message.mime === "string" && /^[a-z]+\/[A-Za-z0-9.+-]+$/.test(message.mime) ? message.mime
+    : (typeof message.data === "string" ? /^data:([a-z]+\/[A-Za-z0-9.+-]+)/.exec(message.data)?.[1] : "") || "";
+  if (!bytes || !bytes.byteLength) { void post(page, { type: DOWNLOAD_MESSAGE, name, failed: true }); return true; }
+  void downloadBytes(page, name, bytes, mime).catch((err) => {
+    void vscode.window.showWarningMessage(`“${name}” wasn't downloaded: ${String(err?.message || err)}`);
+  });
+  return true;
 }
 
 // ---- a file too large for a page: the person's own browser downloads it ----------------------------------------------

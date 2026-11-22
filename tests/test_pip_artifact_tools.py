@@ -67,7 +67,7 @@ class APipMakesAndKeepsItsOwn(unittest.TestCase):
         words = " ".join(s["function"]["description"] for s in pip_artifacts.schemas())
         self.assertIn("one", words.lower())
         self.assertIn("edit_artifact", words)
-        self.assertEqual({s["function"]["name"] for s in pip_artifacts.schemas()}, {"make_artifact", "edit_artifact"})
+        self.assertEqual({s["function"]["name"] for s in pip_artifacts.schemas()}, {"make_artifact", "edit_artifact", "find_artifacts"})
 
 
 class APipReadsAPageAndDGCsDocs(unittest.TestCase):
