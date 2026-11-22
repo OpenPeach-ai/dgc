@@ -227,6 +227,10 @@ body.vscode-light, body.vscode-high-contrast-light { --need:#A86A12; --need-text
 /* Lines added and removed, as words on the bar's pills: the dark theme's green and pink are 1.7:1 and 2.3:1 on a light
    pill. These are the same hues at 5.4:1 and 5.3:1 there. */
 body.vscode-light, body.vscode-high-contrast-light { --add-text:#0F6B3F; --del-ink:#B3261E; }
+/* The green itself, as a mark (an added line's rail, a dot, a tick) and in the few words that wear it: #5BCB8B is 2.0:1
+   on white. On a light ground it is the same hue, deeper: 5.4:1 on white, 4.6:1 on the input grey. (Forced colours
+   keep the user's own, below.) */
+@media (forced-colors: none) { body.vscode-light, body.vscode-high-contrast-light { --good:#1D7A44; } }
 /* The error red on a light ground: a deeper step for fills and dots, and for words the red removed lines use there
    (#B3261E, 6.6:1 on white). */
 body.vscode-light { --err:#D93036; --err-text:#B3261E; --err-soft:rgba(217,48,54,.12); }

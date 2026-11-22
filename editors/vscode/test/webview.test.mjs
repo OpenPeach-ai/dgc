@@ -3714,7 +3714,8 @@ test("removed lines read as removed, and auto mode never rides on the error colo
   // are now the same red, and auto mode is DGC's purple.
   assert.match(mainCss, /--del:\s*#[0-9A-Fa-f]{6}/, "deletions need their own token");
   for (const rule of [/\.diff \.del-stat \{ color: var\(--del-text\)/,
-                      /\.change-del \{ color: var\(--del-text\)/,
+                      // (as words the count takes --del-ink: --del-text on a dark ground, its deeper step on a light one)
+                      /\.change-del \{ color: var\(--del-ink\)/, /--del-ink: var\(--del-text\)/,
                       /\.diff \.del \{[^}]*background: var\(--del-soft\)/]) {
     assert.match(mainCss, rule, `diff deletions must not use --err: ${rule}`);
   }

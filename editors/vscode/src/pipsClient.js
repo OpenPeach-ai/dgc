@@ -585,8 +585,17 @@ async function setKeepRunning(enabled,refresh=false){
  // the switch says what it is doing, and waits up to a few minutes rather than DGC's usual one.
  try{const value=pipsKeepRunning((await broker.request({type:'set_pips_keep_running',enabled},150000)).keep_running);if(token!==scope())return;keepState.value=value;keepState.error='';
   S.notice=refresh&&value.on&&!value.outdated?'Keep Pips running now starts this DGC.':value.on?(value.while_logged_out?'Pips keep running: they start when you log in, restart if they fail, and run while you are logged out.':'Pips keep running: they start when you log in and restart if they fail.'):'Pips no longer start on their own. They keep running now until you stop them.';}
- catch(error){if(token===scope()){keepState.error=errorText(error);setError(error);}}
+ catch(error){if(token===scope()){keepState.error=errorText(error);closeControlsMenu();setError(error);}}
  finally{keepState.busy='';if(token===scope()){S.busy=false;render();}}
+}
+// A switch in Controls that fails says why on the page's error line, and the open menu lies over that line: its × could
+// not be reached. The menu closes when a switch of its own reports a failure, and the keyboard goes to Controls.
+function closeControlsMenu(){
+ const menu=document.querySelector('details.runner-controls[open]');if(!menu)return;
+ // (The switch is off while it works, so the focus that was on it is on nothing by now: that counts as inside. A
+ // focus that has gone somewhere else since stays where it is.)
+ const at=document.activeElement,inside=menu.contains(at)||!at||at===shell||at===owner.body||!at.isConnected;menu.removeAttribute('open');
+ if(inside)menu.querySelector(':scope > summary')?.focus({preventScroll:true});
 }
 let desktopState={value:null,loading:false,error:'',asked:false};
 async function loadDesktopNotifications(){
@@ -600,7 +609,7 @@ async function setDesktopNotifications(enabled){
  if(S.busy||!usable())return;const token=scope();S.busy=true;render();
  try{const value=pipsDesktopNotifications((await send('set_pips_desktop_notifications',{enabled})).desktop_notifications);if(token!==scope())return;desktopState.value=value;desktopState.error='';
   S.notice=value.on?'Desktop notifications on: you hear about a new alert or review, even with the editor closed.':'Desktop notifications off. The editor still tells you while it is open.';}
- catch(error){if(token===scope()){desktopState.error=errorText(error);setError(error);}}
+ catch(error){if(token===scope()){desktopState.error=errorText(error);closeControlsMenu();setError(error);}}
  finally{if(token===scope()){S.busy=false;render();}}
 }
 // Paying by itself, in dollars (Pips API 96, agreed 13 Nov; src/pipPay.js). The 10 Nov count (three a day, across all
@@ -6202,7 +6211,10 @@ function renderThenFocus(){focusIsCallers=true;try{render();}finally{focusIsCall
 function focusMark(el){
  if(!el||el===shell||!el.closest||!$('app')?.contains(el))return null;
  const data=el.id?[]:Object.entries(el.dataset).filter(([name,value])=>!FOCUS_PASSING.includes(name)&&value.length<=200);
- const selector=data.length?el.localName+data.map(([name,value])=>`[data-${name.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())}="${CSS.escape(value)}"]`).join(''):'';
+ // (A menu's button with neither an id nor data of its own, Teams, Project pages, a Pip's More: the <summary> of its
+ // named <details>. A redraw of the list took the keyboard off it, to nothing.)
+ const menu=!el.id&&!data.length&&el.localName==='summary'?el.parentElement?.dataset?.details:'';
+ const selector=data.length?el.localName+data.map(([name,value])=>`[data-${name.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())}="${CSS.escape(value)}"]`).join(''):menu?`details[data-details="${CSS.escape(menu)}"] > summary`:'';
  const li=el.closest('[data-attention-key]'),inList=!!el.closest('.attention-all-list');
  const card=li||el.closest('.attention-carousel,.attention-all-link,.undo-reject')?{key:li?.dataset.attentionKey||'',index:li&&inList?[...li.parentNode.children].indexOf(li):0}:null;
  return selector||card?{selector,nth:selector?[...document.querySelectorAll(selector)].indexOf(el):0,card}:null;

@@ -63,18 +63,29 @@ export const installProbe = () => {
   // control is the node that is still what it was, or the one found again by what it is.)
   const trig = (i) => { const t = la.trig[i]; if (!t) return null; if (!t.el.isConnected || (t.d.sig && sigOf(t.el) !== t.d.sig)) { const again = refind(t.d); if (again) t.el = again; } return t.el.isConnected ? t.el : null; };
   const isLayer = (l) => !!l && l.isConnected && (!l.__laSig || one(l) === l.__laSig);
+  // A view that draws itself again with new nodes (the Pips view, whenever what it shows changes) takes a layer's
+  // node out of the page while the layer is still open on screen. The layer is then the open one that is what it was
+  // (the same kind of box, the same one of them in the page's order), and it keeps its number and its mark: without
+  // this a redraw between two looks left the walk holding a node that was gone, and it read an open menu as having
+  // no rows and the focus as outside it.
+  const again = (was) => { const sig = was.__laSig, held = new Set(la.layers);
+    const same = candidates().filter((n) => !held.has(n) && one(n) === sig); return same[Math.min(was.__laNth || 0, same.length - 1)] || null; };
+  const layer = (k) => { const l = la.layers[k]; if (!l || l.isConnected || !l.__laSig) return l || null;
+    const now = again(l); if (!now) return l;
+    now.__laSig = l.__laSig; now.__laNth = l.__laNth; now.setAttribute("data-la-layer", String(k)); la.layers[k] = now; return now; };
+  const layersNow = () => la.layers.map((_, k) => layer(k));
 
   /** Every control that opens a layer, two of each kind (the first and the last in sight: a menu near the top of the
    *  window and one near its foot). `opts.scope`: a selector to stay under; `opts.inside`: only inside this open layer
    *  (a menu's own "…": a nested menu); `opts.most`: of each kind. */
   la.triggers = (opts = {}) => {
     const inRow = opts.row !== undefined ? la.hov[opts.row]?.el : null;
-    const scopeEl = inRow || (opts.scope ? all(opts.scope)[0] : null), inLayer = opts.inside !== undefined ? la.layers[opts.inside] : null;
+    const scopeEl = inRow || (opts.scope ? all(opts.scope)[0] : null), inLayer = opts.inside !== undefined ? layer(opts.inside) : null;
     const found = [], known = new Set(inRow ? la.trig.map((t) => t.el) : []);
     for (const el of all(`${TRIGGER}, button, [role='button']`)) {
       if (scopeEl && !contains(scopeEl, el)) continue;
       if (known.has(el)) continue;
-      if (inLayer ? !contains(inLayer, el) : la.layers.some((l) => isLayer(l) && contains(l, el))) continue;
+      if (inLayer ? !contains(inLayer, el) : layersNow().some((l) => isLayer(l) && contains(l, el))) continue;
       // (By its name only when it is a glyph alone, or says "More…", "Filter", "Sort", "Options": a button with other
       // words that happens to be called "-more" is "2 more", which goes somewhere.)
       const said = el.matches(TRIGGER), named = !said && (NAMED.test(el.id || "") || cls(el).some((c) => NAMED.test(c))) && (!(el.textContent || "").trim() || /^(more|options|menu|filter|sort|show)\b/i.test(words(el)));
@@ -106,7 +117,7 @@ export const installProbe = () => {
    *  first and the last in sight of each kind, with a point on each to rest the pointer at. */
   la.hoverRows = (opts = {}) => {
     const scopeEl = opts.scope ? all(opts.scope)[0] : null, groups = new Map();
-    for (const row of all(ROW)) { if (scopeEl && !contains(scopeEl, row)) continue; if (!shown(row) || la.layers.some((l) => isLayer(l) && contains(l, row))) continue;
+    for (const row of all(ROW)) { if (scopeEl && !contains(scopeEl, row)) continue; if (!shown(row) || layersNow().some((l) => isLayer(l) && contains(l, row))) continue;
       const b = row.getBoundingClientRect(); if (b.height < 14 || b.height > 160 || b.width < 60 || b.top < 0 || b.bottom > innerHeight) continue;
       const kept = [...row.querySelectorAll("button, [role='button'], a[href]")].some((c) => !c.closest("[hidden]") && (!laid(c) || !shown(c))); if (!kept) continue;
       let spot = null; for (const [fx, fy] of [[0.5, 0.5], [0.2, 0.5], [0.08, 0.5], [0.5, 0.25], [0.8, 0.5]]) { const x = b.left + b.width * fx, y = b.top + b.height * fy, hit = deepHit(x, y); if (hit && (hit === row || contains(row, hit))) { spot = [x, y]; break; } }
@@ -125,7 +136,7 @@ export const installProbe = () => {
         // (a group the arrow keys walk: one of its controls is the Tab stop, the rest are reached from it)
         || !!(el.parentElement && [...el.parentElement.children].some((c) => c !== el && c.tabIndex === 0 && c.tagName === el.tagName)) };
   };
-  la.snap = () => { la.before = new Set(candidates()); la.layers = la.layers.map((l) => (isLayer(l) && shown(l) ? l : null));   /* (a layer keeps its number while the walk goes on) */ const el = deepActive(); la.focusWas = el; return la.before.size; };
+  la.snap = () => { la.before = new Set(candidates()); la.beforeWas = new Map([...la.before].map((n) => [n, { sig: one(n), at: box(n) }])); la.layers = layersNow().map((l) => (isLayer(l) && shown(l) ? l : null));   /* (a layer keeps its number while the walk goes on) */ const el = deepActive(); la.focusWas = el; return la.before.size; };
   la.click = (i) => { const el = trig(i); if (!el) return false; el.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, composed: true })); el.click(); return true; };
   la.focus = (i) => { const el = trig(i); if (!el) return { ok: false }; try { el.focus({ preventScroll: true }); } catch { /* not focusable */ } return { ok: deepActive() === el, tab: el.tabIndex }; };
 
@@ -184,13 +195,18 @@ export const installProbe = () => {
   la.opened = (i) => {
     const el = i >= 0 ? trig(i) : null;
     let fresh = candidates().filter((n) => !la.before.has(n) && !(el && contains(n, el)));
+    // (What was open at the snap and has been drawn again since, with new nodes, is not new: a node of the snap that
+    // has left the page stands for the box of its kind that is now where it was. So does a layer the walk holds.)
+    { const gone = [...la.before].filter((n) => !n.isConnected).map((n) => la.beforeWas?.get(n)).filter(Boolean), held = new Set(layersNow());
+      const near = (a, b) => Math.abs(a.l - b.l) <= 2 && Math.abs(a.t - b.t) <= 2 && Math.abs(a.w - b.w) <= 2 && Math.abs(a.h - b.h) <= 2;
+      fresh = fresh.filter((n) => { if (held.has(n)) return false; const sig = one(n), b = box(n), at = gone.findIndex((g) => g.sig === sig && near(g.at, b)); if (at < 0) return true; gone.splice(at, 1); return false; }); }
     fresh = fresh.filter((n) => !fresh.some((m) => m !== n && contains(m, n)));
     // (What a <details> shows belongs to its own summary: one that another control's press finds open is not that control's layer.)
     if (el) fresh = fresh.filter((n) => { const d = n.closest?.("details"); return !d || contains(d, el); });
     // (The page's own hover label may come up under the pointer; it is read by the tooltip walk, not here.)
     const tips = fresh.filter((n) => kindOf(n) === "tooltip"); fresh = fresh.filter((n) => kindOf(n) !== "tooltip");
     const out = [];
-    for (const n of fresh) { const k = la.layers.push(n) - 1; n.setAttribute("data-la-layer", String(k)); n.__laSig = one(n); out.push(measure(n, el, k)); }
+    for (const n of fresh) { const k = la.layers.push(n) - 1; n.setAttribute("data-la-layer", String(k)); n.__laSig = one(n); n.__laNth = candidates().filter((x) => one(x) === n.__laSig).indexOf(n); out.push(measure(n, el, k)); }
     const expanded = el ? (el.tagName === "SUMMARY" ? !!el.parentElement?.open : el.getAttribute("aria-expanded") === "true") : false;
     let disclosure = null;
     if (!out.length && el && expanded) {
@@ -200,13 +216,17 @@ export const installProbe = () => {
     return { layers: out, disclosure, expanded, tips: tips.length, focus: (() => { const a = deepActive(); return a ? name(a) : ""; })() };
   };
   /** After the key that should close it: is layer `k` gone, and where the focus is. */
-  la.closed = ([k, i]) => { const l = la.layers[k], el = i >= 0 ? trig(i) : null, a = deepActive(), open = isLayer(l) && shown(l) && l.getBoundingClientRect().width > 4;
+  la.closed = ([k, i]) => { const l = layer(k), el = i >= 0 ? trig(i) : null, a = deepActive(), open = isLayer(l) && shown(l) && l.getBoundingClientRect().width > 4;
     if (!open) l?.removeAttribute?.("data-la-layer");
     return { open, focusBack: !!el && (a === el || contains(el, a)), focus: a && a !== document.body ? `${name(a)} “${words(a).slice(0, 30)}”` : "nothing (the page's body)", expanded: el ? (el.tagName === "SUMMARY" ? !!el.parentElement?.open : el.getAttribute("aria-expanded") === "true") : false }; };
+  /** Layer `k` as the page draws it now, wearing its mark (for a words audit or a picture): false once it is gone. */
+  la.hold = (k) => { const l = layer(k); return isLayer(l) && shown(l); };
+  /** Is the keyboard's focus inside layer `k` (or on a field that names one of its rows as the active one)? */
+  la.focusIn = (k) => { const l = layer(k), a = deepActive(); return !!l && !!a && (contains(l, a) || !!a.getAttribute("aria-activedescendant")); };
   /** Whatever the walk opened and is still open is closed, by what the layer is: a <details>, a <dialog>, its own
    *  Close. Returns what was still open (a walk that leaves a layer open would measure it again on the next control). */
   la.closeLeft = () => { const left = [];
-    for (let k = 0; k < la.layers.length; k++) { const l = la.layers[k]; if (!isLayer(l) || !shown(l)) { la.layers[k] = null; continue; }
+    for (let k = 0; k < la.layers.length; k++) { const l = layer(k); if (!isLayer(l) || !shown(l)) { la.layers[k] = null; continue; }
       left.push(name(l));
       const d = l.closest("details[open]") || (l.getRootNode().host ? null : null); if (d) d.open = false;
       else if (l.tagName === "DIALOG" && l.open) l.close();
@@ -219,7 +239,7 @@ export const installProbe = () => {
     return left; };
   la.unmarkDisclosure = () => { for (const n of all("[data-la-layer='d']")) n.removeAttribute("data-la-layer"); };
   /** Closes what Escape did not: its own Close or Cancel, else a press outside. Returns how. */
-  la.forceClose = (k) => { const l = la.layers[k]; if (!isLayer(l)) return "gone";
+  la.forceClose = (k) => { const l = layer(k); if (!isLayer(l)) return "gone";
     const b = [...l.querySelectorAll("button, [role='button']")].find((x) => /^(close|cancel|done|not now|back)\b/i.test(words(x))); if (b) { b.click(); return "its own button"; }
     if (l.tagName === "DIALOG" && l.open) { l.close(); return "dialog.close()"; }
     return ""; };
@@ -287,7 +307,7 @@ export const installProbe = () => {
   la.read = (opts = {}) => {
     const scopeEl = opts.scope ? all(opts.scope)[0] : null, W = vw();
     const rows = {}, actions = {}, over = [], offside = [];
-    const inLayer = (n) => la.layers.some((l) => isLayer(l) && contains(l, n));
+    const held = layersNow(), inLayer = (n) => held.some((l) => isLayer(l) && contains(l, n));
     for (const row of all(ROW)) { if (scopeEl && !contains(scopeEl, row)) continue; if (!shown(row) || inLayer(row)) continue; const b = row.getBoundingClientRect(); if (b.height < 14 || b.height > 120 || b.width < 60) continue;
       if (!row.querySelector(CONTROL) && !row.matches(CONTROL) && !row.matches("[tabindex]")) continue;
       const sig = one(row); const had = rows[sig]; const h = r1(b.height);
@@ -335,7 +355,7 @@ export const installProbe = () => {
   /** The last row of each kind of list, with the list at its end: what a pointer finds at its middle (the row, or
    *  something lying over it: the dock, a bar that stays). */
   la.lastRows = (opts = {}) => { const scopeEl = opts.scope ? all(opts.scope)[0] : null, last = new Map();
-    for (const row of all(ROW)) { if (scopeEl && !contains(scopeEl, row)) continue; if (!laid(row) || la.layers.some((l) => isLayer(l) && contains(l, row))) continue; const b = row.getBoundingClientRect(); if (b.height < 14 || b.height > 160 || b.width < 60) continue; last.set(one(row), row); }
+    for (const row of all(ROW)) { if (scopeEl && !contains(scopeEl, row)) continue; if (!laid(row) || layersNow().some((l) => isLayer(l) && contains(l, row))) continue; const b = row.getBoundingClientRect(); if (b.height < 14 || b.height > 160 || b.width < 60) continue; last.set(one(row), row); }
     const out = [];
     for (const [sig, row] of last) { const b = box(row); if (b.b < 0 || b.t > innerHeight) { out.push({ sig, text: words(row).slice(0, 40), rect: rr(b), out: true }); continue; }
       // (The foot of the window is where a list's end meets the dock: a row of some card further up, scrolled under the head bar, is not a list's end.)
@@ -345,7 +365,7 @@ export const installProbe = () => {
       if (!v) by = by || "a box that clips"; if (by) out.push({ sig, text: words(row).slice(0, 40), rect: rr(b), by }); }
     return out; };
   /** The rows of the open menus (what an action that left the row may have moved into). */
-  la.menuWords = () => la.layers.filter((l) => isLayer(l) && shown(l)).flatMap((l) => [...l.querySelectorAll("button, [role^='menuitem'], [role='option'], a[href]")].filter(laid).map((r) => {
+  la.menuWords = () => layersNow().filter((l) => isLayer(l) && shown(l)).flatMap((l) => [...l.querySelectorAll("button, [role^='menuitem'], [role='option'], a[href]")].filter(laid).map((r) => {
     // (A row's own words: a row that is off carries why as its title, which is not its name.)
     const said = (r.querySelector(".dgc-menu-label")?.textContent || r.textContent || "").replace(/\s+/g, " ").trim(); return said ? said.replace(/[:：].*$/, "").slice(0, 48) : actionName(r, null); }));
 

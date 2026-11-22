@@ -33,7 +33,7 @@
   color-scheme:dark;
 }
 /* The chosen menu row is the raised grey; on a light ground that grey is the page's own white, so it is a wash there. */
-body.vscode-light{color-scheme:light;--need:#A86A12;--need-text:#8F5600;--sel:color-mix(in srgb,var(--text) 8%,transparent)}
+body.vscode-light{color-scheme:light;--good:#1D7A44;--need:#A86A12;--need-text:#8F5600;--sel:color-mix(in srgb,var(--text) 8%,transparent)}
 *{box-sizing:border-box}html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);font:12px/1.5 var(--sans)}
 [hidden]{display:none!important}button,input,select,textarea{font:inherit;color:inherit}
 :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible{outline:1px solid var(--focus);outline-offset:1px}

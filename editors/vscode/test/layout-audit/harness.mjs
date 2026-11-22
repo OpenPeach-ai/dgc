@@ -142,6 +142,7 @@ export async function auditLayers(page, audit, ctx, opts = {}) {
     if (m.rows && m.rows.odd.length) await shoot(put("heights", ctx, `rows of the layer of ${nameOf}`, `In the ${m.kind} that ${nameOf} opens, rows are ${m.rows.usual}px tall but ${m.rows.odd.join(", ")}.`));
     if (m.rows && m.rows.n >= 2 && m.kind === "menu" && !ctx.variant) { const bag = audit.menus[ctx.surface] || (audit.menus[ctx.surface] = {}); const key = `${Math.round(m.rows.usual)}px rows, ${m.rows.font} type, row corner ${m.rows.radius}`; (bag[key] = bag[key] || []).length < 4 && !bag[key].includes(t.label || t.what) && bag[key].push(t.label || t.what); }
     if (opts.words !== false) {
+      await la(page, "hold", m.k).catch(() => false);     // (a view that has drawn itself again since: the layer's mark is on the node that draws it now)
       const w = await page.evaluate(narrowAudit, { scope: `[data-la-layer="${m.k}"]` }).catch(() => null);
       if (w) for (const [key, label] of [["broken", "is drawn on more than one line"], ["cut", "is cut with no “…”"], ["clipped", "(a button's own words) is cut"]]) for (const x of w[key]) await shoot(put("cut", ctx, `in the layer of ${nameOf}: “${x.text}” ${key}`, `In the ${m.kind} that ${nameOf} opens, “${x.text}” ${label} (${x.what}).`));
       if (w) for (const x of w.sideways) if (!SCROLLS_ON_PURPOSE.test(x.what)) await shoot(put("cut", ctx, `the layer of ${nameOf} scrolls sideways`, `In the ${m.kind} that ${nameOf} opens, ${x.what} scrolls sideways (${x.text}).`));
@@ -249,7 +250,7 @@ export async function auditLayers(page, audit, ctx, opts = {}) {
       if (!got) { await page.keyboard.press("Escape"); return [...faults, [`the keyboard doesn't open the layer of ${nameOf}`, `With the focus on ${nameOf} (${t.what}), ${t.context ? "Shift+F10 opens" : "Enter, Space and Down open"} nothing; a ${t.context ? "right-click" : "click"} opens a ${kind0}.`]]; }
       let m = got.layers[0];
       // Into it: at once, or on Down (a menu's rows), or on Tab (a panel that is the next thing after its button).
-      const inside = () => page.evaluate((k) => { const l = window.__la.layers[k]; let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; return !!l && !!a && (window.__la.contains(l, a) || !!a.getAttribute("aria-activedescendant")); }, m.k).catch(() => true);
+      const inside = () => la(page, "focusIn", m.k).catch(() => true);
       if (!m.focusInside && m.kind !== "dialog") { await page.keyboard.press("ArrowDown"); await settle(page, 60); m = { ...m, focusInside: await inside() }; }
       if (!m.focusInside) { await page.keyboard.press("Tab"); await settle(page, 60); m = { ...m, focusInside: await inside() }; }
       if (!m.focusInside) faults.push([`the focus doesn't go into the layer of ${nameOf}`, `Opened by the keyboard, the ${m.kind} that ${nameOf} opens (${m.what}) doesn't take the focus (not at once, not on Down, not on Tab).`]);

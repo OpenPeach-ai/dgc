@@ -111,6 +111,9 @@
   .dgc-card .dgc-card-actions .dgc-card-btn, .dgc-card .dgc-card-actions > button:not(.dgc-card-link),
   .dgc-card .dgc-card-actions:has(> button:not(.dgc-card-link):nth-of-type(4)) > button:not(.dgc-card-link),
   .dgc-card .dgc-card-actions .dgc-card-btn.wide, .dgc-card .dgc-card-actions > button:not(.dgc-card-link).wide { flex: none; width: 100%; min-width: 0; max-width: none; }
+  /* (The roomy button's words are longer than that row, "Use another account" in about 100 px: they go onto a second
+     line between words, and the button grows by that line. It is never cut; the others keep the shared height.) */
+  .dgc-card .dgc-card-actions .dgc-card-btn.wide, .dgc-card .dgc-card-actions > button:not(.dgc-card-link).wide { height: auto; min-height: var(--btn-h); padding: 5px 4px; line-height: 1.25; white-space: normal; overflow: visible; text-overflow: clip; }
 }
 @media (forced-colors: active) {
   .dgc-card, .dgc-card .dgc-chip, .dgc-card .dgc-card-btn { border: 1px solid CanvasText; }

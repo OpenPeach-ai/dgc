@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Small things made right**: on light themes the green of added lines, ticks and dots is deep enough to read (the
+  "+2" of a changed file was barely visible); "Use another account" wraps instead of being cut in a narrow side bar; a
+  redraw of the Pips list no longer drops the keyboard's place on a menu button; when Keep running or Desktop
+  notifications fails, the Controls menu closes so its error line (and its ×) can be reached.
 - **A link's preview when you point at it**, in Work, ChatDGC and a Pip's chat: the site's icon, its picture, title and
   description, and Open. DGC reads public pages only: never a local, private or Tailscale address, and never a
   one-time link (a sign-in, a reset, a confirm or unsubscribe link), which shows its address alone. Only the page's

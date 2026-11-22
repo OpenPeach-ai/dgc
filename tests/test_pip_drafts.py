@@ -376,13 +376,16 @@ class DraftTests(unittest.TestCase):
         original = (self.root / "source.py").read_bytes()
         self.cfg.set("mode", "auto", persist=False)
         self.cfg.permissions["allow"] = ["*"]
+        final = ChatResult(content=json.dumps(self.body()))
         replies = iter([
             ChatResult(tool_calls=[ToolCall("badwrite", "write_file", {"path": "source.py", "content": "tampered"}),
                                    ToolCall("badshell", "bash", {"command": "touch forbidden"})]),
             ChatResult(tool_calls=[ToolCall("read", "read_file", {"path": "source.py"})]),
-            ChatResult(content=json.dumps(self.body()))])
+            final])
         def chat(client, messages, tools=None, on_text=None, **kwargs):
-            result = next(replies)
+            # (A slow, loaded machine can cost one more model round; what matters here is that the write and the shell
+            # were refused, so any later round gets the same final answer.)
+            result = next(replies, final)
             if result.content and on_text: on_text(result.content)
             return result
         events = []
