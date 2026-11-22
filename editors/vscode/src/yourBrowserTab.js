@@ -19,6 +19,7 @@
 import '../media/shared/tokens.css';
 import '../media/shared/dismiss.css';   // one × for every line that stays (window.DgcDismiss)
 import '../media/shared/dismiss.js';
+import '../media/shared/siteicon.js';   // a site's icon: what may be drawn, and a dark one lifted on a dark editor (window.DgcSiteIcon)
 import './yourBrowserTab.css';
 
 const vscode = acquireVsCodeApi();
@@ -104,48 +105,14 @@ function paintOwn() {
   liftIcons();
   for (const b of app.querySelectorAll('.yb-row .yb-btn')) b.disabled = !ready() || !f;
 }
-/** Whether the editor around this tab is dark (its own background, as drawn). */
-function darkEditor() {
-  const m = getComputedStyle(document.body).backgroundColor.match(/[\d.]+/g);
-  if (!m || m.length < 3) return false;
-  const [r, g, b] = m.slice(0, 3).map((v) => Number(v) / 255);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.4;
-}
-/** A site icon that is dark and of one colour (black, near-black, grey), by its own pixels: on a dark editor it is drawn
- *  light, as the site's dark-mode icon would be. Coloured icons are left as they are. */
-const iconTones = new Map();
-function darkOneColour(img) {
-  const key = img.currentSrc || img.src;
-  if (iconTones.has(key)) return iconTones.get(key);
-  let tone = false;
-  try {
-    const c = document.createElement('canvas'); c.width = c.height = 16;
-    const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, 16, 16);
-    const d = g.getImageData(0, 0, 16, 16).data;
-    let n = 0, lum = 0, spread = 0;
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] < 128) continue;
-      const r = d[i] / 255, gr = d[i + 1] / 255, b = d[i + 2] / 255;
-      lum += 0.2126 * r + 0.7152 * gr + 0.0722 * b; spread += Math.max(r, gr, b) - Math.min(r, gr, b); n += 1;
-    }
-    tone = n > 8 && lum / n < 0.22 && spread / n < 0.15;
-  } catch { tone = false; }
-  if (iconTones.size > 300) iconTones.clear();
-  iconTones.set(key, tone);
-  return tone;
-}
+/** Each tab's site icon; a dark one-colour icon drawn light on a dark editor (media/shared/siteicon.js). */
 function liftIcons() {
-  const dark = darkEditor();
-  app.classList.toggle('yb-dark', dark);
-  for (const img of tabs.querySelectorAll('img.yb-fav')) {
-    const apply = () => img.classList.toggle('yb-fav-lift', dark && darkOneColour(img));
-    if (img.complete && img.naturalWidth) apply(); else img.addEventListener('load', apply, { once: true });
-  }
+  app.classList.toggle('yb-dark', DgcSiteIcon.lift(tabs.querySelectorAll('img.yb-fav'), 'yb-fav-lift'));
 }
 function tookOwn(said) {
   if (!said || typeof said !== 'object') return;
   if (Array.isArray(said.tabs)) S.tabs = said.tabs.filter((t) => t && typeof t.id === 'string').slice(0, 50).map((t) => ({ id: t.id, title: String(t.title || ''), url: String(t.url || ''), current: t.current === true,
-    icon: typeof t.icon === 'string' && /^data:image\/(png|x-icon|svg\+xml|gif|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(t.icon) && t.icon.length < 140000 ? t.icon : '' }));
+    icon: DgcSiteIcon.ok(t.icon) }));
   if (typeof said.current === 'string') S.current = said.current;
   if (said.ok && typeof said.image === 'string' && said.image.startsWith('data:image/jpeg;base64,')) {
     S.frame = { image: said.image, url: String(said.url || ''), title: String(said.title || ''), width: Number(said.width) || 0, height: Number(said.height) || 0 };

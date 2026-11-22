@@ -4561,6 +4561,14 @@ class Agent(GoalLifecycle):
         if callable(notify):
             notify(view, op)
 
+    def _checklist_unseen(self) -> None:
+        """This chat's context no longer holds the pinned checklist it was told (a compaction): tell it again."""
+        try:
+            from . import checklists
+            checklists.unsee(getattr(getattr(self, "session_file", None), "stem", "") or "")
+        except Exception:                                  # noqa: BLE001 -- a courtesy, never a failed compaction
+            pass
+
     def _artifacts_exposed(self) -> bool:
         """Are make_artifact / edit_artifact offered (dgc/artifact_tools)? To the agent the user talks to, in every
         mode (an artifact is DGC's own, never a project file), and never to a session a launching application's policy
@@ -6159,7 +6167,7 @@ class Agent(GoalLifecycle):
         asks to see one. A headless run with artifacts off (the benchmark) never pays for it."""
         if self._artifacts_exposed() and self.mode != "plan":
             return [
-                "# Saved Artifacts: pages, dashboards, documents, slides and sheets",
+                "# Saved Artifacts: pages, dashboards, documents, slides, sheets and checklists",
                 "Use make_artifact to make a new Artifact that the user can reopen from Library. Its card opens "
                 "in the editor and DGC keeps its versions. It lives in DGC's own store and needs no file, so a page "
                 "about something other than this project (a summary of mail, a one-off report) is a make_artifact "
@@ -6171,6 +6179,13 @@ class Agent(GoalLifecycle):
                 "conversation, ask which one. Do not create a replacement or hand the user a raw localhost "
                 "link for a revision. For a chart in an HTML Page, give percentage-height bars a definite "
                 "height on their parent and check the rendered result before claiming it is fixed.",
+                "A checklist (make_artifact type checklist) is for a job the user wants tracked: when they ask for a "
+                "checklist for a job, or to work through one, make it (each item's title and what done means), then "
+                "work it item by item and keep it current: Building when you start an item, Done with a note and its "
+                "proof when it is proved, one item per edit_artifact call, never the whole list rewritten. It is "
+                "pinned to the project and the user ticks it too, so read what it says now before you go on. It "
+                "doesn't replace the todo tool: todo is your plan for this one request; a checklist is the user's, and "
+                "carries over to later chats.",
             ]
         return [
             "# Artifacts — how to SHOW the user a page (READ THIS CAREFULLY)",
@@ -6261,6 +6276,17 @@ class Agent(GoalLifecycle):
                 # The one-time note for a clear made before this turn (or at a goal-cycle boundary). A
                 # clear that lands between tool batches reaches the model as a reminder instead.
                 sections.append(("cleared", "# Checklist cleared\n" + self.TODO_CLEARED_NOTE))
+        if not intents_only and self.depth == 0 and not getattr(self, "_monitor_turn", False) \
+                and self._artifacts_exposed():
+            # The project's pinned checklist (dgc/checklists.py): a new chat is told it once and carries on from the
+            # first item not done; after that, only what changed since this chat last read it. A goal that runs from
+            # it says it in each goal turn instead.
+            if not (getattr(self, "_goal_details", None) or {}).get("checklist") or getattr(self, "goal_status", "") != "active":
+                from . import checklists
+                pinned = checklists.turn_note(str(self.config.project_root),
+                                              getattr(getattr(self, "session_file", None), "stem", "") or "")
+                if pinned:
+                    sections.append(pinned)
         output = getattr(self, "_turn_output", "")
         if output and not intents_only:
             from .artifact_tools import output_line
@@ -6946,9 +6972,35 @@ class Agent(GoalLifecycle):
         return display_path(path, self.config.project_root) or str(path)
 
     def _turn_files_rows(self, start: int) -> tuple[list[dict], int]:
-        # With the files commands changed that Undo leaves (`command: true`), so the card can say so.
-        rows, total = self.checkpoints.changes(start, commands=True)
+        # With the files commands changed that Undo leaves (`command: true`), so the card can say so. Without
+        # the ones Git ignores by now (a virtual environment, caches, build output a command made), as the bar
+        # under the chat counts: a turn that made a venv and then the .gitignore for it edited its own files.
+        rows, total = self.checkpoints.changes(start, commands=True, leave_out=self._ignored_by_git)
         return [{**row, "path": self._turn_files_path(row["path"])} for row in rows], total
+
+    def _ignored_by_git(self, paths: list[str]) -> set[str]:
+        """Of these recorded paths, the ones the project's Git ignores now. Nothing when it isn't Git."""
+        from .command_watch import _repo_of
+        from .worktree import ignored_now
+        found = _repo_of(self)
+        if not found or not paths:
+            return set()
+        repo = found[0]
+        listed = ignored_now(repo)
+        if not listed:
+            return set()
+        dirs, files = listed
+        if not dirs and not files:
+            return set()
+        out: set[str] = set()
+        for path in paths:
+            try:
+                rel = Path(path).relative_to(repo).as_posix()
+            except ValueError:
+                continue                       # outside the checkout: Git says nothing about it
+            if rel in files or any(rel == d or rel.startswith(d + "/") for d in dirs):
+                out.add(path)
+        return out
 
     @staticmethod
     def _turn_files_view(record: dict) -> dict:
@@ -15451,6 +15503,7 @@ class Agent(GoalLifecycle):
                     compacted_assistant["_responses_compaction_tokens"] = output_tokens
                 digest = self.notes_digest()
                 self._goal_stated = False   # a compacted context has not seen the objective
+                self._checklist_unseen()      # nor the project's pinned checklist: the next turn says it again
                 uncompacted = self.messages
                 self.messages = (
                     [self.messages[0],
@@ -15499,6 +15552,7 @@ class Agent(GoalLifecycle):
         if digest:
             summary = f"{summary}\n\n{digest}"
         self._goal_stated = False   # a compacted context has not seen the objective
+        self._checklist_unseen()      # nor the project's pinned checklist: the next turn says it again
         uncompacted = self.messages
         self.messages = (
             [self.messages[0],

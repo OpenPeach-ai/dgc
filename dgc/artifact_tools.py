@@ -15,15 +15,17 @@ import json
 
 from . import artifact_service as service
 
-_TYPES = ["doc", "slides", "sheet", "dashboard", "page"]
+_TYPES = ["doc", "slides", "sheet", "dashboard", "page", "checklist"]
 
 MAKE_ARTIFACT = {"type": "function", "function": {
     "name": "make_artifact",
     "description": (
         "Make an artifact the user keeps and opens beside the conversation, with every version kept: a doc "
         "(a document in Markdown), slides (a deck), a sheet (a spreadsheet), a dashboard (charts over data the user "
-        "allows) or a page (one HTML page). Use it when they ask for one of these, or when what they want is plainly "
-        "one (a report to keep editing, a deck to present, a budget, a small tool). DGC keeps it in its own store: it "
+        "allows), a page (one HTML page) or a checklist (the items of a job, each with what done means and a status, "
+        "which you keep current as you work and the user ticks too). Use it when they ask for one of these, or when "
+        "what they want is plainly one (a report to keep editing, a deck to present, a budget, a small tool; \"make a "
+        "checklist for X and work through it\"). DGC keeps it in its own store: it "
         "needs no file, and nothing is written to the project, so it is the way to make a page that isn't part of the "
         "project (a summary of mail, a one-off report). It shows as a card under your "
         "reply: say in a sentence or two what's in it; don't paste it into your reply. To change it later, use "
@@ -47,7 +49,10 @@ MAKE_ARTIFACT = {"type": "function", "function": {
             "dashboard: {\"sources\": [{\"id\", \"kind\": \"file|sqlite|postgres|plugin\", \"path\"?, \"server\"?}], "
             "\"widgets\": [{\"id\", \"kind\": \"number|chart|table\", \"title\", \"source\", \"query\": \"SELECT …\", "
             "\"chart\"?: {\"type\", \"x\": \"<column>\", \"series\": [\"<column>\"]}, \"value\"?: \"<column>\"}]}; "
-            "queries are read-only SELECTs, and the user allows each source once.")}},
+            "queries are read-only SELECTs, and the user allows each source once. "
+            "checklist: {\"items\": [{\"title\": \"a short name for the step\", \"done_when\": \"what must be true, "
+            "and checkable, for it to be done\"}]} (every item starts Not started; it is pinned to this project, so a "
+            "later chat carries on from it).")}},
         "required": ["type", "title"]}}}
 
 EDIT_ARTIFACT = {"type": "function", "function": {
@@ -62,7 +67,12 @@ EDIT_ARTIFACT = {"type": "function", "function": {
         "edits": {"type": "array", "items": {"type": "object"}, "description": (
             "doc: [{\"find\": exact text, \"replace\": new text}]. slides: [{\"op\": \"replace|insert|delete|move|"
             "set|theme\", \"slide\": n, …}]. sheet: [{\"op\": \"set\", \"cell\": \"B4\", \"value\": …}, {\"op\": "
-            "\"insert_rows\" …}]. dashboard: [{\"op\": \"add_widget|change_widget|remove_widget|…\", …}].")},
+            "\"insert_rows\" …}]. dashboard: [{\"op\": \"add_widget|change_widget|remove_widget|…\", …}]. "
+            "checklist (always by edits, ONE item per call): [{\"op\": \"set\", \"item\": \"c2\", \"status\": \"Not "
+            "started|Building|Testing|Checked live|Needs you|Done\", \"note\": \"what you did, or what you need\", "
+            "\"proof\": [\"test results as text\", {\"image\": \"path/to/screenshot.png\", \"caption\"}]}]; Done needs "
+            "note and proof, Needs you needs note; also {\"op\": \"add\", \"title\", \"done_when\"}, {\"op\": "
+            "\"remove|move|pin\", …}.")},
         "content": {"type": "string", "description": "doc or page: the whole new text or HTML."},
         "data": {"type": "object", "description": "slides, sheet or dashboard: the whole new data."},
         "note": {"type": "string", "description": "What changed, in a few words (shown in the version history)."},
@@ -73,7 +83,7 @@ EDIT_ARTIFACT = {"type": "function", "function": {
 FIND_ARTIFACTS = {"type": "function", "function": {
     "name": "find_artifacts",
     "description": (
-        "Find the user's artifacts (docs, decks, sheets, dashboards, pages) by words from their names, newest first, "
+        "Find the user's artifacts (docs, decks, sheets, dashboards, pages, checklists) by words from their names, newest first, "
         "each with its id: before making one they may already have, and to change one made in another conversation "
         "with edit_artifact. With no words, the most recent ones. Changes nothing."),
     "parameters": {"type": "object", "properties": {
@@ -119,8 +129,59 @@ def missing_note(output, made_types) -> str:
 
 def _summary(view: dict, op: str) -> str:
     verb = {"made": "Made", "changed": "Changed"}.get(op, op.title())
+    if view.get("type") == "checklist":
+        return _checklist_summary(view, verb)
     return (f"{verb} {view['label']} “{view['title']}” ({view['id']}, version {view['version']}). It shows as a card "
             "the user opens; don't repeat its content in your reply.")
+
+
+def _checklist_summary(view: dict, verb: str) -> str:
+    """What the model reads after making or changing a checklist: what the history now says, where it stands and the
+    next item, so it carries on without reading the list again."""
+    from . import artifact_checklist as checklist
+    from .artifact_store import store
+    head = f"{verb} Checklist “{view['title']}” ({view['id']}, version {view['version']})"
+    try:
+        data = store().source(view["id"], view["version"])
+    except Exception:                                     # noqa: BLE001 -- made, even if it can't be read back here
+        return head + "."
+    last = (view.get("versions") or [{}])[-1].get("summary") or ""
+    said = f": {last}" if verb == "Changed" and last else ""
+    tail = (" It shows as a card the user opens and ticks too, pinned to this project. Keep it current as you work: "
+            "mark an item Building when you start it, and Done (with a note and its proof) when what its “done when” "
+            "says is true, one item per edit_artifact call." if verb == "Made" else "")
+    return f"{head}{said}. {checklist.standing(data)}{tail}"
+
+
+def _checklist_guard(aid: str, args: dict, reader: str) -> tuple[str, str]:
+    """Before a checklist changes: what the user changed since this chat last read it. Returns (refusal, note): a
+    refusal when the call would change an item the user changed meanwhile (the model reads theirs first), else the note
+    its result carries."""
+    from . import artifact_checklist as checklist
+    from . import checklists
+    from .artifact_store import store
+    last = checklists.seen(reader, aid)
+    version = service.view(aid, versions=False)["version"]
+    if last is None or last >= version:
+        return "", ""
+    lines, theirs, only_user = checklists.since(aid, last)
+    checklists.mark(reader, aid, version)
+    if not lines:
+        return "", ""
+    words = checklists.changed_words(lines, only_user)
+    if theirs:
+        data = store().source(aid, version)
+        for edit in args.get("edits") or []:
+            if not isinstance(edit, dict) or edit.get("item") is None:
+                continue
+            try:
+                item = checklist.find_item(data, edit.get("item"))
+            except ValueError:
+                continue
+            if item["id"] in theirs:
+                return (f"error: nothing changed. {words} Your call would change {item['id']}, which the user just "
+                        f"changed (it is {item['status']} now). {checklist.standing(data)} Decide again from that."), ""
+    return "", words
 
 
 def _when(stamp) -> str:
@@ -159,6 +220,14 @@ def taken_words(existing: dict, op: str, mine=None) -> str:
         # (Not the caller's to change, and not the caller's to see: only that the name is used.)
         return (f"error: the user already has a {label} named “{existing.get('title')}”. Give yours a different name "
                 "that says what it is.")
+    if op == "make_artifact" and existing.get("type") == "checklist":
+        p = existing.get("progress") or {}
+        nxt = p.get("next") or {}
+        return (f"error: this project already has a checklist named “{existing.get('title')}” ({_line(existing)}; "
+                f"{p.get('done', 0)} of {p.get('total', 0)} done). Work from that one: read it with edit_artifact "
+                f"(only its id) and carry on from {nxt.get('id') or 'its first item not done'}; add what's missing with "
+                "{\"op\": \"add\"} edits. Make another only if the user wants a separate one, under a name that says "
+                "how it differs.")
     if op == "make_artifact":
         return (f"error: there's already a {label} named “{existing.get('title')}” ({_line(existing)}). If the user "
                 "means that one, change it with edit_artifact (each change is a new version they can go back to; "
@@ -197,14 +266,16 @@ def run(name: str, args, *, origin: dict, author: str = "DGC", on_change=None, b
         return "error: give the tool's arguments as an object."
     if name == "find_artifacts":
         return find(args, mine=mine)
+    told = ""                  # what the user changed in a checklist since this chat last read it
     try:
         if name == "make_artifact":
             type_ = str(args.get("type") or "")
-            spec = args.get("data") if type_ in ("slides", "sheet", "dashboard") else {"content": args.get("content")}
+            spec = (args.get("data") if type_ in ("slides", "sheet", "dashboard", "checklist")
+                    else {"content": args.get("content")})
             if type_ == "page":
                 spec = {"html": args.get("content")}
             if spec is None:
-                return f"error: a {type_ or 'deck, sheet or dashboard'} needs its data."
+                return f"error: a {type_ or 'deck, sheet, dashboard or checklist'} needs its data."
             view = service.make(type_, args.get("title"), spec, origin=origin, author=author, base=base,
                                 resolve=resolve)
             op = "made"
@@ -212,10 +283,20 @@ def run(name: str, args, *, origin: dict, author: str = "DGC", on_change=None, b
             aid = str(args.get("id") or "")
             content = args.get("data") if args.get("data") is not None else args.get("content")
             title = args.get("title") if isinstance(args.get("title"), str) else None
+            kind = _kind_of(aid)
             if content is None and not args.get("edits") and title is None:
                 # (Read only. Said, so a model doesn't tell the user it changed something it only read.)
+                if kind == "checklist":
+                    from . import checklists
+                    checklists.mark(checklists.reader_of(origin), aid, service.view(aid, versions=False)["version"])
+                    return (service.outline(aid) + "\n\n(You only read it: nothing has changed.)")
                 return (service.outline(aid) + "\n\n(You only read it: nothing has changed. To change it, call "
                         "edit_artifact again with edits or the whole new content.)")
+            if kind == "checklist":
+                from . import checklists
+                refusal, told = _checklist_guard(aid, args, checklists.reader_of(origin))
+                if refusal:
+                    return refusal
             if isinstance(content, str) and service.view(aid, versions=False)["type"] == "page":
                 content = {"html": content}
             view = service.edit(aid, edits=args.get("edits") or None, content=content, author=author,
@@ -234,7 +315,18 @@ def run(name: str, args, *, origin: dict, author: str = "DGC", on_change=None, b
             on_change(view, op)
         except Exception:                                     # noqa: BLE001 -- a screen never fails the call
             pass
+    if view.get("type") == "checklist":
+        from . import checklists
+        checklists.mark(checklists.reader_of(origin), view["id"], view["version"])
+        return _summary(view, op) + (f"\n{told}" if told else "")
     return _summary(view, op)
+
+
+def _kind_of(aid: str) -> str:
+    try:
+        return str(service.view(aid, versions=False).get("type") or "")
+    except Exception:                                         # noqa: BLE001 -- the edit itself says what is wrong
+        return ""
 
 
 def args_preview(args) -> str:

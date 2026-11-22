@@ -7,7 +7,7 @@
   position: fixed; left: 0; top: 0; z-index: 95; box-sizing: border-box; display: flex; flex-direction: column;
   width: 340px; max-width: calc(100vw - 16px); margin: 0; overflow: hidden;
   border: 1px solid var(--border-strong); border-radius: var(--r-card);
-  background: var(--surface2); color: var(--text); box-shadow: var(--lift-2);
+  background: var(--raised, var(--surface2)); color: var(--text); box-shadow: var(--lift-2);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans); letter-spacing: 0; text-align: left; text-transform: none; white-space: normal;
 }
 .dgc-linkcard[hidden] { display: none; }

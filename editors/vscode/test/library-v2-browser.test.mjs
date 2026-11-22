@@ -154,7 +154,7 @@ for (const place of ["side", "tab"]) {
     try {
       const filters = async () => (await x.lib()).filters.map((f) => [f.id, f.key, f.value]);
       assert.deepEqual(await filters(), [["kind", "Kind", "All"], ["maker", "By", "Anyone"]]);
-      assert.deepEqual((await x.menu("kind")).map((r) => r.label), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards"]);
+      assert.deepEqual((await x.menu("kind")).map((r) => r.label), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards", "Checklists"]);
       await x.page.keyboard.press("Escape"); await x.rest(200);
       const makers = await x.menu("maker");
       assert.deepEqual(makers.slice(0, 4).map((r) => r.label), ["Anyone", "Work", "Chat", "Pips"]);

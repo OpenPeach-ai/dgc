@@ -842,7 +842,8 @@ class CheckpointManager:
         return [(i, pt["preview"], len(pt["files"])) for i, pt in enumerate(self.points)]
 
     def changes(self, start: int, *, limit: int = _MAX_TURN_FILES,
-                budget_s: float = _TURN_FILES_BUDGET_S, commands: bool = False) -> tuple[list[dict], int]:
+                budget_s: float = _TURN_FILES_BUDGET_S, commands: bool = False,
+                leave_out=None) -> tuple[list[dict], int]:
         """What a rewind to point ``start`` would change, file by file: ``(files, total)``.
 
         Each file's state before (its earliest snapshot from ``start`` on, as rewind_state picks it)
@@ -860,6 +861,9 @@ class CheckpointManager:
         ``commands``: also list, after those, each file one of this chat's commands changed that the
         rewind cannot put back (note_command_change), as ``{..., counted: False, command: True}``;
         ``total`` then counts those too. The Edited card asks for them; Undo's counts never do.
+
+        ``leave_out``: given every path that would be listed, the ones not to list or count (the card
+        leaves out what Git ignores now, as the bar under the chat does). Undo's counts never pass it.
         """
         if not (0 <= start < len(self.points)):
             return [], 0
@@ -874,10 +878,19 @@ class CheckpointManager:
                     earliest[path] = prior
                     if path in commanded:
                         by_command.add(path)
+        commanded_changes = self._command_changes(start, earliest) if commands else {}
+        skip: set[str] = set()
+        if callable(leave_out) and (earliest or commanded_changes):
+            try:
+                skip = set(leave_out([*earliest, *commanded_changes]) or ())
+            except Exception:                  # noqa: BLE001 -- a filter that fails lists everything
+                skip = set()
         rows: list[dict] = []
         total = 0
         deadline = time.monotonic() + max(0.0, budget_s)
         for path, prior in earliest.items():
+            if path in skip:
+                continue
             before = (prior if isinstance(prior, _Snapshot) else
                       (_Snapshot("missing") if prior is None else
                        _Snapshot("file", str(prior).encode(), 0o644)))
@@ -923,7 +936,9 @@ class CheckpointManager:
             limits: dict[str, str] = {}
             for point in list(self.points[start:]):
                 limits.update(point.get("command_limits") or {})
-            for path, status in self._command_changes(start, earliest).items():
+            for path, status in commanded_changes.items():
+                if path in skip:
+                    continue
                 total += 1
                 if len(rows) < limit:
                     row = {"path": path, "additions": 0, "deletions": 0, "counted": False,

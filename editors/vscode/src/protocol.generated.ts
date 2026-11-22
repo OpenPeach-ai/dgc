@@ -13272,7 +13272,8 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "doc",
         "slides",
         "sheet",
-        "dashboard"
+        "dashboard",
+        "checklist"
       ]
     },
     "surface": {

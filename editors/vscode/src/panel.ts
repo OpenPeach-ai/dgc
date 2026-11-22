@@ -10,7 +10,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { AttachMode, AttachedChatState, ChildExitInfo, DgcBackend, DgcEvent, MOVED_CAUSE, STOP_CAUSE } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, isChatdgcModsEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
-import { artifactsOffer, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
+import { artifactsOffer, forwardedArtifactPage, outputChoice, workChecklistRows, type Artifacts, type ArtifactView } from "./artifacts";
 import { keepRunningAfterClose } from "./closingTab";
 import { editorName, holderFacts, holderLine, type HolderFacts, type HolderLine } from "./holderWords";
 import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VoiceClient, type DictationOwner } from "./voice";
@@ -1164,6 +1164,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // A card in this chat's transcript shows the artifact's title and version as they are now.
       if (message.type === "artifactChanged" && this.webviewReady) this.post({ type: "artifactNews", artifact: message.artifact, op: message.op });
       // Home: what a session or a chat made arrives there as a card, kept so a reload still has it (src/pipHomeDismiss.ts).
+      // A checklist made, ticked or removed: Work's list says how far along it is now.
+      if (message.type === "artifactChanged" && home && (message.artifact as any)?.type === "checklist") { void this.postWorkChecklists(); }
       if (message.type === "artifactChanged" && home) {
         const pages = noteHomePage(this.context, message);
         if (pages && this.home && this.webviewReady) this.post({ type: "homePages", pages });
@@ -1626,9 +1628,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.archivedItems = archived;
     this.folderRowsShown = folders;
     this.postSessionItems(items, error);
+    void this.postWorkChecklists();
     // Which of them a backend is still running with no window: the list marks them, and the marks
     // follow the work while there is any (live_sessions -> liveSessionsArrived repaints the list).
     this.requestLiveSessions();
+  }
+
+  /** The project's pinned checklists, above Work's list: each with how far along it is and what is next (or which
+   *  item needs you). For the folder chosen in the dropdown (every folder's on All projects, each with its folder's
+   *  name), or this window's folder; sent with the list and again whenever a checklist changes. */
+  private checklistsRequest = 0;
+  private async postWorkChecklists(): Promise<void> {
+    if (!this.home || !this.webviewReady || !this.artifacts) { return; }
+    const request = ++this.checklistsRequest;
+    let views: ArtifactView[];
+    try { views = await this.artifacts.list("checklist"); } catch { return; }       // an older DGC lists none
+    if (request !== this.checklistsRequest) { return; }
+    const folders = this.folderRowsShown, choice = folders ? this.folderChoice(folders) : "";
+    const here = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+    const wanted = folders ? choice : here;
+    this.post({ type: "workChecklists", items: workChecklistRows(views, wanted, !!folders && !choice) });
   }
 
   /** The list as last shown, so the running marks can be repainted without asking for it again. */
@@ -11922,6 +11941,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const hubJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "hub.js"));
     // Home as cards: the grid, the card library and each card (media/shared/homecards.js, window.DgcHomeCards).
     const homeCardsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "homecards.js"));
+    // A site's own icon beside its link (Home's Browser card) or tab (media/shared/siteicon.js, window.DgcSiteIcon).
+    const siteIconJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "siteicon.js"));
     // The header row every page of the side bar wears (media/shared/pagehead.js, window.DgcPageHead).
     const pageHeadJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "pagehead.js"));
     // One × for every warning, error or done line that stays, the same on every surface (media/shared/dismiss.js, window.DgcDismiss).
@@ -12274,7 +12295,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script><script nonce="${nonce}" src="${pipJobJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${usageMeterJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${dismissJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${usageMeterJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${siteIconJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${dismissJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

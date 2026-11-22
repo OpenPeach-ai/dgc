@@ -110,6 +110,10 @@ def clean_details(value) -> dict:
             pass
     for key in ("cycles", "tokens_used", "token_budget", "stalled_cycles"):
         result[key] = _count(value.get(key))
+    # A goal that runs from a checklist (/goal checklist; dgc/checklists.py): the checklist's id.
+    linked = value.get("checklist")
+    if isinstance(linked, str) and re.fullmatch(r"ar_[a-f0-9]{16}", linked):
+        result["checklist"] = linked
     result["usage_known"] = value.get("usage_known") is not False
     result["reason"] = str(value.get("reason") or "")[:2000]
     result["evidence"] = [item[:1000] for item in value.get("evidence", [])[:12]
@@ -882,6 +886,19 @@ class GoalLifecycle:
                  replace: bool = False, inputs: dict | None = None) -> bool:
         self._goal_failed_pause = False
         clean = self._safe_text(text).strip()
+        # /goal checklist [NAME]: the project's checklist is the objective, worked item by item (dgc/checklists.py).
+        linked = None
+        if clean and not self.depth:
+            from . import checklists
+            try:
+                linked = checklists.goal_from(clean, str(self.config.project_root))
+            except ValueError as exc:
+                self._last_persist_error = str(exc)
+                return False
+            except Exception:                              # noqa: BLE001 -- the store can't be read: an ordinary goal
+                linked = None
+            if linked:
+                clean = self._safe_text(linked[1]).strip()
         too_long = self.objective_size_error(clean)
         if too_long:
             self._last_persist_error = too_long
@@ -936,6 +953,10 @@ class GoalLifecycle:
                 self._goal_details["inputs"] = selected
                 if supplied or fresh:
                     self._goal_details.pop("inputs_error", None)
+                if linked:
+                    self._goal_details["checklist"] = linked[0]
+                elif fresh:
+                    self._goal_details.pop("checklist", None)
             self._pending_goal_report = None
             if token_budget is not None:
                 self._goal_details["token_budget"] = token_budget
@@ -1036,6 +1057,34 @@ class GoalLifecycle:
         if getattr(self, "stopping", False):
             return "DGC's backend stopped while this goal was running; resume to continue it"
         return "Stopped by user"
+
+    def _goal_reader(self) -> str:
+        return getattr(getattr(self, "session_file", None), "stem", "") or ""
+
+    def _goal_checklist_state(self) -> dict | None:
+        """Where the checklist this goal runs from stands now (None for a goal with none)."""
+        linked = self._goal_details.get("checklist")
+        if not linked:
+            return None
+        from . import checklists
+        try:
+            return checklists.goal_state(linked)
+        except Exception:                                  # noqa: BLE001 -- unreadable now: the goal goes on as any other
+            return None
+
+    def _goal_checklist_note(self) -> str:
+        linked = self._goal_details.get("checklist")
+        if not linked:
+            return ""
+        from . import checklists
+        try:
+            return checklists.goal_note(linked, self._goal_reader())
+        except Exception:                                  # noqa: BLE001
+            return ""
+
+    def goal_first_prompt(self, text: str) -> str:
+        """What the goal's first turn is sent: the objective as written, or the checklist's when it runs from one."""
+        return self.goal if self._goal_details.get("checklist") and self.goal else text
 
     def _gate_completion_report(self, report: dict) -> dict | None:
         """Hold a "completed" report against the checklist it claims to have finished.
@@ -1165,6 +1214,21 @@ class GoalLifecycle:
                     return finish("paused", result, reason=self._last_turn_pause)
                 if dismissed:
                     return finish("paused", result, reason=QUESTION_DISMISSED_REASON)
+                # A goal that runs from a checklist ends on the checklist: every item Done, or one that needs the user
+                # (said with which and why). A completion report with items still open is refused, naming them.
+                listed = self._goal_checklist_state()
+                if listed and listed["state"] == "needs":
+                    self.ui.info(listed["line"])
+                    return finish("blocked", result, reason=listed["line"])
+                if listed and listed["state"] == "done":
+                    self.ui.info(listed["line"])
+                    return finish("completed", result, reason=listed["line"], evidence=listed.get("evidence") or [])
+                if listed and listed["state"] == "open" and report and report["status"] == "completed":
+                    self._goal_refusal_note = (
+                        "Your completion report for the goal was not accepted: these checklist items are not Done: "
+                        + "; ".join(listed["open"][:8]) + ". Work the next one; mark each Done with edit_artifact "
+                        "(its note and proof) when it is proved. The goal ends by itself when every item is Done.")
+                    report = None
                 if report and report["status"] == "completed":
                     report = self._gate_completion_report(report)
                 if report and report["status"] != "active":
@@ -1217,6 +1281,9 @@ class GoalLifecycle:
                 refusal = str(getattr(self, "_goal_refusal_note", "") or "")
                 self._goal_refusal_note = ""
                 prompt = ((refusal + "\n\n") if refusal else "") + cycle_prompt(self.goal, details)
+                listed_note = self._goal_checklist_note()
+                if listed_note:
+                    prompt += "\n\n" + listed_note
                 if getattr(self, "goal_turns", False):
                     # 12 Nov, his call: each goal cycle is a turn of its own, with its own reply and
                     # file changes; the frontend starts the next one when it is idle (after anything queued).

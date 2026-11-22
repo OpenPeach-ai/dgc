@@ -5,6 +5,7 @@ import '../media/shared/dialog.css';   // every popover's and dialog's lift and 
 import './settings.css';
 // DGC's own hover label, drawn in the page: the browser's own `title` tooltip is cut by the window's edge (window.DgcTip).
 import '../media/shared/tip.css';
+import '../media/shared/menu.js';   // (keeps --raised, the menus' solid grey, which the labels stand on where a theme's is see-through)
 import '../media/shared/tip.js';
 import '../media/shared/icons.js';
 import '../media/shared/dismiss.css';   // one × for every line that stays, the same on every surface (window.DgcDismiss)

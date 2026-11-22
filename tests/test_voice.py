@@ -84,9 +84,13 @@ class CatalogTests(unittest.TestCase):
             self.assertTrue(m["licence"] and m["summary"] and m["languages"] and m["size"] > 10_000_000)
         self.assertEqual({m["role"] for m in catalog.MODELS}, set(catalog.ROLES), "something for each role")
 
-    def test_pocket_tts_says_it_is_for_non_commercial_use(self):
-        self.assertEqual(catalog.model("pocket-tts")["licence"],
-                         "CC BY 4.0 in archive; upstream README says non-commercial")
+    def test_pocket_tts_is_the_archive_its_publisher_put_up_on_21_nov_and_says_its_licence(self):
+        # The publisher replaced the archive under the same name on 21 Nov 2026 (same files; its README now says the
+        # weights are CC BY 4.0 and the code Apache-2.0, no longer "non-commercial"): the old pin refused every install.
+        found = catalog.model("pocket-tts")
+        self.assertEqual((found["size"], found["sha256"]),
+                         (98_337_865, "f4da7c7bd465f7b91e89191487fe90504396a51d6f0bcf94d0787633e2657293"))
+        self.assertEqual(found["licence"], "CC BY 4.0")
 
 
 class SpeakableTests(unittest.TestCase):
@@ -158,6 +162,21 @@ class ManagerTests(Fixture):
             self.manager.install("kitten-mini-en", lambda *a: None)
         self.assertFalse(self.manager.installed("kitten-mini-en"))
         self.assertFalse((self.root / "models" / "kitten-mini-en").exists())
+
+    def test_a_whole_download_that_isnt_the_file_dgc_knows_says_the_server_changed_it_not_try_again(self):
+        # A download cut short raises on its own; one that arrives whole at another size is another file: the
+        # publisher replaced it, and trying again can't help. It says so, and nothing is installed.
+        found = catalog.model("kitten-mini-en")
+        self.offer("kitten-mini-en")
+        with patch.dict(next(m for m in catalog.MODELS if m["id"] == "kitten-mini-en"),
+                        {"size": found["size"] + 5, "sha256": "1" * 64}):
+            with self.assertRaises(VoiceError) as caught:
+                self.manager.install("kitten-mini-en", lambda *a: None)
+        words = str(caught.exception)
+        self.assertIn("changed", words)
+        self.assertIn("Update DGC", words)
+        self.assertNotIn("try again", words)
+        self.assertFalse(self.manager.installed("kitten-mini-en"))
 
     def test_an_archive_that_would_write_outside_its_folder_is_refused(self):
         found = catalog.model("kitten-mini-en")

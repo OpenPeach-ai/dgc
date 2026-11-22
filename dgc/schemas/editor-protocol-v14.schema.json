@@ -17606,7 +17606,8 @@
                 "doc",
                 "slides",
                 "sheet",
-                "dashboard"
+                "dashboard",
+                "checklist"
               ]
             },
             "surface": {

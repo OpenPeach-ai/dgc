@@ -8854,7 +8854,8 @@ class Backend:
                     return
                 # Match the optimistic goal row even when --tokens was stripped by the host.
                 # Worker turn_start can arrive before prompt_accepted.
-                state, _ = self._start_turn(text, request_id=request_id)
+                first = getattr(self.agent, "goal_first_prompt", None)
+                state, _ = self._start_turn(first(text) if callable(first) else text, request_id=request_id)
                 if state != "started":
                     self.agent.update_goal("paused", reason="The first turn could not start")
                     self.em.emit("command_rejected", command=t, reason="turn_in_progress",

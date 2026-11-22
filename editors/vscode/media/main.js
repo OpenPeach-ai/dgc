@@ -1054,6 +1054,57 @@
       if (item.id === focused) row.focus();
     }
   }
+  // ---- The project's checklists (0.52), above Work's list: each pinned one with how far along it is and what is next
+  // (or which item needs you). A click opens it in its panel, where you tick it. The host sends them for the folder
+  // chosen (every folder's on All projects, each with its folder's name) and again whenever one changes.
+  let workChecklists = [];
+  function checklistLine(item) {
+    if (item.needs) return { text: `Needs you: ${item.needs}`, needs: true };
+    if (item.total && item.done >= item.total) return { text: "Every item is done", needs: false };
+    return { text: item.next ? `Next: ${item.next}` : "", needs: false };
+  }
+  function paintWorkChecklists() {
+    const before = $("sessions-status");
+    if (!before) return;
+    let box = $("work-checklists");
+    const query = sessionsSearchable ? String(lastSessions?.query || "") : sessionsFilter;
+    const shown = query ? [] : workChecklists;
+    if (!shown.length) { if (box) box.hidden = true; return; }
+    if (!box) {
+      box = el("ul", "work-checklists"); box.id = "work-checklists"; box.setAttribute("aria-label", "Checklists in this project");
+      before.before(box);
+    }
+    box.hidden = false;
+    const focused = box.contains(document.activeElement) ? document.activeElement.dataset.id : "";
+    box.replaceChildren(...shown.map((item) => {
+      const row = el("li", "work-checklist"); row.setAttribute("role", "button"); row.tabIndex = 0; row.dataset.id = item.id;
+      const share = item.total ? Math.round((100 * item.done) / item.total) : 0, line = checklistLine(item);
+      const mark = el("span", "work-checklist-mark"); mark.setAttribute("aria-hidden", "true");
+      if (window.DgcFileSheet) mark.innerHTML = window.DgcFileSheet.html("checklist");
+      const main = el("span", "session-main");
+      const name = el("span", "session-name"); name.textContent = item.title; name.title = item.title;
+      const sub = el("span", `session-sub${line.needs ? " session-waiting" : ""}`);
+      sub.textContent = [`${item.done} of ${item.total} done`, line.text, item.folder || ""].filter(Boolean).join(" · ");
+      sub.title = sub.textContent;
+      const bar = el("span", "work-checklist-bar"); bar.setAttribute("aria-hidden", "true");
+      const fill = el("i"); fill.style.width = `${share}%`; bar.append(fill);
+      main.append(name, sub, bar);
+      row.append(mark, main);
+      row.setAttribute("aria-label", `Checklist: ${item.title}. ${item.done} of ${item.total} done${line.text ? `. ${line.text}` : ""}. Open it`);
+      const open = () => vscode.postMessage({ type: "artifactOpen", id: item.id, artifactType: "checklist", title: item.title });
+      row.onclick = open;
+      row.onkeydown = (e) => { if (e.target === row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); } };
+      return row;
+    }));
+    if (focused) [...box.children].find((row) => row.dataset.id === focused)?.focus();
+  }
+  function renderWorkChecklists(msg) {
+    workChecklists = (Array.isArray(msg.items) ? msg.items : []).filter((item) => item && /^ar_[a-f0-9]{16}$/.test(String(item.id || "")) && typeof item.title === "string")
+      .slice(0, 8).map((item) => ({ id: item.id, title: item.title.slice(0, 200), done: Math.max(0, Number(item.done) || 0), total: Math.max(0, Number(item.total) || 0),
+        next: typeof item.next === "string" ? item.next.slice(0, 200) : "", needs: typeof item.needs === "string" ? item.needs.slice(0, 200) : "",
+        folder: typeof item.folder === "string" ? item.folder.slice(0, 120) : "" }));
+    paintWorkChecklists();
+  }
   function renderSessions(msg) {
     const list = $("sessions-list"), status = $("sessions-status");
     lastSessions = msg;
@@ -1112,6 +1163,7 @@
         return { id: item.id, title, age: sessionAge(item.when), when: [item.when, plural(Number(item.count) || 0, "message")].filter(Boolean).join(" · "), born: window.DgcMarks?.born(item.id, item.when),
           ...(everywhere && typeof item.project === "string" && item.project ? { path: [item.project, item.projectPath || item.project] } : {}),
           ...(here ? { restore: () => vscode.postMessage({ type: "restoreSession", id: item.id, title }), remove: () => vscode.postMessage({ type: "deleteArchivedSession", id: item.id, title }) } : {}) }; }) });
+    paintWorkChecklists();                 // (hidden while a search shows its finds)
     if (dock) paintDock();                 // a pinned session's name and what it is doing now
     paintHub();
   }
@@ -1479,7 +1531,7 @@
     yb.asked = Date.now();
     ybAsk("get_your_browser_recent").then((said) => {
       const links = Array.isArray(said?.links) ? said.links.filter((l) => l && typeof l.url === "string" && /^https?:\/\//i.test(l.url)).slice(0, 3)
-        .map((l) => ({ url: String(l.url).slice(0, 2000), title: String(l.title || "").slice(0, 200), host: String(l.host || "").slice(0, 253) })) : [];
+        .map((l) => ({ url: String(l.url).slice(0, 2000), title: String(l.title || "").slice(0, 200), host: String(l.host || "").slice(0, 253), icon: window.DgcSiteIcon?.ok(l.icon, 32001) || "" })) : [];
       yb.links = links; yb.available = said?.available !== false; yb.reason = yb.available ? "" : String(said?.reason || "").slice(0, 600); yb.open = said?.open === true;
       yb.install = yb.available ? null : ybInstallOf(said?.install); yb.view = said?.view === "tab" ? "tab" : "window";
       ybInstallPoll();
@@ -6487,6 +6539,7 @@
   // before its name. A turn of more than TS_OPEN_FILES files starts with its folders folded, so a big turn stays short
   // (three rows and "Show N more" did that before) and the header with Undo stays where it is.
   const TS_OPEN_FILES = 6;
+  const TS_FOLDERS = 8;
   let tsSeq = 0;
   function turnSummaryCard(edits, prompt, cli = null) {
     const files = [...(edits || new Map()).entries()];
@@ -6507,11 +6560,14 @@
       const add = counted.reduce((n, [, v]) => n + v.additions, 0), del = counted.reduce((n, [, v]) => n + v.deletions, 0);
       return `<span class="ts-counts"><span class="change-add">+${add}</span><span class="change-del">\u2212${del}</span></span>`;
     };
-    const row = ([path, v], i, nested = false) => {
-      const [dir, name] = splitPath(path);
+    // In a folder's group a file shows the rest of its path after the folder (just its name, unless the card grouped
+    // by top folder); a top-level row shows its whole path, the folder dimmed.
+    const row = ([path, v], i, folder = null) => {
+      const nested = folder !== null;
+      const [dir, name] = splitPath(nested ? String(path).slice(folder.length + 1) : path);
       return `<button type="button" class="ts-row${nested ? " ts-nested" : ""}" data-file="${i}" title="Review ${esc(path)}">`
         + `${icon("file-text", "sm")}`
-        + `<span class="change-path">${dir && !nested ? `<span class="path-dir">${esc(dir)}</span>` : ""}`
+        + `<span class="change-path">${dir ? `<span class="path-dir">${esc(dir)}</span>` : ""}`
         + `<span class="path-name">${esc(name)}</span></span>`
         // A file outside the project changed by a DGC that has since restarted: its earlier version went with that
         // process (it is never saved), so Undo leaves it as it is, and says so here and in its count.
@@ -6534,20 +6590,28 @@
     const many = cli ? Math.max(Number(cli.total) || 0, files.length) : files.length;
     const head = many === 1 ? "Edited 1 file" : `Edited ${many} files`;
     const totals = countsOf(files, { empty: `<span class="ts-uncounted">no line count</span>` });
-    // Groups in the order their first file came; "" is the files at the top level, drawn without a folder row.
-    const groups = new Map();
-    files.forEach((entry, i) => {
-      const folder = files.length === 1 ? "" : splitPath(entry[0])[0].replace(/\/$/, "");
-      if (!groups.has(folder)) groups.set(folder, []);
-      groups.get(folder).push([entry, i]);
-    });
+    // Groups in the order their first file came; "" is the files at the top level, drawn without a folder row. Past
+    // TS_FOLDERS folders (a command that made a whole tree: a virtual environment, a package's files) one group per top
+    // folder, so the card stays a few rows instead of one per folder of the tree.
+    const groupBy = (folderOf) => {
+      const out = new Map();
+      files.forEach((entry, i) => {
+        const folder = files.length === 1 ? "" : folderOf(String(entry[0]));
+        if (!out.has(folder)) out.set(folder, []);
+        out.get(folder).push([entry, i]);
+      });
+      return out;
+    };
+    let groups = groupBy((path) => splitPath(path)[0].replace(/\/$/, ""));
+    if ([...groups.keys()].filter(Boolean).length > TS_FOLDERS) groups = groupBy((path) => path.includes("/") ? path.slice(0, path.indexOf("/")) : "");
     const folded = files.length > TS_OPEN_FILES;
     const listId = `ts-list-${++tsSeq}`;
     const body = [...groups].map(([folder, entries]) => folder
       ? `<div class="ts-folder"><button type="button" class="ts-folder-row" aria-expanded="${!folded}" title="${esc(folder)}">`
         + `<span class="ts-chev">${icon("chevron-down", "sm")}</span>${icon("folder", "sm")}`
-        + `<span class="ts-folder-name">${esc(folder)}</span>${countsOf(entries.map(([entry]) => entry))}</button>`
-        + `<div class="ts-folder-files"${folded ? " hidden" : ""}>${entries.map(([entry, i]) => row(entry, i, true)).join("")}</div></div>`
+        + `<span class="ts-folder-name">${esc(folder)}</span>${countsOf(entries.map(([entry]) => entry),
+          { empty: `<span class="ts-uncounted">${entries.length === 1 ? "1 file" : `${entries.length} files`}</span>` })}</button>`
+        + `<div class="ts-folder-files"${folded ? " hidden" : ""}>${entries.map(([entry, i]) => row(entry, i, folder)).join("")}</div></div>`
       : entries.map(([entry, i]) => row(entry, i)).join("")).join("");
     card.innerHTML = `<div class="ts-head">`
       + `<span class="ts-heading"><span class="ts-title">${head}</span>`
@@ -7409,8 +7473,8 @@
   // (a document in the editor over its file); Download makes a copy in one of its own formats, to the person's own computer. Every card of the same
   // artifact shows it as it is now: a later change names the same id (artifact_changed, or artifactNews from another
   // chat, a Pip or the editor).
-  const ARTIFACT_MARK = { doc: "file-text", slides: "presentation", sheet: "sheet", dashboard: "layout-dashboard", page: "app-window" };
-  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page" };
+  const ARTIFACT_MARK = { doc: "file-text", slides: "presentation", sheet: "sheet", dashboard: "layout-dashboard", page: "app-window", checklist: "file-text" };
+  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist" };
   const ARTIFACT_FORMAT = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
                             xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
   const ARTIFACT_OP = { made: "made", changed: "changed", restored: "restored", refreshed: "refreshed", removed: "removed" };
@@ -7436,7 +7500,10 @@
     card.classList.toggle("stopped", removed);
     card.setAttribute("aria-label", `${ARTIFACT_KIND[a.type]}: ${a.title || ARTIFACT_KIND[a.type]}`);
     const kind = ARTIFACT_KIND[a.type];
-    const status = removed ? "removed: it's in DGC's trash" : `version ${Number(a.version) || 1}${card.dataset.op ? ` · ${card.dataset.op}` : ""}`;
+    // (A checklist's card says how far along it is, and keeps saying it as DGC works: every change repaints it.)
+    const far = a.type === "checklist" && a.progress && Number.isSafeInteger(a.progress.total) && a.progress.total > 0
+      ? `${Math.max(0, Math.min(Number(a.progress.done) || 0, a.progress.total))} of ${a.progress.total} done · ` : "";
+    const status = removed ? "removed: it's in DGC's trash" : `${far}version ${Number(a.version) || 1}${card.dataset.op ? ` · ${card.dataset.op}` : ""}`;
     // The shared card (media/shared/doccard.css, ui-04): its tile, its name over a quiet line, and Open over the whole card.
     card.classList.add("dgc-doc-card");
     card.dataset.tone = a.type;
@@ -7500,7 +7567,7 @@
   // What make_artifact and edit_artifact tell the model (dgc/artifact_tools._summary): `Made Slides “Q3 plan”
   // (ar_…, version 3). …`, read back into the card's artifact.
   function artifactFromResult(text) {
-    const m = /^(Made|Changed|Restored) (Document|Slides|Spreadsheet|Dashboard|Page) \u201c([\s\S]{0,240}?)\u201d \((ar_[0-9a-f]{16}), version (\d{1,6})\)/.exec(text);
+    const m = /^(Made|Changed|Restored) (Document|Slides|Spreadsheet|Dashboard|Page|Checklist) \u201c([\s\S]{0,240}?)\u201d \((ar_[0-9a-f]{16}), version (\d{1,6})\)/.exec(text);
     if (!m) return null;
     const type = Object.keys(ARTIFACT_KIND).find((t) => ARTIFACT_KIND[t] === m[2]);
     return type ? { id: m[4], type, title: m[3], version: Number(m[5]), op: m[1].toLowerCase() } : null;
@@ -14449,8 +14516,9 @@ function permissionChoices(ev) {
   function paintNewsLink() {
     const link = $("phead-news");
     if (!link) return;
-    link.querySelector(".phead-ver").textContent = dgcVersion;
-    link.setAttribute("aria-label", `What's new in DGC ${dgcVersion}`.trim());
+    // The number is the CLI's (DGC's engine answers ready with it; the extension has a number of its own).
+    link.querySelector(".phead-ver").textContent = dgcVersion ? `CLI ${dgcVersion}` : "";
+    link.setAttribute("aria-label", `What's new (DGC CLI ${dgcVersion})`);
     link.hidden = !(chatPlace === "home" && dgcVersion && (sideTab === "home" || sideTab === "library"));
   }
   $("phead-news")?.addEventListener("click", () => vscode.postMessage({ type: "whatsNewShow" }));
@@ -14564,6 +14632,7 @@ function permissionChoices(ev) {
     if (msg.type === "pipShowFix") { if (/^run_[0-9a-f]{32}$/.test(String(msg.run_id || ""))) showPipFix(String(msg.run_id)); return; }
     if (msg.type === "dock") { onDock(msg); return; }
     if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }
+    if (msg.type === "workChecklists") { if (chatPlace === "home") renderWorkChecklists(msg); return; }
     if (msg.type === "chatdgc_list") { if (chatPlace === "home") renderChats(msg); return; }
     if (msg.type === "chatdgc_archived") { if (chatPlace === "home") renderChatsArchived(msg); return; }
     if (msg.type === "chatdgc_note") { if (chatPlace === "home" && msg.kind === "archived") chatArchivedNote(msg); return; }

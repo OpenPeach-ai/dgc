@@ -8,6 +8,7 @@
 import * as vscode from "vscode";
 import * as http from "http";
 import * as https from "https";
+import * as path from "path";
 import { randomBytes } from "crypto";
 import { CANVAS_DOC_VIEW } from "./canvasDoc";
 import { downloadFile, type DownloadPage } from "./download";
@@ -19,10 +20,10 @@ export { ArtifactNotice, madeWords, ARTIFACT_NOTICED_KEY, type MadeNotice } from
 export const ARTIFACT_PANEL = "dgc.artifactPanel";
 export const ARTIFACT_PRESENT = "dgc.artifactPresent";
 export const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
-export const ARTIFACT_TYPES = ["page", "doc", "slides", "sheet", "dashboard"];
+export const ARTIFACT_TYPES = ["page", "doc", "slides", "sheet", "dashboard", "checklist"];
 /** The Output chip's choices, in its menu's order; "auto" lets the model choose (and is never sent). */
 export const ARTIFACT_OUTPUTS = ["auto", "document", "slides", "spreadsheet", "page", "dashboard"];
-const LABELS: Record<string, string> = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page" };
+const LABELS: Record<string, string> = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist" };
 export const FORMAT_LABELS: Record<string, string> = {
   docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
   xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)",
@@ -36,11 +37,15 @@ const MAX_SAVE_BYTES = 4 * 1024 * 1024 - 64 * 1024;
 const DOC_FILE = /[\\/](ar_[a-f0-9]{16})[\\/]work[\\/][^\\/]+$/;
 
 export type ArtifactsOffer = { version: number; types: string[]; outputs: string[]; exports: Record<string, string[]>; present: boolean; compare?: boolean; sourceConsentVersion?: boolean };
+/** How far along a checklist is: its items done of all, the ones that need you, the next one, pinned to its project. */
+export type ChecklistProgress = { done: number; total: number; needs: string[]; next?: { id: string; title: string; status: string };
+                                  waiting?: { id: string; title: string }; pinned: boolean };
 export type ArtifactView = {
   id: string; type: string; label: string; title: string; version: number; created?: string; updated?: string;
   origin?: Record<string, unknown>; exports: string[]; link?: Record<string, unknown>; canvas?: string; file?: string;
   versions?: { n: number; author: string; at: string; summary: string; size?: number }[];
   allowed_sources?: string[];
+  progress?: ChecklistProgress;
   /** Who made it: {kind: pip|session|chat|app|cli, id, name} (name "" when DGC does not know it). */
   made_by?: { kind: string; id: string; name: string };
   /** A Page a reply's card ("card") or a ChatDGC widget ("widget") made. */
@@ -66,6 +71,33 @@ export function outputChoice(value: unknown, offer: ArtifactsOffer | undefined):
   const choice = typeof value === "string" ? value : "";
   if (!offer || !choice || choice === "auto" || !ARTIFACT_OUTPUTS.includes(choice)) return "";
   return offer.outputs.length && !offer.outputs.includes(choice) ? "" : choice;
+}
+
+/** A checklist's progress as the process said it, checked: {done, total, needs, next?, pinned}. */
+export function checklistProgress(raw: any): ChecklistProgress | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const count = (v: unknown) => (Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) <= 100000 ? (v as number) : 0);
+  const total = count(raw.total), done = Math.min(count(raw.done), total);
+  const next = raw.next && typeof raw.next === "object" && /^c[1-9][0-9]{0,4}$/.test(String(raw.next.id || ""))
+    ? { id: String(raw.next.id), title: String(raw.next.title || "").slice(0, 200), status: String(raw.next.status || "").slice(0, 24) } : undefined;
+  const waiting = raw.waiting && typeof raw.waiting === "object" && /^c[1-9][0-9]{0,4}$/.test(String(raw.waiting.id || ""))
+    ? { id: String(raw.waiting.id), title: String(raw.waiting.title || "").slice(0, 200) } : undefined;
+  return { done, total, needs: Array.isArray(raw.needs) ? raw.needs.filter((id: unknown) => typeof id === "string" && /^c[1-9][0-9]{0,4}$/.test(id)).slice(0, 200) : [],
+           ...(next ? { next } : {}), ...(waiting ? { waiting } : {}), pinned: raw.pinned === true };
+}
+
+/** Work's list: the pinned checklists of one project folder (`folder`), or of every folder (`everywhere`, each then
+ *  with its folder's name), the latest change first: {id, title, done, total, next, needs, folder}. */
+export function workChecklistRows(views: ArtifactView[], folder: string, everywhere = false): Record<string, unknown>[] {
+  const same = (a: string, b: string) => !!a && !!b && path.resolve(a) === path.resolve(b);
+  return views.filter((view) => view.type === "checklist" && view.progress?.pinned === true)
+    .map((view) => ({ view, project: typeof view.origin?.project === "string" ? String(view.origin.project) : "" }))
+    .filter(({ project }) => (everywhere ? !!project : same(project, folder)))
+    .sort((a, b) => String(b.view.updated || "").localeCompare(String(a.view.updated || "")))
+    .slice(0, 8)
+    .map(({ view, project }) => ({ id: view.id, title: view.title, done: view.progress!.done, total: view.progress!.total,
+      next: view.progress!.next?.title || "", needs: view.progress!.waiting?.title || "",
+      ...(everywhere ? { folder: path.basename(project) || project } : {}) }));
 }
 
 /** An artifact as an event carried it, checked: only what the screens use, as the right kinds. */
@@ -97,6 +129,9 @@ export function artifactView(raw: any): ArtifactView | undefined {
   }
   // Which of a dashboard's sources the user allowed (when the process says; see the panel for when it doesn't).
   if (Array.isArray(raw.allowed_sources)) view.allowed_sources = raw.allowed_sources.filter((s: unknown) => typeof s === "string").slice(0, 32);
+  // A checklist: how far along it is (its card, the Library and Work's list say it without reading the list).
+  const progress = checklistProgress(raw.progress);
+  if (raw.type === "checklist" && progress) view.progress = progress;
   return view;
 }
 
@@ -184,7 +219,7 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 <div class="art-banner" id="art-banner" role="alert" hidden></div>
 <main class="art-main" id="art-main"><p class="art-empty" id="art-loading">Loading…</p></main>
 <div class="sr-only" id="art-announce" aria-live="polite"></div>
-${s("media/shared/icons.js")}${s("media/shared/dismiss.js")}${s("media/shared/download.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifact.js")}
+${s("media/shared/icons.js")}${s("media/shared/dismiss.js")}${s("media/shared/download.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifactChecklist.js")}${s("media/artifact.js")}
 </body></html>`;
 }
 

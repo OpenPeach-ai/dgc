@@ -291,16 +291,26 @@ test("the lines: what isn't true at this commit is left out (ships: false), and 
   } finally { await x.close(); }
 });
 
-test("the logo line: DGC's version and What's new at its far right, on Home and the Library; a click asks for the news", async (t) => {
+test("the logo line: the CLI's version and What's new at its far right, small, on Home and the Library; a click asks for the news", async (t) => {
   if (!browser) { if (process.env.DGC_REQUIRE_CHROMIUM === "1") assert.fail("Chromium could not start"); t.skip("no Chromium"); return; }
-  for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 300, 440]) {
+  for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 240, 260, 300, 440]) {
     const x = await openHome(browser, { width, height: 600, theme });
     try {
       const link = x.page.locator("#phead-news");
       assert.equal(await link.isVisible(), false, "nothing before DGC says its version");
       await x.send({ type: "event", event: { type: "ready", version: "0.52.0", capabilities: {}, model: "m", mode: "default", think: "off" } });
       await link.waitFor({ state: "visible" });
-      assert.equal((await link.innerText()).replace(/\s+/g, " ").trim(), width >= 300 ? "0.52.0 What's new" : "What's new");
+      // The number is the CLI's (DGC's engine; the extension has its own), so it says so.
+      const words = (await link.innerText()).replace(/\s+/g, " ").trim();
+      if (width >= 300) assert.equal(words, "CLI 0.52.0 What's new");
+      else assert.ok(words === "What's new" || words === "CLI 0.52.0 What's new", `${width}: ${words}`);
+      // Quieter than the logo: smaller than its words and not heavier than them.
+      const size = await x.page.evaluate(() => { const px = (s) => { const n = document.querySelector(s); return n ? { size: parseFloat(getComputedStyle(n).fontSize), weight: Number(getComputedStyle(n).fontWeight) } : null; };
+        return { ver: px("#phead-news .phead-ver"), word: px("#phead-news .phead-news-word"), logo: px("#phead .pm .pm-product") || px("#phead .pm") }; });
+      for (const k of ["ver", "word"]) {
+        assert.ok(size[k].size < size.logo.size, `${k} is smaller than the logo's words (${theme} ${width}: ${JSON.stringify(size)})`);
+        assert.ok(size[k].weight <= 400, `${k} is not bold (${JSON.stringify(size)})`);
+      }
       const [l, h, logo] = await x.page.evaluate(() => [document.getElementById("phead-news").getBoundingClientRect(), document.getElementById("phead").getBoundingClientRect(),
         document.querySelector("#phead .pm").getBoundingClientRect()].map((r) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom })));
       assert.ok(h.right - l.right <= 14, `at the far right of the line (${theme} ${width})`);

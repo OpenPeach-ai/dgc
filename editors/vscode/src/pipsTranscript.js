@@ -208,7 +208,7 @@ export function questionCard(m){
 
 // What its reply made or changed (Pips API 102): each page, doc, sheet, deck or dashboard is the card Work draws, its
 // tile over "Page · made", and the card opens it (data-artifact-open, the Pip page's own Open).
-const MADE_KINDS={doc:'Document',slides:'Slides',sheet:'Spreadsheet',page:'Page',dashboard:'Dashboard'};
+const MADE_KINDS={doc:'Document',slides:'Slides',sheet:'Spreadsheet',page:'Page',dashboard:'Dashboard',checklist:'Checklist'};
 const MADE_ID=/^ar_[0-9a-f]{16}$/;
 export function madeArtifactsMarkup(m){
   const list=Array.isArray(m.artifacts)?m.artifacts.slice(0,8).filter(a=>a&&MADE_ID.test(String(a.id||''))&&MADE_KINDS[a.type]&&typeof a.title==='string'):[];

@@ -105,6 +105,13 @@ class Headless(OwnHost):
         self.assertTrue(current and current[0].get("icon", "").startswith("data:image/png;base64,"), reply["tabs"])
         self.host.view_own("frame", {"op": "frame", "seq": 0})
         self.assertEqual(len(fetched), 1, "fetched once, kept by its address")
+        # Home's Browser card wears it too: the visit kept for the card carries the site's icon (22 Nov).
+        url = current[0]["url"]
+        kept = [l for l in self.host.recent.links if l["url"] == url]
+        self.assertTrue(kept and kept[0].get("icon", "").startswith("data:image/png;base64,"), self.host.recent.links)
+        self.host.recent.write_due(force=True)
+        self.assertTrue(any(l.get("icon", "").startswith("data:image/png;base64,")
+                            for l in your_browser.recent_links(self.directory, 3)), "and it is written with the link")
 
     def test_an_icon_that_isnt_a_small_picture_is_never_kept(self):
         for body, kind in ((b"<html>", "text/html"), (b"x" * 300_000, "image/png"), (b"", "image/png")):

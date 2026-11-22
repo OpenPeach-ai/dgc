@@ -235,6 +235,12 @@ class VoiceManager:
                 for block in iter(lambda: handle.read(1 << 20), b""):
                     digest.update(block)
             if digest.hexdigest() != found["sha256"]:
+                # A download cut short raises while it is read; one that arrived whole at another size is another
+                # file: its publisher replaced it, and trying again can't help.
+                if got[0] != found["size"]:
+                    raise VoiceError(f"{found['name']} wasn't installed: the file on its download server has changed "
+                                     "since this version of DGC was made (its checksum doesn't match the one DGC "
+                                     "knows). Update DGC to get it.")
                 raise VoiceError(f"{found['name']} didn't download correctly (its checksum doesn't match); try again.")
             self._step(job, "unpack", got[0], found["size"], on_progress)
             staging = Path(tempfile.mkdtemp(prefix=f".{found['id']}-", dir=self.root))

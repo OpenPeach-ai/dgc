@@ -284,7 +284,7 @@ body.cd-blank .cd-fine { display: none; }
 .cd-thumb-big { cursor: zoom-out; }
 /* A picture you attached, with its "…" on its corner (media/shared/filemenu.js): on a solid ground, so it reads over any picture. */
 .cd-thumb-card { position: relative; display: inline-flex; max-width: 100%; }
-.cd-thumb-card > .dgc-file-more { position: absolute; top: 6px; right: 6px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.cd-thumb-card > .dgc-file-more { position: absolute; top: 6px; right: 6px; background: var(--raised, var(--surface2)); color: var(--text); border: 1px solid var(--border); }
 .cd-thumb-card > .dgc-file-more:hover, .cd-thumb-card > .dgc-file-more[aria-expanded="true"] { background: var(--surface); }
 /* A file you attached: its chip, then its "…". */
 .cd-sent > .cd-chip[data-file-card] { gap: 2px; }

@@ -1101,15 +1101,25 @@ RECENT_FILE = "recent.json"
 RECENT_KEEP = 12
 RECENT_SHOWN = 3
 RECENT_WRITE_SECONDS = 2.0
+RECENT_ICON_CHARS = 32_000      # a site's icon kept with its link for Home's card: a small picture only (about 24 KB)
+_RECENT_ICON = re.compile(r"^data:image/(png|x-icon|svg\+xml|gif|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$")
 
 
-def _link(url, title, at) -> dict | None:
+def _icon(value) -> str:
+    """A site's icon as Home's card may draw it: a small data: picture, else nothing (the card draws its globe)."""
+    return value if isinstance(value, str) and len(value) <= RECENT_ICON_CHARS and _RECENT_ICON.match(value) else ""
+
+
+def _link(url, title, at, icon="") -> dict | None:
     url, title = str(url or ""), str(title or "")
     parts = urlsplit(url)
     if (parts.scheme not in ("http", "https") or not parts.hostname or parts.username is not None
             or parts.password is not None or len(url) > 2000):
         return None
-    return {"url": url, "title": title[:200], "host": parts.hostname.lower()[:253], "at": str(at or "")[:40]}
+    link = {"url": url, "title": title[:200], "host": parts.hostname.lower()[:253], "at": str(at or "")[:40]}
+    if _icon(icon):
+        link["icon"] = icon
+    return link
 
 
 def recent_links(directory, n: int = RECENT_SHOWN) -> list[dict]:
@@ -1125,7 +1135,7 @@ def recent_links(directory, n: int = RECENT_SHOWN) -> list[dict]:
     out = []
     for row in rows if isinstance(rows, list) else []:
         if isinstance(row, dict) and isinstance(row.get("title", ""), str):
-            link = _link(row.get("url"), row.get("title"), row.get("at"))
+            link = _link(row.get("url"), row.get("title"), row.get("at"), row.get("icon"))
             if link is not None and all(l["url"] != link["url"] for l in out):
                 out.append(link)
         if len(out) >= n:
@@ -1144,12 +1154,19 @@ class Recent:
         self.dirty = False
         self.written = 0.0
 
-    def note(self, url, title, visit: bool = True) -> None:
-        """A tab of the person's is at ``url`` (``visit``: it just went there) or its page's title changed."""
-        link = _link(url, title, utc_now())
+    def note(self, url, title, visit: bool = True, icon: str = "") -> None:
+        """A tab of the person's is at ``url`` (``visit``: it just went there) or its page's title changed; ``icon``:
+        its site's icon when Your Browser has it already."""
+        link = _link(url, title, utc_now(), icon)
         if link is None:
             return
         old = next((l for l in self.links if l["url"] == link["url"]), None)
+        if "icon" not in link:
+            # (The icon this site's other links wear, or this link's own from before: kept.)
+            known = next((l.get("icon") for l in ([old] if old else []) + self.links
+                          if l and l.get("icon") and l["host"] == link["host"]), "")
+            if known:
+                link["icon"] = known
         if old is not None and not visit:
             if link["title"] and old["title"] != link["title"]:
                 old["title"] = link["title"]             # a title that came after its address: in place
@@ -1161,6 +1178,17 @@ class Recent:
             link["title"] = old["title"]                 # a page reloading says no title for a moment
         self.links = [link] + [l for l in self.links if l["url"] != link["url"]][:RECENT_KEEP - 1]
         self.dirty = True
+
+    def wear(self, url, icon) -> None:
+        """A site's icon arrived for ``url``: that link and its site's other links without one wear it."""
+        icon = _icon(icon)
+        host = (urlsplit(str(url or "")).hostname or "").lower()
+        if not icon or not host:
+            return
+        for link in self.links:
+            if link["host"] == host and (link["url"] == url or not link.get("icon")) and link.get("icon") != icon:
+                link["icon"] = icon
+                self.dirty = True
 
     def write_due(self, force: bool = False) -> None:
         if not self.dirty or (not force and self.clock() - self.written < RECENT_WRITE_SECONDS):
@@ -1563,6 +1591,7 @@ class YourBrowserHost:
         self.icons: dict[str, str] = {}           # icon address -> data: address ("" when it wasn't a small picture)
         self.icon_of: dict[str, str] = {}         # page address -> its icon's address
         self.icon_pending: set[str] = set()
+        self.icon_asking: set[str] = set()      # pages whose icon is being looked up off Chrome's message loop
         self.fetch_icon, self.icon_wait = fetch_icon, False
         self.own: str | None = None
         self.own_size = OWN_SIZE
@@ -1832,7 +1861,9 @@ class YourBrowserHost:
         if browser is None or browser.whose(target) != PERSON:
             return
         info = browser.infos.get(target, {})
-        self.recent.note(info.get("url"), info.get("title"), visit)
+        url = info.get("url")
+        self.recent.note(url, info.get("title"), visit, self.icons.get(self.icon_of.get(url, ""), ""))
+        self._icon_soon(target, url)
         if self.headless and self.own and target != self.own and info.get("openerId") == self.own \
                 and target not in self._followed:
             # A link from the person's own streamed tab opened a new tab: the stream follows it, as a window would.
@@ -2125,24 +2156,48 @@ class YourBrowserHost:
                     ".map(n => n.href).find(h => /^https?:/.test(h)); return l || (/^https?:/.test(location.href) ?"
                     " location.origin + '/favicon.ico' : ''); })()")
 
+    def _icon_soon(self, target, url) -> None:
+        """A visit of the person's to a page whose icon isn't known yet: looked up off Chrome's message loop (this is
+        called from it, and the lookup waits for Chrome's answer), as the streamed tab looks it up while it draws; so
+        the window beside the editor brings Home's Browser card its sites' icons too."""
+        url = str(url or "")
+        if self.headless or not url.startswith(("http://", "https://")) or url in self.icon_of or url in self.icon_asking:
+            return                                      # (the streamed tab looks its icon up as it draws: view_own)
+        self.icon_asking.add(url)
+
+        def look():
+            try:
+                with self.lock:
+                    if self.browser is not None:
+                        self._want_icon(target)
+            finally:
+                self.icon_asking.discard(url)
+        threading.Thread(target=look, daemon=True, name="your-browser-icon-ask").start()
+
     def _want_icon(self, target) -> None:
-        """The site's icon for this tab: where its page says it is (asked once per address), downloaded once and kept
-        by that address (in memory only), off the lock; a tab whose address has one already wears it."""
+        """The site's icon for this tab: where its page says it is (asked once per address; the site's /favicon.ico
+        for a tab Chrome hasn't let DGC into), downloaded once and kept by that address (in memory only), off the lock;
+        a tab whose address has one already wears it."""
         url = self.browser.infos.get(target, {}).get("url", "") if self.browser else ""
         if not url.startswith(("http://", "https://")) or url in self.icon_of:
             return
         session = self.browser._attached.get(target)
-        if session is None:
-            return
-        try:
-            reply = self.browser._session_call(session, "Runtime.evaluate", {"expression": self._ICON_SOURCE,
-                                                                              "returnByValue": True}, timeout=3)
-        except (BrowserError, socket.timeout, OSError):
-            return
-        href = (reply.get("result") or {}).get("value") if isinstance(reply, dict) else None
+        href = None
+        if session is not None:
+            try:
+                reply = self.browser._session_call(session, "Runtime.evaluate", {"expression": self._ICON_SOURCE,
+                                                                                  "returnByValue": True}, timeout=3)
+                href = (reply.get("result") or {}).get("value") if isinstance(reply, dict) else None
+            except (BrowserError, socket.timeout, OSError):
+                return
+        else:
+            parts = urlsplit(url)
+            href = f"{parts.scheme}://{parts.netloc}/favicon.ico" if parts.hostname else None
         if not isinstance(href, str) or not href.startswith(("http://", "https://")):
             return
         self.icon_of[url] = href[:2000]
+        if self.icons.get(href):
+            self.recent.wear(url, self.icons[href])      # (another page of the site brought it already)
         if href in self.icons or href in self.icon_pending:
             return
         self.icon_pending.add(href)
@@ -2156,6 +2211,10 @@ class YourBrowserHost:
                     self.icons.clear()
                     self.icon_of.clear()
                 self.icons[href] = data or ""
+                if data:                             # Home's Browser card wears it with the visit (22 Nov)
+                    for page, source in list(self.icon_of.items()):
+                        if source == href:
+                            self.recent.wear(page, data)
         if self.icon_wait:
             download()
         else:

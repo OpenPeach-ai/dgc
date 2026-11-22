@@ -114,6 +114,31 @@ test("a long turn starts with its folders folded, and the whole card folds from 
   assert.equal(list.hidden, false);
 });
 
+// A live run (22 Nov): a command made a whole tree of new files (a virtual environment) and the card drew one row per
+// folder of it, about 400, screen after screen under the turn. Past eight folders the card groups by top folder, and a
+// folder whose files have no line count says how many files it holds.
+test("a turn whose files fall in many folders is grouped by top folder, each saying how many files it holds", () => {
+  const tree = Array.from({ length: 30 }, (_, i) => ({ path: `.venv/lib/p${Math.floor(i / 2)}/m${i}.py` }));
+  const card = turnThatEdited([...tree, { path: "src/a.py", diff: true }, { path: "README.md", diff: true }]);
+  const folders = [...card.querySelectorAll(".ts-folder-row")];
+  assert.deepEqual(folders.map((f) => f.querySelector(".ts-folder-name").textContent), [".venv", "src"], "one row per top folder, not 15");
+  assert.equal(folders[0].querySelector(".ts-uncounted").textContent, "30 files", "a folder with no line counts says how many files");
+  assert.equal(folders[1].querySelector(".change-add").textContent, "+1", "a counted folder keeps its counts");
+  assert.equal(folders[1].querySelector(".ts-uncounted"), null, "and nothing else");
+  assert.equal(folders[0].getAttribute("aria-expanded"), "false", "folded, as any long turn starts");
+  folders[0].click();
+  const first = folders[0].nextElementSibling.querySelector(".ts-row");
+  assert.equal(first.querySelector(".path-dir").textContent, "lib/p0/", "inside the top folder, the rest of its path, dimmed");
+  assert.equal(first.querySelector(".path-name").textContent, "m0.py");
+  assert.equal(card.querySelector(".ts-list > .ts-row .path-name").textContent, "README.md", "a top-level file is still its own row");
+});
+
+test("a few folders are still each their own row", () => {
+  const card = turnThatEdited([{ path: "app/x/1.py", diff: true }, { path: "app/y/2.py", diff: true }, { path: "lib/3.py" }]);
+  assert.deepEqual([...card.querySelectorAll(".ts-folder-name")].map((n) => n.textContent), ["app/x", "app/y", "lib"]);
+  assert.equal(card.querySelectorAll(".ts-folder-row")[2].querySelector(".ts-uncounted").textContent, "1 file");
+});
+
 test("a short list has no expander at all", () => {
   const card = turnThatEdited([{ path: "src/a.py", diff: true }, { path: "src/b.py", diff: true }]);
   assert.equal(card.querySelector(".ts-expand"), null);

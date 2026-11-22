@@ -680,11 +680,11 @@ its own address, so another page loaded into its frame can't speak for it.
 An SDK app opts in with `session.cards.watch()` and gets each card as an `mcp_app_card` event:
 draw it yourself, and pass what it asks to `session.cards.call(...)`. See the SDK guide.
 """.strip()),
-    ("Artifacts", "documents, decks, sheets, dashboards and pages DGC makes and keeps", """
+    ("Artifacts", "documents, decks, sheets, dashboards, pages and checklists DGC makes and keeps", """
 # Artifacts
 
 An artifact is something DGC makes that you keep: a **Document**, **Slides**, a **Spreadsheet**, a
-**Dashboard** or a **Page**. Ask for one in a chat, in a coding session, or let a Pip keep its
+**Dashboard**, a **Page** or a **Checklist**. Ask for one in a chat, in a coding session, or let a Pip keep its
 reports in one. Every artifact lives on this computer, in `~/.dgc/artifacts/`, whichever part of
 DGC made it, and nothing is hosted anywhere: exporting is how you share one.
 
@@ -753,6 +753,24 @@ under its chart with when it last ran. **Refresh runs on this computer with no m
 nothing, and a dashboard never writes anywhere. If an edit points a source at other data, DGC asks
 again. A Pip can keep a dashboard current: give it the dashboard on its page.
 
+## Checklists
+
+Ask DGC to **make a checklist for a job and work through it**, and it makes a Checklist: each item
+has a title, what done means, a status (Not started, Building, Testing, Checked live, Needs you,
+Done), a note and its proof (test results as text, screenshots as pictures). DGC keeps it current
+as it works: it changes one item at a time, so **Versions** shows every step, and it marks an item
+Done only with a note of what it did and its proof.
+
+You tick it too. In its panel, tick or reopen an item, pick its status from the chip, change what
+done means or the note, add or remove an item. Each change is saved at once as a version by you,
+and DGC sees it at its next look and goes by it.
+
+A checklist is **pinned to its project**: a new chat in that folder is told the checklist and
+carries on from the first item not done. **Work** lists the project's pinned checklists above its
+sessions, each with how far along it is. Unpin it in its panel when the job is over.
+`/goal checklist` runs from it item by item: the goal ends when every item is Done, and stops
+when an item needs you, saying which and why. Download one as Markdown, HTML or PDF.
+
 ## Pips
 
 A Pip that reviews your code can keep each review as the newest version of its own Document or
@@ -761,7 +779,7 @@ dashboards to refresh after every run it finishes.
 
 ## In the terminal
 
-- `dgc artifacts` lists them (`--type doc|slides|sheet|dashboard|page`, `--from chat|work|pip`,
+- `dgc artifacts` lists them (`--type doc|slides|sheet|dashboard|page|checklist`, `--from chat|work|pip`,
   `--json`).
 - `dgc artifacts show ID` lists its versions; `open ID` opens it in your browser;
   `export ID FORMAT [--to PATH]`; `restore ID VERSION`; `rm ID` moves it to DGC's trash
@@ -3293,6 +3311,9 @@ command that takes nothing, such as `/help`, still runs the moment you pick it.
 - `/goal blocked` — stop automatic progress while an external blocker exists.
 - `/goal resume` — reactivate the goal and continue work immediately.
 - `/goal clear` — remove it.
+- `/goal checklist` — run from this project's pinned checklist, item by item (`/goal checklist NAME`
+  when the project has more than one). It ends when every item is Done, or stops when an item
+  needs you and says which and why. See **Artifacts** for checklists.
 
 A goal that is complete, blocked or paused is no longer worked on, but the model still sees one
 line about it, so a compaction never sends it back to work you already have. The line gives the

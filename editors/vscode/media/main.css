@@ -227,6 +227,17 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .session-row { box-sizing:border-box; display:flex; align-items:center; gap:10px; min-width:0; min-height:44px; margin:0 calc(-1 * var(--home-bleed)); padding:4px calc(var(--home-bleed) - 1px);
   border:1px solid transparent; border-radius:var(--r-md); cursor:pointer; user-select:none; }
 #sessions-host .session-row:hover { background:var(--row-hover); }
+/* The project's checklists, above the list: a row each, its small sheet, its name, how far along it is and a thin bar. */
+#sessions-host .work-checklists { list-style:none; margin:0 0 var(--sp-2); padding:0; display:flex; flex-direction:column; gap:1px; }
+#sessions-host .work-checklist { box-sizing:border-box; display:flex; align-items:center; gap:10px; min-width:0; min-height:44px; margin:0 calc(-1 * var(--home-bleed)); padding:4px calc(var(--home-bleed) - 1px); border-radius:var(--btn-r, 6px); cursor:pointer; }
+#sessions-host .work-checklist:hover { background:var(--row-hover); }
+#sessions-host .work-checklist:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
+#sessions-host .work-checklist-mark { flex:none; display:grid; place-items:center; width:24px; height:30px; }
+#sessions-host .work-checklist-mark > .dgc-sheet { width:22px; height:28px; }
+#sessions-host .work-checklist-mark .dgc-sheet-tag { display:none; }
+#sessions-host .work-checklist .session-main { flex:1 1 0; min-width:0; display:flex; flex-direction:column; }
+#sessions-host .work-checklist-bar { display:block; height:3px; margin-top:4px; border-radius:2px; background:color-mix(in srgb, var(--text) 12%, transparent); overflow:hidden; }
+#sessions-host .work-checklist-bar i { display:block; height:100%; border-radius:2px; background:var(--accent); }
 #sessions-host .session-row:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
 #sessions-host .session-blob { flex:none; display:grid; place-items:center; width:24px; height:24px; line-height:0; }
 #sessions-host .session-blob [data-mark] { --size:24px; }
@@ -406,12 +417,13 @@ body.vscode-light .project-icon[data-color="orange"] { color:#EA580C; }   /* #F9
 #phead .chat-add:hover { background: var(--surface2); color: var(--text); }
 #phead .chat-add:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 #phead .chat-add[disabled] { opacity: .35; cursor: default; }
-/* DGC's version and "What's new", at the far right of the logo line (Home and the Library in the side bar). */
+/* The CLI's version and "What's new", at the far right of the logo line (Home and the Library in the side bar): a size
+   under the logo's own words, so the logo leads. */
 #phead .phead-news { flex: none; margin-left: auto; display: inline-flex; align-items: baseline; align-self: baseline; gap: var(--sp-2); height: var(--control-sm);
   padding: 0 var(--sp-2); border: 0; border-radius: var(--btn-r, 6px); background: transparent; color: var(--muted); cursor: pointer;
-  font: var(--w-medium, 500) var(--t-xs)/14px var(--font, inherit); white-space: nowrap; }
+  font: 400 10px/var(--control-sm) var(--sans); white-space: nowrap; }
 #phead .phead-news[hidden] { display: none; }
-#phead .phead-news .phead-ver { font-family: var(--mono); letter-spacing: .04em; color: var(--faint); }
+#phead .phead-news .phead-ver { font-variant-numeric: tabular-nums; color: var(--faint); }
 #phead .phead-news .phead-news-word { color: var(--muted); }
 #phead .phead-news:hover { background: var(--surface2); }
 #phead .phead-news:hover .phead-news-word { color: var(--text); }
@@ -1850,12 +1862,12 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 .tip { box-shadow: var(--lift-1); position: fixed; z-index: 61;   /* (over a menu, whose rows it labels: .dgc-pop is 60) */ max-width: min(280px, calc(100vw - 16px)); pointer-events: none;
   display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--border-strong); border-radius: var(--r-md);
-  background: var(--surface2); color: var(--text-strong);
+  background: var(--raised, var(--surface2)); color: var(--text-strong);   /* (--raised: the menus' solid grey where a theme's is see-through) */
   font: var(--w-med) var(--t-xs)/1.45 var(--sans); text-align: left;
   overflow-wrap: anywhere; }     /* a long name with no spaces wraps inside the tip, never runs out of it */
 .tip .tip-detail { color: var(--muted); font-weight: var(--w-reg); }
 .tip::after { content: ""; position: absolute; left: var(--tip-arrow, 50%); width: 6px; height: 6px;
-  margin-left: -3px; background: var(--surface2);
+  margin-left: -3px; background: var(--raised, var(--surface2));
   border: 1px solid var(--border-strong); border-width: 0 1px 1px 0; }
 .tip.above::after { bottom: -4px; transform: rotate(45deg); }
 .tip.below::after { top: -4px; transform: rotate(-135deg); }
@@ -2068,7 +2080,7 @@ pre.code.foldable.open::after { content: none; }
 pre.code .fold {
   position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
   font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; z-index: 1;
-  background: var(--surface2); color: var(--text); border: 1px solid var(--border-strong);
+  background: var(--raised, var(--surface2)); color: var(--text); border: 1px solid var(--border-strong);
   border-radius: var(--btn-r, 6px); padding: var(--sp-1) var(--sp-3);
 }
 pre.code .fold:hover { border-color: var(--accent); }
@@ -2077,7 +2089,7 @@ pre.code .fold:hover { border-color: var(--accent); }
    no position rule, so it rendered as a word floating above the table instead. */
 pre.code .copy, .md-table-wrap .copy, blockquote > .copy { position: absolute; top: 6px; right: 6px; z-index: 1;
   height: var(--control-sm); min-width: var(--control-sm); display: inline-flex; align-items: center;
-  justify-content: center; cursor: pointer; background: var(--surface2); color: var(--muted);
+  justify-content: center; cursor: pointer; background: var(--raised, var(--surface2)); color: var(--muted);
   border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: 0;
   opacity: 0; transition: opacity .12s, color .12s, border-color .12s; }
 pre.code .copy .codicon, .md-table-wrap .copy .codicon, blockquote > .copy .codicon { font-size: var(--t-sm); }

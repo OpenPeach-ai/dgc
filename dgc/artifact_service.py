@@ -16,6 +16,10 @@ The types and what each is made from:
 - ``page``: an HTML page or small site. Work's ``artifact`` tool makes one linked to the project's files; the model
   can make one from HTML it writes. Exported as Word or PDF, as Excel when it holds a table, as HTML or a zip of its files.
 
+- ``checklist``: the items of a job, each with what done means, a status, a note and proof (``dgc.artifact_checklist``).
+  DGC changes one item per edit, so the history shows each step; the user ticks in its panel. Exported as Markdown,
+  HTML or PDF. Its proof pictures are files of the version.
+
 The model hands over data, never a file's bytes; DGC lays every artifact out the same way every time.
 """
 from __future__ import annotations
@@ -36,8 +40,9 @@ from .artifact_store import ArtifactError, Store
 OUTPUTS = {"auto": None, "document": "doc", "slides": "slides", "spreadsheet": "sheet", "page": "page",
            "dashboard": "dashboard"}
 EXPORTS = {"doc": ("docx", "pdf", "md"), "slides": ("pptx", "pdf", "html"), "sheet": ("xlsx", "csv"),
-           "dashboard": ("pdf", "html"), "page": ("docx", "pdf", "html", "zip")}
-LABELS = {"doc": "Document", "slides": "Slides", "sheet": "Spreadsheet", "dashboard": "Dashboard", "page": "Page"}
+           "dashboard": ("pdf", "html"), "page": ("docx", "pdf", "html", "zip"), "checklist": ("md", "html", "pdf")}
+LABELS = {"doc": "Document", "slides": "Slides", "sheet": "Spreadsheet", "dashboard": "Dashboard", "page": "Page",
+          "checklist": "Checklist"}
 # A document holds about a megabyte of text (it was 200,000 characters): a Pip's reply past 256 KB is kept whole as its
 # document (pips.keep_long_reply, Limits for everyone, 10 Nov).
 MAX_DOC_CHARS = 1_048_576
@@ -115,6 +120,8 @@ def _kind(type_: str):
         from . import artifact_sheet as module
     elif type_ == "dashboard":
         from . import artifact_dashboard as module
+    elif type_ == "checklist":
+        from . import artifact_checklist as module
     else:
         raise ArtifactUseError(f"{type_} has no data module")
     return module
@@ -123,9 +130,10 @@ def _kind(type_: str):
 def _type(value) -> str:
     text = str(value or "").strip().lower()
     text = {"document": "doc", "docs": "doc", "deck": "slides", "presentation": "slides", "spreadsheet": "sheet",
-            "sheets": "sheet", "table": "sheet", "html": "page", "web page": "page"}.get(text, text)
+            "sheets": "sheet", "table": "sheet", "html": "page", "web page": "page",
+            "checklists": "checklist", "check list": "checklist"}.get(text, text)
     if text not in artifact_store.TYPES:
-        raise ArtifactUseError("An artifact is a doc, slides, sheet, dashboard or page.")
+        raise ArtifactUseError("An artifact is a doc, slides, sheet, dashboard, page or checklist.")
     return text
 
 
@@ -248,12 +256,85 @@ def keep_users_edits(aid: str, *, store: Store | None = None) -> bool:
         _theirs_first(st, art)
         return st.get(aid).version != before
 
+# A checklist's proof pictures: the model names a picture file in the project; its bytes are kept as a file of the
+# version (the file itself may go). The data names each by its kept name.
+def _checklist_picture(base, resolve, into: dict):
+    from . import artifact_checklist as checklist
+
+    def keep(path: str) -> str:
+        if not str(path or "").strip():
+            raise ArtifactUseError("A picture given as proof needs its path.")
+        try:
+            if callable(resolve):
+                found = Path(resolve(path))
+            else:
+                if base is None:
+                    raise ArtifactUseError("There is no project folder here to read a picture from: give the proof "
+                                           "as text.")
+                root = Path(base).resolve()
+                found = (root / str(path)).resolve()
+                found.relative_to(root)
+            raw, _ = workspace.read_regular_bytes(found, maximum=checklist.MAX_PICTURE_BYTES)
+        except ArtifactUseError:
+            raise
+        except Exception as exc:                          # noqa: BLE001 -- outside the project, missing, too big
+            raise ArtifactUseError(f"The picture “{str(path)[:120]}” couldn't be read as proof ({type(exc).__name__}: "
+                                   f"{str(exc)[:160]}). Give a PNG, JPEG, GIF or WebP file inside the project.") from None
+        try:
+            name = checklist.picture_name(raw)
+        except ValueError as exc:
+            raise ArtifactUseError(f"“{str(path)[:120]}”: {exc}") from None
+        into[name] = raw
+        return name
+    return keep
+
+
+def _checklist_files(st: Store, aid: str, n: int | None = None) -> dict:
+    """The pictures a version of a checklist holds: {file name: bytes}."""
+    own = artifact_store.SOURCE_FILE["checklist"]
+    return {name: raw for name, raw in st.files(aid, n).items() if name != own}
+
+
+def _checklist_content(data: dict, have: dict) -> dict:
+    """What the store keeps of a checklist: its data, and the pictures its proof names (no others)."""
+    from . import artifact_checklist as checklist
+    wanted = checklist.pictures_in(data)
+    missing = sorted(wanted - have.keys())
+    if missing:
+        raise ArtifactUseError("The checklist names a proof picture it doesn't hold. Add pictures with an edit: "
+                               "{\"op\": \"set\", \"item\": …, \"proof\": [{\"image\": \"path\"}]}.")
+    return {**data, artifact_store.CHECKLIST_FILES: {name: have[name] for name in sorted(wanted)}}
+
+
+def checklist_pictures(aid: str, n: int | None = None, *, store: Store | None = None) -> dict:
+    """A checklist version's proof pictures as data: addresses, for the screens that draw it."""
+    import base64
+    kinds = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
+    return {name: f"data:{kinds.get(name.rsplit('.', 1)[-1], 'image/png')};base64,{base64.b64encode(raw).decode('ascii')}"
+            for name, raw in _checklist_files(_store(store), aid, n).items()}
+
+
 def make(type_, title, spec, *, origin: dict, author: str = "DGC", summary: str = "Made", store: Store | None = None,
          base=None, resolve=None) -> dict:
     """A new artifact. ``origin`` names where (``{"surface": "chat", "chat": …}``, ``{"surface": "work", …}``, …)."""
     from .chatdgc import made
     type_ = _type(type_)
-    content = _content(type_, spec, base=base, resolve=resolve)
+    if type_ == "checklist":
+        # Pinned to its project from the start (a new chat there carries on from it), unless the maker says not.
+        from . import artifact_checklist as checklist
+        given_spec = spec.get("data", spec) if isinstance(spec, dict) and set(spec) == {"data"} else spec
+        if isinstance(given_spec, list):
+            given_spec = {"items": given_spec}
+        if isinstance(given_spec, dict) and "pinned" not in given_spec:
+            given_spec = {**given_spec, "pinned": bool((origin or {}).get("project"))}
+        pictures: dict = {}
+        try:
+            content = _checklist_content(
+                checklist.normalize(given_spec, picture=_checklist_picture(base, resolve, pictures)), pictures)
+        except checklist.ChecklistError as exc:
+            raise ArtifactUseError(str(exc)) from None
+    else:
+        content = _content(type_, spec, base=base, resolve=resolve)
     entry = _page_files(spec)[1] if type_ == "page" else ""
     st = _store(store)
     # Names are unique per kind: a name that's taken is refused (the caller changes that one, or names this one apart);
@@ -306,7 +387,12 @@ def edit(aid: str, *, edits=None, content=None, author: str = "DGC", note: str =
         if only_name:
             # Only a new name: the same content as it's kept, as a new version that says so.
             new = st.files(aid, art.version) if art.type == "page" else st.source(aid, art.version)
+            if art.type == "checklist":
+                new = {**new, artifact_store.CHECKLIST_FILES: _checklist_files(st, aid, art.version)}
             note = note or "Renamed"
+        elif art.type == "checklist":
+            new, note = _checklist_edit(st, art, edits=edits, content=content, author=author, note=note, base=base,
+                                        resolve=resolve)
         elif content is not None:
             new = _content(art.type, content, base=base, resolve=resolve)
         elif art.type == "doc":
@@ -333,6 +419,41 @@ def edit(aid: str, *, edits=None, content=None, author: str = "DGC", note: str =
         except ArtifactError as exc:
             raise ArtifactUseError(str(exc)) from None
         return view(aid, store=store)
+
+def _checklist_edit(st: Store, art, *, edits, content, author: str, note: str, base, resolve) -> tuple[dict, str]:
+    """A checklist's next version and the line the history says of it. DGC (and a Pip) change one item per call with
+    edits; the user's panel hands back the list with their change. The history's line is what changed, item by item."""
+    from . import artifact_checklist as checklist
+    current = st.source(art.id, art.version)
+    have = _checklist_files(st, art.id, art.version)
+    by_user = str(author or "").casefold() == "you"
+    try:
+        if content is not None:
+            if not by_user:
+                raise ArtifactUseError(
+                    "A checklist is changed one item at a time, never rewritten: use edits, like [{\"op\": \"set\", "
+                    "\"item\": \"c2\", \"status\": \"Done\", \"note\": \"what you did\", \"proof\": [\"the test "
+                    "results\"]}] (one item per call), or {\"op\": \"add\", \"title\": …, \"done_when\": …} for a new item.")
+            given = content.get("data", content) if isinstance(content, dict) and set(content) == {"data"} else content
+            if isinstance(given, dict):
+                given = {key: value for key, value in given.items() if key != artifact_store.CHECKLIST_FILES}
+                given.setdefault("pinned", bool(current.get("pinned")))
+                given.setdefault("last", current.get("last", 0))
+            data = checklist.normalize(given)
+            before = {item["id"]: item for item in current.get("items") or []}
+            stamp = checklist._now()
+            for item in data["items"]:
+                was = before.get(item["id"])
+                if was is not None and was["status"] != item["status"]:
+                    item["by"], item["at"] = "you", stamp
+        else:
+            data = checklist.apply_edits(current, edits, author=author,
+                                         picture=_checklist_picture(base, resolve, have))
+    except checklist.ChecklistError as exc:
+        raise ArtifactUseError(str(exc)) from None
+    said = "; ".join(checklist.describe(current, data))
+    return _checklist_content(data, have), (said[:artifact_store.MAX_SUMMARY] or note or "Changed")
+
 
 def restore(aid: str, n: int, *, author: str = "you", store: Store | None = None) -> dict:
     st = _store(store)
@@ -457,6 +578,13 @@ def view(aid: str, *, store: Store | None = None, versions: bool = True) -> dict
         out["file"] = str(_doc_file(art))              # the file the editor opens
     if art.type == "dashboard":
         out["allowed_sources"] = list(art.sources)     # the sources the user allowed (allow_source), by id
+    if art.type == "checklist":
+        # How far along it is ({done, total, needs: [ids], next: {id, title, status} | None, pinned}): its card, the
+        # Library and Work's list say it without reading the list.
+        try:
+            out["progress"] = _kind("checklist").progress(st.source(aid, art.version))
+        except Exception:                                  # noqa: BLE001 -- unreadable data: shown without it
+            pass
     if versions:
         out["versions"] = [{"n": v.n, "author": v.author, "at": v.at, "summary": v.summary, "size": v.size}
                            for v in st.versions(aid)]
@@ -555,6 +683,9 @@ def render(aid: str, n: int | None = None, *, mode: str = "view", store: Store |
         html = _kind("slides").render_html(st.source(aid, n), mode=mode, title=art.title)
     elif art.type == "sheet":
         html = _kind("sheet").render_html(st.source(aid, n))
+    elif art.type == "checklist":
+        html = _kind("checklist").render_html(st.source(aid, n), title=art.title,
+                                              pictures=checklist_pictures(aid, n, store=st))
     else:
         saved = state(aid, store=store, version=n)
         source = st.source(aid, n)
@@ -621,6 +752,18 @@ def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=Non
             else:
                 first = (sheet.get("sheets") or [{}])[0].get("name", "")
                 target.write_text(module.export_csv(sheet, first), encoding="utf-8-sig")
+        elif art.type == "checklist":
+            if fmt == "md":
+                target.write_text(_kind("checklist").export_md(st.source(aid, n), art.title), encoding="utf-8")
+            else:
+                page = render(aid, n, store=store)[0]["index.html"]
+                if fmt == "pdf":
+                    try:
+                        page = made._print(page.decode("utf-8"), config, browser)
+                    except Exception as exc:
+                        raise ArtifactUseError(f"The checklist PDF couldn't be printed: {made._why_plain(exc)} "
+                                               "Set up Chrome or Edge with `dgc doctor`, or download it as Markdown.") from None
+                target.write_bytes(page)
         elif art.type == "dashboard":
             page = render(aid, n, store=store)[0]["index.html"]
             if fmt == "pdf":

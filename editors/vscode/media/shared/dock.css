@@ -83,7 +83,7 @@ body.vscode-light .dgc-dock-dot[data-dot="live"], body.vscode-high-contrast-ligh
 /* The name of what is pointed at (or focused from the keyboard), just above it. */
 .dgc-dock-tip {
   position: absolute; z-index: 2; box-sizing: border-box; max-width: min(240px, calc(100% - 12px)); padding: 5px 9px 6px; border: 1px solid var(--hair); border-radius: var(--r-md);
-  background: var(--surface2); box-shadow: var(--lift-1); pointer-events: none; text-align: left; -webkit-user-select: none; user-select: none;
+  background: var(--raised, var(--surface2)); box-shadow: var(--lift-1); pointer-events: none; text-align: left; -webkit-user-select: none; user-select: none;
 }
 .dgc-dock-tip[hidden] { display: none; }
 .dgc-dock-tip b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere;

@@ -9,12 +9,12 @@
   if (root.DgcFileSheet) return;
 
   // The kinds DGC really makes or shows, and the word on each one's tab. The tab's colour is the kind's, in the CSS.
-  const KINDS = { page: "Page", doc: "Doc", slides: "Slides", sheet: "Sheet", dashboard: "Board", pdf: "PDF", md: "MD", csv: "CSV",
+  const KINDS = { page: "Page", doc: "Doc", slides: "Slides", sheet: "Sheet", dashboard: "Board", checklist: "List", pdf: "PDF", md: "MD", csv: "CSV",
     img: "PNG", video: "MP4", code: "Code", json: "JSON", zip: "ZIP", file: "File" };
   // A file's ending, or what DGC calls it (an artifact's type, a made file's format, a Library file's type), to its kind.
   // An ending that has its own name on the tab keeps it ("DOCX" on a document's sheet, "JPG" on a picture's).
   const BY_NAME = { page: "page", html: "page", htm: "page", doc: "doc", document: "doc", docx: "doc", txt: "doc", text: "doc", slides: "slides", presentation: "slides", pptx: "slides",
-    sheet: "sheet", spreadsheet: "sheet", xlsx: "sheet", dashboard: "dashboard", pdf: "pdf", md: "md", markdown: "md", csv: "csv", tsv: "csv",
+    sheet: "sheet", spreadsheet: "sheet", xlsx: "sheet", dashboard: "dashboard", checklist: "checklist", pdf: "pdf", md: "md", markdown: "md", csv: "csv", tsv: "csv",
     img: "img", image: "img", png: "img", jpg: "img", jpeg: "img", webp: "img", gif: "img", svg: "img", heic: "img",
     video: "video", mp4: "video", webm: "video", mov: "video", code: "code", json: "json", zip: "zip", archive: "zip" };
   const CODE = /^(?:js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|kt|swift|c|h|cpp|cs|php|sh|css|scss|sql|yaml|yml|toml|xml|vue|lua)$/;
@@ -29,7 +29,7 @@
     const ending = /\.([A-Za-z0-9]{1,5})$/.exec(String(name || ""))?.[1]?.toLowerCase() || "";
     const said = String(what || "").toLowerCase();
     // What DGC made (an artifact's type) names its kind outright; a file is named by its ending first.
-    const key = ["page", "doc", "slides", "sheet", "dashboard"].includes(said) ? said : BY_NAME[ending] || CODE.test(ending) ? ending : said;
+    const key = ["page", "doc", "slides", "sheet", "dashboard", "checklist"].includes(said) ? said : BY_NAME[ending] || CODE.test(ending) ? ending : said;
     const kind = BY_NAME[key] || (CODE.test(key) ? "code" : "file");
     const tag = kind === "code" && CODE.test(key) ? key.toUpperCase() : OWN_TAG.test(key) ? (key === "jpeg" ? "JPG" : key.toUpperCase()) : KINDS[kind];
     return { kind, tag };
@@ -44,6 +44,7 @@
     slides: () => `<span class="box stage"><i class="mark"></i><i class="l w55 h"></i></span><span class="rw fill"><i class="box"></i><i class="box"></i><i class="box"></i></span>${l(60, "s")}${l(40, "s")}`,
     sheet: () => `<span class="grid">${times(3, '<i class="hd"></i>')}${times(15, "<i></i>")}</span>`,
     dashboard: () => `<span class="rw fill tall"><i class="box"></i><i class="box"></i></span><span class="box bars">${times(6, (i) => `<i class="b${i}"></i>`)}</span>`,
+    checklist: () => `${l(55, "h")}${times(4, (i) => `<span class="rw tick${i < 2 ? " on" : ""}"><i class="cb"></i>${l([70, 55, 75, 45][i])}</span>`)}`,
     pdf: () => `${l(50, "h")}${l(90)}${l(85)}${l(90)}${l(60)}<i class="box block"></i>${l(80)}${l(40)}`,
     md: () => `<span class="rw"><b>#</b>${l(45, "h")}</span>${l(85)}${l(70)}<span class="rw"><b>##</b>${l(35, "h")}</span>${l(80)}${l(55)}`,
     csv: () => `<span class="rw">${times(3, l(30, "h"))}</span>${times(6, `<span class="rw">${times(3, l(30))}</span>`)}`,

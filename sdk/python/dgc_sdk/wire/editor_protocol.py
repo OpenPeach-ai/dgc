@@ -1949,7 +1949,7 @@ EVENT_FIELDS.update({
 # itself, whichever chat sends it, because an artifact belongs to the account, not to a folder. An artifact as these
 # events carry it is artifact_service.view(): {id, type, label, title, version, created, updated, origin, exports,
 # link?, canvas?, versions?: [{n, author, at, summary, size}]}.
-ARTIFACT_TYPES = ("page", "doc", "slides", "sheet", "dashboard")
+ARTIFACT_TYPES = ("page", "doc", "slides", "sheet", "dashboard", "checklist")
 # The Output chip: what the next reply should make. "auto" (or leaving it out) lets the model choose, as before.
 ARTIFACT_OUTPUTS = ("auto", "document", "slides", "spreadsheet", "page", "dashboard")
 ARTIFACT_OPS = ("made", "changed", "restored", "removed", "refreshed")

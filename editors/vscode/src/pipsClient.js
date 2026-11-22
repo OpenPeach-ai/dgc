@@ -7393,7 +7393,7 @@ async function navigateFromHost(value){navigating++;try{return await navigateFro
 async function navigateFromHostNow(value) {
   if(!record(value))return;
   if(value.overview===true){if(S.selected)chatDrafts.set(S.selected,draft.chatText);S.overview=true;S.tab='chat';rememberView();render();return;}
-  // The dock's "+" > New Personal Pip: Your Pips, with New Pip open on a name and a character.
+  // The dock's "+" > New Pip: Your Pips, with New Pip open on a name and a character.
   if(value.create==='personal'||value.create==='pip'&&onePips()){
    const personal=personalSpace();
    if(personal&&S.workspace?.id!==personal.id)await enterWorkspace(personal);

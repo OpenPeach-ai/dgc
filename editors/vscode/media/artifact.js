@@ -1,6 +1,6 @@
 // An artifact's panel (src/artifacts.ts hosts it): its header (title, type, version, Versions, Download, Open in browser)
-// and, by type, what edits or shows it. A deck and a sheet have editors of their own (artifactSlides.js,
-// artifactSheet.js); a dashboard shows DGC's page of it with its sources to allow; a page is framed at its own address.
+// and, by type, what edits or shows it. A deck, a sheet and a checklist have editors of their own (artifactSlides.js,
+// artifactSheet.js, artifactChecklist.js); a dashboard shows DGC's page of it with its sources to allow; a page is framed at its own address.
 // Everything a model or a person wrote is put in as text, never as markup. DGC's own page of an artifact is shown in a
 // frame with no script and an origin of its own (srcdoc + sandbox).
 (() => {
@@ -9,8 +9,8 @@
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
   const icon = (name, cls = "") => { const g = el("span", `codicon codicon-${name}${cls ? " " + cls : ""}`); g.setAttribute("aria-hidden", "true"); return g; };
-  const TYPE_ICON = { doc: "file-text", slides: "preview", sheet: "table", dashboard: "dashboard", page: "browser" };
-  const TYPE_LABEL = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page" };
+  const TYPE_ICON = { doc: "file-text", slides: "preview", sheet: "table", dashboard: "dashboard", page: "browser", checklist: "checklist" };
+  const TYPE_LABEL = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist" };
   const FORMATS = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
                     xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
   const SURFACE = { chat: "Chat", work: "Work", pip: "a Pip", sdk: "an app", cli: "the terminal", editor: "the editor" };
@@ -563,6 +563,8 @@
           $("art-main").replaceChildren(el("p", "art-empty", `This artifact couldn't be opened: ${msg.message}`));
           return;
         }
+        // (A checklist makes your one change again on the newer list by itself, once, before anything is asked.)
+        if (msg.what === "save" && msg.reason === "conflict" && state.editor?.retries?.(msg)) return;
         if (msg.what === "save" && msg.reason === "conflict") { conflict(); state.editor?.rejected?.(msg); return; }
         if (msg.what === "refresh" && state.editor?.quiet?.()) { state.editor.rejected?.(msg); return; }
         banner("error", msg.what === "save" ? `Not saved: ${msg.message}` : msg.message);

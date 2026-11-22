@@ -290,7 +290,7 @@ test('"+" is always the last item and offers New work, a ChatDGC chat, Personal 
     await x.setting({ pins: PINS }); await x.settle();
     const plus = async () => { const d = await dockNow(x.page); await x.page.mouse.click(...centre(d.items.at(-1))); await x.settle(); return dockNow(x.page); };
     let d = await plus();
-    assert.deepEqual(d.menu, ["New work", "New ChatDGC chat", "New Personal Pip", "Settings"]);
+    assert.deepEqual(d.menu, ["New work", "New chat", "New Pip", "Settings"]);
     assert.equal(await x.page.evaluate(() => document.querySelector("#dgc-dock .dgc-dock-add").getAttribute("aria-expanded")), "true");
     await x.page.click('.dgc-pop [data-id="work"]');
     assert.deepEqual((await posted(x, "dockNew")).at(-1), { type: "dockNew", what: "work" }, "a new Work session, at once");
@@ -583,7 +583,7 @@ test("the keyboard: Tab into the dock, arrows between items, Home and End, Enter
     // "+" by the keyboard.
     await x.page.keyboard.press("End"); await x.page.keyboard.press("Enter"); await x.settle();
     d = await dockNow(x.page);
-    assert.deepEqual(d.menu, ["New work", "New ChatDGC chat", "New Personal Pip", "Settings"]);
+    assert.deepEqual(d.menu, ["New work", "New chat", "New Pip", "Settings"]);
     assert.equal(d.focus, "work");
     await x.page.keyboard.press("End"); await x.page.keyboard.press("Enter");
     assert.deepEqual((await posted(x, "dockNew")).at(-1), { type: "dockNew", what: "settings" });

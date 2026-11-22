@@ -42,11 +42,11 @@ MODELS: list[dict] = [
     },
     {
         "id": "pocket-tts", "role": "read_aloud", "name": "Pocket TTS", "summary": "Natural. 7 languages.",
-        # The pinned archive contains a CC BY 4.0 LICENSE, but its README still calls it non-commercial.
-        # Disclose both until sherpa-onnx resolves https://github.com/k2-fsa/sherpa-onnx/issues/4098.
-        "languages": "7 languages", "licence": "CC BY 4.0 in archive; upstream README says non-commercial", "size": 98_336_520,
+        # The archive its publisher put up again under the same name on 21 Nov 2026: the same files, and its README
+        # now says the weights are CC BY 4.0 (the code Apache-2.0), where the first one called them non-commercial.
+        "languages": "7 languages", "licence": "CC BY 4.0", "size": 98_337_865,
         "url": f"{RELEASES}/tts-models/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
-        "sha256": "2f3b88823cbbb9bf0b2477ec8ae7b3fec417b3a87b6bb5f256dba66f2ad967cb",
+        "sha256": "f4da7c7bd465f7b91e89191487fe90504396a51d6f0bcf94d0787633e2657293",
         "folder": "sherpa-onnx-pocket-tts-int8-2026-01-26", "engine": "pocket",
         "files": {"lm_flow": "lm_flow.int8.onnx", "lm_main": "lm_main.int8.onnx", "encoder": "encoder.onnx",
                   "decoder": "decoder.int8.onnx", "text_conditioner": "text_conditioner.onnx",

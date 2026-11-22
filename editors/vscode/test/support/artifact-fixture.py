@@ -1,5 +1,6 @@
 """Real artifacts for the artifact panel's tests and captures (test/support/artifact-scene.mjs): a deck, a workbook and a
-dashboard as dgc/artifact_slides.py, artifact_sheet.py and artifact_dashboard.py normalize them, and DGC's own page of
+dashboard as dgc/artifact_slides.py, artifact_sheet.py and artifact_dashboard.py normalize them (and a checklist, as
+dgc/artifact_checklist.py keeps one), and DGC's own page of
 each as the artifact server would serve it. Prints one JSON object. Writes only into the folder it is given (the
 dashboard's SQLite database, which it then refreshes from); the caller removes that folder. Not a test file.
 
@@ -50,6 +51,49 @@ def board(db: str) -> dict:
                         {"id": "spend", "kind": "table", "title": "Ad spend", "source": "ads", "query": "SELECT * FROM ads"}]}
 
 
+def _png(width: int, height: int, rgb: tuple) -> bytes:
+    """A small real picture (one colour, a darker band across its top), standing in for a screenshot."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+    band = bytes(max(0, c - 60) for c in rgb)
+    rows = b"".join(b"\x00" + (band if y < height // 6 else bytes(rgb)) * width for y in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+
+
+def checklist_fixture() -> dict:
+    """A checklist part-way through, as DGC keeps one: an item Done with its note, test results and a screenshot, one
+    being built, one that needs the user, one not started."""
+    import base64
+    from dgc import artifact_checklist as checklist
+    shot = _png(320, 200, (58, 110, 190))
+    name = checklist.picture_name(shot)
+    data = checklist.normalize({"about": "The parser the importer needs, tested and written up.", "pinned": True, "items": [
+        {"title": "Write the parser", "done_when": "parse() reads every sample file in samples/"},
+        {"title": "Add the tests", "done_when": "pytest passes with 10 or more tests"},
+        {"title": "Publish the package", "done_when": "The package is on the index, version 1.0"},
+        {"title": "Write the README", "done_when": "README says how to install it and run it, with one example"}]})
+    stamp = "2026-10-28T08:{:02d}:00+00:00"
+    data = checklist.apply_edits(data, [{"op": "set", "item": "c1", "status": "Done", "note": "Wrote parse() in parser.py; it reads all three samples.",
+                                         "proof": ["pytest tests/test_parser.py: 4 passed in 0.31s", {"image": "shot.png", "caption": "The run, all three read"}]}],
+                                 picture=lambda path: name, now=stamp.format(10))
+    data = checklist.apply_edits(data, [{"op": "set", "item": "c2", "status": "Building"}], now=stamp.format(20))
+    data = checklist.apply_edits(data, [{"op": "set", "item": "c3", "status": "Needs you",
+                                         "note": "The index asks for an API token; I don't have one."}], now=stamp.format(30))
+    pictures = {name: "data:image/png;base64," + base64.b64encode(shot).decode("ascii")}
+    made = view("ar_" + "6" * 16, "checklist", "Ship the parser", 4, "work", progress=checklist.progress(data))
+    made["origin"] = {"surface": "work", "project": "/home/me/code/shop"}
+    made["versions"] = [{"n": 1, "author": "DGC", "at": "2026-10-28T08:00:00Z", "summary": "Made", "size": 900},
+                        {"n": 2, "author": "DGC", "at": "2026-10-28T08:10:00Z", "summary": "c1 “Write the parser”: Not started → Done", "size": 1900},
+                        {"n": 3, "author": "DGC", "at": "2026-10-28T08:20:00Z", "summary": "c2 “Add the tests”: Not started → Building", "size": 1950},
+                        {"n": 4, "author": "DGC", "at": "2026-10-28T08:30:00Z", "summary": "c3 “Publish the package”: Not started → Needs you", "size": 2050}]
+    return {"view": made, "content": data, "state": {"pictures": pictures},
+            "html": checklist.render_html(data, title="Ship the parser", pictures=pictures)}
+
+
 def view(aid: str, type_: str, title: str, versions: int, surface: str, **extra) -> dict:
     out = {"id": aid, "type": type_, "label": service.LABELS[type_], "title": title, "version": versions,
            "created": "2026-10-27T09:12:00Z", "updated": "2026-10-28T08:40:00Z", "origin": {"surface": surface},
@@ -84,6 +128,7 @@ def main(folder: str) -> None:
         "page": {"view": view("ar_" + "4" * 16, "page", "Tip calculator", 1, "work")},
         "doc": {"view": view("ar_" + "5" * 16, "doc", "Launch notes", 2, "work", file=str(root / "ar_5555555555555555" / "work" / "Launch notes.md"))},
     }
+    out["checklist"] = checklist_fixture()
     out["dashboard"]["three_column_html"] = dashboard.render_html(
         {**dash, "layout": {"columns": 3}}, results, title="Store sales")
     # Capture a real comparison from saved versions, alongside the pages the browser scenes use.

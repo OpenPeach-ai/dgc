@@ -2142,8 +2142,8 @@
   // ---- artifacts a reply made or changed (message.artifacts: a deck, a sheet, a dashboard, a page): a card each, which
   // opens it in its panel or exports it. They're kept with the reply, so they come back with the chat; what each one
   // is now (a later version, a new title, removed) comes from artifactChanged and, after a reload, artifactViews.
-  const ARTIFACT_ICON = { doc: "file-text", slides: "preview", sheet: "table", dashboard: "dashboard", page: "browser" };
-  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page" };
+  const ARTIFACT_ICON = { doc: "file-text", slides: "preview", sheet: "table", dashboard: "dashboard", page: "browser", checklist: "checklist" };
+  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist" };
   const ARTIFACT_FORMAT = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
                             xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
   const artifactsNow = new Map();          // id -> the artifact as last heard (null: removed)

@@ -270,6 +270,19 @@ class RecentLinks(Base):
         path.write_text("{not json")
         self.assertEqual(self.ok("get_your_browser_recent")["links"], [])
 
+    def test_a_link_carries_its_sites_icon_only_as_a_small_picture(self):
+        # (His 22 Nov ask: Home's Browser card shows each visited site's own icon, not a globe.)
+        png = "data:image/png;base64," + "iVBORw0KGgo" + "A" * 40
+        self.write([{"url": "https://a.example.com/", "title": "A", "icon": png},
+                    {"url": "https://b.example.com/", "title": "B", "icon": "javascript:alert(1)"},
+                    {"url": "https://c.example.com/", "title": "C", "icon": "https://c.example.com/fav.png"},
+                    {"url": "https://d.example.com/", "title": "D", "icon": "data:text/html;base64,PHNjcmlwdD4="},
+                    {"url": "https://e.example.com/", "title": "E",
+                     "icon": "data:image/png;base64," + "A" * (your_browser.RECENT_ICON_CHARS + 1)}])
+        links = your_browser.recent_links(self.registry.directory, 5)
+        self.assertEqual([l.get("icon") for l in links], [png, None, None, None, None])
+        self.assertNotIn("icon", links[1], "no icon: no field (Home draws the globe)")
+
 
 class ItSaysWhatItIs(Base):
     def test_get_your_browser_shows_the_window_the_persons_tabs_and_the_lanes_from_the_supervisor(self):
@@ -502,6 +515,41 @@ class Recent(Host):
                          [("https://news.example.org/today", "Today's news, updated"),
                           ("https://mail.example.net/inbox", "Inbox (3)"), ("https://news.example.org/", "")])
         self.assertNotIn("shop.example.com", json.dumps(links))
+
+    def test_a_visit_in_the_window_brings_its_sites_icon_to_homes_card(self):
+        # (22 Nov: the streamed tab looked the icons up while it drew; the window beside the editor never did, and
+        # Home's card showed globes.) Asked off Chrome's own message loop; the site's page says where its icon is.
+        original = self.pipe.send
+
+        def send(payload):
+            if payload.get("method") == "Runtime.evaluate" and "icon" in payload["params"]["expression"]:
+                self.pipe.sent.append(payload)
+                self.pipe.inbox.append({"id": payload["id"], "sessionId": payload.get("sessionId"),
+                                        "result": {"result": {"type": "string", "value": "https://news.example.org/fav.png"}}})
+                return
+            original(payload)
+        self.pipe.send = send
+        fetched = []
+        self.host.fetch_icon = lambda url: (fetched.append(url) or (b"\x89PNG\r\n\x1a\n" + b"0" * 40, "image/png"))
+        self.host.icon_wait = True                    # (the lookup and the download at once here, not in threads)
+        self.host.open("", None)
+        self.pump()
+        self.pipe.info("P1", "https://news.example.org/today", "Today's news")
+        self.pump()
+        for _ in range(100):                          # (the lookup runs in its own thread: pumped until it lands)
+            if fetched and self.host.recent.links and self.host.recent.links[0].get("icon"):
+                break
+            time.sleep(0.02)
+            self.pump()
+        self.assertEqual(fetched, ["https://news.example.org/fav.png"])
+        link = next(l for l in self.host.recent.links if l["url"] == "https://news.example.org/today")
+        self.assertTrue(link.get("icon", "").startswith("data:image/png;base64,"), link)
+        self.pipe.info("P1", "https://news.example.org/sport", "Sport")
+        for _ in range(20):
+            time.sleep(0.02)
+            self.pump()
+        self.assertEqual(len(fetched), 1, "the site's other pages wear the icon it has")
+        self.assertTrue(self.host.recent.links[0].get("icon"), self.host.recent.links[0])
 
     def test_a_popup_from_a_lane_is_the_lanes_and_never_noted(self):
         self.host.open("", None)

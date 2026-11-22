@@ -302,8 +302,8 @@
       const pop = root.DgcBlob?.popup;
       if (!pop) return;
       name(null); pointer = null; settle();
-      const made = [offers.work && { id: "work", label: "New work", icon: "work" }, offers.chat && { id: "chat", label: "New ChatDGC chat", icon: "chat" },
-        offers.pip && { id: "pip", label: "New Personal Pip", icon: "pip" }].filter(Boolean);
+      const made = [offers.work && { id: "work", label: "New work", icon: "work" }, offers.chat && { id: "chat", label: "New chat", icon: "chat" },
+        offers.pip && { id: "pip", label: "New Pip", icon: "pip" }].filter(Boolean);
       pop(button, { keyboard, label: "New", rows: [made, offers.settings ? [{ id: "settings", label: "Settings", icon: "settings" }] : []],
         onPick: (id) => o.onNew?.(id), onClose: watchLeave });
     }

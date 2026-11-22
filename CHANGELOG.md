@@ -6,6 +6,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **DGC keeps a checklist**: ask it to make a checklist for a job and work through it, and it makes a Checklist
+  artifact: each item's title, what done means, a status (Not started, Building, Testing, Checked live, Needs you,
+  Done), a note and its proof (test results, screenshots). It changes one item at a time, so Versions shows every
+  step, and marks an item Done only with a note and proof. You tick, reopen and edit items in its panel, and DGC goes
+  by that at its next look. It is pinned to its project: a new chat there carries on from the first item not done,
+  Work lists it with how far along it is, and `/goal checklist` runs from it item by item, ending when every item is
+  Done or stopping when one needs you (it says which and why).
 - **Showing a dashboard no longer adds a "Page" beside it in the Library**: its view, served to show it, was taken for
   a page of its own with the dashboard's name. Ones made that way go to DGC's trash, where they can be recovered.
 - **One artifact per name**: asked to change something it made, a model changes that one (a new version you can go

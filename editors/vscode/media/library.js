@@ -38,7 +38,7 @@
   const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
   // The tabs, in his order: id, name, what one of them is called, its icon (a codicon) and its line for a label.
   const TABS = [
-    ["artifacts", "Artifacts", "artifact", "browser", "Artifacts: the pages, sheets, docs, decks and dashboards DGC made"],
+    ["artifacts", "Artifacts", "artifact", "browser", "Artifacts: the pages, sheets, docs, decks, dashboards and checklists DGC made"],
     ["widgets", "Widgets", "widget", "symbol-misc", "Widgets: ChatDGC's widgets, and the cards a reply drew in Work or a Pip's chat"],
     ["images", "Images", "image", "file-media", "Images: every image DGC made or kept for you"],
     ["videos", "Videos", "video", "device-camera-video", "Videos: every video DGC made for you"],
@@ -46,10 +46,10 @@
   ];
   const TAB_IDS = TABS.map((t) => t[0]);
   // Artifacts' kinds: the filter's word, and the word of an empty list.
-  const A_KINDS = [["", "All", "artifacts"], ["page", "Pages", "pages"], ["sheet", "Sheets", "sheets"], ["doc", "Docs", "docs"], ["slides", "Decks", "decks"], ["dashboard", "Dashboards", "dashboards"]];
+  const A_KINDS = [["", "All", "artifacts"], ["page", "Pages", "pages"], ["sheet", "Sheets", "sheets"], ["doc", "Docs", "docs"], ["slides", "Decks", "decks"], ["dashboard", "Dashboards", "dashboards"], ["checklist", "Checklists", "checklists"]];
   // The Widgets tab's kinds (his call, 16 Nov): the widgets you use again, or the charts a chat's replies drew.
   const W_KINDS = [["", "All", "widgets or charts"], ["widget", "Widgets", "widgets"], ["chart", "Charts", "charts"]];
-  const A_KIND = { doc: "Doc", slides: "Deck", sheet: "Sheet", page: "Page", dashboard: "Dashboard" };
+  const A_KIND = { doc: "Doc", slides: "Deck", sheet: "Sheet", page: "Page", dashboard: "Dashboard", checklist: "Checklist" };
   // Files' kinds (ChatDGC's own), and where a file came from.
   const F_KINDS = [["", "All", "files"], ["image", "Images", "images"], ["pdf", "PDFs", "PDFs"], ["document", "Documents", "documents"], ["spreadsheet", "Spreadsheets", "spreadsheets"],
     ["presentation", "Presentations", "presentations"], ["code", "Code", "code files"], ["text", "Pasted text", "pasted text"]];
@@ -76,7 +76,7 @@
   const ITEM_ACTS = [...window.DgcFileMenu.ACTS, ["rename", "Rename…"], ["remove", "Remove…"]];
   // What only a kind has, kept under the eight (by the ids of actions() below).
   const ITEM_MORE = ["chat", "player", "use", "project", "add", "pin"];
-  const A_WORD = { doc: "doc", slides: "deck", sheet: "sheet", page: "page", dashboard: "dashboard" };
+  const A_WORD = { doc: "doc", slides: "deck", sheet: "sheet", page: "page", dashboard: "dashboard", checklist: "checklist" };
   const SAID_MS = 2600;     // how long "Path copied" stays
 
   /** Why an item cannot do one of the eight ("" when it can). The host decides again for itself (src/chatdgc.ts
@@ -470,7 +470,7 @@
       const button = (id, key, value, tip) => `<button type="button" id="library-filter-${id}" class="dgc-folder lib-filter" data-filter="${id}"${id !== "maker" && value === "All" ? ' data-all="1"' : ""} aria-haspopup="menu" aria-expanded="false" aria-label="${esc(`${key}: ${value}`)}" title="${esc(tip)}">`
         + `<span class="dgc-folder-k">${esc(key)}</span><span class="dgc-folder-v">${esc(value)}</span>${CHEVRON}</button>`;
       let html = "";
-      if (tab === "artifacts") html += button("kind", "Kind", (A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[1], "Show one kind: pages, sheets, docs, decks or dashboards");
+      if (tab === "artifacts") html += button("kind", "Kind", (A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[1], "Show one kind: pages, sheets, docs, decks, dashboards or checklists");
       // (Kind on Widgets only where this DGC lists charts: with none, every row is a widget.)
       if (tab === "widgets" && state.charts.live) html += button("kind", "Kind", (W_KINDS.find((k) => k[0] === f.kind) || W_KINDS[0])[1], "Show the widgets you use again, or the charts a chat drew");
       if (tab === "files") html += button("kind", "Kind", (F_KINDS.find((k) => k[0] === f.kind) || F_KINDS[0])[1], "Show one kind of file")
@@ -656,7 +656,7 @@
       }
       const who = tab === "files" ? "" : whoWords(tab);
       if (tab === "artifacts") return q ? `No artifact named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || f.maker ? `No ${(A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.`
-        : "Pages, sheets, docs, decks and dashboards DGC makes for you show here.";
+        : "Pages, sheets, docs, decks, dashboards and checklists DGC makes for you show here.";
       if (tab === "widgets") return q ? `No ${f.kind === "chart" ? "chart" : "widget"} named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || who ? `No ${(W_KINDS.find((k) => k[0] === f.kind) || W_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.` : state.charts.live ? "Widgets ChatDGC makes for you, the charts its replies draw, and the cards a reply draws in Work or a Pip’s chat, show here."
         : "Widgets ChatDGC makes for you, and the cards a reply draws in Work or a Pip’s chat, show here. A chart in a chat stays in its chat.";
       if (tab === "images") return q ? `No image made from words like “${q}”.` : who ? `No images ${who} yet.` : "Images DGC makes or keeps for you show here.";

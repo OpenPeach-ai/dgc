@@ -467,6 +467,37 @@ def ignored_dirs(root) -> list[str]:
     return names
 
 
+def ignored_now(root) -> tuple[list[str], set[str]] | None:
+    """What this repository ignores now, as git reports it, relative to `root`: (directories, files).
+
+    One `ls-files --others --ignored --directory`, the same listing as ignored_dirs (a wholly-ignored
+    tree is one entry, never descended into), keeping the single files it names too. Tracked files are
+    never in it. None when git cannot say."""
+    try:
+        out = _git_bytes(
+            ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+            root, timeout=_ABSENT_SCAN_TIMEOUT, max_stdout=_MAX_GIT_PATH_BYTES)
+    except Exception:
+        return None
+    if out.returncode != 0:
+        return None
+    dirs: list[str] = []
+    files: set[str] = set()
+    for raw in out.stdout.split(b"\0"):
+        try:
+            rel = raw.decode("utf-8", "strict")
+        except UnicodeDecodeError:
+            continue
+        name = rel.rstrip("/")
+        if not name or name.startswith("/") or ".." in name.split("/"):
+            continue
+        if rel.endswith("/"):
+            dirs.append(name)
+        else:
+            files.add(name)
+    return dirs, files
+
+
 def absent_ignored_dirs(main_root, child_root, *, limit: int = _MAX_ABSENT_DIRS) -> list[str]:
     """Git-ignored directories the parent checkout has and an isolated child's does not.
 

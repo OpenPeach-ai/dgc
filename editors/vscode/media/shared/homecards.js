@@ -172,7 +172,7 @@
     return days < 1 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? `${days} days ago` : SHORT_DAY(new Date(at));
   }
   const SHORT_DAY = (d) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", ...(d.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }) }).format(d);
-  const A_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", page: "Page", dashboard: "Dashboard" };
+  const A_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", page: "Page", dashboard: "Dashboard", checklist: "Checklist" };
   const A_MADE = { chat: "made in Chat", work: "made in Work", pip: "made by a Pip", sdk: "made by an app", cli: "made in the terminal" };
 
   // ---- numbers and days ------------------------------------------------------------------------------------------------
@@ -381,7 +381,9 @@
       const why = b.reason ? (form === "s" ? `<span class="hc-sub hc-browse-why" title="${esc(b.reason)}">Not available here</span>` : `<p class="hc-quiet hc-browse-why">${esc(b.reason)}</p>`) : "";
       const said = b.error ? `<p class="hc-quiet hc-browse-why" role="status">${esc(b.error)}</p>` : "";
       const glyph = shared("globe", 14);
-      const rows = b.reason ? "" : links.map((l) => `<button type="button" class="hc-li hc-link" data-browse="${esc(l.url)}" title="${esc(`Open ${l.url} in Your Browser`)}"><span class="hc-ico hc-globe">${glyph}</span>`
+      // Each link wears its site's own icon (media/shared/siteicon.js), else the globe.
+      const mark = (l) => { const icon = view.DgcSiteIcon?.ok(l.icon) || ""; return icon ? `<span class="hc-ico hc-site"><img class="hc-siteimg" src="${esc(icon)}" alt="" width="16" height="16" decoding="async" draggable="false"></span>` : `<span class="hc-ico hc-globe">${glyph}</span>`; };
+      const rows = b.reason ? "" : links.map((l) => `<button type="button" class="hc-li hc-link" data-browse="${esc(l.url)}" title="${esc(`Open ${l.url} in Your Browser`)}">${mark(l)}`
         + `<span class="hc-tx"><span class="hc-nm">${esc(l.title || l.host || l.url)}</span>${form === "s" || tight ? "" : `<span class="hc-meta">${esc(l.host || "")}</span>`}</span></button>`).join("");
       const none = !links.length && !b.reason ? `<p class="hc-quiet hc-browse-none">${form === "s" ? "Your last links show here" : "The last sites you visit in Your Browser show here."}</p>` : "";
       return `${head}${field}${why}${said}${rows ? `<div class="hc-links">${rows}</div>` : none}`;
@@ -627,6 +629,7 @@
       const emptyHtml = order.length ? "" : '<p class="hc-quiet hc-empty">Home is empty. Add cards with the Cards button, or put the usual ones back with Reset Home in it.</p>';
       let empty = host.querySelector(".hc-empty"); if (!!empty !== !!emptyHtml) { empty?.remove(); if (emptyHtml) grid.insertAdjacentHTML("afterend", emptyHtml); }
       if (library) drawLibrary(d);
+      view.DgcSiteIcon?.lift(host.querySelectorAll("img.hc-siteimg"), "hc-siteimg-lift", doc);   // (read once per picture; again here, so a theme change is followed)
       try { onDraw?.(host); } catch { /* the faces are the page's */ }
       if (focusNext) { const target = host.querySelector(focusNext); focusNext = ""; target?.focus({ preventScroll: true }); }
       ask();

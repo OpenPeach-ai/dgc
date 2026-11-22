@@ -729,10 +729,10 @@ test('Settings -> Voice lists each model with its size and licence; Install show
   assert.match(x.d.querySelector('main').textContent,/Reading your voice models/);
   const model=(id,role,name,size,licence,extra={})=>({id,role,name,summary:name+' summary',languages:'English',licence,size,installed:false,in_use:false,installing:null,...extra});
   const models=[model('moonshine-base-en','dictation','Moonshine',111266225,'MIT'),model('nemotron-3.5-asr','dictation','Nemotron 3.5',475271763,'NVIDIA Open Model (OpenMDW-1.1)'),
-                model('kitten-mini-en','read_aloud','Kitten',67547594,'Apache-2.0'),model('pocket-tts','read_aloud','Pocket TTS',98336520,'CC BY 4.0 in archive; upstream README says non-commercial')];
+                model('kitten-mini-en','read_aloud','Kitten',67547594,'Apache-2.0'),model('pocket-tts','read_aloud','Pocket TTS',98337865,'CC BY 4.0')];
   x.message({type:'event',event:{type:'voice_state',runtime:{installed:false,size_mb:50},models,dictation:'',read_aloud:''}});
   const text=x.d.querySelector('main').textContent;
-  for(const want of ['Dictation','Read aloud','Moonshine','Nemotron 3.5','475 MB','CC BY 4.0 in archive; upstream README says non-commercial','voice engine (about 50 MB)']) assert.match(text,new RegExp(want.replace(/[()]/g,'\\$&')),want);
+  for(const want of ['Dictation','Read aloud','Moonshine','Nemotron 3.5','475 MB','CC BY 4.0','voice engine (about 50 MB)']) assert.match(text,new RegExp(want.replace(/[()]/g,'\\$&')),want);
   x.click('[data-voice-install="nemotron-3.5-asr"]');
   assert.deepEqual(last(),{type:'voiceInstall',id:'nemotron-3.5-asr'});
   x.message({type:'event',event:{type:'voice_state',runtime:{installed:false,size_mb:50},models:models.map(m=>m.id==='nemotron-3.5-asr'?{...m,installing:{stage:'starting',done:0,total:m.size}}:m),dictation:'',read_aloud:''}});

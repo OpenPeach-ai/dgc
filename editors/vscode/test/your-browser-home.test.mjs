@@ -170,6 +170,34 @@ test("Home's Browser card: a search field and the last links; typing or a link o
   } finally { await x.close(); }
 });
 
+// (His 22 Nov ask: each recent link wears its site's own icon, not the globe.)
+const RED = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGN4ZqPxnxLMMGrAqAGjBgwXAwB2LEkfOWMJxAAAAABJRU5ErkJggg==";
+const BLACK = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGMQERH5TwlmGDVg1IBRA4aLAQCg8jsQtJPZ9wAAAABJRU5ErkJggg==";
+for (const theme of ["dark-modern", "light-modern"]) {
+  test(`Home's Browser card: each link wears its site's own icon, the globe only where it has none; a dark one lifted on a dark editor (${theme})`, async (t) => {
+    if (skipOrFail(t)) return;
+    const links = [{ ...LINKS[0], icon: RED }, { ...LINKS[1], icon: BLACK }, { ...LINKS[2], icon: "https://docs.python.org/favicon.ico" }];
+    const x = await homeWithCard(440, theme, withBrowser({ recent: { links, open: false, available: true, reason: "" } }));
+    try {
+      await waitFor(x.page, () => document.querySelectorAll('#home-hub .hc-card[data-card="browser"] img.hc-siteimg').length === 2);
+      await x.page.waitForTimeout(300);
+      const rows = await x.page.evaluate(() => [...document.querySelectorAll('#home-hub .hc-card[data-card="browser"] .hc-link')].map((b) => {
+        const img = b.querySelector("img.hc-siteimg"), r = img?.getBoundingClientRect();
+        return { icon: img ? img.getAttribute("src").slice(0, 30) : "", loaded: !!img && img.naturalWidth > 0, size: r ? [Math.round(r.width), Math.round(r.height)] : null,
+          lifted: !!img && img.classList.contains("hc-siteimg-lift"), globe: !!b.querySelector(".hc-globe svg") };
+      }));
+      assert.deepEqual(rows.map((r) => [r.icon !== "", r.globe]), [[true, false], [true, false], [false, true]], `the site's icon, or the globe (an address is never drawn): ${JSON.stringify(rows)}`);
+      assert.ok(rows.slice(0, 2).every((r) => r.loaded && r.size[0] === 16 && r.size[1] === 16), `16 px, drawn: ${JSON.stringify(rows)}`);
+      const dark = theme.startsWith("dark");
+      assert.deepEqual(rows.slice(0, 2).map((r) => r.lifted), [false, dark], "a coloured icon as it is; a black one drawn light on a dark editor only");
+      // Pressed on its icon, a link opens its site, as the rest of the row does (the icon is no other card's control).
+      await x.page.click(`#home-hub .hc-card[data-card="browser"] .hc-link[data-browse="${LINKS[1].url}"] img.hc-siteimg`);
+      await waitFor(x.page, () => window.__requests.some((r) => r.type === "open_your_browser"));
+      assert.deepEqual((await requests(x.page, "open_your_browser")).map((r) => r.url), [LINKS[1].url]);
+    } finally { await x.close(); }
+  });
+}
+
 test("Home's Browser card in the card library, and why it can't open here", async (t) => {
   if (skipOrFail(t)) return;
   const reason = "Your Browser needs Google Chrome's own sandbox, which this Ubuntu keeps from DGC's copy of Chrome. Run this once in a terminal, then open it again: printf 'abi <abi/4.0>,...' '/home/someone/.dgc/desktop/arm64/v-*/root/opt/google/chrome/chrome' | sudo tee /etc/apparmor.d/dgc-chrome";

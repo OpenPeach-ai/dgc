@@ -91,7 +91,7 @@ class Session:
 
 MAX_REPLY_ARTIFACTS = 8
 _ARTIFACT_ID = re.compile(r"ar_[0-9a-f]{16}\Z")
-_ARTIFACT_TYPES = ("doc", "slides", "sheet", "page", "dashboard")
+_ARTIFACT_TYPES = ("doc", "slides", "sheet", "page", "dashboard", "checklist")
 
 
 def reply_artifacts(items) -> list:

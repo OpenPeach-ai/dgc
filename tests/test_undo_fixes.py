@@ -539,6 +539,28 @@ class CommandUndoTests(CommandHelpers, HarnessCase):
         self.assertEqual(outcome["conflicts"], [{"path": "a.py", "reason": "overlap"}])
         self.assertIn("typed by the person", (h.root / "a.py").read_text())
 
+    VENV = ("python3 -c \"import pathlib; [(pathlib.Path('.venv/lib/p%d' % (i // 10)).mkdir(parents=True, exist_ok=True), "
+            "pathlib.Path('.venv/lib/p%d/m%d.py' % (i // 10, i)).write_text('x')) for i in range(620)]\"")
+
+    def test_files_a_command_made_that_git_ignores_by_the_turns_end_are_left_off_the_card(self):
+        # A live run (22 Nov): the model made a virtual environment with a command (2010 files), then wrote a
+        # .gitignore that ignores it. The card said "Edited 2010 files" and listed every folder of the environment,
+        # screen after screen, while the bar under the chat said 15. More than one command's copy limit here, so
+        # some of its files are in the recovery point and the rest are ones Undo leaves: neither is on the card.
+        h = self.repo({"a.py": "a = 1\n"})
+        card = self.turn(h, "build", ToolCall("b1", "bash", {"command": self.VENV}),
+                         ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "a = 1", "new_string": "a = 2"}),
+                         ToolCall("w1", "write_file", {"path": ".gitignore", "content": ".venv/\n"}))
+        self.assertEqual(len(list((h.root / ".venv").rglob("*.py"))), 620)
+        self.assertEqual(self.rows(card), {"a.py": ("modified", False), ".gitignore": ("new", False)})
+        self.assertEqual(card["total"], 2, "the card's count is the bar's: files Git ignores are not the turn's edits")
+
+    def test_files_a_command_made_that_git_does_not_ignore_stay_on_the_card(self):
+        h = self.repo({"a.py": "a = 1\n"})
+        card = self.turn(h, "build", ToolCall("b1", "bash", {"command": self.VENV}))
+        self.assertEqual(card["total"], 620, "nothing ignores them: they are the turn's, listed as before")
+        self.assertTrue(all(path.startswith(".venv/lib/") for path in self.rows(card)))
+
     def test_the_cost_of_the_look_around_a_command_is_recorded(self):
         h = self.repo({"a.py": "a\n"})
         self.turn(h, "one command", ToolCall("b1", "bash", {"command": "true"}))

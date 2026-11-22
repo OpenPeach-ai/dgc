@@ -6,7 +6,9 @@ An artifact is a typed, versioned thing on this computer:
 - ``doc``: a document (today's canvas, Markdown with DGC's blocks), or a piece of code;
 - ``slides``: a deck (slides with a layout each, speaker notes, a theme);
 - ``sheet``: a spreadsheet (sheets of typed columns and rows);
-- ``dashboard``: charts, each one read-only query over a source the user allowed once.
+- ``dashboard``: charts, each one read-only query over a source the user allowed once;
+- ``checklist``: the items of a job, each with what done means, a status, a note and proof (its pictures are files
+  of the version).
 
 Each lives in ``~/.dgc/artifacts/<id>/``:
 
@@ -44,7 +46,7 @@ from pathlib import Path, PurePosixPath
 
 from . import workspace
 
-TYPES = ("page", "doc", "slides", "sheet", "dashboard")
+TYPES = ("page", "doc", "slides", "sheet", "dashboard", "checklist")
 SURFACES = ("chat", "work", "pip", "sdk", "cli")
 ARTIFACT_ID = re.compile(r"ar_[a-f0-9]{16}\Z")
 SHA = re.compile(r"[a-f0-9]{64}\Z")
@@ -56,7 +58,11 @@ MAX_FILES = 2000                              # files in one version (a page's s
 WARN_STORE_BYTES = 2 * 1024 * 1024 * 1024     # the Library says the store is getting large past this
 
 # The single file a typed artifact keeps (a page keeps its site's files under their own names).
-SOURCE_FILE = {"doc": "doc.md", "slides": "deck.json", "sheet": "sheet.json", "dashboard": "dashboard.json"}
+SOURCE_FILE = {"doc": "doc.md", "slides": "deck.json", "sheet": "sheet.json", "dashboard": "dashboard.json",
+               "checklist": "checklist.json"}
+# A checklist's content may carry its proof pictures under this key, as {file name: bytes}: they become files of the
+# version beside its data (never part of the data), so every version keeps the pictures it showed.
+CHECKLIST_FILES = "_files"
 
 _thread_lock = threading.RLock()
 
@@ -389,6 +395,16 @@ class Store:
             return {SOURCE_FILE["doc"]: content.encode("utf-8")}
         if not isinstance(content, dict):
             raise ArtifactError(f"A {type_} is data (an object), not text.")
+        if type_ == "checklist" and CHECKLIST_FILES in content:
+            pictures = content[CHECKLIST_FILES]
+            content = {key: value for key, value in content.items() if key != CHECKLIST_FILES}
+            if not isinstance(pictures, dict) or not all(
+                    isinstance(name, str) and isinstance(raw, (bytes, bytearray)) for name, raw in pictures.items()):
+                raise ArtifactError("A checklist's pictures map file names to bytes.")
+            files = {safe_rel(name): bytes(raw) for name, raw in pictures.items()}
+            if SOURCE_FILE[type_] in files:
+                raise ArtifactError("A checklist's picture can't take its data's name.")
+            return {**files, SOURCE_FILE[type_]: (json.dumps(content, indent=1, ensure_ascii=False) + "\n").encode("utf-8")}
         return {SOURCE_FILE[type_]: (json.dumps(content, indent=1, ensure_ascii=False) + "\n").encode("utf-8")}
 
     def _commit(self, art: Artifact, files: dict[str, bytes], author: str, summary: str,

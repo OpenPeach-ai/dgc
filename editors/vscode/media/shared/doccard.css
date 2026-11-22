@@ -18,6 +18,7 @@
 .dgc-doc-card[data-tone="sheet"], .dgc-doc-card[data-tone="xlsx"], .dgc-doc-card[data-tone="csv"] { --doc-tile: var(--fk-green); }
 .dgc-doc-card[data-tone="pdf"] { --doc-tile: var(--fk-red); }
 .dgc-doc-card[data-tone="dashboard"] { --doc-tile: var(--fk-pink); }
+.dgc-doc-card[data-tone="checklist"] { --doc-tile: var(--fk-yellow); }
 .dgc-doc-card[data-tone="page"], .dgc-doc-card[data-tone="artifact"], .dgc-doc-card[data-tone="html"] { --doc-tile: var(--fk-violet); }
 .dgc-doc-card[data-tone="code"] { --doc-tile: var(--fk-neutral); }
 

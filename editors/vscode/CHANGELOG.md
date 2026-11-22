@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Checklists**: a checklist DGC makes for a job opens in a panel that looks like one: how far along it is, then each
+  item with its tick box, its status as a chip, what done means, its note and its proof (test results, and pictures
+  that open larger). Tick or reopen an item, pick a status, change what done means, add or remove an item, pin or
+  unpin it: each is saved at once as your version, and if DGC changed the list meanwhile your change is made on the
+  newer list. The Library lists checklists with their own icon and a Checklists kind, and Work shows the project's
+  pinned checklists above its sessions, each with how far along it is and what is next (or which item needs you).
 - **Small things made right**: on light themes the green of added lines, ticks and dots is deep enough to read (the
   "+2" of a changed file was barely visible); "Use another account" wraps instead of being cut in a narrow side bar; a
   redraw of the Pips list no longer drops the keyboard's place on a menu button; when Keep running or Desktop
@@ -165,7 +171,7 @@
 - A Pip at Do it all has its own rule for payments on its page: Ask me each time, or Let it pay. Payments a day, in the Pips view's Controls, is how many a Pip you let pay may make by itself (3 unless you change it). An order press never offers Always allow.
 - A dock at the foot of DGC's side bar, on every screen of it (the home, the Pips view, a Pip's chat): what you pinned, then "+". Pin a Pip, a Work session, a ChatDGC chat, an artifact, a Library file or a widget with the new pin on its row; the pin stays filled while it is pinned, and a click unpins. A Pip shows its face, a session its mark, a file the small sheet of its kind, a widget its own mark. Pointing at the dock makes the items grow toward the pointer and names the one under it: a session's full title and what it is doing, a Pip's name and what waits on it. A click opens it.
 - On a dock item: a quiet dot while it is open in an editor, a purple dot while it is running, and a number when it needs you. A right-click (or Shift+F10) offers Open, Unpin, Move left and Move right.
-- "+" is always the last item: New Work session, New ChatDGC chat, New Personal Pip, and Settings. Each starts at once.
+- "+" is always the last item: New Work session, New chat, New Pip, and Settings. Each starts at once.
 - The dock by keyboard: Tab reaches it as one stop, Left and Right move between items, Home and End jump to the ends, Enter opens, and Escape closes a menu and returns to its item.
 - Icons shrink as you pin more, down to 24 px. If they still can't fit, the dock steps aside until the side bar is wider; nothing is unpinned. Past the most it holds (8, which fit a 300 px side bar), pinning one more asks which to take off.
 - Settings › General › Dock: show it Always (the default), When I point at the bottom (it rises over the page, and drops away about a second after the pointer leaves), or Never; the most items, up to 16; and the icon size.

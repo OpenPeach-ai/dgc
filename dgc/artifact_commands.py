@@ -102,6 +102,9 @@ class ArtifactCommands:
             fields["content"] = store().source(aid, cmd.get("version", view["version"]))
         if view["type"] == "dashboard":
             fields["state"] = service.state(aid, version=cmd.get("version", view["version"]))
+        if view["type"] == "checklist":
+            # Its proof pictures, for the panel that draws it (the data names each by its file in the version).
+            fields["state"] = {"pictures": service.checklist_pictures(aid, cmd.get("version", view["version"]))}
         self._reply(cmd, "artifact_detail", **fields)
 
     def _artifact_update(self, cmd):

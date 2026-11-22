@@ -111,6 +111,19 @@ def compare(store: Store, aid: str, before: int, after: int | None = None) -> di
                     av, bv = ac[c] if c < len(ac) else None, bc[c] if c < len(bc) else None
                     if av != bv or type(av) is not type(bv):
                         add(f"{name}!{letters(c)}{r + 2}", av, bv)
+    elif art.type == "checklist":
+        old_items = {item["id"]: item for item in old.get("items", [])}
+        new_items = {item["id"]: item for item in new.get("items", [])}
+        for ident in dict.fromkeys([*old_items, *new_items]):
+            a, b = old_items.get(ident), new_items.get(ident)
+            if a != b:
+                add(f"{ident} “{(b or a)['title'][:60]}”", a, b,
+                    kind="added" if a is None else "removed" if b is None else "changed")
+        if list(old_items) != list(new_items):
+            add("Item order", list(old_items), list(new_items))
+        a, b = ({k: v for k, v in data.items() if k not in ("items", "last")} for data in (old, new))
+        if a != b:
+            add("Checklist settings", a, b)
     else:
         for key in sorted(old.keys() | new.keys()):
             if old.get(key) != new.get(key):

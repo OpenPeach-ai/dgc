@@ -547,6 +547,13 @@ dialog.hc-library:not([open]) { display: none; }
 .hc-globe { width: 18px; height: 18px; color: var(--hc-quiet); }
 .hc-card[data-form="s"] .hc-globe { width: 14px; height: 14px; }
 .hc-globe > svg { width: 14px; height: 14px; }
+/* A visited site's own icon in its place (media/shared/siteicon.js): 16 px as browsers draw them, sharp; a dark one-colour
+   icon drawn light on a dark editor. */
+.hc-site { width: 18px; height: 18px; }
+.hc-card[data-form="s"] .hc-site { width: 14px; height: 14px; }
+.hc-siteimg { display: block; width: 16px; height: 16px; object-fit: contain; border-radius: 2px; }
+.hc-card[data-form="s"] .hc-siteimg { width: 14px; height: 14px; }
+.hc-siteimg.hc-siteimg-lift { filter: invert(1); }
 .hc-browse-none { font-size: var(--t-xs); }
 .hc-card[data-form="s"] .hc-browse-none { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.3; }
 /* Why it can't run here: its words whole (a command to copy among them), never past the card's edge. */
