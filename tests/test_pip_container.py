@@ -63,6 +63,61 @@ sys.exit(0)
 '''
 
 
+class RelaysPastSelectsLimitTests(unittest.TestCase):
+    """The relays between two sockets (DGC's to a Pip computer, boxd's, and the proxy forwarder inside the box) keep
+    working when the process has more than 1024 files open, as a long-running one can: select() refuses sockets numbered
+    past that (ValueError), which dropped the connection at once (found in the screen stream, 22 Nov)."""
+
+    def crowd(self, past=1100):
+        import resource
+        soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft != resource.RLIM_INFINITY and soft < past + 64:
+            self.skipTest(f"this process may open only {soft} files")
+        held = []
+        while True:
+            fd = os.open(os.devnull, os.O_RDONLY)
+            held.append(fd)
+            if fd > past:
+                break
+        self.addCleanup(lambda: [os.close(fd) for fd in held])
+
+    def relays(self, pump):
+        self.crowd()
+        near, a = socket.socketpair()
+        b, far = socket.socketpair()
+        self.assertGreater(a.fileno(), 1024)
+        failed = []
+        def run():
+            try:
+                pump(a, b)
+            except Exception as error:         # noqa: BLE001 -- the test reports it
+                failed.append(error)
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        near.sendall(b"hello")
+        far.settimeout(5)
+        self.assertEqual(far.recv(100), b"hello")
+        far.sendall(b"back")
+        near.settimeout(5)
+        self.assertEqual(near.recv(100), b"back")
+        near.close()
+        worker.join(5)
+        self.assertFalse(worker.is_alive(), "it ends when one side closes")
+        self.assertEqual(failed, [])
+        far.close()
+
+    def test_dgcs_relay_to_a_pip_computer(self):
+        self.relays(pip_container._pump)
+
+    def test_boxds_relay(self):
+        self.relays(pip_boxd.pump)
+
+    def test_the_proxy_forwarder_inside_the_box(self):
+        names: dict = {}
+        exec(pip_computer_box.FORWARDER.split("server = socket.socket()")[0], names)
+        self.relays(names["pump"])
+
+
 class FakeContainerTests(unittest.TestCase):
     def setUp(self):
         # The setup runs on a module-level thread that can still be finishing after a test saw "ready":

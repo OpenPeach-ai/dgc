@@ -177,24 +177,28 @@ _ELEMENT_AT_JS = r"""function (x, y) {
 }"""
 
 # Inside the box: a TCP listener for Chromium's --proxy-server, relaying each connection to the
-# Unix socket DGC bound into the box. Plain stdlib Python; it is the only process besides Chrome.
+# Unix socket DGC bound into the box. Plain stdlib Python; it is the only process besides Chrome. A selector, never
+# select(), which refuses sockets numbered past 1024.
 FORWARDER = r'''
-import select, socket, threading
+import selectors, socket, threading
 def pump(a, b):
+    waiting = selectors.DefaultSelector()
     try:
+        waiting.register(a, selectors.EVENT_READ); waiting.register(b, selectors.EVENT_READ)
         while True:
-            ready, _, _ = select.select([a, b], [], [], 300)
+            ready = waiting.select(300)
             if not ready:
                 return
-            for s in ready:
+            for key, _ in ready:
+                s = key.fileobj
                 data = s.recv(65536)
                 if not data:
                     return
                 (b if s is a else a).sendall(data)
-    except OSError:
+    except (OSError, ValueError):
         pass
     finally:
-        a.close(); b.close()
+        waiting.close(); a.close(); b.close()
 server = socket.socket()
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind(("127.0.0.1", %d))

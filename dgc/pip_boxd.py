@@ -12,7 +12,7 @@ events.sock carries the dock's Browser clicks (the control FIFO) to the Mac, one
 """
 import os
 import queue
-import select
+import selectors
 import socket
 import sys
 import threading
@@ -33,19 +33,25 @@ clients = threading.BoundedSemaphore(MAX_CLIENTS)
 
 
 def pump(a, b) -> None:
+    # A selector, never select(): sockets numbered past 1024 are refused by select().
+    waiting = selectors.DefaultSelector()
     try:
+        waiting.register(a, selectors.EVENT_READ)
+        waiting.register(b, selectors.EVENT_READ)
         while True:
-            ready, _, _ = select.select([a, b], [], [], 600)
+            ready = waiting.select(600)
             if not ready:
                 return
-            for s in ready:
+            for key, _ in ready:
+                s = key.fileobj
                 data = s.recv(65536)
                 if not data:
                     return
                 (b if s is a else a).sendall(data)
-    except OSError:
+    except (OSError, ValueError):
         pass
     finally:
+        waiting.close()
         a.close()
         b.close()
 
