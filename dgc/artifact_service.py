@@ -756,6 +756,10 @@ def serve(aid: str, *, mode: str = "view", store: Store | None = None) -> str:
     folder = write_view(aid, files, store=st)
     served = artifacts.add(entry, folder, art.title)
     if served.store_id != aid:
-        served.store_id = aid
+        # Marked as this artifact's own view, and saved at once: a served folder without its mark would be taken for a
+        # page of its own by the next listing (artifact_index), in this process or another.
+        with artifacts._SRV.lock:
+            served.store_id = aid
+            artifacts._SRV._save()
     url = served.page_url
     return url[:url.rfind("/") + 1] + PRESENT_FILE if mode == "present" else url

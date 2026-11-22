@@ -305,6 +305,16 @@ test("the logo line: DGC's version and What's new at its far right, on Home and 
         document.querySelector("#phead .pm").getBoundingClientRect()].map((r) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom })));
       assert.ok(h.right - l.right <= 14, `at the far right of the line (${theme} ${width})`);
       assert.ok(Math.abs((l.top + l.bottom) / 2 - (logo.top + logo.bottom) / 2) <= 2, "level with the logo");
+      // One baseline: the version, "What's new" and the logo's own words sit on the same line, to the pixel.
+      const lines = await x.page.evaluate(() => {
+        const base = (el) => { if (!el || !el.offsetParent) return null; const m = document.createElement("span");
+          m.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline"; el.append(m);
+          const y = m.getBoundingClientRect().top; m.remove(); return Math.round(y * 2) / 2; };
+        return { ver: base(document.querySelector("#phead-news .phead-ver")), word: base(document.querySelector("#phead-news .phead-news-word")),
+          logo: base(document.querySelector("#phead .pm .pm-product")) };
+      });
+      if (lines.ver !== null) assert.ok(Math.abs(lines.ver - lines.word) <= 0.5, `the version and "What's new" share a baseline (${JSON.stringify(lines)})`);
+      if (lines.logo !== null) assert.ok(Math.abs(lines.word - lines.logo) <= 0.5, `"What's new" sits on the logo's baseline (${theme} ${width}: ${JSON.stringify(lines)})`);
       assert.ok(l.left >= logo.right, "never over the logo");
       const look = await x.page.evaluate(() => { const b = document.getElementById("phead-news"), cs = getComputedStyle(b);
         const grey = (c) => { const [r, g, bl] = c.match(/[\d.]+/g).map(Number); return Math.max(r, g, bl) - Math.min(r, g, bl) <= 12; };

@@ -48,6 +48,7 @@
     "onWebviewPanel:dgc.chatEditor",
     "onWebviewPanel:dgc.chatdgcEditor",
     "onWebviewPanel:dgc.chatdgcWidget",
+    "onWebviewPanel:dgc.chatdgcLibrary",
     "onWebviewPanel:dgc.artifactPanel",
     "onWebviewPanel:dgc.noteTab"
   ],
@@ -780,6 +781,12 @@
           "default": true,
           "scope": "window",
           "description": "Show each site's own favicon beside a link you type in a prompt. The icon is fetched from Google's favicon service using only the link's origin, never its path or query. Turn this off to use bundled icons and make no network request."
+        },
+        "dgc.linkPreviews": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Show a preview card when you point at a link in a chat: the site's name, picture, title and description. DGC reads public pages only, and only the top of the page: never a private, local or tailnet address, a one-time link, or an address that holds a secret. Turn this off to read nothing."
         }
       }
     },

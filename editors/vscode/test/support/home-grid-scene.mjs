@@ -62,7 +62,7 @@ export const THIRTY_FOLDERS = ["shop", "garden-notes", "invoices", "recipes", "t
  *  folders: the Project Folder rows (null: a DGC that lists none); news: Work replies nobody saw ([{ id, at, preview }]).
  *  Everything else is dock-scene's (width, height, theme, motion, state, sessions, video...). */
 export async function openGrid(browser, { layout = DEFAULT, settings = {}, usage = USAGE(), weather = WEATHER, folders = FOLDERS, news = [], sessions = DOCK_SESSIONS, state = homeState("busy"),
-  notes = [], seed = null, notesOptions = {}, keychain = true, places = PLACES, geo = "ok", widgets = WIDGETS, artifacts = ARTIFACTS, ...rest } = {}) {
+  notes = [], seed = null, notesOptions = {}, keychain = true, places = PLACES, geo = "ok", widgets = WIDGETS, artifacts = ARTIFACTS, favorites = false, ...rest } = {}) {
   const x = await openDock(browser, { tab: "home", sessions, state, height: 900, grid: true, ...rest });
   // Notes are the real host's (src/notes.ts), on a folder of its own: `notes` are the notes kept before the notes app
   // ([{ id, text, at, pinned }], carried over as the host carries them), `seed` is notes and folders as files
@@ -74,11 +74,11 @@ export async function openGrid(browser, { layout = DEFAULT, settings = {}, usage
   store.onSaid(tell);      // (what the host says by itself, as when notes lock after a while, reaches the page too)
   const requests = [];
   x.page.on("request", (r) => requests.push(r.url()));
-  await x.page.evaluate(({ layout, settings, usage, weather, DEFAULT, notes, places, geo, widgets, artifacts }) => {
+  await x.page.evaluate(({ layout, settings, usage, weather, DEFAULT, notes, places, geo, widgets, artifacts, favorites }) => {
     const kept = window.__homeCards = { order: [...layout], settings: JSON.parse(JSON.stringify(settings)) };
     // The stand-in place search: `geo` "ok" | "offline" | "refused"; what was asked of it is noted (never a network).
     window.__homeGeo = { places, mode: geo }; window.__geoAsked = [];
-    window.__homeWidgets = widgets; window.__homeArtifacts = artifacts;
+    window.__homeWidgets = widgets; window.__homeArtifacts = artifacts; window.__homeFavorites = favorites === true;      // (a DGC that keeps the Library's favorites)
     window.__homeUsage = usage; window.__homeWeather = weather; window.__weatherAsked = [];
     const tell = (data) => window.dispatchEvent(new MessageEvent("message", { data: JSON.parse(JSON.stringify(data)) }));
     const say = () => tell({ type: "homeCards", ...kept });
@@ -104,14 +104,14 @@ export async function openGrid(browser, { layout = DEFAULT, settings = {}, usage
       // Notes: the real host (src/notes.ts) answers, from the test's own process (see below).
       else if (m.type === "homeNotesDo") window.__notesHost(m);
       else if (m.type === "homeWidgetsGet") tell(window.__homeWidgets ? { type: "homeWidgets", offered: true, widgets: window.__homeWidgets } : { type: "homeWidgets", offered: false, widgets: [] });
-      else if (m.type === "homeArtifactsGet") tell(window.__homeArtifacts ? { type: "homeArtifacts", offered: true, items: window.__homeArtifacts } : { type: "homeArtifacts", offered: false, items: [] });
+      else if (m.type === "homeArtifactsGet") tell(window.__homeArtifacts ? { type: "homeArtifacts", offered: true, items: window.__homeArtifacts, ...(window.__homeFavorites ? { favorites: true } : {}) } : { type: "homeArtifacts", offered: false, items: [] });
     };
     const posted = window.__posted, push = posted.push;
     posted.push = function (m) { const n = push.call(this, m); try { host(m); } catch (error) { window.__homeCardsError = String(error); } return n; };
     say(); window.__notesHost({ type: "homeNotesDo", op: "get" });
     if (usage) tell(usage);
     if (kept.settings.weather?.place || kept.settings.weather?.city) tell(weather);
-  }, { layout, settings, usage, weather, DEFAULT, notes, places, geo, widgets, artifacts });
+  }, { layout, settings, usage, weather, DEFAULT, notes, places, geo, widgets, artifacts, favorites });
   if (folders || news.length) await x.send({ type: "sessions_list", items: sessions, error: "", ...(folders ? { folders } : {}), ...(news.length ? { news } : {}) });
   await x.settle();
   /** Until the cards have come to rest (a glide, a flip wave). */

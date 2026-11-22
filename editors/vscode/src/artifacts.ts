@@ -12,6 +12,7 @@ import { randomBytes } from "crypto";
 import { CANVAS_DOC_VIEW } from "./canvasDoc";
 import { downloadFile, type DownloadPage } from "./download";
 import { tabIcon } from "./tabIcon";
+import { cleanEvery, filePaths, watchFiles } from "./dashboardWatch";
 
 export { ArtifactNotice, madeWords, ARTIFACT_NOTICED_KEY, type MadeNotice } from "./artifactNotice";
 
@@ -212,9 +213,20 @@ class ArtifactPanel {
   private serveSeq = 0;
   private loadSeq = 0;
 
+  private unwatch?: () => void;    // a live dashboard's watch on its files (src/dashboardWatch.ts)
+  private filesPending = false;    // they changed while the panel wasn't showing
+
   constructor(private readonly hub: Artifacts, readonly id: string, readonly panel: vscode.WebviewPanel) {
     panel.webview.onDidReceiveMessage((message) => { void this.fromPage(message); });
-    panel.onDidDispose(() => hub.forget(this));
+    panel.onDidChangeViewState?.(() => {
+      if (this.panel.visible && this.filesPending) { this.filesPending = false; this.post({ type: "filesChanged" }); }
+    });
+    panel.onDidDispose(() => { this.unwatch?.(); this.unwatch = undefined; hub.forget(this); });
+  }
+
+  /** One of a live dashboard's files changed: its page refreshes, now if it shows, else when it shows again. */
+  private filesChanged(): void {
+    if (this.panel.visible) this.post({ type: "filesChanged" }); else this.filesPending = true;
   }
 
   post(message: Record<string, unknown>): void {
@@ -233,7 +245,7 @@ class ArtifactPanel {
         this.view = view;
         this.panel.title = view.title;
         this.post({ type: "detail", artifact: view, content: ev.content ?? null, state: ev.state && typeof ev.state === "object" ? ev.state : null,
-                    offer: this.hub.offers() ?? null });
+                    offer: this.hub.offers() ?? null, ...(view.type === "dashboard" ? { refreshEvery: this.hub.refreshEvery(this.id) } : {}) });
         if (view.type !== "doc") this.serve();
       },
       fail: (reason, message) => { if (seq === this.loadSeq) this.post({ type: "rejected", what: "load", reason, message }); },
@@ -353,6 +365,18 @@ class ArtifactPanel {
           fail: (reason, text) => this.post({ type: "rejected", what: "refresh", reason, message: text }),
         });
         return;
+      case "refreshEvery": {
+        // How often a dashboard refreshes by itself (its page keeps the timer); "files": on its files' change, watched here.
+        const every = cleanEvery(message.every);
+        if (view?.type !== "dashboard" || every === undefined) return;
+        void this.hub.setRefreshEvery(this.id, every);
+        this.unwatch?.(); this.unwatch = undefined; this.filesPending = false;
+        if (every === "files") {
+          const project = typeof (view as any).origin?.project === "string" ? String((view as any).origin.project) : undefined;
+          this.unwatch = watchFiles(filePaths(message.files, project), () => this.filesChanged());
+        }
+        return;
+      }
       case "allow": {
         if (view?.type !== "dashboard" || typeof message.source !== "string" || typeof message.allowed !== "boolean") return;
         const source = message.source.slice(0, 40), allowed = message.allowed;
@@ -410,6 +434,9 @@ export function fetchPage(url: string, limit = MAX_PAGE_BYTES, timeoutMs = 20_00
     req.on("error", reject);
   });
 }
+
+/** Each dashboard's own refresh choice (src/dashboardWatch.ts), in the editor's global state. */
+const REFRESH_KEY = "dgc.dashboardRefresh";
 
 export class Artifacts implements vscode.Disposable {
   private disposed = false;
@@ -611,6 +638,20 @@ export class Artifacts implements vscode.Disposable {
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...name.split("/"))).toString();
     panel.webview.html = artifactDocument(asset, panel.webview.cspSource, randomBytes(16).toString("base64"));
     return one;
+  }
+
+  /** How often a dashboard refreshes by itself, as the person chose it here ("" by hand): kept by the editor. */
+  refreshEvery(id: string): string {
+    try { return cleanEvery(this.context.globalState.get<Record<string, string>>(REFRESH_KEY)?.[id]) ?? ""; } catch { return ""; }
+  }
+  async setRefreshEvery(id: string, every: string): Promise<void> {
+    try {
+      const all = { ...(this.context.globalState.get<Record<string, string>>(REFRESH_KEY) || {}) };
+      if (every) all[id] = every; else delete all[id];
+      const keys = Object.keys(all);
+      for (const key of keys.slice(0, Math.max(0, keys.length - 500))) delete all[key];      // (the newest 500)
+      await this.context.globalState.update(REFRESH_KEY, all);
+    } catch { /* kept for this panel only */ }
   }
 
   forget(panel: ArtifactPanel): void {

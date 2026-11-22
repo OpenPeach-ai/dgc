@@ -73,6 +73,10 @@ import '../media/pasteclean.js';  // window.DgcPasteClean: what a paste becomes,
 import '../media/mentions.js';   // window.DgcMentions: @ marks in the box and the bubble, the same in all three chats
 import '../media/mentions.css';
 import '../media/shared/links.css';   // a link's favicon and its bundled mark, the same in Work and ChatDGC
+// A link's preview card under the pointer, the same in Work and ChatDGC (window.DgcLinkPreview). In the side bar Work's
+// page asks its host and this view adds its shadow root; a tab of its own connects it below.
+import '../media/shared/linkpreview.css';
+import '../media/shared/linkpreview.js';
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon,outputIcon,questionCard} from './pipsTranscript.js';
 import {patchChildren} from './pipsDomPatch.js';
 import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
@@ -191,6 +195,11 @@ const vscode = {postMessage:options.postMessage};
 // is drawn in: an image's `error` does not leave a shadow root.
 if(!embedded)globalThis.DgcMarkdown?.setFavicons?.(nativeDocument.body.dataset.linkFavicons!=='off');
 disposers.push(globalThis.DgcMentions?.watchFavicons(root)||(()=>{}));
+// A link's preview card (media/shared/linkpreview.js): this tab asks its own host; in the side bar Work's page does.
+if(!embedded)globalThis.DgcLinkPreview?.connect(message=>vscode.postMessage(message));
+// (In the side bar this view's root is told to it: a pointer moving between two things inside a shadow root is never
+// told to the page outside, so the page alone would miss a link reached from the words beside it.)
+else disposers.push(globalThis.DgcLinkPreview?.watch?.(root)||(()=>{}));
 if(chatTab)shell.classList.add('pip-chat-tab');
 let dockPins=new Set(),dockKnown=false;   // what is pinned to the dock, once the host has said (a host with no dock never does)
 // A reply's pictures fold away (media/pictureFold.js, through pipsTranscript.js): drawn in this page's root (a shadow

@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto';
 import { homedir } from 'os';
 import { FILE_ACTS, keptFileAct } from './fileActs';
 import { downloadBytes, downloadFile, downloadMade, takeSave } from './download';
+import { handleLinkPreview, LINK_PREVIEW_MESSAGE } from './linkPreview';
 import { GitRefs } from './gitRefs';
 import { openCommit } from './gitCommitDoc';
 import { isAbsolute } from 'path';
@@ -1841,6 +1842,9 @@ export class PipsEditor implements vscode.Disposable {
                               { stop: this.videoStop, follow: this.videoFollow });
       return;
     }
+    // A link's preview card in a Pip's chat (media/shared/linkpreview.js): answered by the editor, on the page that asked
+    // (the Pips page or a chat's own tab), never sent to DGC (src/linkPreview.ts reads the page).
+    if (message?.type === LINK_PREVIEW_MESSAGE && !computer) { void handleLinkPreview(message, reply => this.post(reply, surface)); return; }
     if (message?.type === 'mcpApp' && !computer && this.pagePanel(surface)) {
       // A plugin's card in a Pip's reply, in the Pips tab: what it asks goes to this window's backend (src/mcpApps.ts).
       const panel = this.pagePanel(surface)!;

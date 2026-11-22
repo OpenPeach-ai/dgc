@@ -24,6 +24,7 @@ import { checkForExtensionUpdates } from "./extensionupdate";
 import { workspaceFile, workspaceImage } from "./navigation";
 import { FILE_ACTS, projectFileAct } from "./fileActs";
 import { downloadBytes, takeSave } from "./download";
+import { handleLinkPreview, LINK_PREVIEW_MESSAGE, linkPreviewsOn, setLinkPreviews } from "./linkPreview";
 import { GitRefs } from "./gitRefs";
 import { openCommit } from "./gitCommitDoc";
 import { McpBrowserRequest, editorIsRemote, handSignInBack, openMcpBrowser } from "./mcpAuth";
@@ -1197,6 +1198,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // A maker's name, pressed in the Library's editor tab: that Work session in its tab; that Pip's chat in the
       // Pips tab beside it (as a Work tab opens Pips).
       openMaker: (maker) => { if (maker.kind === "session") this.openSessionInEditor(maker.id, maker.name); else if (maker.kind === "pip") this.openPipsEditor({ pip: maker.id }); },
+      favoritesOffered: () => this.favoritesCapable(),
+      favorites: (change) => this.favorites(change),
       videosOffered: () => this.videosCapable(),
       videosStop: (job) => this.videosStop(job),
       videosLibrary: (cmd) => this.videosLibrary(cmd),
@@ -6148,6 +6151,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await handleVideoMessage(msg, (m) => this.post(m), { stop: (job) => this.videosStop(job), follow: (job) => this.videosJobs(job) });
       return;
     }
+    // A link's preview card: the page asks about an address, and is answered here (src/linkPreview.ts reads the page).
+    if (msg?.type === LINK_PREVIEW_MESSAGE) { await handleLinkPreview(msg, (m) => this.post(m)); return; }
     if (msg?.type === "videoJobs") { this.videosJobs(String(msg.job || "")); return; }
     if (msg?.type === "autoModeAnswer") {
       if (this.autoModePrompt && msg.requestId === this.autoModePrompt.id) {
@@ -10094,6 +10099,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return this.ensureBackend().request({ ...checked, request_id: this.nextRequestId("images-library") } as any, "images_library" as any, 15000);
   }
 
+  /** Does this chat's CLI keep the Library's favorites (ready.capabilities.favorites, 0.52)? */
+  favoritesCapable(): boolean { return (this.lastReadyEvent?.capabilities as any)?.favorites === 1; }
+  /** The Library's favorites (dgc/favorites.py): the list (favorites_list), or one item starred or its star taken
+   *  off (favorites_set); DGC answers the whole list either way. Rejects on an older CLI, and when DGC refuses. */
+  async favorites(change?: { kind: string; id: string; on: boolean }): Promise<any> {
+    if (!this.favoritesCapable()) throw new Error("Update the DGC CLI to keep favorites here.");
+    if (!change) return this.ensureBackend().request({ type: "favorites_list", request_id: this.nextRequestId("favorites-list") } as any, "favorites" as any, 15000);
+    return this.ensureBackend().request({ type: "favorites_set", request_id: this.nextRequestId("favorites-set"), kind: String(change.kind), id: String(change.id), on: change.on === true } as any,
+      "favorites" as any, 15000);
+  }
+
   /** Does this chat's CLI list what you attached in Work sessions (ready.capabilities.session_attachments, 16 Nov)? */
   sessionAttachmentsCapable(): boolean { return (this.lastReadyEvent?.capabilities as any)?.session_attachments === 1; }
   /** The Library's Files, Work's part: what you attached in Work sessions (list_session_attachments), newest first.
@@ -10311,6 +10327,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Settings -> General -> Pictures in replies: the editor's own setting, shown as it is now.
     this.settingsEditor?.webview.postMessage({ type: "picturesInReplies", value: picturesFolded() ? "folded" : "shown" });
     // Settings -> General -> Dock: the editor's own three, shown as they are now.
+    // Settings -> Security -> Links: the editor's own setting too (dgc.linkPreviews), shown as it is now.
+    this.settingsEditor?.webview.postMessage({ type: "linkPreviews", on: linkPreviewsOn() });
     this.settingsEditor?.webview.postMessage({ type: "dockSettings", ...dockSettings() });
     this.refreshEditorSettings();
   }
@@ -10576,6 +10594,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // Applies at once, in every window: each chat's pictures nobody folded or opened follow it (src/pictureFolds.ts).
       await setPicturesInReplies(msg.value);
       this.settingsEditor?.webview.postMessage({ type: "picturesInReplies", value: picturesFolded() ? "folded" : "shown" });
+    } else if (msg?.type === "linkPreviews") {
+      // Applies at once, in every window: each host reads it before it reads a page (src/linkPreview.ts).
+      await setLinkPreviews(msg.on);
+      this.settingsEditor?.webview.postMessage({ type: "linkPreviews", on: linkPreviewsOn() });
     } else if (msg?.type === "dockSetting") {
       // Applies at once, in every window: each side bar's dock follows it (src/dock.ts).
       await setDockSetting(msg);
@@ -11864,6 +11886,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // opened large in the chat (media/shared/picturepop.js, window.DgcPicturePop): the same in ChatDGC and a Pip's chat.
     const downloadJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "download.js"));
     const picturePopJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "picturepop.js"));
+    // A link's preview card under the pointer (media/shared/linkpreview.js, window.DgcLinkPreview): the same in ChatDGC
+    // and a Pip's chat. Its picture is a data: URI this host read (src/linkPreview.ts), so the policy below is unchanged.
+    const linkPreviewJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "linkpreview.js"));
     // A file's menu, the same on a Library row and on a file's card in a chat (media/shared/filemenu.js, window.DgcFileMenu).
     const fileMenuJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "filemenu.js"));
     // Inline touches in what you type and what you read: a colour's swatch, shortcuts as keys, commits as links, times in
@@ -12239,7 +12264,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div id="followup-hint" hidden></div>
 </footer>
-<script nonce="${nonce}" src="${menuJs}"></script><script nonce="${nonce}" src="${iconsJs}"></script><script nonce="${nonce}" src="${downloadJs}"></script><script nonce="${nonce}" src="${picturePopJs}"></script><script nonce="${nonce}" src="${askCardJs}"></script><script nonce="${nonce}" src="${fileMenuJs}"></script><script nonce="${nonce}" src="${inlineJs}"></script>
+<script nonce="${nonce}" src="${menuJs}"></script><script nonce="${nonce}" src="${iconsJs}"></script><script nonce="${nonce}" src="${downloadJs}"></script><script nonce="${nonce}" src="${picturePopJs}"></script><script nonce="${nonce}" src="${linkPreviewJs}"></script><script nonce="${nonce}" src="${askCardJs}"></script><script nonce="${nonce}" src="${fileMenuJs}"></script><script nonce="${nonce}" src="${inlineJs}"></script>
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script><script nonce="${nonce}" src="${pipJobJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **A link's preview when you point at it**, in Work, ChatDGC and a Pip's chat: the site's icon, its picture, title and
+  description, and Open. DGC reads public pages only: never a local, private or Tailscale address, and never a
+  one-time link (a sign-in, a reset, a confirm or unsubscribe link), which shows its address alone. Only the page's
+  head is read, without your cookies, and kept for a day. Turn it off in Settings › Security › Links.
+- **The Library's tab comes back after a window reload**, with its tab, search and filters as you left them.
+- **Favorites in the Library**: star anything (a purple star on its row, or Add to Favorites in its ⋯ menu), and
+  filter any tab by Favorites, with search and the other filters. A star on Home's Artifacts card shows only your
+  favorite artifacts. Favorites are kept by DGC, the same in every window and after a reload.
+- **Dashboards stay live**: beside Refresh, choose how it refreshes by itself: every minute, 5, 15 or 60 minutes, or
+  when its files change (a table file or a SQLite database it reads). Only while it shows; "Refreshed 09:40 · every 5
+  min" says so. A failed refresh keeps the numbers it has and tries again later, twice as long each time (at most an
+  hour). The choice is kept per dashboard by the editor; it isn't a change to the dashboard.
+- **ChatDGC's @ list is as tall as its rows**, as a Pip's chat's is: one match is one row, never a tall empty box.
 - **What's new, whenever you want it**: DGC's version and "What's new" sit at the far right of the side bar's logo
   line (Home and the Library), in grey; a click opens the slides again.
 - **Your Browser's tabs read like Chrome's**: the current tab is the address row's colour and joins it, on a strip a

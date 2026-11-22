@@ -96,7 +96,9 @@ const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" },
                        // Settings -> Models -> A model that can see (0.52): only when ready.capabilities.seeing says so.
                        { method: "seeingSettingsCommand", guard: "seeingCapable" },
                        // The usage meter (0.52): its numbers asked only when ready.capabilities.usage_limits says so.
-                       { method: "askUsageLimits", guard: "usageLimitsCapable" }].map(g => g.method);
+                       { method: "askUsageLimits", guard: "usageLimitsCapable" },
+                       // The Library's favorites (0.52): read and changed only when ready.capabilities.favorites says so.
+                       { method: "favorites", guard: "favoritesCapable" }].map(g => g.method);
 const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps: "mcpAppsSupported",
                               watchRouter: "routerCapable", watchImages: "imagesCapable",
                               imagesLibrary: "imagesLibraryCapable", routerThinking: "routerThinkingCapable",
@@ -108,7 +110,8 @@ const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps:
                               sessionAttachments: "sessionAttachmentsCapable", sessionAttachment: "sessionAttachmentsCapable",
                               modelWindowAt: "modelWindowOffered", sendHelperConnections: "helperConnectionsOffered",
                               answerConnectionRoute: "helperConnectionsOffered", libraryPicture: "libraryPictureCapable",
-                              seeingSettingsCommand: "seeingCapable", askUsageLimits: "usageLimitsCapable" };
+                              seeingSettingsCommand: "seeingCapable", askUsageLimits: "usageLimitsCapable",
+                              favorites: "favoritesCapable" };
 
 /** Is this node inside a method with the given name? */
 function insideMethod(node, name) {

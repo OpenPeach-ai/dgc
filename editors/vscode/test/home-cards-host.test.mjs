@@ -32,6 +32,29 @@ test("someone new has the default set; what is added, moved and removed is kept 
 
 // (The test "each card type wears a mosaic palette of its own ... never Ember" went on 13 Nov with the per-card icons:
 // the library's cards have no icon, so the host keeps no palette for them.)
+test("the Artifacts card's star is kept: only its favorites, across a reload, beside the page it showed", async () => {
+  const context = store(), home = new HomeCards(context);
+  await home.setting("artifacts", { shown: "ar_0000000000000003" });
+  await home.setting("artifacts", { favorites: true });
+  assert.deepEqual(new HomeCards(context).state().settings.artifacts, { shown: "ar_0000000000000003", favorites: true }, "the star on, and the page it showed still kept");
+  await home.setting("artifacts", { favorites: "yes" });
+  await home.setting("artifacts", { favorites: 1, shown: "ar_0000000000000004" });
+  assert.deepEqual(new HomeCards(context).state().settings.artifacts, { shown: "ar_0000000000000003", favorites: true }, "only on or off: anything else changes nothing");
+  await home.setting("artifacts", { shown: "ar_0000000000000005" });
+  assert.deepEqual(new HomeCards(context).state().settings.artifacts, { shown: "ar_0000000000000005", favorites: true }, "turning the page keeps the star");
+  await home.setting("artifacts", { favorites: false });
+  assert.deepEqual(new HomeCards(context).state().settings.artifacts, { shown: "ar_0000000000000005" }, "off: nothing is kept for it");
+  await home.setting("artifacts", { shown: "" });
+  assert.equal(new HomeCards(context).state().settings.artifacts, undefined);
+  // Only the Artifacts card has one.
+  await home.setting("widgets", { favorites: true });
+  assert.equal(new HomeCards(context).state().settings.widgets, undefined);
+  // Through a page's message, as Home sends it.
+  let said; home.handle({ type: "homeCardSetting", card: "artifacts", settings: { favorites: true } }, (s) => { said = s; });
+  await new Promise((done) => setTimeout(done, 10));
+  assert.deepEqual(said.settings.artifacts, { favorites: true });
+});
+
 test("the host keeps no palette for a card: the library's cards have no icon of their own", async () => {
   const context = store(), home = new HomeCards(context);
   await home.setOrder(["note", "clock"]);

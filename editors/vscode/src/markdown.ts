@@ -1,4 +1,5 @@
 import MarkdownIt from "markdown-it";
+import { PRIVATE_HOST } from "./privateHost";
 import { renderGenerativeUi } from "./generativeUi";
 import { addMath } from "./markdownMath";
 import hljs from "highlight.js/lib/core";
@@ -189,10 +190,8 @@ let faviconsEnabled = true;
 export function setFavicons(on: boolean): void { faviconsEnabled = !!on; }
 export function faviconsOn(): boolean { return faviconsEnabled; }
 
-// An address no public site has: an IP address, localhost, a one-word name, a private or tailnet name. Google's icon
-// service can't reach it and sends a soft stand-in globe, and the address never needs to leave the machine: such a
-// link wears DGC's own sharp mark (links.css) instead.
-const PRIVATE_HOST = /^(?:localhost|[^.]+|\d{1,3}(?:\.\d{1,3}){3}|\[.*\])$|\.(?:localhost|local|lan|home|internal|intranet|corp|private|home\.arpa|ts\.net)$/i;
+// An address no public site has (src/privateHost.ts): Google's icon service can't reach it and sends a soft stand-in
+// globe, and the address never needs to leave the machine: such a link wears DGC's own sharp mark (links.css) instead.
 
 export function faviconUrl(value: string): string | undefined {
   try {

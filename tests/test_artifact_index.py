@@ -43,6 +43,12 @@ class Index(unittest.TestCase):
         else:
             os.environ["DGC_HOME"] = self._env
 
+    def dashboard_spec(self):
+        csv = self.tmp / "sales.csv"
+        csv.write_text("order,total\n1,10\n")
+        return {"sources": [{"id": "sales", "kind": "file", "path": str(csv)}],
+                "widgets": [{"id": "n", "kind": "number", "title": "Orders", "source": "sales", "query": "SELECT COUNT(*) AS n FROM sales", "value": "n"}]}
+
     def run_index(self):
         return artifact_index.index(chats=self.chats, force=True)
 
@@ -81,6 +87,42 @@ class Index(unittest.TestCase):
         old.store_id = ""                         # even an entry that forgot its page isn't brought back
         self.assertEqual(self.run_index(), 0)
         self.assertEqual(self.store.list(), [])
+
+    def test_a_dashboard_shown_never_comes_in_as_a_page_of_its_own(self):
+        """Showing a dashboard serves its view folder (inside DGC's own store); that served view is the dashboard's,
+        never a second item with its name (a "Page" beside the dashboard in the Library)."""
+        dash = S.make("dashboard", "Live sales", self.dashboard_spec(),
+                      origin={"surface": "work", "project": str(self.tmp / "shop"), "session": "s"})
+        with patch.object(S, "render", return_value=({"index.html": b"<!doctype html><p>numbers</p>"}, "index.html")):
+            S.serve(dash["id"])
+        served = [a for a in A._SRV.artifacts.values()]
+        self.assertTrue(served and all(a.store_id == dash["id"] for a in served), "the served view is the dashboard's")
+        # Even a served view that lost its mark (another process read the list before it was saved) stays out.
+        for a in served:
+            a.store_id = ""
+        self.run_index()
+        self.assertEqual([(v["type"], v["title"]) for v in S.listing()], [("dashboard", "Live sales")])
+
+    def test_a_page_already_made_from_a_dashboards_view_goes_to_the_trash(self):
+        dash = S.make("dashboard", "Live sales", self.dashboard_spec(), origin={"surface": "work", "project": str(self.tmp)})
+        view = self.store.root / dash["id"] / "view"
+        view.mkdir(parents=True, exist_ok=True)
+        (view / "index.html").write_text("<!doctype html><p>numbers</p>")
+        phantom = self.store.create("page", "Live sales", {"index.html": b"<p>numbers</p>"}, author="DGC",
+                                    origin={"surface": "work", "project": str(view)},
+                                    link={"path": str(view), "entry": "index.html", "project": str(view)}, legacy={"server": "x1"})
+        site = self.tmp / "site"
+        site.mkdir()
+        (site / "index.html").write_text("<p>mine</p>")
+        mine = self.store.create("page", "My page", {"index.html": b"<p>mine</p>"}, author="DGC",
+                                 origin={"surface": "work", "project": str(self.tmp)},
+                                 link={"path": str(site), "entry": "index.html", "project": str(self.tmp)}, legacy={"server": "x2"})
+        self.run_index()
+        ids = {v["id"] for v in S.listing()}
+        self.assertNotIn(phantom.id, ids, "a dashboard's view shown as a page of its own: gone")
+        self.assertIn(mine.id, ids, "a page someone made stays")
+        self.assertIn(dash["id"], ids)
+        self.assertTrue(any(p.name.startswith(phantom.id) for p in (self.store.root / ".trash").iterdir()), "in DGC's trash, not deleted")
 
     def test_implicit_chat_import_stays_inside_the_artifact_stores_home(self):
         self.seed_chat()  # A foreign ChatDGC store has a widget and a made sheet.

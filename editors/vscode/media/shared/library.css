@@ -52,6 +52,17 @@
 /* A kind is a word and is never cut ("Dashboards"); a maker's name beside it is what ends in "…". */
 .dgc-lib .lib-filter[data-filter="kind"], .dgc-lib .lib-filter[data-filter="origin"] { flex: none; }
 .dgc-lib .lib-filter .dgc-folder-v { white-space: nowrap; }
+/* Favorites, at the line's end: a button of the same shape, with the star. Pressed, the tab shows only what is
+   starred: the star is filled, in the accent, and the word is the strong text's. */
+.dgc-lib .lib-fav-filter { appearance: none; flex: none; display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; height: var(--btn-h); margin: 0; padding: 0 10px 0 8px; border: 1px solid var(--btn-line); border-radius: var(--btn-r);
+  background: transparent; color: var(--text-2); font: var(--w-reg) var(--t-sm)/1 var(--sans); white-space: nowrap; cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), transform var(--btn-press) var(--ease-out); }
+.dgc-lib .lib-fav-filter:hover { background: var(--btn-wash); color: var(--text); }
+.dgc-lib .lib-fav-filter:active { transform: scale(.97); }
+.dgc-lib .lib-fav-filter:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.dgc-lib .lib-fav-filter > .dgc-icon { flex: none; }
+.dgc-lib .lib-fav-filter[aria-pressed="true"] { border-color: var(--border-strong); background: var(--field); color: var(--text-strong); font-weight: var(--w-med); }
+.dgc-lib .lib-fav-filter[aria-pressed="true"] > .dgc-icon { color: var(--accent-text); }
 .dgc-lib .lib-status { margin: 0; padding: 0; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 .dgc-lib .lib-status[hidden] { display: none; }
 .dgc-lib .lib-status[data-kind="error"] { color: var(--err-text); }
@@ -107,6 +118,17 @@
 .dgc-lib .lib-act:focus-visible, .dgc-lib .lib-row-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .dgc-lib .lib-act[data-act="remove"]:hover { color: var(--err-text); }
 .dgc-lib .lib-pin[aria-pressed="true"] { color: var(--text); }
+/* A Favorite's star, before the row's buttons: the same 28 px button. Not a favorite, it is an outline that shows
+   when the row is pointed at or holds the keyboard (its place is kept, so nothing moves when it shows); a favorite's
+   is filled, in the accent, and always there. Where nothing can be pointed at, every row's star shows. */
+.dgc-lib .lib-fav { appearance: none; flex: none; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 28px; height: 28px; margin: 0 -8px 0 0; padding: 0; border: 0; border-radius: var(--btn-r);
+  background: transparent; color: var(--text-2); cursor: pointer; opacity: 0; transition: opacity var(--dur-hover, .12s) ease, color var(--dur-hover, .12s) ease, background-color var(--dur-hover, .12s) ease; }
+.dgc-lib .lib-row:is(:hover, :focus-within) .lib-fav, .dgc-lib .lib-fav[aria-pressed="true"], .dgc-lib .lib-fav:focus-visible { opacity: 1; }
+.dgc-lib .lib-fav:hover { background: var(--wash); color: var(--text); }
+.dgc-lib .lib-fav:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.dgc-lib .lib-fav[aria-pressed="true"], .dgc-lib .lib-fav[aria-pressed="true"]:hover { color: var(--accent-text); }
+@media (hover: none) { .dgc-lib .lib-fav { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dgc-lib .lib-fav, .dgc-lib .lib-fav-filter { transition: none; } }
 /* The row's ⋯ is on every row at every width, after its words (and after its icon buttons, where those fit): nothing
    needs the pointer on the row first, and Tab reaches it (his pictures, 16 Nov: in a narrow side bar the icons went and
    the ⋯ showed only on the row pointed at, so Pin could not be reached). Where the icon buttons don't fit (under 560px)
@@ -123,6 +145,7 @@
 @media (min-width: 560px) {
   .dgc-lib .lib-row { gap: 0 var(--sp-3); }
   .dgc-lib .lib-row-actions { display: inline-flex; }
+  .dgc-lib .lib-fav { margin-right: calc(2px - var(--sp-3)); }
   /* The row's ⋯ comes after its buttons: the whole menu (the same one a right-click opens). */
   .dgc-lib .lib-row .lib-row-more { margin-left: calc(2px - var(--sp-3)); margin-right: 0; }
   .dgc-lib .lib-row-facts { display: block; }
@@ -145,6 +168,13 @@
   .dgc-lib .lib-row-maker { min-width: 2.5em; }
 }
 
+/* A side bar too narrow for Kind, By and the word Favorites on one line: Favorites is its star alone, so the filters
+   stay one line; the word stays in the page for a screen reader, and is the button's label on hover. */
+@media (max-width: 339px) {
+  .dgc-lib .lib-fav-filter { width: var(--btn-h); padding: 0; justify-content: center; }
+  .dgc-lib .lib-fav-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+
 /* ---- in its own editor tab: one column, the list scrolling inside the page ---- */
 .lib-body { margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); }
 .lib-body .dgc-lib { --lib-bleed: var(--sp-2); width: 100%; max-width: 860px; height: 100%; min-height: 0; margin: 0 auto; padding: var(--sp-4) var(--sp-4) var(--sp-5); overflow-y: auto; }
@@ -158,4 +188,7 @@
   .dgc-lib .lib-row:hover { background: Highlight; color: HighlightText; forced-color-adjust: none; }
   .dgc-lib button.lib-row-maker { color: LinkText; }
   .dgc-lib .lib-search { border-color: CanvasText; }
+  .dgc-lib .lib-fav-filter { border-color: CanvasText; }
+  .dgc-lib .lib-fav-filter[aria-pressed="true"] { border-color: Highlight; }
+  .dgc-lib .lib-fav[aria-pressed="true"], .dgc-lib .lib-fav-filter[aria-pressed="true"] > .dgc-icon { color: Highlight; }
 }

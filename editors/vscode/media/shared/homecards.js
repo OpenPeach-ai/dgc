@@ -464,7 +464,10 @@
 
     // ---- Widgets and Artifacts: what the Library lists, a page at a time ---------------------------------------------------
     const PER = { widgets: { s: 1, m: 1, l: 2 }, artifacts: { s: 1, m: 2, l: 4 } };
-    const rowsOf = (id) => (Array.isArray(made[id]?.rows) ? made[id].rows : []);
+    const everyRow = (id) => (Array.isArray(made[id]?.rows) ? made[id].rows : []);
+    /** The Artifacts card's star: on, the card shows only the favorites (the Library keeps them; this DGC must). */
+    const starOn = (id) => id === "artifacts" && made.artifacts?.favorites === true && layout.settings?.artifacts?.favorites === true;
+    const rowsOf = (id) => (starOn(id) ? everyRow(id).filter((r) => r.favorite === true) : everyRow(id));
     /** The page a card shows: the one that holds the thing it showed last (kept by the host). */
     function pageOf(id, per) {
       const rows = rowsOf(id), shown = layout.settings?.[id]?.shown || "", at = Math.max(0, rows.findIndex((r) => r.id === shown));
@@ -490,17 +493,23 @@
     }
     function stackCard(id, form, d) {
       const name = CARDS[id].name, said = made[id], rows = rowsOf(id), all = id === "widgets" ? "All widgets" : "All artifacts";
-      const link = `<button type="button" class="hc-lnk hc-all" data-library="${id}" title="Open the Library on ${name}">${all}</button>`;
+      // The Artifacts card's star, in its head: pressed, only the favorites; pressed again, all of them.
+      const only = starOn(id), star = id === "artifacts" && said?.favorites === true && said.offered !== false
+        ? `<button type="button" class="hc-btn hc-icon hc-fav" data-fk="fav" aria-pressed="${only}" aria-label="${only ? "Showing only favorites. Show all artifacts" : "Show only favorites"}" title="${only ? "Showing only your favorites. Press to show all." : "Show only your favorites"}">${shared(only ? "unfavorite" : "favorite", 14)}</button>` : "";
+      const link = `${star}<button type="button" class="hc-lnk hc-all" data-library="${id}" title="Open the Library on ${name}">${all}</button>`;
+      // (Only favorites, and none: said in one line, with the star still there to press again.)
+      if (only && !rows.length) return form === "s" ? `<span class="hc-lbl">${name}<span class="hc-favmark" title="Only favorites">${shared("unfavorite", 11)}</span></span><span class="hc-grow"></span><span class="hc-sub">No favorites yet</span>`
+        : `${headOf(name, "", link)}<p class="hc-quiet">No favorites here yet. Star an item to keep it here.</p>`;
       const quiet = !said ? "Looking…" : said.offered === false ? `This DGC keeps no ${id}. Update DGC to see them here.`
         : id === "widgets" ? "No widgets yet. Ask Work or Chat for a widget (a calculator, a timer, a quiz), and it shows here." : "No artifacts yet. Ask Work or Chat for a page, a document, slides, a sheet or a dashboard, and it shows here.";
       if (!rows.length) return form === "s" ? `<span class="hc-lbl">${name}</span><span class="hc-grow"></span><span class="hc-sub">${esc(!said ? "Looking…" : said.offered === false ? `This DGC keeps no ${id}` : `No ${id} yet`)}</span>`
         : `${headOf(name, "", said && said.offered !== false ? link : "")}<p class="hc-quiet">${esc(quiet)}</p>`;
-      if (form === "full") return `${headOf(name, `<span class="hc-cap hc-cut">${rows.length}${said.more ? "+" : ""}, newest first</span>`, link)}<div class="hc-stack hc-stack-all" data-per="all">${rows.map((r) => tileOf(id, r, d, form)).join("")}</div>`;
+      if (form === "full") return `${headOf(name, `<span class="hc-cap hc-cut">${rows.length}${said.more && !only ? "+" : ""}${only ? (rows.length === 1 ? " favorite" : " favorites") : ""}, newest first</span>`, link)}<div class="hc-stack hc-stack-all" data-per="all">${rows.map((r) => tileOf(id, r, d, form)).join("")}</div>`;
       const per = PER[id][form], { page, pages } = pageOf(id, per), shown = rows.slice(page * per, page * per + per);
       const dots = pages > 8 ? `<span class="hc-pages">${page + 1} / ${pages}</span>` : Array.from({ length: pages }, (_, k) => `<button type="button" class="hc-dot" data-page="${k}" tabindex="-1" aria-label="Page ${k + 1} of ${pages}"${k === page ? ' aria-current="true"' : ""}></button>`).join("");
       const pager = `<div class="hc-pager" role="group" aria-label="${name}: pages"><button type="button" class="hc-btn hc-icon hc-prev" data-fk="prev" aria-label="Earlier page" title="Earlier (Left)"${page ? "" : " disabled"}>${PREV}</button><span class="hc-dots">${dots}</span><button type="button" class="hc-btn hc-icon hc-next" data-fk="next" aria-label="Next page" title="Next (Right)"${page < pages - 1 ? "" : " disabled"}>${NEXT}</button></div>`;
       const stack = `<div class="hc-stack" data-per="${per}" data-fk="stack" tabindex="0" role="group" aria-roledescription="carousel" aria-label="${name}, page ${page + 1} of ${pages}. Left and Right turn the page.">${shown.map((r) => tileOf(id, r, d, form)).join("")}</div>`;
-      return (form === "s" ? `<span class="hc-lbl">${name}<span class="hc-cnt">${rows.length}${said.more ? "+" : ""}</span></span>` : headOf(name, "", link)) + stack + pager;
+      return (form === "s" ? `<span class="hc-lbl">${name}${only ? `<span class="hc-favmark" title="Only favorites">${shared("unfavorite", 11)}</span>` : ""}<span class="hc-cnt">${rows.length}${said.more && !only ? "+" : ""}</span></span>` : headOf(name, "", link)) + stack + pager;
     }
     const render = (id, form, d, tight) => (id === "token" ? tokenCard(form) : id === "recent" ? recentCard(form, d, tight) : id === "needs" ? needsCard(form, d) : id === "running" ? runningCard(form, d, tight)
       : id === "quick" ? quickCard(form, d) : id === "browser" ? browserCard(form, d, tight) : id === "folders" ? foldersCard(form, d) : id === "clock" ? clockCard(form) : id === "weather" ? weatherCard(form, tight) : id === "note" ? ""
@@ -510,7 +519,7 @@
       return id === "needs" ? (d.needs?.count ? `${d.needs.count} waiting` : "Nothing waiting") : id === "running" ? ((d.running || []).length ? `${d.running.length} running` : "Nothing running") : id === "recent" ? "Work, chats and Pips"
         : id === "token" ? "Tokens, requests, cache" : id === "quick" ? "New work · chat · Pip" : id === "work" ? plural(d.work?.total || 0, "session") : id === "chats" ? plural(d.chats?.total || 0, "chat") : id === "pips" ? plural(d.pips?.total || 0, "Pip")
         : id === "folders" ? plural((d.folders?.rows || []).length, "folder") : id === "browser" ? (d.browser?.install ? "Needs Google Chrome" : (d.browser?.links || []).length ? plural(d.browser.links.length, "last link") : "Search or type an address") : id === "clock" ? "The time here" : id === "weather" ? placeOf()?.name || "A place you choose"
-        : id === "widgets" ? (made.widgets ? plural(rowsOf("widgets").length, "widget") : "The widgets made for you") : id === "artifacts" ? (made.artifacts ? plural(rowsOf("artifacts").length, "artifact") : "What was made for you") : plural(notesApp?.count() || 0, "note");
+        : id === "widgets" ? (made.widgets ? plural(rowsOf("widgets").length, "widget") : "The widgets made for you") : id === "artifacts" ? (made.artifacts ? plural(everyRow("artifacts").length, "artifact") : "What was made for you") : plural(notesApp?.count() || 0, "note");
     }
     function preview(id, d) {
       const marks = (rows) => (rows || []).slice(0, 3).map((r) => `<span class="hc-ico">${r.icon || ""}</span>`).join("") || `<span class="hc-sub">${esc(caption(id, d))}</span>`;
@@ -1047,6 +1056,15 @@
       if (id === "widgets" || id === "artifacts") {
         const turner = t.closest(".hc-prev, .hc-next, .hc-dot"), tile = t.closest("button[data-tile]");
         if (turner) { turn(id, card.dataset.form, turner.classList.contains("hc-prev") ? "prev" : turner.classList.contains("hc-next") ? "next" : turner.dataset.page); if (!card.contains(doc.activeElement)) card.querySelector(".hc-stack")?.focus({ preventScroll: true }); return; }
+        if (t.closest(".hc-fav")) {
+          // The star: only the favorites, or all again. Kept by the host, so a reload finds it as it was left.
+          const on = !starOn(id);
+          setting(id, { favorites: on });
+          say(on ? "Artifacts: showing only your favorites." : "Artifacts: showing all.");
+          focusNext = `${ui.open ? ".hc-open" : ".hc-grid"} .hc-fav`;
+          cancelAnimationFrame(pending); drawNow();
+          return;
+        }
         if (t.closest("[data-library]")) { act?.("library", id); return; }
         if (tile) { const row = rowsOf(id).find((r) => r.id === tile.dataset.tile); if (row) act?.(id === "widgets" && !row.card ? "widget" : "artifact", row.card ? { ...row, type: "page" } : row); return; }
       }
@@ -1195,7 +1213,7 @@
         const rows = (Array.isArray(kind === "widgets" ? said?.widgets : said?.items) ? (kind === "widgets" ? said.widgets : said.items) : []).filter((r) => r && typeof r.id === "string" && r.id).slice(0, 200);
         if (kind === "artifacts") rows.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
         else rows.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));      // (ChatDGC's widgets and replies' cards, together, the newest first)
-        made[kind] = { offered: said?.offered !== false, rows, more: said?.more === true }; madeAt[kind] = Date.now(); draw();
+        made[kind] = { offered: said?.offered !== false, rows, more: said?.more === true, ...(kind === "artifacts" && said?.favorites === true ? { favorites: true } : {}) }; madeAt[kind] = Date.now(); draw();
       },
       /** The host's Notes messages (the list, a note's words, a search): the notes app's. */
       notes(message) { notesApp?.heard(message); },

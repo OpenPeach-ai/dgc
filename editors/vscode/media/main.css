@@ -31,6 +31,7 @@
 @import url("./shared/links.css");
 @import url("./shared/inline.css");
 @import url("./shared/picturepop.css");
+@import url("./shared/linkpreview.css");
 @import url("./shared/modelpicker.css");
 @import url("./shared/usagemeter.css");
 @import url("./shared/askcard.css");
@@ -129,7 +130,7 @@ body:not([data-agent-page]) #phead .pm ~ .thread-title { margin-left: calc(6px -
 #pips-host { display:flex; flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; width:100%; }
 /* (The Pips view stands on the side bar's own ground, as Home, Work and Chat do, 13 Nov: the tab bar and the dock keep
    the one ground on every tab. They took the editor's ground under the Pips view, which stood on it.) */
-body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(#whats-new):not(#pips-welcome):not(#pips-mac-note):not(.yb-install-dialog):not(script) { display:none !important; }
+body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(.dgc-linkcard):not(#whats-new):not(#pips-welcome):not(#pips-mac-note):not(.yb-install-dialog):not(script) { display:none !important; }
 /* A page of the Pips view with a back arrow (a Pip's chat, its Settings, History and its other pages; Pips settings,
    Needs attention's View all, a project's New Pip, Workspace context and Notifications) has the side bar to itself: no
    dock and no tab bar (main.js, onInsidePip), and the page takes their room. DGC's own header stays. Not drawn, so
@@ -149,8 +150,17 @@ body.sessions-active #phead .pm { display:inline-flex; flex:1; align-self:center
    Home, Work, Chat, Pips. The header holds the wordmark alone there: the buttons it once had are the tab bar's (Pips is
    a tab, and the tabs are Pips' way back), so nothing is offered twice. The tab bar sits close under it. */
 html[data-chat-place="home"] #phead { min-height: 34px; padding-bottom: 0; }
+/* The logo and "What's new" share one baseline (a monospace and a sans face centred by their boxes sat 1–1.5 px apart);
+   the top padding keeps the logo where it was. */
+html[data-chat-place="home"] #phead { align-items: baseline; padding-top: calc(var(--sp-2) + 2.5px); }
 html[data-chat-place="home"] #phead :is(button:not(#phead-news), .agent-mark) { display:none !important; }
-html[data-chat-place="home"] #phead .pm { display:inline-flex; flex:1; align-self:center; }
+html[data-chat-place="home"] #phead .pm { display:inline-flex; flex:1; align-self:baseline; }
+/* (Under 231 px the logo is its mark alone, with no words to share a baseline: it stays centred, as before.) */
+@media (max-width: 230px) {
+  html[data-chat-place="home"] #phead { align-items: center; padding-top: var(--sp-2); }
+  html[data-chat-place="home"] #phead .pm, html[data-chat-place="home"] #phead .phead-news { align-self: center; }
+  html[data-chat-place="home"] #phead .phead-news { align-items: center; }
+}
 html[data-chat-place="home"] #side-tabs { padding-top: 4px; }
 /* ---- Frosted glass: the tab bar and the strip behind the dock (0.52) ----------------------------- */
 /* On Home, Work, Chat and the Pips list the page begins under DGC's header and runs to the foot of the side bar; the tab
@@ -396,7 +406,7 @@ body.vscode-light .project-icon[data-color="orange"] { color:#EA580C; }   /* #F9
 #phead .chat-add:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 #phead .chat-add[disabled] { opacity: .35; cursor: default; }
 /* DGC's version and "What's new", at the far right of the logo line (Home and the Library in the side bar). */
-#phead .phead-news { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); height: var(--control-sm);
+#phead .phead-news { flex: none; margin-left: auto; display: inline-flex; align-items: baseline; align-self: baseline; gap: var(--sp-2); height: var(--control-sm);
   padding: 0 var(--sp-2); border: 0; border-radius: var(--btn-r, 6px); background: transparent; color: var(--muted); cursor: pointer;
   font: var(--w-medium, 500) var(--t-xs)/14px var(--font, inherit); white-space: nowrap; }
 #phead .phead-news[hidden] { display: none; }

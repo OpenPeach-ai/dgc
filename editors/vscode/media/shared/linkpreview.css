@@ -1,0 +1,39 @@
+/* A link's preview card (media/shared/linkpreview.js): under a link in a chat while the pointer rests on it, the same
+   in Work, ChatDGC and a Pip's chat. The site's icon, its name and Open on the top row; the site's own picture, full
+   width; the page's title and two lines of what it says. DGC's own surface, hairline and card corner; Open is the text
+   button of the button family (its 6px corner, never a pill). Both themes and high contrast from the shared tokens;
+   170 to 700 px wide (the script keeps it inside the page and off its link). */
+.dgc-linkcard {
+  position: fixed; left: 0; top: 0; z-index: 95; box-sizing: border-box; display: flex; flex-direction: column;
+  width: 340px; max-width: calc(100vw - 16px); margin: 0; overflow: hidden;
+  border: 1px solid var(--border-strong); border-radius: var(--r-card);
+  background: var(--surface2); color: var(--text); box-shadow: var(--lift-2);
+  font: var(--w-reg) var(--t-sm)/1.45 var(--sans); letter-spacing: 0; text-align: left; text-transform: none; white-space: normal;
+}
+.dgc-linkcard[hidden] { display: none; }
+.dgc-linkcard-top { flex: none; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: 6px 6px 6px var(--sp-3); }
+.dgc-linkcard:not([data-state="address"]) .dgc-linkcard-top { border-bottom: 1px solid var(--border); }
+.dgc-linkcard-icon { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; color: var(--muted); }
+.dgc-linkcard-icon img { display: block; width: 16px; height: 16px; border-radius: 3px; object-fit: contain; }
+.dgc-linkcard-icon svg { display: block; }
+.dgc-linkcard-site { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+/* Open: the family's small text button, its glyph after the word. */
+.dgc-linkcard .dgc-linkcard-open { display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; color: var(--text); }
+.dgc-linkcard .dgc-linkcard-open svg { flex: none; }
+/* The site's own picture: about 16:9 as sites make them, cut to its box, never taller than 180px. It sits under the
+   top row, so the card's corners are not its own. */
+.dgc-linkcard-picture { flex: 0 1 auto; display: block; width: 100%; min-height: 0; aspect-ratio: 1.91 / 1; max-height: 180px; border-radius: 0; object-fit: cover; background: var(--wash); }
+.dgc-linkcard-words { flex: none; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+.dgc-linkcard-picture + .dgc-linkcard-words { border-top: 1px solid var(--border); }
+.dgc-linkcard-title { color: var(--text); font-weight: var(--w-semi); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.dgc-linkcard-desc { color: var(--muted); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.dgc-linkcard-reading { color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) {
+  .dgc-linkcard { animation: dgc-linkcard-in var(--dur-menu) var(--ease-out); }
+  .dgc-linkcard.above { animation-name: dgc-linkcard-in-above; }
+}
+@keyframes dgc-linkcard-in { from { opacity: 0; transform: translateY(-3px); } }
+@keyframes dgc-linkcard-in-above { from { opacity: 0; transform: translateY(3px); } }
+@media (forced-colors: active) { .dgc-linkcard { border-color: CanvasText; box-shadow: none; } }

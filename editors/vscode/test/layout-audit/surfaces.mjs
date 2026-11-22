@@ -52,7 +52,8 @@ const homeCardReach = async (page, a, same) => {
 const OWN = {
   // The Library in its editor tab (the page src/chatdgc.ts serves), each of its tabs.
   "library-page": async (b, { width, theme, touch }, visit) => {
-    const x = await openLibraryPage(b, { width, theme: modern(theme), touch, scale: 1 });
+    // (A DGC that keeps favorites: every row has its star, one of them filled, and the filters have Favorites.)
+    const x = await openLibraryPage(b, { width, theme: modern(theme), touch, scale: 1, favorites: [`artifact:${LIB_ARTIFACTS[1].id}`] });
     try { await visit("list", x.page);
       for (const tab of ["widgets", "images", "videos", "files"]) { await x.libTab(tab); await visit(tab, x.page); }
       await x.libTab("artifacts"); await scrollAll(x.page, "end"); await x.settle(); await visit("list-end", x.page);
@@ -87,7 +88,7 @@ const OWN = {
     try { await x.settle(); await visit("work-200", x.page); await scrollAll(x.page, "end"); await x.settle(); await visit("work-200-end", x.page); } finally { await x.close(); }
     x = await openDock(b, { tab: "chat", width, height: 760, theme: modern(theme), touch });
     try { await x.send({ type: "chatdgc_list", available: true, items: CHATS_200, open: ["chat_s1"], answering: ["chat_s3"] }); await x.settle(); await visit("chat-200", x.page); await scrollAll(x.page, "end"); await x.settle(); await visit("chat-200-end", x.page); } finally { await x.close(); }
-    x = await openLibraryTab(b, { width, theme: modern(theme), touch, artifacts: ARTIFACTS_200, pageSize: 200 });
+    x = await openLibraryTab(b, { width, theme: modern(theme), touch, artifacts: ARTIFACTS_200, pageSize: 200, favorites: [`artifact:${ARTIFACTS_200[0].id}`, `artifact:${ARTIFACTS_200[3].id}`] });
     try { await visit("library-200", x.page); await scrollAll(x.page, "end"); await x.settle(); await visit("library-200-end", x.page); } finally { await x.close(); }
     // The dock hidden: the same list with no dock under it.
     x = await openDock(b, { tab: "work", width, height: 760, theme: modern(theme), sessions: SESSIONS_200.slice(0, 40), show: "never", touch });

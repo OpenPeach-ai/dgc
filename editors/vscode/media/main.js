@@ -4268,6 +4268,9 @@
   // The renderer builds an HTML string, so it cannot read the setting per call. Tell it once,
   // before anything renders, or `dgc.linkFavicons: false` would still emit an <img> per link.
   DgcMarkdown.setFavicons?.(document.body.dataset.linkFavicons !== "off");
+  // A link's preview card under the pointer (media/shared/linkpreview.js): this page asks its host about the address.
+  // The Pips view in this side bar is covered too: it adds its shadow root (DgcLinkPreview.watch, src/pipsClient.js).
+  window.DgcLinkPreview?.connect((message) => vscode.postMessage(message));
   const md = (source) => DgcMarkdown.render(source);
   // DGC's own reply in this chat: the one place a ```dgc-ui card is live. Skills, docs, memory, goals, helpers' and
   // Pips' reports and thinking keep it as code (md above).

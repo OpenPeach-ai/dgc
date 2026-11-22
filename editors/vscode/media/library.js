@@ -22,6 +22,10 @@
 // and says why. Each of the eight asks the host one way ("itemAct", naming the item and nothing else): the host does it
 // only for an item it listed, from its own record of it. Where there is room a row also keeps its quick icon buttons.
 // The search field searches the tab you are on.
+// Favorites: every row has a star (an outline, shown when the row is pointed at or holds the keyboard; filled, in the
+// accent, and always shown once the item is a favorite), its menu has Add to Favorites / Remove from Favorites, and
+// every tab's filter line has Favorites, which shows only the starred, with the search and the other filters. DGC
+// keeps the list (one for every kind and every window); the host says it ("favorites") where this DGC keeps one.
 // Names are the user's words: text nodes only. media/shared/library.css is how it looks. A classic script:
 // window.DgcLibrary.
 (function () {
@@ -61,6 +65,11 @@
   // Pin and Unpin, More: the one glyph each has on every surface (media/shared/icons.js).
   const PIN = (on) => window.DgcIcons.html(on ? "unpin" : "pin");
   const DOTS = window.DgcIcons.html("more");
+  // A Favorite's star: in outline to add, filled to take off (media/shared/icons.js).
+  const STAR = (on) => window.DgcIcons.html(on ? "unfavorite" : "favorite");
+  // Which favorites a tab lists page by page, by how the list names them (the artifacts are all listed at once).
+  const FAV_PAGED = { widgets: ["widget:", "chart:"], images: ["image:"], videos: ["video:"], files: ["file:", "workfile:"] };
+  const FAV_PAGES = 40;     // the most pages a tab reads on its own, looking for its favorites
   const PAGE = 200;         // artifacts and widgets drawn at a time ("Show more" draws the next)
   // An item's menu: the eight things, in his order (15 Nov), the same for every kind.
   // (The first six are every file's, on every surface: media/shared/filemenu.js. A chat's file card has those and no more.)
@@ -284,8 +293,13 @@
       // by a DGC whose host says it lists them (chartsOffered, workFilesOffered); until then neither is asked for.
       charts: { rows: [], next: null, loaded: false, live: false, asking: 0, sig: null },
       work: { rows: [], next: null, loaded: false, live: false, seq: 0, sig: null },
+      // Favorites: whether this DGC keeps them (the host says), the starred items by their row's key, and the tabs
+      // showing only those.
+      favs: { live: false, keys: new Set(), only: Object.fromEntries(TAB_IDS.map((id) => [id, saved.favorites?.[id] === true])) },
       error: "",
     };
+    // (Looking for a tab's favorites past its first page: one page asked for at a time, and so many at most.)
+    const favLook = { waiting: false, pages: 0 };
     // What each tab last asked the host for (its words and filters): shown again unchanged, it is not asked again.
     const sig = { artifacts: null, widgets: null, images: null, videos: null, files: null };
     // Every maker a tab has seen, by name, so the By menu keeps them while one is chosen.
@@ -295,7 +309,7 @@
 
     const sendPin = pin || post;
     const goTo = go || ((maker) => post({ type: "maker", maker: { kind: maker.kind, id: maker.id, name: maker.name } }));
-    const keepNow = () => keep?.({ tab: state.tab, filters: JSON.parse(JSON.stringify(state.filters)) });
+    const keepNow = () => keep?.({ tab: state.tab, filters: JSON.parse(JSON.stringify(state.filters)), ...(TAB_IDS.some((id) => state.favs.only[id]) ? { favorites: { ...state.favs.only } } : {}) });
     const menu = (button, label, rows, pick) => {
       if (!root.DgcBlob) return;
       if (button.getAttribute("aria-expanded") === "true") { root.DgcBlob.close(true); return; }
@@ -308,6 +322,33 @@
       els.said.textContent = String(words || "").slice(0, 120); els.said.hidden = !els.said.textContent;
       if (!els.said.hidden) saidTimer = view.setTimeout(() => { els.said.hidden = true; els.said.textContent = ""; }, SAID_MS);
     }
+
+    // ---- favorites ----------------------------------------------------------------------------------------------------------
+    const isFav = (item) => state.favs.keys.has(item.key);
+    const favOnly = (tab = state.tab) => state.favs.live && state.favs.only[tab] === true;
+    /** Stars an item, or takes its star off: shown at once, and asked of the host, whose answer is the list DGC keeps. */
+    function toggleFav(item) {
+      if (!state.favs.live || !item) return;
+      const on = !isFav(item);
+      if (on) state.favs.keys.add(item.key); else state.favs.keys.delete(item.key);
+      post({ type: "favorite", item: refOf(item), on });
+      say(on ? "Added to Favorites" : "Removed from Favorites");
+      draw();
+    }
+    /** With Favorites on, a tab listed a page at a time reads on while one of its favorites is not among its rows yet. */
+    function favRead() {
+      const tab = state.tab, kinds = FAV_PAGED[tab];
+      if (!kinds || !showing || !favOnly(tab) || favLook.waiting || favLook.pages >= FAV_PAGES) return false;
+      const more = tab === "widgets" ? state.widgets.next != null || state.charts.next != null : tab === "files" ? state.files.next != null || state.work.next != null : state[tab].next != null;
+      if (!more) return false;
+      const have = new Set(tab === "widgets" ? [...state.widgets.rows.map((w) => `widget:${w.id}`), ...state.charts.rows.map((c) => `chart:${c.chat_id}:${c.id}`)]
+        : tab === "files" ? [...state.files.rows.map((f) => `file:${f.id}`), ...state.work.rows.map((f) => `workfile:${f.ref}`)] : state[tab].rows.map((r) => `${tab === "images" ? "image" : "video"}:${r.path}`));
+      if (![...state.favs.keys].some((key) => kinds.some((k) => key.startsWith(k)) && !have.has(key))) return false;
+      favLook.waiting = true; favLook.pages += 1;
+      ask(tab, true);
+      return true;
+    }
+    const favAgain = () => { favLook.waiting = false; favLook.pages = 0; };
 
     // ---- who made it: the filter's value, and what the host is asked for ----------------------------------------------------
     const makerKey = (item) => (item.by.id && item.by.name && KINDS[item.by.kind] ? `${item.by.kind}:${item.by.id}` : "");
@@ -373,10 +414,11 @@
       const tab = state.tab, q = state.query.toLowerCase(), f = state.filters[tab];
       const found = (item) => !q || has(item.title, q) || has(item.by.name, q);
       const newest = (a, b) => b.at - a.at;        // (made at the same moment, they stay in the host's order)
+      const only = favOnly(tab), starred = (item) => !only || isFav(item);      // (Favorites, with the words and the other filters)
       if (tab === "artifacts") {
         const all = state.artifacts.items.map(fromArtifact).filter((a) => !a.made_as);
         note("artifacts", all);
-        return all.filter((a) => (!f.kind || a.type === f.kind) && byMaker(a, f.maker) && found(a)).sort(newest);
+        return all.filter((a) => (!f.kind || a.type === f.kind) && byMaker(a, f.maker) && found(a) && starred(a)).sort(newest);
       }
       if (tab === "widgets") {
         // ChatDGC's own widgets are listed by ChatDGC; each is also a Page among the artifacts, which is left out here
@@ -385,18 +427,18 @@
         const all = [...cards, ...(state.widgets.live ? state.widgets.rows.map(fromWidget) : []), ...(state.charts.live ? state.charts.rows.map(fromChart) : [])];
         note("widgets", all);
         const kindOk = (a) => !f.kind || (f.kind === "chart") === (a.source === "chart");
-        return all.filter((a) => kindOk(a) && byMaker(a, f.maker) && found(a)).sort(newest);
+        return all.filter((a) => kindOk(a) && byMaker(a, f.maker) && found(a) && starred(a)).sort(newest);
       }
       if (tab === "images" || tab === "videos") {
         const all = state[tab].rows.map(tab === "images" ? fromImage : fromVideo);
         note(tab, all);
         // (The host found them by their words and their surface; a maker by name is one of that surface's.)
-        return all.filter((a) => byMaker(a, f.maker));
+        return all.filter((a) => byMaker(a, f.maker) && starred(a));
       }
-      const own = state.files.rows.map(fromFile);
+      const own = state.files.rows.map(fromFile).filter(starred);
       if (!state.work.live || f.origin === "made") return own;
       // Beside ChatDGC's: what you attached in Work sessions, of the kind chosen; the newest of both first.
-      const work = state.work.rows.map(fromWorkFile).filter((w) => !f.kind || w.type === f.kind);
+      const work = state.work.rows.map(fromWorkFile).filter((w) => (!f.kind || w.type === f.kind) && starred(w));
       return work.length ? [...own, ...work].sort(newest) : own;
     }
 
@@ -432,6 +474,8 @@
       if (tab === "files") html += button("kind", "Kind", (F_KINDS.find((k) => k[0] === f.kind) || F_KINDS[0])[1], "Show one kind of file")
         + button("origin", "From", (ORIGINS.find((o) => o[0] === f.origin) || ORIGINS[0])[1], "Show the files you uploaded, or the ones ChatDGC made");
       else html += button("maker", "By", makerWord(tab), "Show what one maker made: Work, Chat, your Pips, or one of them by name");
+      // Favorites, on every tab: pressed, the tab shows only what you starred (with the search and the filters before it).
+      if (state.favs.live) { const on = favOnly(tab); html += `<button type="button" id="library-filter-fav" class="lib-fav-filter" data-filter="fav" aria-pressed="${on}" aria-label="${on ? "Favorites: showing only your favorites" : "Favorites: show only your favorites"}" title="${on ? "Showing only your favorites. Press to show everything." : "Show only your favorites"}">${STAR(on)}<span class="lib-fav-word">Favorites</span></button>`; }
       if (els.filters.__html === html) return;
       const had = doc.activeElement && els.filters.contains(doc.activeElement) ? doc.activeElement.id : "";
       els.filters.__html = html; els.filters.innerHTML = html;
@@ -497,10 +541,13 @@
       // (What only its kind has, in the order of the row's own icon buttons: where those don't fit, this is where they are.)
       const more = actions(item).filter((a) => ITEM_MORE.includes(a.id));
       return [ITEM_ACTS.map(([id, label]) => { const why = whyNot(item, id); return { id, label, ...(why ? { why } : {}), ...(id === "remove" ? { danger: true } : {}) }; }),
-        more.map((a) => ({ id: `more:${a.id}`, label: a.label }))];
+        more.map((a) => ({ id: `more:${a.id}`, label: a.label })),
+        // (The star's own row, with the star: the one glyph the row's button and the filter wear.)
+        state.favs.live ? [isFav(item) ? { id: "fav", label: "Remove from Favorites", icon: "unfavorite" } : { id: "fav", label: "Add to Favorites", icon: "favorite" }] : []];
     }
     function itemPick(item, li, id) {
       if (id.startsWith("more:")) { const act = actions(item).find((a) => a.id === id.slice(5)); if (act) act.run(li); return; }
+      if (id === "fav") { toggleFav(item); return; }
       if (whyNot(item, id)) return;
       // (A video plays in its own row, from the bytes the host hands over: nothing is opened anywhere else.)
       if (id === "open" && item.source === "video") { play(li, item.raw); return; }
@@ -546,7 +593,7 @@
       if (item.source === "widget") li.dataset.widget = String(item.raw.id || "");
       const [words, name] = byWords(item), ago = age(item.at, now), acts = actions(item);
       const facts = item.facts.filter(Boolean);
-      li.setAttribute("aria-label", `${item.title}, ${words}${name}${item.where ? ` · ${item.where}` : ""}${ago ? `, ${ago === "now" ? "just now" : `${ago} ago`}` : ""}${facts.length ? `. ${facts.join(", ")}` : ""}${item.tip ? `. ${item.tip.replace(/\n/g, ". ")}` : ""}. ${acts[0].label}.`);
+      li.setAttribute("aria-label", `${item.title}, ${words}${name}${item.where ? ` · ${item.where}` : ""}${ago ? `, ${ago === "now" ? "just now" : `${ago} ago`}` : ""}${facts.length ? `. ${facts.join(", ")}` : ""}${item.tip ? `. ${item.tip.replace(/\n/g, ". ")}` : ""}.${state.favs.live && isFav(item) ? " A favorite." : ""} ${acts[0].label}.`);
       const main = doc.createElement("span"); main.className = "lib-row-main";
       // (The row has no label of its own: its words are on it. A name too long for its line ends in "…" and says itself
       // whole when pointed at, see nameTip below; what a kept picture is for, and its file's name, are said there too.)
@@ -582,6 +629,13 @@
       const dots = doc.createElement("button"); dots.type = "button"; dots.className = "lib-row-more"; dots.setAttribute("aria-haspopup", "menu"); dots.setAttribute("aria-expanded", "false");
       dots.setAttribute("aria-label", `More for ${item.title}`); dots.title = "More"; dots.innerHTML = DOTS;
       li.append(thumb(item), main, bar, dots);
+      // The star, before the row's buttons: a real button with the item's name, pressed while it is a favorite.
+      if (state.favs.live) {
+        const on = isFav(item), star = doc.createElement("button"); star.type = "button"; star.className = "lib-fav"; star.dataset.fav = "1"; star.setAttribute("aria-pressed", String(on));
+        star.setAttribute("aria-label", on ? `Remove ${item.title} from Favorites` : `Add ${item.title} to Favorites`); star.title = on ? "Remove from Favorites" : "Add to Favorites"; star.innerHTML = STAR(on);
+        if (on) li.dataset.fav = "1";
+        bar.before(star);
+      }
       return li;
     }
     function statusWords(found) {
@@ -592,6 +646,12 @@
       const loaded = tab === "artifacts" ? state.artifacts.loaded : tab === "widgets" ? state.artifacts.loaded && (!state.widgets.live || state.widgets.loaded) && (!state.charts.live || state.charts.loaded)
         : tab === "files" ? t.loaded && (!state.work.live || state.work.loaded) : t.loaded;
       if (!loaded) return "Loading…";
+      if (favOnly(tab)) {
+        // (Still reading the tab's later pages for a favorite: not "none" yet.)
+        if (favLook.waiting) return "Looking for your favorites…";
+        const narrowed = tab === "files" ? f.kind || f.origin : f.kind || f.maker;
+        return q ? `No favorite named like “${q}”${narrowed ? " with these filters" : ""}.` : narrowed ? "No favorites with these filters." : "No favorites here yet. Star an item to keep it here.";
+      }
       const who = tab === "files" ? "" : whoWords(tab);
       if (tab === "artifacts") return q ? `No artifact named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || f.maker ? `No ${(A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.`
         : "Pages, sheets, docs, decks and dashboards DGC makes for you show here.";
@@ -614,10 +674,11 @@
       const now = Date.now();
       drawn = tab === "artifacts" || tab === "widgets" ? all.slice(0, state.shown) : all;
       if (tab === "widgets" && marks) marks.wear?.("widget", state.widgets.rows.map((w) => ({ id: String(w.id || "") })));
-      const focused = doc.activeElement && els.list.contains(doc.activeElement) ? [doc.activeElement.closest(".lib-row")?.dataset.key, doc.activeElement.dataset?.act || (doc.activeElement.classList.contains("lib-row-more") ? "more" : "")] : null;
+      const focused = doc.activeElement && els.list.contains(doc.activeElement) ? [doc.activeElement.closest(".lib-row")?.dataset.key, doc.activeElement.dataset?.act || (doc.activeElement.classList.contains("lib-row-more") ? "more" : doc.activeElement.classList.contains("lib-fav") ? "fav" : "")] : null;
       const playing = new Map([...els.list.querySelectorAll(".lib-row")].filter((li) => li.querySelector("figure.made-video")).map((li) => [li.dataset.key, li.querySelector("figure.made-video")]));
       els.list.replaceChildren(...drawn.map((item) => { const li = row(item, now); if (playing.has(item.key)) li.append(playing.get(item.key)); return li; }));
-      if (focused?.[0]) { const li = [...els.list.children].find((n) => n.dataset.key === focused[0]); (focused[1] === "more" ? li?.querySelector(".lib-row-more") : focused[1] ? li?.querySelector(`[data-act="${focused[1]}"]`) : li)?.focus({ preventScroll: true }); }
+      if (focused?.[0]) { const li = [...els.list.children].find((n) => n.dataset.key === focused[0]); (focused[1] === "more" ? li?.querySelector(".lib-row-more") : focused[1] === "fav" ? li?.querySelector(".lib-fav") : focused[1] ? li?.querySelector(`[data-act="${focused[1]}"]`) : li)?.focus({ preventScroll: true }); }
+      favRead();
       const say = statusWords(all);
       els.status.textContent = say; els.status.hidden = !say;
       if (state.error || state[tab].error) els.status.dataset.kind = "error"; else delete els.status.dataset.kind;
@@ -648,7 +709,7 @@
       if (!TAB_IDS.includes(tab) || !state.offered[tab]) return;
       const other = tab !== state.tab;
       if (other) { state.tab = tab; state.shown = PAGE; keepNow(); }
-      if (other) toTop = true;                 // (another tab starts at its first row)
+      if (other) { toTop = true; favAgain(); }       // (another tab starts at its first row)
       draw(); fresh();
       if (focus) doc.getElementById(`library-tab-${tab}`)?.focus({ preventScroll: true });
     }
@@ -660,11 +721,19 @@
       e.preventDefault(); show(to, true);
     });
     function choose(which, value) {
-      state.filters[state.tab][which] = value; state.shown = PAGE;
+      state.filters[state.tab][which] = value; state.shown = PAGE; favAgain();
       keepNow(); draw(); fresh();
       doc.getElementById(`library-filter-${which}`)?.focus({ preventScroll: true });
     }
     els.filters.addEventListener("click", (e) => {
+      if (e.target.closest?.(".lib-fav-filter")) {
+        // Favorites: only the starred, or everything again. The keyboard stays on the button.
+        e.stopPropagation();
+        state.favs.only[state.tab] = !favOnly(); state.shown = PAGE; favAgain(); toTop = true;
+        keepNow(); draw(); fresh();
+        doc.getElementById("library-filter-fav")?.focus({ preventScroll: true });
+        return;
+      }
       const button = e.target.closest?.(".lib-filter"); if (!button) return;
       e.stopPropagation();
       const which = button.dataset.filter, tab = state.tab, f = state.filters[tab];
@@ -692,6 +761,7 @@
       const item = byKey(li.dataset.key); if (!item) return;
       if (t.closest(".made-video")) return;                       // the player's own controls
       if (t.closest("[data-maker]")) { e.stopPropagation(); goTo({ ...item.by }); return; }
+      if (t.closest(".lib-fav")) { e.stopPropagation(); toggleFav(item); return; }
       const acts = actions(item), button = t.closest("[data-act]");
       if (button) { e.stopPropagation(); run(item, acts.find((a) => a.id === button.dataset.act), li, button); return; }
       const dots = t.closest(".lib-row-more");
@@ -747,7 +817,7 @@
     els.search.addEventListener("input", () => {
       view.clearTimeout(typing);
       if (state.tab === "images" || state.tab === "videos") ++state[state.tab].seq;      // an answer on its way is to words since replaced
-      typing = view.setTimeout(() => { state.query = els.search.value.trim().slice(0, 200); state.shown = PAGE; draw(); fresh(); }, 250);
+      typing = view.setTimeout(() => { state.query = els.search.value.trim().slice(0, 200); state.shown = PAGE; favAgain(); draw(); fresh(); }, 250);
     });
     els.load.addEventListener("click", () => {
       const tab = state.tab;
@@ -776,6 +846,15 @@
           marks?.said?.(msg);
           if (started) draw();
           return;
+        case "favorites": {
+          // What DGC keeps starred, by each row's key ("artifact:<id>", "image:<path>", ...); `offered` false (or a
+          // host that never says this): this DGC keeps no favorites, and there is no star and no filter.
+          const live = msg.offered === true;
+          state.favs.live = live;
+          state.favs.keys = new Set(live ? (Array.isArray(msg.keys) ? msg.keys : []).filter((k) => typeof k === "string" && k.length <= 4200).slice(0, 5000) : []);
+          if (started) draw();
+          return;
+        }
         case "artifactsOffered":
           // No artifacts in this DGC: no Artifacts tab. Widgets is ChatDGC's own list and the cards among the
           // artifacts: its tab is there while this DGC keeps either.
@@ -803,13 +882,13 @@
           if (!state.charts.live) return;
           const found = (Array.isArray(msg.charts) ? msg.charts : []).filter((c) => c && typeof c.id === "string" && typeof c.chat_id === "string");
           state.charts.rows = Number(msg.offset) > 0 ? [...state.charts.rows, ...found.filter((c) => !state.charts.rows.some((x) => x.id === c.id && x.chat_id === c.chat_id))] : found;
-          state.charts.next = next(msg.next); state.charts.loaded = true; draw(); return;
+          state.charts.next = next(msg.next); state.charts.loaded = true; favLook.waiting = false; draw(); return;
         }
         case "workFiles": {
           if (!state.work.live || Number(msg.seq) !== state.work.seq) return;        // an answer to a search since replaced
           const found = (Array.isArray(msg.files) ? msg.files : []).filter((f) => f && typeof f.ref === "string" && f.ref);
           state.work.rows = Number(msg.offset) > 0 ? [...state.work.rows, ...found.filter((f) => !state.work.rows.some((x) => x.ref === f.ref))] : found;
-          state.work.next = next(msg.next); state.work.loaded = true; draw(); return;
+          state.work.next = next(msg.next); state.work.loaded = true; favLook.waiting = false; draw(); return;
         }
         case "workFileData": setPic(`workfile:${String(msg.ref || "")}`, msg); return;
         case "workImagesOffered": if (msg.on !== true) { state.images.rows = []; state.images.loaded = true; } offer("images", msg.on === true); return;
@@ -821,7 +900,7 @@
         case "widgets": {
           const found = (Array.isArray(msg.widgets) ? msg.widgets : []).filter((w) => w && typeof w.id === "string");
           state.widgets.rows = state.widgets.asking ? [...state.widgets.rows, ...found.filter((w) => !state.widgets.rows.some((x) => x.id === w.id))] : found;
-          state.widgets.next = next(msg.next); state.widgets.loaded = true; draw(); return;
+          state.widgets.next = next(msg.next); state.widgets.loaded = true; favLook.waiting = false; draw(); return;
         }
         case "workImages": case "videos": {
           const tab = msg.type === "videos" ? "videos" : "images", t = state[tab];
@@ -829,7 +908,7 @@
           const found = (Array.isArray(tab === "videos" ? msg.videos : msg.images) ? (tab === "videos" ? msg.videos : msg.images) : []).filter((r) => r && typeof r.path === "string");
           t.rows = Number(msg.offset) > 0 ? [...t.rows, ...found.filter((r) => !t.rows.some((x) => x.path === r.path))] : found;
           t.next = next(msg.next); t.loaded = true; t.error = msg.error ? String(msg.error).slice(0, 300) : "";
-          draw(); return;
+          favLook.waiting = false; draw(); return;
         }
         case "library": {
           const asked = state.files.asked.shift() || { offset: 0, sig: sigOf("files") };
@@ -838,7 +917,7 @@
           const found = (Array.isArray(msg.files) ? msg.files : []).filter((f) => f && typeof f.id === "string");
           state.files.rows = asked.offset ? [...state.files.rows, ...found.filter((f) => !state.files.rows.some((x) => x.id === f.id))] : found;
           state.files.next = next(msg.next); state.files.loaded = true; if (sig.files === null) sig.files = asked.sig;
-          draw(); return;
+          favLook.waiting = false; draw(); return;
         }
         case "itemSaid": say(msg.words); return;
         case "itemCopy": {
@@ -860,10 +939,10 @@
         }
         // Made, changed or removed somewhere: every tab is asked again when it next shows, the one on screen now.
         case "artifactChanged": sig.artifacts = sig.widgets = null; if (showing && (state.tab === "artifacts" || state.tab === "widgets")) ask(state.tab); return;
-        case "changed": case "refresh": for (const id of TAB_IDS) sig[id] = null; state.charts.sig = state.work.sig = null; fresh(true); draw(); return;
+        case "changed": case "refresh": for (const id of TAB_IDS) sig[id] = null; state.charts.sig = state.work.sig = null; favAgain(); fresh(true); draw(); return;
         case "error":
           // (The host could not answer something the Library asked: said in the status line, the lists left as they are.)
-          state.files.asked.length = 0;
+          state.files.asked.length = 0; favLook.waiting = false;
           state.error = String(msg.message || "The Library couldn't be read.").slice(0, 300);
           state.artifacts.loaded = state.files.loaded = state.widgets.loaded = state.charts.loaded = state.work.loaded = true; draw(); state.error = ""; return;
         default: return;
@@ -874,11 +953,11 @@
     return {
       message,
       /** It is on screen: what it shows is asked for again (made, changed or removed since). */
-      shown() { showing = true; for (const id of TAB_IDS) sig[id] = null; state.charts.sig = state.work.sig = null; draw(); fresh(true); },
+      shown() { showing = true; for (const id of TAB_IDS) sig[id] = null; state.charts.sig = state.work.sig = null; favAgain(); if (started && state.favs.live) post({ type: "favorites" }); draw(); fresh(true); },
       hidden() { showing = false; },
       /** Shows one of its tabs (Home's Widgets and Artifacts cards). */
       view(tab) { message({ type: "view", view: tab }); },
-      state: () => ({ tab: state.tab, query: state.query, filters: JSON.parse(JSON.stringify(state.filters)) }),
+      state: () => ({ tab: state.tab, query: state.query, filters: JSON.parse(JSON.stringify(state.filters)), ...(TAB_IDS.some((id) => state.favs.only[id]) ? { favorites: { ...state.favs.only } } : {}) }),
     };
   }
 

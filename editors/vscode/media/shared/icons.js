@@ -24,7 +24,13 @@
     // there) keeps a picture in DGC's Library: its own action, the Library's own glyph.
     save: "download", download: "download", library: "library",
     // A Pip's folder (Pips API 110): Give it a folder and Remove its folder, a folder with a plus and with a minus.
-    "give-folder": "give-folder", "remove-folder": "remove-folder" };
+    "give-folder": "give-folder", "remove-folder": "remove-folder",
+    // A Favorite in the Library: Add to Favorites is the star in outline, Remove from Favorites the star filled (it
+    // is a favorite, and pressing it takes the star off), as Pin and Unpin are one drawing. Home's Artifacts card and
+    // the Library's Favorites filter wear the same star.
+    favorite: "favorite", unfavorite: "unfavorite",
+    // Open a link, outside DGC: the arrow out of a box, on a link's preview card (media/shared/linkpreview.js).
+    "open-link": "link-external" };
   // The icon font's outlines, filled.
   const FONT = {
     "go-to-file": "M8.59 1.01Q9.23 1.01 9.65 1.44L12.59 4.37Q13.01 4.8 13.01 5.44V13.01Q13.01 13.81 12.43 14.4Q11.84 14.99 10.99 14.99H5.01Q4.16 14.99 3.57 14.4Q2.99 13.81 2.99 13.01V6.03H4V13.01Q4 13.44 4.29 13.73Q4.59 14.03 5.01 14.03H10.99Q11.41 14.03 11.71 13.73Q12 13.44 12 13.01V6.03H9.49Q8.85 6.03 8.43 5.57Q8 5.12 8 4.48V2.03L7.95 1.92Q7.84 1.65 7.63 1.44L7.2 1.01ZM9.01 4.48Q9.01 4.69 9.15 4.85Q9.28 5.01 9.49 5.01H11.79L9.01 2.19ZM4.48 0Q4.69 0 4.85 0.16L6.88 2.13Q6.93 2.24 6.96 2.32Q6.99 2.4 6.99 2.51Q6.99 2.61 6.96 2.69Q6.93 2.77 6.88 2.88L4.85 4.85Q4.69 5.01 4.51 5.01Q4.32 5.01 4.16 4.85Q4 4.69 4 4.51Q4 4.32 4.16 4.16L5.28 2.99H2.51Q1.87 2.99 1.44 3.44Q1.01 3.89 1.01 4.48V5.49Q1.01 5.71 0.85 5.87Q0.69 6.03 0.48 6.03Q0.27 6.03 0.13 5.87Q0 5.71 0 5.49V4.48Q0 3.47 0.72 2.75Q1.44 2.03 2.51 2.03H5.28L4.16 0.85Q4 0.69 4 0.51Q4 0.32 4.16 0.16Q4.32 0 4.48 0Z",
@@ -54,12 +60,16 @@
     "chevron-right": "M6.13 3.15Q5.97 3.31 5.97 3.49Q5.97 3.68 6.13 3.84L10.29 8L6.13 12.16Q5.97 12.27 5.97 12.48Q5.97 12.69 6.13 12.85Q6.29 13.01 6.51 13.01Q6.72 13.01 6.83 12.85L11.36 8.37Q11.52 8.21 11.52 8Q11.52 7.79 11.36 7.63L6.83 3.15Q6.72 2.99 6.51 2.99Q6.29 2.99 6.13 3.15Z",
     "edit": "M14.24 1.76Q13.49 1.01 12.4 1.01Q11.31 1.01 10.51 1.76L2.67 9.65Q2.08 10.19 1.87 10.99L1.01 14.4Q0.96 14.67 1.15 14.85Q1.33 15.04 1.6 14.99L5.01 14.13Q5.81 13.92 6.35 13.33L14.24 5.49Q14.99 4.69 14.99 3.6Q14.99 2.51 14.24 1.76ZM11.25 2.45Q11.73 1.97 12.4 1.97Q13.07 1.97 13.55 2.45Q14.03 2.93 14.03 3.6Q14.03 4.27 13.55 4.75L12.75 5.55L10.45 3.25ZM9.76 3.95 12.05 6.24 5.65 12.64Q5.28 13.01 4.75 13.12L2.19 13.81L2.83 11.25Q2.99 10.72 3.36 10.35Z",
     "arrow-swap": "M11.36 1.65Q11.2 1.49 10.99 1.49Q10.77 1.49 10.64 1.65Q10.51 1.81 10.51 2Q10.51 2.19 10.67 2.35L12.27 4H2.51Q2.29 4 2.16 4.13Q2.03 4.27 2.03 4.48Q2.03 4.69 2.16 4.85Q2.29 5.01 2.51 5.01H12.27L10.67 6.67Q10.51 6.77 10.51 6.99Q10.51 7.2 10.64 7.36Q10.77 7.52 10.99 7.52Q11.2 7.52 11.36 7.36L13.87 4.85Q14.03 4.69 14.03 4.48Q14.03 4.27 13.87 4.16ZM5.33 9.33Q5.49 9.23 5.49 9.01Q5.49 8.8 5.36 8.64Q5.23 8.48 5.01 8.48Q4.8 8.48 4.64 8.64L2.13 11.15Q1.97 11.31 1.97 11.52Q1.97 11.73 2.13 11.84L4.64 14.35Q4.8 14.51 5.01 14.51Q5.23 14.51 5.36 14.35Q5.49 14.19 5.49 14Q5.49 13.81 5.33 13.65L3.73 12H13.49Q13.71 12 13.87 11.87Q14.03 11.73 14.03 11.52Q14.03 11.31 13.87 11.15Q13.71 10.99 13.49 10.99H3.73Z",
+    "link-external": "M14.99 9.49V12.48Q14.99 13.55 14.27 14.27Q13.55 14.99 12.48 14.99H3.52Q2.45 14.99 1.73 14.27Q1.01 13.55 1.01 12.48V3.52Q1.01 2.45 1.73 1.73Q2.45 1.01 3.52 1.01H6.51Q6.72 1.01 6.85 1.15Q6.99 1.28 6.99 1.49Q6.99 1.71 6.85 1.84Q6.72 1.97 6.51 1.97H3.52Q2.88 1.97 2.45 2.43Q2.03 2.88 2.03 3.52V12.48Q2.03 13.12 2.45 13.55Q2.88 13.97 3.52 13.97H12.48Q13.12 13.97 13.57 13.55Q14.03 13.12 14.03 12.48V9.49Q14.03 9.28 14.16 9.15Q14.29 9.01 14.51 9.01Q14.72 9.01 14.85 9.15Q14.99 9.28 14.99 9.49ZM14.51 1.01H9.49Q9.28 1.01 9.15 1.15Q9.01 1.28 9.01 1.49Q9.01 1.71 9.15 1.84Q9.28 1.97 9.49 1.97H13.28L9.17 6.13Q9.01 6.29 9.01 6.51Q9.01 6.72 9.15 6.85Q9.28 6.99 9.49 6.99Q9.71 6.99 9.87 6.83L14.03 2.72V6.51Q14.03 6.72 14.16 6.85Q14.29 6.99 14.51 6.99Q14.72 6.99 14.85 6.85Q14.99 6.72 14.99 6.51V1.49Q14.99 1.28 14.85 1.15Q14.72 1.01 14.51 1.01Z",
     "eye-closed": "M10.13 10.83 14.13 14.88Q14.29 14.99 14.51 14.99Q14.72 14.99 14.85 14.85Q14.99 14.72 14.99 14.51Q14.99 14.29 14.88 14.13L1.87 1.12Q1.71 1.01 1.49 1.01Q1.28 1.01 1.15 1.15Q1.01 1.28 1.01 1.49Q1.01 1.71 1.12 1.87L4.37 5.07Q3.73 5.55 3.2 6.21Q2.67 6.88 2.29 7.68L2.03 8.32V8.48Q2.03 8.64 2.11 8.77Q2.19 8.91 2.37 8.96Q2.56 9.01 2.75 8.93Q2.93 8.85 2.99 8.64L3.2 8.11Q3.52 7.41 4 6.8Q4.48 6.19 5.12 5.81L6.67 7.36Q6.13 7.73 5.81 8.29Q5.49 8.85 5.49 9.49Q5.49 10.56 6.24 11.28Q6.99 12 8 12Q8.64 12 9.2 11.68Q9.76 11.36 10.13 10.83ZM9.39 10.08Q9.23 10.51 8.85 10.75Q8.48 10.99 8 10.99Q7.36 10.99 6.93 10.56Q6.51 10.13 6.51 9.49Q6.51 9.07 6.75 8.69Q6.99 8.32 7.41 8.11ZM6.29 4.21 7.2 5.07Q7.57 5.01 8 5.01Q9.39 5.01 10.51 5.55Q11.36 6.03 12.05 6.83Q12.48 7.41 12.8 8.11L13.01 8.64Q13.07 8.85 13.25 8.93Q13.44 9.01 13.63 8.96Q13.81 8.91 13.92 8.75Q14.03 8.59 13.97 8.37L13.71 7.68Q13.33 6.88 12.8 6.19Q12 5.23 10.99 4.69Q9.65 4 8 4Q7.09 4 6.29 4.21Z",
   };
   // DGC's own drawings, in a 1.3 line.
   const PIN = "M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 3.3-3.4-2.6-2.6 1.1-1.1 3.1.3 2.4-2.4z";
   const FOLDER = "M1.8 4.3a.9.9 0 0 1 .9-.9h3.1l1.4 1.4h6.1a.9.9 0 0 1 .9.9v6.6a.9.9 0 0 1-.9.9H2.7a.9.9 0 0 1-.9-.9z";
+  const STAR = "M8 1.9l1.85 3.9 4.25.55-3.1 2.95.78 4.2L8 11.45 4.22 13.5 5 9.3 1.9 6.35l4.25-.55z";
   const LINE = {
+    favorite: `<path d="${STAR}"/>`,
+    unfavorite: `<path d="${STAR}"/>`,    // (the star, solid: it is a favorite, and pressing it takes the star off)
     pin: `<path d="${PIN}"/>`,
     unpin: `<path d="${PIN}"/>`,          // (the pin, solid: it is pinned, and pressing it unpins)
     archive: '<path d="M2 3.5h12v3H2zM3.2 6.5V13h9.6V6.5M6.5 9.2h3"/>',
@@ -87,7 +97,7 @@
     const head = `<svg class="dgc-icon${cls ? ` ${esc(cls)}` : ""}" data-icon="${glyph}" viewBox="0 0 16 16" width="${px}" height="${px}" aria-hidden="true" focusable="false"`;
     if (glyph === "more") return `${head}>${DOTS}</svg>`;
     if (FONT[glyph]) return `${head} fill="currentColor"><path d="${FONT[glyph]}"/></svg>`;
-    return `${head} fill="${glyph === "unpin" ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${LINE[glyph]}</svg>`;
+    return `${head} fill="${glyph === "unpin" || glyph === "unfavorite" ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${LINE[glyph]}</svg>`;
   }
   /** The same, as an element of `doc`. */
   function node(action, opts = {}, doc = root.document) {
@@ -97,6 +107,9 @@
   /** The action a control's name says ("Open in editor: Fix the login" is Open in editor), or "". */
   function forLabel(label) {
     const w = String(label || "").replace(/\s+/g, " ").trim().toLowerCase();
+    // (Before Add and Remove, whose words these begin with.)
+    if (/^add (.+ )?to (your )?favorites\b/.test(w)) return "favorite";
+    if (/^remove (.+ )?from (your )?favorites\b/.test(w)) return "unfavorite";
     if (/^open (it )?in (the |an )?editor\b/.test(w)) return "open-in-editor";
     if (/^more\b/.test(w) || w === "…" || w === "...") return "more";
     if (/^back\b/.test(w)) return "back";

@@ -87,7 +87,9 @@ const HOST = `(${function (data, say, PNG, PICTURES) {
     lib.asked.push(JSON.parse(JSON.stringify(m)));
     if (m.type === "ready" || m.type === "list") {
       if (m.type === "ready") { say({ type: "dock", pins: lib.pins || [], colours: {} }); say({ type: "widgetsOffered", on: lib.widgets !== null }); say({ type: "workImagesOffered", on: lib.images !== null });
-        say({ type: "artifactsOffered", on: lib.artifacts !== null }); say({ type: "videosOffered", on: lib.videos !== null }); if (lib.charts) say({ type: "chartsOffered", on: true }); if (lib.workFiles) say({ type: "workFilesOffered", on: true }); if (lib.view) say({ type: "view", view: lib.view }); }
+        say({ type: "artifactsOffered", on: lib.artifacts !== null }); say({ type: "videosOffered", on: lib.videos !== null }); if (lib.charts) say({ type: "chartsOffered", on: true }); if (lib.workFiles) say({ type: "workFilesOffered", on: true }); if (lib.view) say({ type: "view", view: lib.view });
+        // Favorites, where the scene keeps any (`favorites`: the starred rows' keys; null: an older DGC, which says nothing).
+        if (lib.favorites) say({ type: "favorites", offered: true, keys: lib.favorites }); }
       const files = lib.files.filter((f) => has(f.name, m.query) && (!m.kind || f.type === m.kind) && (!m.origin || (m.origin === "made") === (f.made === true)));
       const counts = {}; for (const f of lib.files) counts[f.type] = (counts[f.type] || 0) + 1;
       say({ type: "library", files, total: files.length, next: null, counts, origins: { made: lib.files.filter((f) => f.made).length, uploaded: lib.files.filter((f) => !f.made).length } });
@@ -105,6 +107,12 @@ const HOST = `(${function (data, say, PNG, PICTURES) {
       say({ type: "charts", offset: from, charts: found.slice(from, from + page), total: found.length, next: from + page < found.length ? from + page : null }); }
     else if (m.type === "workFiles") { if (!lib.workFiles) return; const found = lib.workFiles.filter((f) => has(f.name, m.query)), from = m.offset || 0, page = lib.pageSize || 60;
       say({ type: "workFiles", seq: m.seq || 0, offset: from, files: found.slice(from, from + page), total: found.length, next: from + page < found.length ? from + page : null }); }
+    // A star set or taken off: kept by the row's key, as the host says DGC's list (src/chatdgc.ts favoriteSet).
+    else if (m.type === "favorites") { if (lib.favorites) say({ type: "favorites", offered: true, keys: lib.favorites }); }
+    else if (m.type === "favorite") { if (!lib.favorites) return; const i = m.item || {};
+      const key = i.kind === "chart" ? "chart:" + i.chat_id + ":" + i.id : i.kind === "workfile" ? "workfile:" + i.ref : i.kind === "image" || i.kind === "video" ? i.kind + ":" + i.path : i.kind + ":" + i.id;
+      lib.favorites = lib.favorites.filter((k) => k !== key); if (m.on) lib.favorites.push(key);
+      say({ type: "favorites", offered: true, keys: lib.favorites }); }
     else if (m.type === "workFilePic") say({ type: "workFileData", ref: m.ref, data: picture("tile") })
     else if (m.type === "itemAct" && m.act === "copy" && m.item && m.item.kind === "workfile") say({ type: "itemCopy", key: "workfile:" + m.item.ref, data: picture("tile") });
     else if (m.type === "image") say({ type: "image", id: m.file.id, data: picture(m.file.name) });
@@ -158,7 +166,7 @@ function helpers(x, page) {
  *  offers none of that kind); pins: what is on the dock; everything else is dock-scene's. Returns its helpers plus
  *  lib() (the Library as drawn), said(type) (what the module asked the host through "sideLibrary"), libTab(id),
  *  menu(which), pick(which, label), search(words). */
-export async function openLibraryTab(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, charts = null, workFiles = null, pageSize = 60, tab = "library", ...rest } = {}) {
+export async function openLibraryTab(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, charts = null, workFiles = null, favorites = null, pageSize = 60, tab = "library", ...rest } = {}) {
   const x = await openDock(browser, { tab, height: 760, ...rest });
   await x.page.evaluate(({ data, HOST, PNG, PICTURES }) => {
     const say = (message) => window.dispatchEvent(new MessageEvent("message", { data: { type: "sideLibrary", message: JSON.parse(JSON.stringify(message)) } }));
@@ -167,14 +175,14 @@ export async function openLibraryTab(browser, { artifacts = LIB_ARTIFACTS, widge
     posted.push = function (m) { const n = push.call(this, m); if (m && m.type === "sideLibrary" && m.message) setTimeout(() => answer(m.message), 1); return n; };
     // (What the page asked before this stand-in was here is answered now.)
     for (const m of [...posted]) if (m && m.type === "sideLibrary" && m.message) answer(m.message);
-  }, { data: { artifacts: dated(artifacts), widgets: dated(widgets), files: dated(files), images: dated(images), videos: dated(videos), charts: dated(charts), workFiles: dated(workFiles), pageSize }, HOST, PNG, PICTURES });
+  }, { data: { artifacts: dated(artifacts), widgets: dated(widgets), files: dated(files), images: dated(images), videos: dated(videos), charts: dated(charts), workFiles: dated(workFiles), favorites, pageSize }, HOST, PNG, PICTURES });
   await x.settle(); await x.page.waitForTimeout(80); await x.settle();
   return { ...x, ...helpers(x, x.page), place: "side" };
 }
 
 /** Opens the Library in its editor tab (the page src/chatdgc.ts serves), on the same stand-in host. `view`: the tab
  *  the host opens it on ("" for the page's own). */
-export async function openLibraryPage(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, charts = null, workFiles = null, pageSize = 60, pins = [], view = "", width = 1100, height = 760, theme = "dark-modern", state, touch = false, forced = false, scale = 1, secure = false } = {}) {
+export async function openLibraryPage(browser, { artifacts = LIB_ARTIFACTS, widgets = LIB_WIDGETS, files = LIB_FILES, images = LIB_IMAGES, videos = LIB_VIDEOS, charts = null, workFiles = null, favorites = null, pageSize = 60, pins = [], view = "", width = 1100, height = 760, theme = "dark-modern", state, touch = false, forced = false, scale = 1, secure = false } = {}) {
   const x = await openLibrary(browser, { width, height, theme, state, touch, forced, scale, secure });
   await x.page.evaluate(({ data, HOST, PNG, PICTURES }) => {
     const say = (message) => window.dispatchEvent(new MessageEvent("message", { data: JSON.parse(JSON.stringify(message)) }));
@@ -182,7 +190,7 @@ export async function openLibraryPage(browser, { artifacts = LIB_ARTIFACTS, widg
     const posted = window.__posted, push = posted.push;
     posted.push = function (m) { const n = push.call(this, m); if (m && typeof m.type === "string") setTimeout(() => answer(m), 1); return n; };
     for (const m of [...posted]) if (m && typeof m.type === "string") answer(m);
-  }, { data: { artifacts: dated(artifacts), widgets: dated(widgets), files: dated(files), images: dated(images), videos: dated(videos), charts: dated(charts), workFiles: dated(workFiles), pageSize, pins, view }, HOST, PNG, PICTURES });
+  }, { data: { artifacts: dated(artifacts), widgets: dated(widgets), files: dated(files), images: dated(images), videos: dated(videos), charts: dated(charts), workFiles: dated(workFiles), favorites, pageSize, pins, view }, HOST, PNG, PICTURES });
   const settle = () => x.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 60)))));
   await settle(); await x.page.waitForTimeout(80); await settle();
   const close = () => x.page.close();

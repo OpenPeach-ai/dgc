@@ -330,6 +330,73 @@ test("a dashboard: a source that isn't allowed is plain to see, and one click al
   } finally { await s.page.close(); }
 });
 
+test("a dashboard stays live: every few minutes or when its files change, only while it shows; a failure keeps the numbers and waits longer", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openPanel(browser, { kind: "dashboard", clock: "2026-11-22T09:40:00Z" });
+  try {
+    const stamp = () => text(s.page, ".art-toolbar-note");
+    const menuButton = s.page.locator("#art-refresh-every");
+    assert.equal((await menuButton.innerText()).trim(), "By hand");
+    await menuButton.click();
+    const items = await s.page.locator("#art-refresh-menu .art-menu-item").allInnerTexts();
+    assert.deepEqual(items, ["By hand", "Every minute", "Every 5 minutes", "Every 15 minutes", "Every hour", "When its files change"]);
+    await s.page.locator("#art-refresh-menu .art-menu-item", { hasText: "Every 5 minutes" }).click();
+    const [chosen] = await s.posted("refreshEvery");
+    assert.equal(chosen.every, "5m");
+    assert.ok(chosen.files.some((f) => f.endsWith("shop.db")) && chosen.files.some((f) => f.endsWith("ads.csv")), "its files, for the editor to watch");
+    assert.equal((await menuButton.innerText()).trim(), "Every 5 min");
+    assert.match(await stamp(), /· every 5 min$/);
+    // Five minutes on: it refreshes by itself.
+    await s.clearPosted();
+    await s.page.clock.runFor(5 * 60_000 + 1000);
+    assert.equal((await s.posted("refresh")).length, 1, "refreshed after five minutes");
+    await s.send({ type: "refreshed", state: { results: { w1: { refreshed_at: "2026-11-22T09:45:01Z" } } } });
+    assert.match(await stamp(), /^Refreshed .* · every 5 min$/);
+    // A failure: the numbers stay, and it waits twice as long before trying again.
+    await s.page.clock.runFor(5 * 60_000 + 1000);
+    assert.equal((await s.posted("refresh")).length, 2);
+    const before = await s.page.evaluate(() => document.querySelector(".art-dash iframe")?.srcdoc?.length || 0);
+    await s.send({ type: "rejected", what: "refresh", reason: "error", message: "The database is locked." });
+    assert.match(await stamp(), /^Couldn’t refresh at \d{1,2}:\d{2}.* · trying again at \d{1,2}:\d{2}/);
+    assert.equal(await s.page.evaluate(() => document.querySelector(".art-dash iframe")?.srcdoc?.length || 0), before, "the numbers it had stay");
+    await s.page.clock.runFor(5 * 60_000 + 1000);
+    assert.equal((await s.posted("refresh")).length, 2, "not after five minutes this time");
+    await s.page.clock.runFor(5 * 60_000 + 1000);
+    assert.equal((await s.posted("refresh")).length, 3, "after ten");
+    await s.send({ type: "refreshed", state: { results: { w1: { refreshed_at: "2026-11-22T10:00:03Z" } } } });
+    // Hidden (another tab in front): nothing; shown again: at once if it was due.
+    await s.page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
+    await s.page.clock.runFor(6 * 60_000);
+    assert.equal((await s.posted("refresh")).length, 3, "never while it doesn't show");
+    await s.page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); document.dispatchEvent(new Event("visibilitychange")); });
+    await s.page.clock.runFor(500);
+    assert.equal((await s.posted("refresh")).length, 4, "due while hidden: now");
+    await s.send({ type: "refreshed", state: { results: { w1: { refreshed_at: "2026-11-22T10:06:04Z" } } } });
+    // When its files change: the editor says so, and it refreshes; no timer.
+    await menuButton.click();
+    await s.page.locator("#art-refresh-menu .art-menu-item", { hasText: "When its files change" }).click();
+    assert.equal((await s.posted("refreshEvery")).at(-1).every, "files");
+    assert.match(await stamp(), /· when its files change$/);
+    await s.page.clock.runFor(61 * 60_000);
+    assert.equal((await s.posted("refresh")).length, 4, "no timer");
+    await s.send({ type: "filesChanged" });
+    assert.equal((await s.posted("refresh")).length, 5);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("a dashboard opens with the refresh it was given, and one with no files is never offered the files choice", async (t) => {
+  if (skipOrFail(t)) return;
+  const data = structuredClone(fixtures());           // (the fixtures are shared by every test: never change them)
+  data.dashboard.content = { ...data.dashboard.content, sources: (data.dashboard.content.sources || []).filter((src) => src.kind === "plugin" || src.kind === "postgres") };
+  const s = await openPanel(browser, { kind: "dashboard", fixture: data, detail: { refreshEvery: "15m" } });
+  try {
+    assert.equal((await s.page.locator("#art-refresh-every").innerText()).trim(), "Every 15 min");
+    await s.page.locator("#art-refresh-every").click();
+    assert.equal(await s.page.locator("#art-refresh-menu .art-menu-item", { hasText: "When its files change" }).count(), 0);
+  } finally { await s.page.close(); }
+});
+
 test("DGC's page is framed with no script, in VS Code's theme; a page artifact at its own address", async (t) => {
   if (skipOrFail(t)) return;
   const server = createServer((_req, res) => { res.writeHead(200, { "Content-Type": "text/html" }); res.end("<!doctype html><title>Tips</title><p>Tip calculator</p>"); });

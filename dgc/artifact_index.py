@@ -44,10 +44,39 @@ def _pages(st, known) -> int:
         return 0
     server, n = artifacts._SRV, 0
     with server.lock:
-        waiting = [a for a in server.artifacts.values() if not a.store_id and ("server", a.id) not in known]
+        # (Never a folder inside DGC's own store: that is a typed artifact's view, served to show it, never a page of
+        # its own.)
+        waiting = [a for a in server.artifacts.values() if not a.store_id and ("server", a.id) not in known
+                   and not _inside_store(st, a.directory)]
     for art in waiting:
         if not artifacts._record_version(server, art, Path(art.directory)):
             n += 1
+    return n
+
+
+def _inside_store(st, directory) -> bool:
+    try:
+        Path(str(directory)).resolve().relative_to(st.root.resolve())
+        return True
+    except (ValueError, OSError, RuntimeError):
+        return False
+
+
+def _phantoms(st) -> int:
+    """Pages an earlier DGC made from a typed artifact's view (showing a dashboard served its view folder, and that
+    came in as a "Page" with the dashboard's name): each goes to DGC's trash, where it can be recovered."""
+    n = 0
+    for art in st.list(type="page"):
+        path = str(art.link.get("path") or "")
+        if not path or not _inside_store(st, path):
+            continue
+        rel = Path(path).resolve().relative_to(st.root.resolve()).parts
+        if len(rel) >= 2 and rel[1] == "view" and rel[0] != art.id and st.exists(rel[0]):
+            try:
+                st.remove(art.id)
+                n += 1
+            except Exception:                    # noqa: BLE001 -- tried again next time
+                continue
     return n
 
 
@@ -144,7 +173,8 @@ def index(*, store: artifact_store.Store | None = None, chats=None, force: bool 
             # Index only the chats that belong to this artifact store. An isolated SDK
             # home must never import widgets or files from the host account's ChatDGC.
             chats = ChatStore(st.root.parent / "chat")
-        for part in (lambda: _pages(st, known), lambda: _widgets(st, chats, known), lambda: _sheets(st, chats, known)):
+        for part in (lambda: _phantoms(st), lambda: _pages(st, known), lambda: _widgets(st, chats, known),
+                     lambda: _sheets(st, chats, known)):
             try:
                 total += part()
             except Exception:                    # noqa: BLE001 -- the listing still lists what's there

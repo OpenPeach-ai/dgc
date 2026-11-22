@@ -101,6 +101,26 @@ test("ChatDGC: @ lists its Pips, plugins, Outputs and files, and a mark goes in 
   } finally { await s.page.close(); }
 });
 
+test("ChatDGC's @ list over the conversation is as tall as its rows, and hangs from the box: a shorter list moves nothing", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openChat({ width: 300 });
+  try {
+    const box = () => s.page.evaluate(() => { const r = document.getElementById("cd-pop").getBoundingClientRect(), b = document.getElementById("cd-input").getBoundingClientRect();
+      return { height: Math.round(r.height), bottom: Math.round(r.bottom), boxTop: Math.round(b.top), boxLeft: Math.round(b.left) }; });
+    await s.box().click();
+    await s.page.keyboard.type("@");
+    const wide = await box();
+    assert.ok(wide.height > 120 && wide.height <= 211, `many rows, under the cap (${wide.height}px)`);
+    await s.page.keyboard.type("compo");
+    assert.deepEqual(await rows(s.page), ["Composio"]);
+    const one = await box();
+    assert.ok(one.height > 0 && one.height <= 60, `one row, one row's height: no tall empty box (${one.height}px)`);
+    assert.equal(one.bottom, wide.bottom, "it hangs from the same edge");
+    assert.equal(one.boxTop, wide.boxTop, "the box doesn't move");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("ChatDGC: the first @ in a new tab finds the plugins that arrive after it was typed", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openChat();

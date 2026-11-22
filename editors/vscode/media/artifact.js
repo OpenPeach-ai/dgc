@@ -304,6 +304,44 @@
   /** A dashboard: its sources (what each reads, and whether you allowed it), Refresh, and DGC's page of its numbers. */
   editors.dashboard = () => {
     let frame, sourcesBox, stamp, refreshing = false, refreshBtn, renderedHtml = "";
+    // Live: it refreshes by itself every few minutes, or when its files change, only while it shows. The editor keeps
+    // the choice per dashboard (it's not a change to the dashboard). A failure keeps the numbers it has, and the next
+    // try waits twice as long (at most an hour).
+    const EVERY = { "": ["By hand", "By hand", ""], "1m": ["Every minute", "Every minute", "every minute"],
+      "5m": ["Every 5 minutes", "Every 5 min", "every 5 min"], "15m": ["Every 15 minutes", "Every 15 min", "every 15 min"],
+      "60m": ["Every hour", "Every hour", "every hour"], files: ["When its files change", "When files change", "when its files change"] };
+    const MS = { "1m": 60_000, "5m": 300_000, "15m": 900_000, "60m": 3_600_000 };
+    let every = Object.hasOwn(EVERY, state.refreshEvery || "") ? state.refreshEvery || "" : "";
+    let everyBtn, everyMenu, timer = 0, failures = 0, failedAt = 0, lastRun = Date.now(), dueWhileHidden = false, byItself = false;
+    const clock = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    /** The files it reads (a table file, a SQLite database): the editor watches them when it refreshes on their change. */
+    function fileSources() {
+      return (data().sources || []).filter((s) => (s.kind === "file" || s.kind === "sqlite") && typeof s.path === "string" && s.path).map((s) => s.path).slice(0, 20);
+    }
+    function waitMs() { const base = MS[every]; return base ? Math.min(3_600_000, base * 2 ** failures) : 0; }
+    function plan() {
+      clearTimeout(timer); timer = 0;
+      const ms = waitMs();
+      if (!ms || state.removed) return;
+      timer = setTimeout(due, Math.max(500, (failures ? failedAt : lastRun) + ms - Date.now()));
+    }
+    function due() { timer = 0; if (document.hidden) { dueWhileHidden = true; return; } run(); }
+    function run() {
+      if (refreshing || state.removed) return;
+      byItself = true; refreshing = true; paintStamp(); vscode.postMessage({ type: "refresh" });
+    }
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && dueWhileHidden) { dueWhileHidden = false; run(); } });
+    function paintEvery() {
+      if (!everyBtn) return;
+      everyBtn.replaceChildren(icon("history"), el("span", "art-btn-label", EVERY[every][1]), icon("chevron-down", "art-caret"));
+      everyBtn.setAttribute("aria-label", `Refreshes by itself: ${EVERY[every][0]}`);
+      everyBtn.disabled = state.removed;
+    }
+    function choose(next) {
+      every = next; state.refreshEvery = next; failures = 0; lastRun = Date.now();
+      paintEvery(); paintStamp(); plan();
+      vscode.postMessage({ type: "refreshEvery", every: next, files: fileSources() });
+    }
     const local = new Map();              // source id -> allowed, as this panel last set it
     const asking = new Set();
     function data() { return state.content && typeof state.content === "object" ? state.content : { sources: [], widgets: [] }; }
@@ -367,8 +405,11 @@
       return stamps.at(-1) || "";
     }
     function paintStamp() {
-      const at = refreshedAt();
-      stamp.textContent = refreshing ? "Refreshing…" : at ? `Refreshed ${when(at)}` : "Not refreshed yet";
+      const at = refreshedAt(), live = EVERY[every][2] ? ` · ${EVERY[every][2]}` : "";
+      stamp.textContent = refreshing ? "Refreshing…"
+        : failures && MS[every] ? `Couldn’t refresh at ${clock(failedAt)} · trying again at ${clock(failedAt + waitMs())}`
+        : failures ? `Couldn’t refresh at ${clock(failedAt)}${live}`
+        : `${at ? `Refreshed ${when(at)}` : "Not refreshed yet"}${live}`;
       refreshBtn.disabled = refreshing || state.removed;
     }
     return {
@@ -380,23 +421,49 @@
         refreshBtn = el("button", "art-btn art-btn-primary"); refreshBtn.type = "button";
         refreshBtn.append(icon("refresh"), el("span", "art-btn-label", "Refresh"));
         refreshBtn.title = "Run its queries again now, on this computer, with no model";
-        refreshBtn.addEventListener("click", () => { refreshing = true; paintStamp(); vscode.postMessage({ type: "refresh" }); });
+        refreshBtn.addEventListener("click", () => { byItself = false; refreshing = true; paintStamp(); vscode.postMessage({ type: "refresh" }); });
+        const everyWrap = el("div", "art-menu-wrap");
+        everyBtn = el("button", "art-btn"); everyBtn.type = "button"; everyBtn.id = "art-refresh-every";
+        everyBtn.setAttribute("aria-haspopup", "menu"); everyBtn.setAttribute("aria-expanded", "false");
+        everyBtn.title = "How often it refreshes by itself, while it shows";
+        everyMenu = el("div", "art-menu art-menu-left dgc-popover"); everyMenu.id = "art-refresh-menu";
+        everyMenu.setAttribute("role", "menu"); everyMenu.setAttribute("aria-label", "Refreshes by itself"); everyMenu.hidden = true;
+        everyBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const keys = Object.keys(EVERY).filter((k) => k !== "files" || fileSources().length);
+          showMenu(everyBtn, everyMenu, keys.map((k) => [EVERY[k][0], () => choose(k)]));
+        });
+        everyWrap.append(everyBtn, everyMenu);
         stamp = el("span", "art-toolbar-note");
-        bar.append(refreshBtn, stamp, el("span", "art-spacer"), copy);
+        bar.append(refreshBtn, everyWrap, stamp, el("span", "art-spacer"), copy);
         sourcesBox = el("section", "art-sources"); sourcesBox.setAttribute("aria-label", "Sources");
         frame = viewFrame(`${state.view.title}: the dashboard`);
         const wrap = el("div", "art-dash");
         wrap.append(sourcesBox, frame);
         main.append(bar, wrap);
-        renderSources(); paintStamp();
+        renderSources(); paintEvery(); paintStamp(); plan();
+        // (Watching its files again, for a dashboard opened with that choice.)
+        if (every === "files") vscode.postMessage({ type: "refreshEvery", every, files: fileSources() });
       },
-      update() { asking.clear(); renderSources(); paintStamp(); },
+      update() { asking.clear(); renderSources(); paintEvery(); paintStamp(); },
       render(msg) {
         if (msg.error) { banner("error", msg.error); return; }
         renderedHtml = msg.html;
         frameHtml(frame, msg.html);
       },
-      refreshed(msg) { refreshing = false; if (msg.state) state.dstate = msg.state; paintStamp(); renderSources(); },
+      refreshed(msg) {
+        refreshing = false; byItself = false; failures = 0; lastRun = Date.now();
+        if (msg.state) state.dstate = msg.state;
+        paintStamp(); renderSources(); plan();
+      },
+      /** The editor saw one of its files change (when it refreshes on that). */
+      filesChanged() {
+        if (every !== "files") return;
+        if (document.hidden) { dueWhileHidden = true; return; }
+        run();
+      },
+      /** A refresh it started by itself: its failure is said on the stamp, not in a banner. */
+      quiet: () => byItself,
       allowed(msg) {
         asking.delete(msg.source);
         local.set(msg.source, msg.allowed);
@@ -408,7 +475,11 @@
       },
       rejected(msg) {
         if (msg.what === "allow") { asking.delete(msg.source); renderSources(); }
-        if (msg.what === "refresh") { refreshing = false; paintStamp(); }
+        if (msg.what === "refresh") {
+          refreshing = false; byItself = false; failedAt = Date.now();
+          if (every) failures = Math.min(failures + 1, 12);
+          paintStamp(); plan();
+        }
       },
       dirty: () => false,
     };
@@ -448,6 +519,7 @@
         const wasRemoved = state.removed;
         state.view = msg.artifact; state.content = msg.content; state.contentVersion = msg.artifact.version;
         state.dstate = msg.state; state.offer = msg.offer || state.offer;
+        if (typeof msg.refreshEvery === "string") state.refreshEvery = msg.refreshEvery;
         state.removed = false;
         if (!state.conflict) hideBanner();
         header();
@@ -490,6 +562,7 @@
           return;
         }
         if (msg.what === "save" && msg.reason === "conflict") { conflict(); state.editor?.rejected?.(msg); return; }
+        if (msg.what === "refresh" && state.editor?.quiet?.()) { state.editor.rejected?.(msg); return; }
         banner("error", msg.what === "save" ? `Not saved: ${msg.message}` : msg.message);
         state.editor?.rejected?.(msg);
         return;
@@ -499,6 +572,7 @@
       case "copyFailed": banner("error", msg.message); return;
       case "copied": announce("Text copied to clipboard."); return;
       case "refreshed": state.editor?.refreshed?.(msg); return;
+      case "filesChanged": state.editor?.filesChanged?.(); return;
       case "allowed": state.editor?.allowed?.(msg); return;
     }
   });

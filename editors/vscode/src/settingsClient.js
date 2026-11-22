@@ -108,6 +108,8 @@ const ui = {
     inp: (id, value, type = 'text') => `<input id="${id}" type="${type}" value="${esc(value ?? '')}" autocomplete="off" spellcheck="false">`,
     area: (id, value, placeholder = '', max = 1500) => `<textarea id="${id}" rows="4" maxlength="${max}" placeholder="${esc(placeholder)}" spellcheck="true">${esc(value ?? '')}</textarea>`,
     bool: (id, on) => switchHTML(on, id.replaceAll('_', ' '), `id="${id}" data-setting="${id}"`),
+    // A switch for one of the editor's own settings: it applies at once, so it is never part of Save all.
+    editorBool: (id, on, label) => switchHTML(on, label, `id="${id}" data-editor-setting="${id}"`),
     card: (title, body) => `<div class="card"><h3>${title}</h3>${body}</div>`,
     // A Model box: a list of the models at its card's own host from a CLI that answers list_models_at, else text.
     // opts.before: a control over the box, in the same row (Sub-agents' provider choice); opts.more: the row's "?".
@@ -537,6 +539,10 @@ function render() {
     // Pictures in replies is the editor's own setting (dgc.picturesInReplies): it applies at once, apart from Save all.
     const pictures = $('pictures_in_replies');
     if (pictures) pictures.onchange = () => { draft.pictures_in_replies = pictures.value; send({ type: 'picturesInReplies', value: pictures.value }); };
+    // A link's preview card is the editor's own setting too (dgc.linkPreviews): the switch applies at once.
+    const previews = $('link_previews');
+    if (previews) previews.onclick = () => { const on = previews.getAttribute('aria-checked') !== 'true'; draft.link_previews = on;
+        previews.classList.toggle('on', on); previews.setAttribute('aria-checked', String(on)); send({ type: 'linkPreviews', on }); };
     // The dock's three are the editor's own settings too (dgc.dock.*): each applies at once, in every window.
     const dockShow = $('dock_show'), dockMost = $('dock_most'), dockSize = $('dock_size');
     if (dockShow) dockShow.onchange = () => { draft.dock_show = dockShow.value; send({ type: 'dockSetting', name: 'show', value: dockShow.value }); };
@@ -1591,6 +1597,11 @@ window.addEventListener('message', event => {
         draft.pictures_in_replies = msg.value === 'folded' ? 'folded' : 'shown';
         const select = $('pictures_in_replies');
         if (select && select.value !== draft.pictures_in_replies) select.value = draft.pictures_in_replies;
+    }
+    else if (msg.type === 'linkPreviews') {
+        draft.link_previews = msg.on !== false;
+        const toggle = $('link_previews');
+        if (toggle) { toggle.classList.toggle('on', draft.link_previews); toggle.setAttribute('aria-checked', String(draft.link_previews)); }
     }
     else if (msg.type === 'dockSettings') {
         draft.dock_show = ['hover', 'never'].includes(msg.show) ? msg.show : 'always';

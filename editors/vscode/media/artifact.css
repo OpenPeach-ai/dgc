@@ -33,6 +33,7 @@ body.vscode-light .art-mark, body.vscode-high-contrast-light .art-mark { color: 
 .art-icon:hover:not(:disabled) { background: var(--surface2); color: var(--text-strong); }
 .art-icon:disabled { opacity: .4; cursor: default; }
 .art-menu-wrap { position: relative; display: inline-flex; }
+.art-menu.art-menu-left { right: auto; left: 0; }
 .art-menu { position: absolute; top: calc(100% + var(--sp-1)); right: 0; z-index: 30; min-width: 220px; padding: var(--sp-1);
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); }
 

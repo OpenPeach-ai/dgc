@@ -77,10 +77,12 @@ export function panelPage() {
 }
 
 /** The panel in Chromium at a size and theme; `kind` picks a fixture (slides, sheet, dashboard, page). */
-export async function openPanel(browser, { width = 1100, height = 760, theme = "dark-modern", kind = "slides", frameUrl = "", fixture } = {}) {
+export async function openPanel(browser, { width = 1100, height = 760, theme = "dark-modern", kind = "slides", frameUrl = "", fixture, clock = null, detail = {} } = {}) {
   const data = fixture || fixtures();
   const { html, js } = panelPage();
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2 });
+  // clock: a time to start a test clock at, so minutes pass at once (page.clock.runFor).
+  if (clock) await page.clock.install({ time: new Date(clock) });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.setContent(html, { waitUntil: "load" });
@@ -97,7 +99,7 @@ export async function openPanel(browser, { width = 1100, height = 760, theme = "
   const one = data?.[kind];
   if (one) {
     await send({ type: "init", id: one.view.id });
-    await send({ type: "detail", artifact: one.view, content: one.content ?? null, state: one.state ?? null,
+    await send({ type: "detail", ...detail, artifact: one.view, content: one.content ?? null, state: one.state ?? null,
                  offer: { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
                           exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["pdf", "html"], page: ["docx", "pdf", "html", "zip"] } } });
     if (one.html) await send({ type: "render", html: one.html, version: one.view.version });

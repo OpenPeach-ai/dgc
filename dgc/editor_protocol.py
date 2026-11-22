@@ -1408,6 +1408,16 @@ EVENT_FIELDS["images_result"] = {"request_id": _S(), "ok": _B(), "text": _S(), "
 EVENT_FIELDS["images_library"] = {"request_id": _S(), "images": _A(), "total": _I(), "next_offset": _I(False)}
 EVENT_FIELDS["images_made"] = {"call_id": _NS(False), "images": _A(), "generator": _S(), "model": _S(False),
                                "cost_usd": _N(False)}
+# ---- Favorites in the Library (0.52, dgc/favorites.py; ready.capabilities.favorites = 1) -----------------------------
+# Any Library item can be starred. favorites_list {request_id} and favorites_set {request_id, kind, id, on} are each
+# answered by one `favorites` {request_id, items}: the whole list, [{kind, id, at}], in the order starred. `kind` is
+# artifact | widget | chart | image | video | file | workfile and `id` is what the Library lists that kind by (an
+# artifact's, a widget's or a file's id, "<chat>:<chart>" for a chart, an image's or a video's path, the editor's own
+# name for a Work attachment). An id that is not one of its kind's is command_rejected (invalid_favorite); an artifact,
+# an image or a video DGC doesn't list is unknown_favorite. Both are allowed while a reply runs.
+COMMAND_FIELDS["favorites_list"] = {"request_id": _S()}
+COMMAND_FIELDS["favorites_set"] = {"request_id": _S(), "kind": _S(), "id": _S(), "on": _B()}
+EVENT_FIELDS["favorites"] = {"request_id": _S(), "items": _A()}
 # A generator row in `status` also says what it makes: `makes` (images | videos | both), and for one that makes
 # videos `video`: {model, label, durations, default_duration_s, resolutions, aspects, audio (no | option | always),
 # start_image, price_per_s (words), price_usd_default, minutes, asks, pips, note?}; `key_spent_this_month_usd` is what

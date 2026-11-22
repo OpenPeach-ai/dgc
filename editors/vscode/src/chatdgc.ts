@@ -18,6 +18,7 @@ import { sessionIcon, dockOf, type DockPin } from "./dock";
 import { openCodePreview } from "./codePreview";
 import { promises as fs } from "fs";
 import { downloadBytes, downloadFile, downloadMade, DOWNLOAD_MESSAGE, takeSave, type DownloadPage } from "./download";
+import { handleLinkPreview, LINK_PREVIEW_MESSAGE } from "./linkPreview";
 import { displayMentions, workspaceFiles } from "./mentionsHost";
 
 /**
@@ -37,7 +38,10 @@ export const CHATDGC_LIBRARY = "dgc.chatdgcLibrary";
 const SIDE_LIBRARY = new Set(["ready", "list", "image", "open", "use", "save", "saveToProject", "toProject", "remove",
   "artifactList", "artifactOpen", "artifactExport", "artifactRemove", "widgets", "widgetOpen", "widgetChat", "widgetRemove",
   "workImages", "workImage", "workImageOpen", "workImageReveal", "workImageSave", "workImageToProject",
-  "videoList", "videoOpen", "videoReveal", "videoSave", "itemAct", "itemCopied", "charts", "workFiles", "workFilePic"]);
+  "videoList", "videoOpen", "videoReveal", "videoSave", "itemAct", "itemCopied", "charts", "workFiles", "workFilePic",
+  "favorites", "favorite"]);
+/** What can be a Favorite: every kind of thing the Library lists (dgc/favorites.py KINDS). */
+const FAVORITE_KINDS = new Set(["artifact", "widget", "chart", "image", "video", "file", "workfile"]);
 /** An item's menu in the Library (media/library.js): the eight things an item can be asked to do. */
 const ITEM_ACTS = new Set(["open", "editor", "save", "copy", "path", "reveal", "rename", "remove"]);
 /** The most an image may weigh to be handed to the page for the clipboard. */
@@ -136,6 +140,11 @@ export interface ChatDGCHost {
   sessionAttachmentsOffered?(): boolean;
   sessionAttachments?(cmd: Record<string, unknown>): Promise<any>;
   sessionAttachment?(path: string, id: string): Promise<any>;
+  /** Its backend keeps the Library's favorites (ready.capabilities.favorites, 0.52): `favorites` reads the list
+   *  (favorites_list) or, with an item, stars it or takes its star off (favorites_set); both answer the whole list,
+   *  `{ items: [{ kind, id, at }] }`. Rejects when DGC refuses the item. */
+  favoritesOffered?(): boolean;
+  favorites?(change?: { kind: string; id: string; on: boolean }): Promise<any>;
   /** Its backend makes videos (ready.capabilities.videos, 0.51): a card's Stop, and the Library's Videos. */
   videosOffered?(): boolean;
   videosStop?(job: string): Promise<Record<string, unknown> | undefined>;
@@ -401,7 +410,7 @@ function chatdgcPage(asset: (name: string) => string, cspSource: string): string
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys dgc-dialog" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("media/shared/picturepop.js"))}"></script><script src="${attr(asset("media/shared/modelpicker.js"))}"></script><script src="${attr(asset("media/shared/usagemeter.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/inline.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/pipjob.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/menu.js"))}"></script><script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("media/shared/picturepop.js"))}"></script><script src="${attr(asset("media/shared/linkpreview.js"))}"></script><script src="${attr(asset("media/shared/modelpicker.js"))}"></script><script src="${attr(asset("media/shared/usagemeter.js"))}"></script><script src="${attr(asset("media/shared/filemenu.js"))}"></script><script src="${attr(asset("media/shared/inline.js"))}"></script><script src="${attr(asset("media/shared/composer.js"))}"></script><script src="${attr(asset("media/shared/tray.js"))}"></script><script src="${attr(asset("media/shared/card.js"))}"></script><script src="${attr(asset("media/shared/pipjob.js"))}"></script><script src="${attr(asset("media/shared/tip.js"))}"></script><script src="${attr(asset("media/shared/filesheet.js"))}"></script><script src="${attr(asset("media/shared/marks.js"))}"></script><script src="${attr(asset("media/shared/blob.js"))}"></script><script src="${attr(asset("media/pasteclean.js"))}"></script><script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library in its own editor tab. The page holds only where it goes: the ONE Library module (media/library.js, the
@@ -589,6 +598,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     // A widget's tab open when VS Code closed comes back as it was (its page from the chat, its fields as left).
     const widgets = vscode.window.registerWebviewPanelSerializer(CHATDGC_WIDGET, {
       deserializeWebviewPanel: async (panel: vscode.WebviewPanel, state: any) => this.restoreWidget(panel, state) });
+    // The Library's tab open when the window reloaded comes back, with its tabs, search and filters as they were.
+    const library = vscode.window.registerWebviewPanelSerializer(CHATDGC_LIBRARY, {
+      deserializeWebviewPanel: async (panel: vscode.WebviewPanel) => { this.libraryView = ""; this.adoptLibrary(panel); } });
     // A document canvas opens formatted (Canvas option B), over the same file the Markdown editor opens.
     this.canvasDocs = new CanvasDocEditor(this.context.extensionUri, {
       canvasOf: (path) => this.canvasOf(path),
@@ -600,7 +612,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       canvasShortcut: () => this.canvasShortcut(),
     });
     const docs = this.canvasDocs.register();
-    return { dispose: () => { chats.dispose(); widgets.dispose(); docs.dispose(); } };
+    return { dispose: () => { chats.dispose(); widgets.dispose(); library.dispose(); docs.dispose(); } };
   }
 
   /** A conversation in a tab of its own (or the tab it is already in); "" starts a new chat. `take`: opened to carry
@@ -793,11 +805,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       this.library.reveal();
       if (view) void this.library.webview.postMessage({ type: "view", view });
       void this.library.webview.postMessage({ type: "refresh" });
+      void this.favoritesSay(this.library);       // (starred in another window since: read again)
       return;
     }
     this.libraryView = view;                 // said once the page is ready to hear it
-    const panel = vscode.window.createWebviewPanel(CHATDGC_LIBRARY, "Library", vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] });
+    this.adoptLibrary(vscode.window.createWebviewPanel(CHATDGC_LIBRARY, "Library", vscode.ViewColumn.Active,
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] }));
+  }
+
+  /** The Library's tab, opened here or brought back by the editor after a reload (its tabs, search and filters are the
+   *  page's own kept state, so they come back with it). One at a time: a second one brought back is closed. */
+  adoptLibrary(panel: vscode.WebviewPanel): void {
+    if (this.library && this.library !== panel) { panel.dispose(); return; }
+    panel.webview.options = { enableScripts: true, localResourceRoots: [this.context.extensionUri] };
     const iris = vscode.Uri.joinPath(this.context.extensionUri, "media", "icons", "library-iris", "png", "library-iris-32.png");
     panel.iconPath = { light: iris, dark: iris };
     this.library = panel;
@@ -823,6 +843,73 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const requestId = this.nextId(kind);
     this.requests.set(requestId, { kind, libraryPanel: panel, ...(Number.isInteger(cmd.offset) ? { offset: cmd.offset as number } : {}) } as Asker);
     this.deliver({ kind }, { ...cmd, request_id: requestId });
+  }
+
+  // ---- Favorites in the Library: DGC keeps the list (dgc/favorites.py), one for every kind and every window --------------
+  /** Its backend keeps favorites. An older DGC keeps none: the Library shows no star and no Favorites filter. */
+  private favoritesOffer(): boolean {
+    try { return !!this.host?.favoritesOffered?.() && !!this.host?.favorites; } catch { return false; }
+  }
+  /** DGC's list as the pages are given it: each favorite by its row's key in the Library ("artifact:<id>",
+   *  "image:<path>", "chart:<chat>:<chart>", ...), never anything else of the item. */
+  private favoriteKeys(ev: any): string[] {
+    const keys: string[] = [];
+    for (const row of Array.isArray(ev?.items) ? ev.items.slice(0, 5000) : []) {
+      const kind = String(row?.kind || ""), id = typeof row?.id === "string" ? row.id : "";
+      if (FAVORITE_KINDS.has(kind) && id && id.length <= 4096) keys.push(`${kind}:${id}`);
+    }
+    return keys;
+  }
+  /** Says the favorites to one page (the Library's editor tab or the side bar's Library tab), read from DGC now. */
+  private async favoritesSay(panel: vscode.WebviewPanel): Promise<void> {
+    if (!this.favoritesOffer()) { void panel.webview.postMessage({ type: "favorites", offered: false, keys: [] }); return; }
+    try { void panel.webview.postMessage({ type: "favorites", offered: true, keys: this.favoriteKeys(await this.host!.favorites!()) }); }
+    catch { /* not read this time: the page keeps the list it has */ }
+  }
+  /** The list changed: both places the Library shows hear it, and Home's Artifacts card reads its artifacts again. */
+  private favoritesChanged(ev: any): void {
+    const said = { type: "favorites", offered: true, keys: this.favoriteKeys(ev) };
+    if (this.library) void this.library.webview.postMessage(said);
+    void this.sidePanel.webview.postMessage(said);
+    void this.homeArtifacts(new Set(said.keys));
+  }
+  /** An item as the page names it (media/library.js refOf), as DGC keeps a favorite: its kind and the id the Library
+   *  lists it by. Only an item the Library was shown: one the page made up is nothing. */
+  private favoriteItem(item: any): { kind: string; id: string } | undefined {
+    const kind = String(item?.kind || ""), id = typeof item?.id === "string" ? item.id : "";
+    if (kind === "artifact") return this.libraryArtifacts.has(id) ? { kind, id } : undefined;
+    if (kind === "widget") return WIDGET_ID.test(id) && CONVERSATION_ID.test(String(item.chat_id || "")) ? { kind, id } : undefined;
+    if (kind === "chart") { const key = `${String(item.chat_id || "")}:${id}`; return this.libraryCharts.has(key) ? { kind, id: key } : undefined; }
+    if (kind === "workfile") { const ref = typeof item.ref === "string" ? item.ref : ""; return this.workRefs.has(ref) ? { kind, id: ref } : undefined; }
+    if (kind === "image" || kind === "video") {
+      const asked = typeof item.path === "string" ? item.path : "";
+      const path = kind === "image" ? (this.workImagePaths.has(asked) ? asked : "") : (asked && videoPathAllowed(asked) === asked ? asked : "");
+      return path ? { kind, id: path } : undefined;
+    }
+    if (kind === "file") {
+      const ref = this.libraryRef({ id: item.id, source: item.source, project_id: item.project_id, chat_id: item.chat_id });
+      const known = ref ? this.libraryFiles.get(ref.attachment_id) : undefined;
+      if (!ref || !known || this.libraryRef(known)?.conversation_id !== ref.conversation_id || this.libraryRef(known)?.project_id !== ref.project_id) return undefined;
+      return { kind, id: ref.attachment_id };
+    }
+    return undefined;
+  }
+  /** A row's star (or its menu's Add to / Remove from Favorites): asked of DGC, whose list is then said everywhere.
+   *  Refused, the page is told the list as it is (its star goes back) and the person why. */
+  private async favoriteSet(panel: vscode.WebviewPanel, message: any): Promise<void> {
+    if (!this.favoritesOffer() || typeof message?.on !== "boolean") return;
+    const item = this.favoriteItem(message.item);
+    if (!item) { await this.favoritesSay(panel); return; }
+    try { this.favoritesChanged(await this.host!.favorites!({ ...item, on: message.on })); }
+    catch (err: any) {
+      await this.favoritesSay(panel);
+      void vscode.window.showWarningMessage(`That couldn't be ${message.on ? "added to" : "removed from"} your Favorites: ${String(err?.message || err)}`);
+    }
+  }
+  /** Something left the Library (removed, deleted, moved to the trash): it is no favorite any more. Never throws. */
+  private async favoriteForget(kind: string, id: string): Promise<void> {
+    if (!this.favoritesOffer() || !id) return;
+    try { this.favoritesChanged(await this.host!.favorites!({ kind, id, on: false })); } catch { /* it stays starred in DGC's list, and shows nowhere */ }
   }
 
   // ---- canvas: a document or code in a real editor beside the chat, that both of you change
@@ -1064,6 +1151,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "itemAct":
         await this.libraryAct(panel, message);
         return;
+      case "favorites":
+        await this.favoritesSay(panel);
+        return;
+      case "favorite":
+        await this.favoriteSet(panel, message);
+        return;
       case "itemCopied":
         // The page was handed a picture for the clipboard and could not put it there.
         if (message.ok !== true) void vscode.window.showWarningMessage("That couldn't be copied to the clipboard here. Use Save a copy… instead.");
@@ -1117,6 +1210,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           // Asked first, in VS Code's own words: it goes to DGC's trash, so it can be recovered.
           if (await this.artifacts.remove({ id: String(artifact.id), title: String(artifact.title || "this artifact").slice(0, 120) })) {
             void dockOf(this.context).forget("artifact", String(artifact.id));
+            void this.favoriteForget("artifact", String(artifact.id));
             void panel.webview.postMessage({ type: "artifactRemoved", id: String(artifact.id) });
           }
         }
@@ -1164,12 +1258,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const DELETE = "Delete";
         const choice = await vscode.window.showWarningMessage(
           `Delete the widget “${widget.title}”? Its card stays in the chat, marked as deleted. This can't be undone.`, { modal: true }, DELETE);
-        if (choice === DELETE) void dockOf(this.context).forget("widget", widget.id);
+        if (choice === DELETE) { void dockOf(this.context).forget("widget", widget.id); void this.favoriteForget("widget", widget.id); }
         if (choice === DELETE) this.libraryAsk(panel, "widgetRemove", { type: "chatdgc_widgets", op: "remove", conversation_id: widget.chat, widget_id: widget.id });
         return;
       }
       case "ready":
         void panel.webview.postMessage(dockOf(this.context).state());     // what is pinned, for each row's pin
+        void this.favoritesSay(panel);                                    // what is starred, for each row's star
         void panel.webview.postMessage({ type: "widgetsOffered", on: this.widgetLibrary() });
         void panel.webview.postMessage({ type: "workImagesOffered", on: !!this.host?.imagesOffered?.() && !!this.host?.imagesLibrary });
         void panel.webview.postMessage({ type: "artifactsOffered", on: !!this.artifactsOffer() });
@@ -1235,7 +1330,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const choice = await vscode.window.showWarningMessage(
           `Delete “${chatTitle(String(message.file?.name || "this file"))}” from your Library? The chat it's in keeps its name, marked as no longer available. This can't be undone.`,
           { modal: true }, DELETE);
-        if (choice === DELETE) void dockOf(this.context).forget("file", ref.attachment_id);
+        if (choice === DELETE) { void dockOf(this.context).forget("file", ref.attachment_id); void this.favoriteForget("file", ref.attachment_id); }
         if (choice === DELETE) this.libraryAsk(panel, "libraryChange", { type: "chatdgc_library_file", op: "remove", ...ref });
         return;
       }
@@ -1294,6 +1389,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           if (await this.artifacts.remove({ id, title: title.slice(0, 120) })) {
             this.libraryArtifacts.delete(id);
             void dockOf(this.context).forget("artifact", id);
+            void this.favoriteForget("artifact", id);
             void panel.webview.postMessage({ type: "artifactRemoved", id });
           }
           return;
@@ -1354,6 +1450,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
             await trashFile(() => vscode.workspace.fs.delete(uri, { useTrash: true }), uri.fsPath || path);
             for (const beside of await this.besideMade(path)) { try { await trashFile(() => vscode.workspace.fs.delete(vscode.Uri.file(beside), { useTrash: true }), beside); } catch { /* the item itself is what was asked for */ } }
             if (kind === "image") this.workImagePaths.delete(path);
+            void this.favoriteForget(kind, path);
             void panel.webview.postMessage({ type: "refresh" });
             this.imagesMade();
             return;
@@ -2397,6 +2494,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     if (rememberPictureFold(this.context, message)) return;
     // This chat's colour, picked from its header's blob (src/dock.ts keeps it).
     if (dockOf(this.context).handle(message, (state) => this.post(tab, state))) return;
+    // A link's preview card: the page asks about an address, and is answered here (src/linkPreview.ts reads the page).
+    if (message.type === LINK_PREVIEW_MESSAGE) { await handleLinkPreview(message, (m) => this.post(tab, m)); return; }
     if (VIDEO_MESSAGES.has(message.type)) {
       // A video card's player: its bytes, Open, Show in folder, Save to project… and Stop.
       await handleVideoMessage(message, (m) => this.post(tab, m as Record<string, unknown>),
@@ -3329,6 +3428,24 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
    *  what a card opens. Nothing here is the page's word for what to open: ids are checked as the Library's are. */
   /** The cards a reply drew, as Home's Widgets card lists them beside ChatDGC's widgets (read when the card asks). */
   private homeCards: Array<{ id: string; title: string; card: boolean; surface: string; created_at: string }> = [];
+  /** Home's Artifacts card: what the Library's Artifacts tab lists, the newest first, each favorite marked.
+   *  `known`: the favorites just read (a star changed), so DGC is not asked twice. */
+  private async homeArtifacts(known?: Set<string>): Promise<void> {
+    if (!this.artifacts || !this.artifactsOffer()) { this.host?.postHome({ type: "homeArtifacts", offered: false, items: [] }); return; }
+    try {
+      // (As the Library's Artifacts tab: a reply's card and a ChatDGC widget are Widgets, not counted here.)
+      // Which are favorites (the card's star shows only those): `favorites` says whether this DGC keeps any.
+      let starred = known;
+      if (!starred && this.favoritesOffer()) { try { starred = new Set(this.favoriteKeys(await this.host!.favorites!())); } catch { starred = new Set(); } }
+      const items = (await this.artifacts.list()).filter((a: any) => ARTIFACT_ID.test(String(a?.id || "")) && !a.made_as).map((a: any) => ({ id: String(a.id), type: String(a.type || ""), title: String(a.title || "").slice(0, 200),
+        version: Number(a.version) || 1, surface: String(a.origin?.surface || ""), at: String(a.updated || a.created || ""), ...(starred?.has(`artifact:${a.id}`) ? { favorite: true } : {}) }))
+        .sort((a, b) => b.at.localeCompare(a.at));
+      // (The newest sixty, and every favorite older than those: the star must find them all.)
+      const shown = [...items.slice(0, 60), ...items.slice(60).filter((a) => a.favorite).slice(0, 140)];
+      this.host?.postHome({ type: "homeArtifacts", offered: true, items: shown, more: items.length > 60, ...(starred ? { favorites: true } : {}) });
+    } catch { this.host?.postHome({ type: "homeArtifacts", offered: true, items: [] }); }
+  }
+
   /** ChatDGC's widgets, held while its charts are asked for (Home is told of both at once). */
   async homeCardsMessage(message: any): Promise<void> {
     switch (message?.type) {
@@ -3344,17 +3461,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.ask({ kind: "homeWidgets" }, { type: "chatdgc_widgets", op: "list", limit: 60, offset: 0 });
         return;
       }
-      case "homeArtifactsGet": {
-        if (!this.artifacts || !this.artifactsOffer()) { this.host?.postHome({ type: "homeArtifacts", offered: false, items: [] }); return; }
-        try {
-          // (As the Library's Artifacts tab: a reply's card and a ChatDGC widget are Widgets, not counted here.)
-          const items = (await this.artifacts.list()).filter((a: any) => ARTIFACT_ID.test(String(a?.id || "")) && !a.made_as).map((a: any) => ({ id: String(a.id), type: String(a.type || ""), title: String(a.title || "").slice(0, 200),
-            version: Number(a.version) || 1, surface: String(a.origin?.surface || ""), at: String(a.updated || a.created || "") }))
-            .sort((a, b) => b.at.localeCompare(a.at));
-          this.host?.postHome({ type: "homeArtifacts", offered: true, items: items.slice(0, 60), more: items.length > 60 });
-        } catch { this.host?.postHome({ type: "homeArtifacts", offered: true, items: [] }); }
+      case "homeArtifactsGet":
+        await this.homeArtifacts();
         return;
-      }
       case "homeWidgetOpen": {
         const id = String(message.id || ""), chat = String(message.chat_id || "");
         if (!WIDGET_ID.test(id) || !CONVERSATION_ID.test(chat) || !this.widgetLibrary()) return;

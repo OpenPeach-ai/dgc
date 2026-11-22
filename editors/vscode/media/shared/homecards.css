@@ -455,6 +455,14 @@ button.hc-mtile:hover { border-color: var(--hair-strong); background: color-mix(
 .hc-card[data-form="s"] .hc-dot { width: 10px; }
 .hc-pages { color: var(--hc-quiet); font: var(--w-med) 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .hc-all { margin-right: -4px; }
+/* The Artifacts card's star, in its head before "All artifacts": the cards' own icon button. Pressed, the card shows
+   only the favorites, and the star is filled, in the accent. A Small card (which opens whole when pressed) says the
+   same with a small filled star beside its name. */
+.hc-btn.hc-fav { color: var(--text-2); }
+.hc-btn.hc-fav:hover { color: var(--text-strong); }
+.hc-btn.hc-fav[aria-pressed="true"], .hc-btn.hc-fav[aria-pressed="true"]:hover { border-color: var(--border-strong); background: var(--field); color: var(--accent-text); }
+.hc-favmark { flex: none; display: inline-flex; align-items: center; margin: 0 auto 0 -2px; color: var(--accent-text); }
+@media (forced-colors: active) { .hc-btn.hc-fav[aria-pressed="true"], .hc-favmark { color: Highlight; } }
 
 /* ---- Arrange Home: each card a slim row with a grip and ×; the one being moved is lifted --------------------------------- */
 .hc-grid.hc-arranging { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 8px; }

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { useLinkPreviewFolder } from "./linkPreview";
 import { DgcViewProvider } from "./panel";
 import { SessionTabs } from "./sessionTabs";
 import { ChatDGC } from "./chatdgc";
@@ -22,6 +23,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
   setEditorEnv({ DGC_EDITOR_REMOTE: vscode.env?.remoteName || undefined });
   // (A download's Save dialog starts in the folder of the last one: src/download.ts.)
   rememberDownloadsIn(context.globalState);
+  // A link's preview card keeps what it read for a day in the extension's own folder (src/linkPreview.ts).
+  try { useLinkPreviewFolder(vscode.Uri.joinPath(context.globalStorageUri, "link-previews").fsPath); } catch { /* in memory only */ }
   const provider = new DgcViewProvider(context);
   // Artifacts: everything DGC makes that you keep, opened from any chat's cards and the Library, answered by the side
   // bar's dgc serve (as ChatDGC is) whichever chat made them.

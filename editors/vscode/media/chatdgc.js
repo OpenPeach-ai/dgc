@@ -21,6 +21,8 @@
   // An icon that cannot load (the icon service unreachable, or nothing for that host) gives the link its bundled glyph
   // back: the one fallback Work's page and a Pip's chat use (media/mentions.js, "links").
   window.DgcMentions?.watchFavicons(document);
+  // A link's preview card under the pointer, as in Work and a Pip's chat (media/shared/linkpreview.js).
+  window.DgcLinkPreview?.connect((message) => vscode.postMessage(message));
   // Maths: the Markdown leaves each formula as TeX in a placeholder, and KaTeX (loaded the first
   // time one shows) draws it in the conversation. A copied reply is built afresh, so it carries the TeX as written.
   window.DgcMarkdown?.setMath?.(true);

@@ -718,10 +718,31 @@ test("ChatDGC's tabs wear its own mark, the speech bubble, so they aren't taken 
   for (const theme of ["light", "dark"]) assert.match(readFileSync(join(root, `media/chatdgc-tab-${theme}.svg`), "utf8"), /aria-label="ChatDGC"/);
 });
 
+test("the Library's tab open when the window reloaded comes back (its filters are its page's own kept state); one at a time", async () => {
+  world.serializers.length = 0;
+  const reg = chat.register();
+  const { serializer } = world.serializers.find((x) => x.viewType === CHATDGC_LIBRARY);
+  const restored = fakePanel(CHATDGC_LIBRARY, "Library"), extra = fakePanel(CHATDGC_LIBRARY, "Library");
+  const before = world.panels.length;
+  await serializer.deserializeWebviewPanel(restored, { library: { tab: "images", search: "logo", filters: { fav: true } } });
+  assert.match(restored.webview.html, /library\.js/, "the Library's own page");
+  assert.equal(restored.webview.options.enableScripts, true);
+  assert.equal(chat.library, restored);
+  await serializer.deserializeWebviewPanel(extra, {});
+  assert.equal(extra.disposedCount, 1, "a second one brought back is closed");
+  chat.openLibrary();
+  assert.equal(world.panels.length, before, "opening it again shows the one that came back, no new tab");
+  assert.equal(restored.revealed, 1);
+  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  assert.ok(manifest.activationEvents.includes(`onWebviewPanel:${CHATDGC_LIBRARY}`), "the editor wakes DGC to bring it back");
+  restored.dispose();
+  reg.dispose();
+});
+
 test("a widget's tab open when VS Code closed comes back with its page; a deleted one doesn't; it waits for the backend", async () => {
   host.offers = {};                                   // starting
   const reg = chat.register();
-  assert.deepEqual(world.serializers.map((x) => x.viewType), [CHATDGC_EDITOR, CHATDGC_WIDGET]);
+  assert.deepEqual(world.serializers.map((x) => x.viewType), [CHATDGC_EDITOR, CHATDGC_WIDGET, CHATDGC_LIBRARY]);
   const { serializer } = world.serializers[1];
   const WG = `wg_${"7".repeat(16)}`, other = `wg_${"8".repeat(16)}`;
   const kept = fakePanel(CHATDGC_WIDGET, "EMI"), gone = fakePanel(CHATDGC_WIDGET, "Old"), junk = fakePanel(CHATDGC_WIDGET, "x");
@@ -2300,6 +2321,105 @@ test("the side bar's Library tab is answered by the Library's host as its editor
   // Nothing in the side bar opens the full Library by the old messages any more.
   assert.equal(await chat.homeMessage({ type: "chatdgcLibrary" }), false);
   assert.equal(world.panels.filter((p) => p.viewType === CHATDGC_LIBRARY).length, 0);
+});
+
+// ---- Favorites in the Library (0.52): through the Library's real host and its side bar allowlist
+test("Favorites: the side bar's tab and the editor tab star only what the Library was shown, DGC keeps the list, and both pages and Home's Artifacts card hear it", async () => {
+  const wait = () => new Promise((done) => setTimeout(done, 5));
+  const A1 = { id: "ar_" + "1".repeat(16), type: "doc", title: "Launch notes", updated: "2026-11-19T10:00:00Z" }, A2 = { id: "ar_" + "2".repeat(16), type: "sheet", title: "Acme sales", updated: "2026-11-18T10:00:00Z" };
+  const hub = fakeArtifacts();
+  hub.list = async () => [A1, A2];
+  chat.useArtifacts(hub);
+  // DGC's own list (dgc/favorites.py), as the editor's panel reaches it: no argument reads, a change stars or clears.
+  let kept = []; const changes = [];
+  host.favoritesOffered = () => true;
+  host.favorites = async (change) => {
+    if (change) {
+      changes.push(change);
+      if (change.id === A2.id && change.on) throw new Error("That item isn't in the Library any more.");
+      kept = kept.filter((r) => !(r.kind === change.kind && r.id === change.id));
+      if (change.on) kept.push({ kind: change.kind, id: change.id, at: "2026-11-19T00:00:00Z" });
+    }
+    return { type: "favorites", items: kept.map((r) => ({ ...r })) };
+  };
+  const side = (type) => host.home.filter((m) => m.type === "sideLibrary" && m.message.type === type).map((m) => m.message);
+  const homeCard = () => host.home.filter((m) => m.type === "homeArtifacts").at(-1);
+  // The side bar's tab is told the list with what else it is told when it is ready, and again when it asks.
+  await chat.sideLibrary({ type: "ready" }); await wait();
+  assert.deepEqual(side("favorites"), [{ type: "favorites", offered: true, keys: [] }]);
+  // An artifact the Library was not shown yet is nothing to star: DGC is never asked.
+  await chat.sideLibrary({ type: "favorite", item: { kind: "artifact", id: A1.id }, on: true }); await wait();
+  assert.deepEqual(changes, []);
+  await chat.sideLibrary({ type: "artifactList" }); await wait();
+  await chat.sideLibrary({ type: "favorite", item: { kind: "artifact", id: A1.id }, on: true }); await wait();
+  assert.deepEqual(changes, [{ kind: "artifact", id: A1.id, on: true }], "its kind, its id, on: nothing else of it");
+  assert.deepEqual(side("favorites").at(-1), { type: "favorites", offered: true, keys: [`artifact:${A1.id}`] }, "by the row's key");
+  assert.deepEqual(homeCard().items.map((a) => [a.id, a.favorite === true]), [[A1.id, true], [A2.id, false]], "Home's Artifacts card hears which are favorites");
+  assert.equal(homeCard().favorites, true, "and that this DGC keeps them (its star shows)");
+  // Nothing the page made up reaches DGC: an id never listed, a path, a kind there is none of, a star neither on nor off.
+  const before = changes.length;
+  for (const item of [{ kind: "artifact", id: "ar_" + "9".repeat(16) }, { kind: "image", path: "/etc/passwd" }, { kind: "video", path: "/home/me/x.mp4" }, { kind: "pip", id: "pip_" + "a".repeat(32) },
+    { kind: "workfile", ref: "wa_" + "1".repeat(16) }, { kind: "chart", id: "msg_" + "a".repeat(32) + ":0", chat_id: ID(1) }, { kind: "file", id: "att_" + "3".repeat(32), source: "chat", chat_id: ID(1) },
+    { kind: "widget", id: "wg_zz", chat_id: ID(1) }, { kind: "widget", id: "wg_" + "4".repeat(16), chat_id: "nope" }, null, "artifact"]) {
+    await chat.sideLibrary({ type: "favorite", item, on: true }); await wait();
+  }
+  await chat.sideLibrary({ type: "favorite", item: { kind: "artifact", id: A1.id }, on: "yes" }); await wait();
+  await chat.sideLibrary({ type: "favorite", item: { kind: "artifact", id: A1.id } }); await wait();
+  assert.equal(changes.length, before, "none of them asked of DGC");
+  // What the Library was shown can be: an image images_library listed (by its path), a chat's file, a widget by its ids.
+  host.imagesOffered = () => true;
+  host.imagesLibrary = async () => ({ type: "images_library", images: [{ path: "/home/me/.dgc/images/chat/a.png", prompt: "a", surface: "chat" }], total: 1, next_offset: null });
+  await chat.sideLibrary({ type: "workImages", seq: 1, offset: 0, limit: 60 }); await wait();
+  await chat.sideLibrary({ type: "favorite", item: { kind: "image", path: "/home/me/.dgc/images/chat/a.png" }, on: true }); await wait();
+  chat.onEvent({ type: "chatdgc_library", request_id: last("chatdgc_library").request_id, files: [{ id: "att_" + "3".repeat(32), name: "map.png", type: "image", source: "chat", chat_id: ID(1) }], total: 1, next_offset: null, counts: {} });
+  await chat.sideLibrary({ type: "favorite", item: { kind: "file", id: "att_" + "3".repeat(32), source: "chat", chat_id: ID(1) }, on: true }); await wait();
+  await chat.sideLibrary({ type: "favorite", item: { kind: "file", id: "att_" + "3".repeat(32), source: "chat", chat_id: ID(2) }, on: true }); await wait();     // (the file, named in another chat: not it)
+  await chat.sideLibrary({ type: "favorite", item: { kind: "widget", id: "wg_" + "4".repeat(16), chat_id: ID(1) }, on: true }); await wait();
+  assert.deepEqual(changes.slice(before), [{ kind: "image", id: "/home/me/.dgc/images/chat/a.png", on: true }, { kind: "file", id: "att_" + "3".repeat(32), on: true }, { kind: "widget", id: "wg_" + "4".repeat(16), on: true }]);
+  assert.deepEqual(side("favorites").at(-1).keys, [`artifact:${A1.id}`, "image:/home/me/.dgc/images/chat/a.png", "file:att_" + "3".repeat(32), "widget:wg_" + "4".repeat(16)]);
+  // The Library's editor tab is the same host: told the list when ready, and it hears a star set in the side bar.
+  chat.openLibrary();
+  const lib = world.panels.find((p) => p.viewType === CHATDGC_LIBRARY);
+  lib.say({ type: "ready" }); await wait();
+  assert.equal(lib.last("favorites").keys.length, 4, "the editor tab reads the same list");
+  lib.say({ type: "favorite", item: { kind: "artifact", id: A1.id }, on: false }); await wait();
+  assert.deepEqual(changes.at(-1), { kind: "artifact", id: A1.id, on: false });
+  assert.equal(lib.last("favorites").keys.includes(`artifact:${A1.id}`), false);
+  assert.equal(side("favorites").at(-1).keys.includes(`artifact:${A1.id}`), false, "the side bar's tab hears a star taken off in the editor tab");
+  assert.deepEqual(homeCard().items.map((a) => a.favorite === true), [false, false]);
+  // DGC refuses one (gone since it was listed): the person is told why, and the page the list as it is.
+  const said = lib.webview.posted.filter((m) => m.type === "favorites").length;
+  lib.say({ type: "favorite", item: { kind: "artifact", id: A2.id }, on: true }); await wait();
+  assert.match(world.warnings.at(-1), /couldn't be added to your Favorites: That item isn't in the Library any more\./);
+  assert.equal(lib.webview.posted.filter((m) => m.type === "favorites").length, said + 1, "its star goes back");
+  assert.equal(lib.last("favorites").keys.includes(`artifact:${A2.id}`), false);
+  // Removed from the Library, it is no favorite any more.
+  lib.say({ type: "favorite", item: { kind: "artifact", id: A1.id }, on: true }); await wait();
+  hub.answer = true;
+  lib.say({ type: "itemAct", act: "remove", item: { kind: "artifact", id: A1.id } }); await wait(); await wait();
+  assert.deepEqual(changes.at(-1), { kind: "artifact", id: A1.id, on: false }, "its star goes with it");
+  // An older DGC keeps none: the pages are told so (no star, no filter), and nothing is asked of it.
+  host.favoritesOffered = () => false;
+  const asked = changes.length;
+  await chat.sideLibrary({ type: "favorites" }); await wait();
+  assert.deepEqual(side("favorites").at(-1), { type: "favorites", offered: false, keys: [] });
+  await chat.sideLibrary({ type: "favorite", item: { kind: "widget", id: "wg_" + "4".repeat(16), chat_id: ID(1) }, on: true }); await wait();
+  assert.equal(changes.length, asked);
+  await chat.homeCardsMessage({ type: "homeArtifactsGet" }); await wait();
+  assert.equal("favorites" in homeCard(), false, "and Home's card has no star");
+});
+
+test("Home's Artifacts card is given every favorite, however old: the newest sixty and the favorites after them", async () => {
+  const hub = fakeArtifacts();
+  const all = Array.from({ length: 70 }, (_, n) => ({ id: "ar_" + String(n).padStart(16, "0"), type: "page", title: `Page ${n}`, updated: new Date(Date.UTC(2026, 10, 19) - n * 3600000).toISOString() }));
+  hub.list = async () => all;
+  chat.useArtifacts(hub);
+  host.favoritesOffered = () => true;
+  host.favorites = async () => ({ type: "favorites", items: [{ kind: "artifact", id: all[65].id }, { kind: "artifact", id: all[3].id }, { kind: "image", id: "/x.png" }] });
+  await chat.homeCardsMessage({ type: "homeArtifactsGet" });
+  const card = host.home.filter((m) => m.type === "homeArtifacts").at(-1);
+  assert.equal(card.items.length, 61); assert.equal(card.more, true); assert.equal(card.favorites, true);
+  assert.deepEqual(card.items.filter((a) => a.favorite).map((a) => a.id), [all[3].id, all[65].id]);
 });
 
 test("the Library's editor tab: his Iris books on its tab, opened on the tab asked for, a maker's name leads back, ⋯ opens the settings", async () => {

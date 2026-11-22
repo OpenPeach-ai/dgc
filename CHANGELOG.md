@@ -6,6 +6,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Showing a dashboard no longer adds a "Page" beside it in the Library**: its view, served to show it, was taken for
+  a page of its own with the dashboard's name. Ones made that way go to DGC's trash, where they can be recovered.
 - **One artifact per name**: asked to change something it made, a model changes that one (a new version you can go
   back to) instead of saving another beside it. Two docs, decks, sheets, dashboards or pages never share a name (case
   and spacing don't count). A second one is made only when you want both, under a name that says how it differs; the

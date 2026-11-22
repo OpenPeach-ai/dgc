@@ -289,6 +289,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "images_list", "images_library",
     # Video jobs: reading them, or the Library's videos (a Stop is the person acting, so it isn't here).
     "videos_jobs", "videos_library",
+    # The Library's favorites, read (a star set or taken off is the person acting, so favorites_set isn't here).
+    "favorites_list",
     # A client saying it shows the card for the mods DGC writes: nothing changes but what it is sent.
     "watch_mod_offers",
     # The person saved a file in the editor: a fact for the command watch, not the person acting on the chat.
@@ -3330,6 +3332,9 @@ class Backend:
                           # Video generation (dgc/videos.py): videos_jobs / videos_stop / videos_generate /
                           # videos_library; video_job follows once a client has sent one of them.
                           "videos": self._videos_capability(),
+                          # Favorites in the Library (dgc/favorites.py): favorites_list / favorites_set, each
+                          # answered by one `favorites` event with the whole list.
+                          "favorites": self._favorites_capability(),
                           # The web search providers set_config's search_provider takes (Settings -> Web search
                           # offers only these): an older CLI refuses the whole save on one it doesn't know.
                           "search_providers": list(SEARCH_PROVIDERS),
@@ -3475,6 +3480,36 @@ class Backend:
                 return reject("router_failed", f"{type(exc).__name__}: {exc}")
             self.em.emit("router_status", request_id=request_id, status=status, **extra)
         threading.Thread(target=work, name=f"dgc-{t}", daemon=True).start()
+
+    # ---- Favorites in the Library (0.52, dgc/favorites.py) ---------------------------------------------------------
+    _FAVORITES_COMMANDS = ("favorites_list", "favorites_set")
+
+    def _favorites_capability(self) -> int:
+        return 1
+
+    def _favorites_command(self, cmd: dict) -> None:
+        """favorites_list or favorites_set: answered by one `favorites` event naming its request and carrying the
+        whole list, or command_rejected with why in words. A small file read and written: done on the spot, and
+        allowed while a reply runs (a star is the Library's, never the chat's)."""
+        from . import favorites
+        t = str(cmd.get("type") or "")
+        request_id = str(cmd.get("request_id") or "")
+        if not 1 <= len(request_id) <= 128:
+            self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                         message="request_id must contain 1-128 characters")
+            return
+        try:
+            items = (favorites.mark(cmd.get("kind"), cmd.get("id"), cmd.get("on") is True)
+                     if t == "favorites_set" else favorites.listing())
+        except favorites.FavoriteError as exc:
+            self.em.emit("command_rejected", command=t, reason=exc.reason, message=str(exc), request_id=request_id)
+            return
+        except Exception as exc:               # noqa: BLE001 -- said, never a dead backend
+            self.em.emit("command_rejected", command=t, reason="favorites_failed",
+                         message=f"The Library's favorites couldn't be saved ({type(exc).__name__}).",
+                         request_id=request_id)
+            return
+        self.em.emit("favorites", request_id=request_id, items=items)
 
     # ---- Image generation (0.51, dgc/images.py) ------------------------------------------------------------------
     _IMAGES_COMMANDS = ("images_list", "images_update", "images_generate", "images_library")
@@ -8749,6 +8784,10 @@ class Backend:
 
         if t in self._VIDEOS_COMMANDS:
             self._videos_command(cmd)
+            return
+
+        if t in self._FAVORITES_COMMANDS:
+            self._favorites_command(cmd)
             return
 
         if t in self._ROUTER_COMMANDS:

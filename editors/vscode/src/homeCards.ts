@@ -3,7 +3,7 @@
 // Kept on this computer, in the extension's global state as the dock's pins are (src/dock.ts), so a reload and every
 // window find Home as it was left: which cards are on Home and in what order (the side bar's width picks each card's
 // size, so no size is kept), the everyday cards' own settings (the Clock's added time zones, the Weather's place and
-// unit, which widget and which artifact their cards last showed). The Notes card's notes are not here: they are files in
+// unit, which widget and which artifact their cards last showed, whether the Artifacts card shows only favorites). The Notes card's notes are not here: they are files in
 // DGC's own storage folder (src/notes.ts), and a Notes message a page sends is handed to that store.
 //
 // Read for it: the token report, shaped for the Token usage card (the days as DGC counted them, the models by tokens
@@ -29,7 +29,7 @@ export const CLOCK_ZONES_MOST = 3;
 export type HomePlace = { name: string; admin1: string; country: string; code: string; lat: number; lon: number; tz: string };
 /** `clock.zones`: the time zones added beside Here, in the order they were added. `weather.city`: a city typed before
  *  places were chosen from a list (found once more, then kept as a place). */
-export type HomeSettings = { clock?: { zones: string[] }; weather?: { place?: HomePlace; city?: string; unit?: "c" | "f" }; widgets?: { shown?: string }; artifacts?: { shown?: string } };
+export type HomeSettings = { clock?: { zones: string[] }; weather?: { place?: HomePlace; city?: string; unit?: "c" | "f" }; widgets?: { shown?: string }; artifacts?: { shown?: string; favorites?: true } };
 export type HomeCardsState = { type: "homeCards"; order: HomeCardType[]; settings: HomeSettings };
 export type HomeWeather = { type: "homeWeather"; ok: true; place: string; at: number; now: { temp: number; code: number; day: boolean }; high: number; low: number; hours: { time: string; temp: number; code: number }[] }
   | { type: "homeWeather"; ok: false; reason: "nocity" | "offline" | "refused" | "notfound" };
@@ -79,6 +79,8 @@ function settings(value: unknown): HomeSettings {
   const place = homePlace(from.weather?.place), c = place ? undefined : city(from.weather?.city), unit = from.weather?.unit === "f" ? "f" : from.weather?.unit === "c" ? "c" : undefined;
   if (place || c || unit) out.weather = { ...(place ? { place } : {}), ...(c ? { city: c } : {}), ...(unit ? { unit } : {}) };
   for (const card of ["widgets", "artifacts"] as const) if (typeof from[card]?.shown === "string" && SHOWN_ID.test(from[card].shown)) out[card] = { shown: from[card].shown };
+  // (The Artifacts card's star: only its favorites. Kept only while it is on.)
+  if (from.artifacts?.favorites === true) out.artifacts = { ...(out.artifacts || {}), favorites: true };
   return out;
 }
 export type HomeUsageModel = { name: string; model: string; provider: string; where: string; tokens: number; share: number };
@@ -166,7 +168,17 @@ export class HomeCards {
       if (!next) return;
       if (next.length) now.clock = { zones: next }; else delete now.clock;
     }
-    else if (card === "widgets" || card === "artifacts") { if (typeof from.shown !== "string" || (from.shown && !SHOWN_ID.test(from.shown))) return; if (from.shown) now[card] = { shown: from.shown }; else delete now[card]; }
+    else if (card === "widgets" || card === "artifacts") {
+      // The thing the card last showed (its page), and for Artifacts whether its star is on: each said alone, the other kept.
+      const starSaid = card === "artifacts" && from.favorites !== undefined;
+      if (from.shown === undefined && !starSaid) return;
+      if (from.shown !== undefined && (typeof from.shown !== "string" || (from.shown && !SHOWN_ID.test(from.shown)))) return;
+      if (starSaid && typeof from.favorites !== "boolean") return;
+      const next: { shown?: string; favorites?: true } = { ...(now[card] || {}) };
+      if (from.shown !== undefined) { if (from.shown) next.shown = from.shown as string; else delete next.shown; }
+      if (starSaid) { if (from.favorites) next.favorites = true; else delete next.favorites; }
+      if (next.shown || next.favorites) now[card] = next; else delete now[card];
+    }
     else {
       const place = from.place === undefined ? now.weather?.place : homePlace(from.place), unit = from.unit === "f" || from.unit === "c" ? from.unit : now.weather?.unit;
       if (from.place !== undefined && !place) return;

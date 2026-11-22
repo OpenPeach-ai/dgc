@@ -694,6 +694,12 @@ artifact; removal moves its versions to DGC's trash. A Page or Dashboard has a *
 in its editor panel, so its readable text can be copied even when the embedded preview does not
 offer a working copy command.
 
+Star anything in the Library to make it a **Favorite**: an artifact, a widget, an image, a video or a
+file. A favorite's star is filled, and **Favorites** in each tab's filters shows only what you starred,
+together with the search and the other filters. The star on Home's Artifacts card shows only your
+favorite artifacts there. Favorites are kept on this computer, in `~/.dgc/library/favorites.json`,
+so every window shows the same ones.
+
 **Download** on a card or in the panel saves a copy to your own computer, also from a remote window:
 
 | What it is | Downloads as |
