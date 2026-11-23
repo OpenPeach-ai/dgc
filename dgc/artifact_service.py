@@ -585,6 +585,11 @@ def view(aid: str, *, store: Store | None = None, versions: bool = True) -> dict
             out["progress"] = _kind("checklist").progress(st.source(aid, art.version))
         except Exception:                                  # noqa: BLE001 -- unreadable data: shown without it
             pass
+    # Its comment threads, counted ({open, all}; dgc/artifact_comments): the Library row and the panel say how many.
+    from .artifact_comments import counts
+    said = counts(aid, store=st)
+    if said:
+        out["comments"] = said
     if versions:
         out["versions"] = [{"n": v.n, "author": v.author, "at": v.at, "summary": v.summary, "size": v.size}
                            for v in st.versions(aid)]

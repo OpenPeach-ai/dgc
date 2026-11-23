@@ -249,6 +249,35 @@
       fxInput.value = r < 0 ? s.columns[c]?.name || "" : editText(s.rows[r]?.[c], s.columns[c]);
       fxInput.setAttribute("aria-label", `${fxAddr.textContent}: ${r < 0 ? "column name" : "value or formula"}`);
       if (focus) { gridBox.focus({ preventScroll: true }); node?.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+      // (Offered where the person picked cells, not where a redraw put the cursor back.)
+      offering = !!focus;
+      offerComment();
+    }
+    // ---- comments (media/shared/comments.js, through the panel): the cells picked, their sheet, what they hold
+    /** The cells picked as a comment points at them: {kind: "cells", sheet, range, values, quote}; their corners. */
+    function picked() {
+      const s = sheet(), a = anchor || cur;
+      const r1 = Math.min(a.r, cur.r), r2 = Math.max(a.r, cur.r), c1 = Math.min(a.c, cur.c), c2 = Math.max(a.c, cur.c);
+      const row = (r) => (r < 0 ? s.columns.map((col) => col.name) : s.rows[r] || []);
+      const values = [], words = [];
+      for (let r = r1; r <= r2; r++) {
+        values.push(row(r).slice(c1, c2 + 1).map((v) => (v === undefined ? null : v)));
+        words.push(row(r).slice(c1, c2 + 1).map((v, i) => (r < 0 ? String(v ?? "") : String(shown(r, c1 + i).text ?? ""))).join("  "));
+      }
+      const name = (r, c) => `${R.letters(c)}${r < 0 ? 1 : r + 2}`;
+      const range = r1 === r2 && c1 === c2 ? name(r1, c1) : `${name(r1, c1)}:${name(r2, c2)}`;
+      const cells = (r2 - r1 + 1) * (c2 - c1 + 1);
+      return { anchor: { kind: "cells", sheet: s.name, range, ...(cells <= 50 ? { values } : {}), quote: words.join("\n").slice(0, 2000) },
+               corners: [at(r1, c1), at(r2, c2)] };
+    }
+    let offering = false;
+    function offerComment() {
+      if (!offering || !u.commentsOn?.() || locked || editing || !grid?.isConnected) { u.offerComment?.(null); return; }
+      const { anchor: a, corners } = picked();
+      const [one, two] = corners.map((n) => n?.getBoundingClientRect());
+      const view = gridBox.getBoundingClientRect();
+      if (!one || !two || two.bottom < view.top || one.top > view.bottom) { u.offerComment(null); return; }
+      u.offerComment(a, { left: one.left, top: one.top, right: Math.min(two.right, view.right), bottom: Math.min(two.bottom, view.bottom) }, { beside: true });
     }
     function setCell(r, c, text) {
       const s = sheet();
@@ -268,6 +297,7 @@
     }
     function startEdit(seed) {
       if (locked || editing) return;
+      u.offerComment?.(null);
       const { r, c } = cur;
       const node = at(r, c);
       if (!node) return;
@@ -579,6 +609,8 @@
         grid = el("table", "sh-grid"); grid.setAttribute("role", "grid");
         gridBox.append(grid);
         gridBox.addEventListener("keydown", keys);
+        let moved = 0;
+        gridBox.addEventListener("scroll", () => { cancelAnimationFrame(moved); moved = requestAnimationFrame(offerComment); });
         gridBox.addEventListener("click", (e) => {
           const node = e.target.closest("[data-r]");
           if (!node || editing) return;
@@ -602,6 +634,21 @@
         base = view.version;
         savedJson = JSON.stringify(book);
         paint();
+      },
+      commentAnchor: () => (sheet() ? picked().anchor : null),
+      /** A thread's cells: its sheet, the cells picked and scrolled to. */
+      reveal(a) {
+        if (!a || a.kind !== "cells") return;
+        const at2 = book.sheets.findIndex((x) => x.name === a.sheet);
+        if (at2 < 0) { u.announce(`The sheet “${a.sheet}” isn't in this version.`); return; }
+        const m = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/.exec(String(a.range || ""));
+        if (!m) return;
+        const col = (t) => [...t].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+        if (si !== at2) { si = at2; filterText = ""; if (filterInput) filterInput.value = ""; shownRows = PAGE_ROWS; paint(); }
+        const r1 = Number(m[2]) - 2, c1 = col(m[1]), r2 = m[3] ? Number(m[4]) - 2 : r1, c2 = m[3] ? col(m[3]) : c1;
+        while (r2 >= shownRows && shownRows < sheet().rows.length) { shownRows += PAGE_ROWS; paint(); }
+        select(r1, c1, true);
+        if (r2 !== r1 || c2 !== c1) select(r2, c2, true, true);
       },
       render(msg) {
         if (msg.error) { status.textContent = msg.error; return; }

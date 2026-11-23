@@ -13,9 +13,11 @@ from .artifact_store import TYPES
 from .editor_protocol import command_error
 
 # present: artifact_open takes mode "present" (a deck's present mode at its own address).
+# comments: artifact_comment_* and artifact_suggestion_* are understood, answered by artifact_comments
+# (dgc/artifact_comments; Ask DGC runs dgc/artifact_comment_turn).
 CAPABILITY = {"artifacts": {"version": 1, "types": list(TYPES), "outputs": list(service.OUTPUTS),
                             "exports": {t: list(f) for t, f in service.EXPORTS.items()}, "present": 1, "compare": 1,
-                            "source_consent_version": 1}}
+                            "source_consent_version": 1, "comments": 1}}
 
 
 def _reads_a_plugin(aid: str) -> bool:
@@ -30,6 +32,10 @@ class ArtifactCommands:
     def __init__(self, emit, config=None):
         self.emit = emit                  # Emitter.emit(type, **fields)
         self.config = config
+        # Ask DGC's model (a test hands one in): None is the user's own, from config (artifact_comment_turn).
+        self.comment_client = None
+        self._asking: set[tuple[str, str]] = set()
+        self._asking_lock = threading.Lock()
 
     def _reply(self, cmd: dict, kind: str, **fields) -> None:
         self.emit(kind, **fields, **({"request_id": cmd["request_id"]} if cmd.get("request_id") else {}))
@@ -156,3 +162,83 @@ class ArtifactCommands:
     def _artifact_allow_source(self, cmd):
         view = service.allow_source(cmd["id"], cmd["source"], cmd["allowed"], base_version=cmd.get("base_version"))
         self.changed(view, "changed", surface="editor", request_id=cmd["request_id"])
+
+    # comments (dgc/artifact_comments): each answer is the artifact's threads, as every screen draws them -----------
+    def comments(self, aid: str, request_id: str = "") -> None:
+        """The threads of one artifact, to the screen that asked (request_id) or to every screen (none)."""
+        from . import artifact_comments as comments
+        from .artifact_store import store
+        threads = comments.wire(comments.threads(aid))
+        self.emit("artifact_comments", id=aid, version=store().get(aid).version, threads=threads,
+                  **({"request_id": request_id} if request_id else {}))
+
+    def _ask(self, aid: str, tid: str) -> None:
+        """Ask DGC on a thread: answered on a thread of its own (one answer per thread at a time)."""
+        from . import artifact_comment_turn as turn
+        key = (aid, tid)
+        with self._asking_lock:
+            if key in self._asking:
+                return
+            self._asking.add(key)
+        from . import artifact_comments as comments
+        comments.answering(aid, tid, True)                  # said at once, in the answer to this command
+
+        def run():
+            try:
+                client = self.comment_client() if callable(self.comment_client) else None
+                turn.answer(aid, tid, config=self.config, client=client,
+                            on_change=lambda view, op: self.changed(view, op, surface="comment"),
+                            on_threads=lambda: self.comments(aid))
+            except Exception:                              # noqa: BLE001 -- the thread says it (or was deleted)
+                try:
+                    self.comments(aid)
+                except Exception:                          # noqa: BLE001
+                    pass
+            finally:
+                with self._asking_lock:
+                    self._asking.discard(key)
+        threading.Thread(target=run, name="dgc-comment-answer", daemon=True).start()
+
+    def _artifact_comment_list(self, cmd):
+        self.comments(cmd["id"], cmd["request_id"])
+
+    def _artifact_comment_add(self, cmd):
+        from . import artifact_comments as comments
+        thread = comments.add(cmd["id"], cmd["anchor"], cmd["text"])
+        if cmd.get("ask"):
+            self._ask(cmd["id"], thread["id"])
+        self.comments(cmd["id"], cmd["request_id"])
+
+    def _artifact_comment_reply(self, cmd):
+        from . import artifact_comments as comments
+        comments.reply(cmd["id"], cmd["thread"], cmd["text"])
+        if cmd.get("ask"):
+            self._ask(cmd["id"], cmd["thread"])
+        self.comments(cmd["id"], cmd["request_id"])
+
+    def _artifact_comment_resolve(self, cmd):
+        from . import artifact_comments as comments
+        comments.resolve(cmd["id"], cmd["thread"], cmd["resolved"])
+        self.comments(cmd["id"], cmd["request_id"])
+
+    def _artifact_comment_delete(self, cmd):
+        from . import artifact_comments as comments
+        comments.delete(cmd["id"], cmd["thread"])
+        self.comments(cmd["id"], cmd["request_id"])
+
+    def _artifact_comment_ask(self, cmd):
+        from . import artifact_comments as comments
+        comments.get(cmd["id"], cmd["thread"])              # (there, or said why not)
+        self._ask(cmd["id"], cmd["thread"])
+        self.comments(cmd["id"], cmd["request_id"])
+
+    def _artifact_suggestion_accept(self, cmd):
+        from . import artifact_comments as comments
+        view = comments.accept(cmd["id"], cmd["thread"], cmd["suggestion"])
+        self.comments(cmd["id"], cmd["request_id"])
+        self.changed(view, "changed", surface="comment")
+
+    def _artifact_suggestion_reject(self, cmd):
+        from . import artifact_comments as comments
+        comments.reject(cmd["id"], cmd["thread"], cmd["suggestion"])
+        self.comments(cmd["id"], cmd["request_id"])

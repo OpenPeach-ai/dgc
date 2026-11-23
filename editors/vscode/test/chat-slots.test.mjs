@@ -1243,3 +1243,19 @@ test("a Pip alert is said once by the editor, and Open Pips opens Pips", async (
     assert.equal(shown.length, 1, "an older CLI is never asked");
   } finally { win.showInformationMessage = original; }
 });
+
+// Every answer the artifacts hub (src/artifacts.ts) takes reaches it: Compare in Versions' answer (artifact_comparison)
+// was left off the route and went to the chat on screen instead, so its panel waited for an answer that never came.
+test("every artifact answer the artifacts hub takes is routed to it, Compare's too", () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  const active = provider.activeSlot();
+  const hub = [], chat = [];
+  provider.artifacts = { onEvent: (ev) => { hub.push(ev.type); return true; } };
+  provider.onEvent = (ev) => { chat.push(ev.type); };
+  const types = ["artifact_items", "artifact_changed", "artifact_detail", "artifact_served", "artifact_exported",
+    "artifact_comparison", "artifact_comments"];
+  for (const type of types) provider.routeEvent(active, { type, request_id: "r1" });
+  assert.deepEqual(hub, types);
+  assert.deepEqual(chat, [], "none of them is the chat's");
+});

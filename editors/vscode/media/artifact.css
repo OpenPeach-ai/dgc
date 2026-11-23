@@ -1,3 +1,4 @@
+@import url("./shared/comments.css");
 /* An artifact's panel (media/artifact.js): DGC's tokens from main.css, in the editor area's own colours. */
 body.art-body { background: var(--vscode-editor-background, var(--surface)); color: var(--text); }
 .art-head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-3) var(--sp-4);
@@ -360,3 +361,31 @@ body.vscode-light .ck-pin[aria-pressed="true"] { color: var(--link); }
 @media (hover: none) { .ck-remove, .ck-edit { opacity: 1; } }
 @media (forced-colors: active) { .ck-chip { border: 1px solid ButtonText; } .ck-tick[aria-checked="true"] { background: Highlight; } .ck-progress i { background: Highlight; } }
 .art-main[data-type="checklist"] { overflow-y: auto; }
+
+/* ---- comments (media/shared/comments.js): the rail beside the artifact where there is room, under it where there isn't */
+.art-work { position: relative; flex: 1; min-height: 0; display: flex; }
+.art-work > .art-main { flex: 1; min-width: 0; }
+.art-comments { flex: none; width: 300px; min-height: 0; border-left: 1px solid var(--border); background: var(--vscode-editor-background, var(--surface)); }
+.art-comments[hidden] { display: none; }
+.art-count:not(:empty) { min-width: 16px; padding: 0 5px; border-radius: var(--r-full); background: var(--accent-soft); color: var(--accent-text);
+  font: var(--w-semi) var(--t-xs)/16px var(--sans); text-align: center; }
+body.vscode-light .art-count:not(:empty) { color: var(--link); }
+#art-comments-btn[aria-pressed="true"] { background: var(--sel); border-color: var(--border-strong); color: var(--text-strong); }
+@media (max-width: 959px) {
+  .art-work { flex-direction: column; }
+  .art-comments { width: auto; max-height: 42%; border-left: 0; border-top: 1px solid var(--border); }
+}
+/* (A deck's three columns need more room than is left beside the rail: its two-column layout until there is.) */
+@media (min-width: 960px) and (max-width: 1400px) {
+  body[data-rail="side"] .sl { grid-template-columns: 190px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(240px, 42%); }
+  body[data-rail="side"] .sl-preview { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); }
+}
+.ck-item.ck-lit { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; border-radius: var(--r-md); }
+.ck-comment, .sl-comment { color: var(--muted); }
+.ck-comment { flex: none; opacity: 0; }
+.ck-item:hover .ck-comment, .ck-item:focus-within .ck-comment { opacity: 1; }
+@media (hover: none) { .ck-comment { opacity: 1; } }
+@media (max-width: 420px) {
+  .ck-comment { order: 2; opacity: 1; }
+  .ck-top:has(.ck-comment) .ck-title { flex-basis: calc(100% - 26px - var(--control) * 2 - var(--sp-2) * 3); }
+}

@@ -77,10 +77,10 @@ export function panelPage() {
 }
 
 /** The panel in Chromium at a size and theme; `kind` picks a fixture (slides, sheet, dashboard, page). */
-export async function openPanel(browser, { width = 1100, height = 760, theme = "dark-modern", kind = "slides", frameUrl = "", fixture, clock = null, detail = {} } = {}) {
+export async function openPanel(browser, { width = 1100, height = 760, theme = "dark-modern", kind = "slides", frameUrl = "", fixture, clock = null, detail = {}, offer = {}, motion } = {}) {
   const data = fixture || fixtures();
   const { html, js } = panelPage();
-  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2, ...(motion ? { reducedMotion: motion } : {}) });
   // clock: a time to start a test clock at, so minutes pass at once (page.clock.runFor).
   if (clock) await page.clock.install({ time: new Date(clock) });
   const errors = [];
@@ -101,7 +101,7 @@ export async function openPanel(browser, { width = 1100, height = 760, theme = "
     await send({ type: "init", id: one.view.id });
     await send({ type: "detail", ...detail, artifact: one.view, content: one.content ?? null, state: one.state ?? null,
                  offer: { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard", "checklist"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
-                          exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["pdf", "html"], page: ["docx", "pdf", "html", "zip"], checklist: ["md", "html", "pdf"] } } });
+                          exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["pdf", "html"], page: ["docx", "pdf", "html", "zip"], checklist: ["md", "html", "pdf"] }, ...offer } });
     if (one.html) await send({ type: "render", html: one.html, version: one.view.version });
     if (kind === "page" && frameUrl) await send({ type: "frame", url: frameUrl, version: one.view.version });
   }

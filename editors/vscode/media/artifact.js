@@ -65,6 +65,7 @@
       frame.style.colorScheme = dark() ? "dark" : "light";
       if (frame._source) frameHtml(frame, frame._source);
     }
+    for (const frame of document.querySelectorAll("iframe.art-page")) frame.style.colorScheme = dark() ? "dark" : "light";
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
   // ---- menus: a list of choices under a button, keyboard and all
@@ -256,16 +257,50 @@
       [["Reload", () => { hideBanner(); vscode.postMessage({ type: "reload" }); }, true], ["Keep editing", hideBanner]]);
   }
 
+  // ---- comments: offered by the process (offer.comments), drawn by media/shared/comments.js in the rail beside the
+  // artifact (under it in a narrow panel); each editor says what is picked (util.offerComment) and shows where a thread
+  // points (its reveal). The rail shows when there are threads, until the Comments button hides it.
+  let comments = null, railChoice = null, railCount = { open: 0, all: 0 };
+  const HINT = { sheet: "Pick cells to comment on them, or comment on the whole sheet.", slides: "Pick words in a slide, or use Comment on this slide.",
+                 checklist: "Comment on an item with its comment button, or pick words in it.", page: "Pick words on the page to comment on them.",
+                 dashboard: "Comment on the whole dashboard.", doc: "Pick words to comment on them." };
+  function startComments() {
+    if (comments || !state.offer?.comments || !window.DgcComments || !state.view) return;
+    const kind = (TYPE_LABEL[state.view.type] || "artifact").toLowerCase();
+    comments = window.DgcComments.make({ rail: $("art-comments"), kind, hint: HINT[state.view.type], post: (m) => vscode.postMessage(m),
+      reveal: (anchor, thread) => state.editor?.reveal?.(anchor, thread), current: () => state.editor?.commentAnchor?.(),
+      changed: (n) => { railCount = n; paintRail(); } });
+    $("art-comments-btn").hidden = false;
+    vscode.postMessage({ type: "comments", op: "list" });
+  }
+  function paintRail() {
+    const show = !!comments && (railChoice ?? railCount.all > 0);
+    $("art-comments").hidden = !show;
+    document.body.dataset.rail = show ? (window.matchMedia?.("(min-width: 960px)").matches ? "side" : "under") : "";
+    const btn = $("art-comments-btn");
+    btn.setAttribute("aria-pressed", String(show));
+    $("art-comments-count").textContent = railCount.open ? String(railCount.open) : "";
+    btn.setAttribute("aria-label", `Comments${railCount.open ? `: ${railCount.open} open` : ""}. ${show ? "Hide" : "Show"} them`);
+  }
+  window.matchMedia?.("(min-width: 960px)").addEventListener?.("change", paintRail);
+  $("art-comments-btn").addEventListener("click", () => { railChoice = $("art-comments").hidden; paintRail(); if (railChoice) $("art-comments").querySelector("button")?.focus(); });
+
   // ---- the bodies
   const util = { el, icon, when, author, announce, banner, hideBanner, conflict, viewFrame, frameHtml, dark,
-                 post: (m) => vscode.postMessage(m), showMenu, closeMenu };
+                 post: (m) => vscode.postMessage(m), showMenu, closeMenu,
+                 // Comments (media/shared/comments.js): an editor says what is picked and where (null: nothing), or opens
+                 // the box for a comment on one part at once (an item's own Comment button).
+                 offerComment: (anchor, rect, how) => comments?.offer(anchor, rect, how), askComment: (anchor, rect) => comments?.compose(anchor, rect),
+                 commentsOn: () => !!comments };
   window.DgcArtifact = window.DgcArtifact || { editors: {} };
   window.DgcArtifact.util = util;
   const editors = window.DgcArtifact.editors;
 
   /** A page: framed at its own address (its own origin, so it can't reach this panel). */
   editors.page = () => {
-    let frame, note;
+    let frame, note, origin = "";
+    /** The page's frame: Comments on (it then says what is picked), or a thread's place to show. */
+    const tell = (message) => { try { if (origin) frame.contentWindow?.postMessage({ type: "dgc-comments", ...message }, origin); } catch { /* not loaded yet */ } };
     return {
       mount(main) {
         const bar = el("div", "art-toolbar");
@@ -278,12 +313,32 @@
         note = el("span", "art-toolbar-note", "Loading the page…");
         bar.append(note, el("span", "art-spacer"), copy, reload);
         frame = el("iframe", "art-frame art-page");
+        // The editor's colour scheme on the frame, as DGC's own frames have it: a page with no colours of its own then
+        // gets a browser's white page with dark words (without it Chrome left the page see-through over the dark panel,
+        // black words on it), and a page that says it does dark (color-scheme: light dark) follows the editor.
+        frame.style.colorScheme = dark() ? "dark" : "light";
         frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin");
         frame.setAttribute("referrerpolicy", "no-referrer");
         frame.title = state.view.title;
+        frame.addEventListener("load", () => { if (util.commentsOn()) tell({ on: true }); });
         main.append(bar, frame);
       },
-      frame(msg) { frame.src = msg.url; note.textContent = `Version ${msg.version || state.view.version}, at its own address`; },
+      frame(msg) {
+        try { origin = new URL(msg.url).origin; } catch { origin = ""; }
+        frame.src = msg.url; note.textContent = `Version ${msg.version || state.view.version}, at its own address`;
+      },
+      /** What the page's frame said is picked: its place and words, where it is in the frame. */
+      picked(data) {
+        const a = data && typeof data.anchor === "object" ? data.anchor : null, r = data?.rect, box = frame.getBoundingClientRect();
+        if (!a || !r || ![r.left, r.top, r.right, r.bottom].every(Number.isFinite)) { util.offerComment(null); return; }
+        const anchor = { kind: "element", quote: String(a.quote || "").slice(0, 2000), path: String(a.path || "").slice(0, 600),
+                         near: String(a.near || "").slice(0, 200), tag: String(a.tag || "").slice(0, 20) };
+        if (!anchor.quote.trim()) { util.offerComment(null); return; }
+        const rect = { left: box.left + r.left, right: box.left + r.right, top: box.top + r.top, bottom: box.top + r.bottom };
+        if (rect.bottom < box.top || rect.top > box.bottom) { util.offerComment(null); return; }
+        util.offerComment(anchor, rect);
+      },
+      reveal(anchor) { tell({ reveal: anchor }); },
       render(msg) { if (msg.error) note.textContent = msg.error; },
       update() {},                        // a reload serves it again (artifacts.ts load)
       dirty: () => false,
@@ -507,11 +562,25 @@
     // VS Code relays host messages from another Window with this webview's origin.
     // A Page or dashboard frame has a different origin; it must not drive editor actions.
     // Local previews dispatch source-less messages, which are safe within the test page.
+    const pageFrame = document.querySelector("iframe.art-page");
+    if (pageFrame && event.source && event.source === pageFrame.contentWindow) {
+      // DGC's helper in a framed page says only what is picked there; it never drives anything else.
+      const data = event.data;
+      if (data && typeof data === "object" && data.type === "dgc-comment-pick" && comments) state.editor?.picked?.(data);
+      return;
+    }
     if (event.source && event.source !== window && event.origin !== location.origin) return;
     const msg = event.data;
     if (!msg || typeof msg !== "object") return;
     switch (msg.type) {
       case "comparison": showComparison(msg.comparison); return;
+      case "comments":
+        if (msg.id && msg.id !== state.id) return;
+        startComments();
+        comments?.set(msg.threads, msg.version);
+        return;
+      // (Said in the panel's banner, which has the shared Dismiss ×; read aloud by the rail.)
+      case "commentsRejected": comments?.rejected(msg.message); banner("error", String(msg.message || "DGC couldn't do that.")); return;
       case "init":
         state.id = String(msg.id || "");
         try { vscode.setState({ ...(vscode.getState() || {}), id: state.id }); } catch {}
@@ -525,8 +594,10 @@
         state.removed = false;
         if (!state.conflict) hideBanner();
         header();
+        startComments();                          // (before the body: an editor draws its comment buttons from the start)
         if (first || !state.editor) mountBody(); else state.editor.update?.(true);
         if (wasRemoved) state.editor?.lock?.(false);
+        if (wasRemoved) comments?.lock(false);
         return;
       }
       case "changed": {
@@ -535,6 +606,7 @@
           state.removed = true; header();
           banner("info", "This was removed. It's in DGC's trash with every version, where it can be recovered.");
           state.editor?.lock?.(true);
+          comments?.lock(true);
           return;
         }
         const was = state.view.version;

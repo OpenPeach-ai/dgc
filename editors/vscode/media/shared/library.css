@@ -192,3 +192,7 @@
   .dgc-lib .lib-fav-filter[aria-pressed="true"] { border-color: Highlight; }
   .dgc-lib .lib-fav[aria-pressed="true"], .dgc-lib .lib-fav-filter[aria-pressed="true"] > .dgc-icon { color: Highlight; }
 }
+/* An artifact's open comments, first on its row's line (media/shared/comments.js draws the threads). */
+.dgc-lib .lib-row-talk { flex: none; display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; color: var(--accent-text, var(--link)); font-weight: var(--w-med); }
+body.vscode-light .dgc-lib .lib-row-talk, body.vscode-high-contrast-light .dgc-lib .lib-row-talk { color: var(--link); }
+.dgc-lib .lib-row-talk > svg { flex: none; }

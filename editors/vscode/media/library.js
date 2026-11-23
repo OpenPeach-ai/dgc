@@ -171,13 +171,16 @@
   }
 
   // ---- what a row is: one shape for every kind of thing ---------------------------------------------------------------------
+  /** How many of an artifact's comment threads are open (its row says it). */
+  function openComments(a) { const n = Number(a?.comments?.open); return Number.isSafeInteger(n) && n > 0 ? Math.min(n, 999) : 0; }
   /** An artifact: its kind's sheet, its title, who made it; `card`: a reply's card or a ChatDGC widget made it. */
   function fromArtifact(a) {
     return { key: `artifact:${a.id}`, source: "artifact", type: String(a.type || ""), made_as: a.made_as === "card" || a.made_as === "widget" ? a.made_as : "", title: text(a.title) || A_KIND[a.type] || "Untitled",
       at: when(a.updated || a.created), by: makerOf(a.made_by, a.origin), verb: "made",
       // (A reply's card is a card here, never "Page": listed under Widgets with a Page's name and sheet, it read as an
       // artifact filed in the wrong tab. L2, user test 15 Nov.)
-      facts: [a.made_as === "card" ? "A reply’s card" : a.made_as === "widget" ? "Widget" : A_KIND[a.type] || String(a.type || ""), `version ${Number(a.version) || 1}`], raw: a };
+      facts: [a.made_as === "card" ? "A reply’s card" : a.made_as === "widget" ? "Widget" : A_KIND[a.type] || String(a.type || ""), `version ${Number(a.version) || 1}`,
+              ...(openComments(a) ? [`${openComments(a)} open comment${openComments(a) === 1 ? "" : "s"}`] : [])], raw: a };
   }
   /** One of ChatDGC's widgets: it is in a chat, which made it. */
   function fromWidget(w) {
@@ -601,6 +604,14 @@
       // whole when pointed at, see nameTip below; what a kept picture is for, and its file's name, are said there too.)
       const title = doc.createElement("span"); title.className = "lib-row-name"; title.textContent = item.title; if (item.tip) title.dataset.more = item.tip;
       const meta = doc.createElement("span"); meta.className = "lib-row-meta";
+      // (Its open comments, first on the line: they stay when the rest gives way at the narrowest side bar.)
+      const talk = item.source === "artifact" ? openComments(item.raw) : 0;
+      if (talk) {
+        const badge = doc.createElement("span"); badge.className = "lib-row-talk"; badge.title = `${talk} open comment${talk === 1 ? "" : "s"}`;
+        const g = root.DgcIcons?.node?.("comment", { size: 12 }, doc); if (g) badge.append(g);
+        badge.append(doc.createTextNode(String(talk)));
+        meta.append(badge);
+      }
       const by = doc.createElement("span"); by.className = "lib-row-by"; by.textContent = words; meta.append(by);
       // (At the narrowest side bar "made by Tile checker" is "by Tile checker" and "made in Work" is "in Work": the
       // name, or the place, is what must stay.)
@@ -941,6 +952,8 @@
         }
         // Made, changed or removed somewhere: every tab is asked again when it next shows, the one on screen now.
         case "artifactChanged": sig.artifacts = sig.widgets = null; if (showing && (state.tab === "artifacts" || state.tab === "widgets")) ask(state.tab); return;
+        // Its comments changed (a count on its row): asked again like a change, when the Artifacts tab shows.
+        case "artifactComments": sig.artifacts = null; if (showing && state.tab === "artifacts") ask("artifacts"); return;
         case "changed": case "refresh": for (const id of TAB_IDS) sig[id] = null; state.charts.sig = state.work.sig = null; favAgain(); fresh(true); draw(); return;
         case "error":
           // (The host could not answer something the Library asked: said in the status line, the lists left as they are.)

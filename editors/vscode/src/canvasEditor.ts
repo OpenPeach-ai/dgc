@@ -453,7 +453,7 @@ const caret = new Plugin({
 });
 
 function state(doc: any): EditorState {
-  return EditorState.create({ doc, plugins: [caret, rules, keys, keymap(baseKeymap), tableEditing(), history(), sync, flashing] });
+  return EditorState.create({ doc, plugins: [caret, rules, keys, keymap(baseKeymap), tableEditing(), history(), sync, flashing, commentMarks] });
 }
 
 /** The file as the host has it: the first time, or after the model (or another editor) changed it. */
@@ -639,6 +639,132 @@ style.addEventListener("change", () => {
       : setBlockType(nodes.heading, { level: +v.slice(1) }));
 });
 
+// ---- comments (media/shared/comments.js): a DGC document's, not a chat's canvas. Words picked here get the Comment
+// button; each open thread's words are marked in the page (a click shows its thread); the rail beside the page (under
+// it in a narrow tab) holds the threads. The host (canvasDoc.ts) says whether the process offers them.
+const railBox = document.getElementById("cv-comments") as HTMLElement | null;
+const railBtn = document.getElementById("cv-comments-btn") as HTMLButtonElement | null;
+let notes: any = null, railChoice: boolean | null = null, threads: any[] = [];
+const MAX_QUOTE = 2000;
+
+/** The document's words with spacing made single, and where each character is in the document. */
+function wordsOf(doc: any): { text: string; pos: number[] } {
+  let text = "", started = false;
+  const pos: number[] = [];
+  const put = (ch: string, at: number) => {
+    if (/\s/.test(ch)) { if (!text || text.endsWith(" ")) return; ch = " "; }
+    text += ch; pos.push(at);
+  };
+  doc.descendants((node: any, at: number) => {
+    if (node.isTextblock) { if (started) put(" ", at); started = true; }
+    if (node.isText) for (let i = 0; i < node.text.length; i++) put(node.text[i], at + i);
+    return true;
+  });
+  return { text, pos };
+}
+const single = (t: unknown) => String(t ?? "").replace(/\s+/g, " ").trim();
+const tail = (a: string, b: string) => { let n = 0; while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n++; return n; };
+const head = (a: string, b: string) => { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; };
+/** Where a comment's words are now: [from, to], the one with the same words around it when they are there twice. */
+function findQuote(doc: any, anchor: any): [number, number] | null {
+  const q = single(anchor?.quote);
+  if (!q) return null;
+  const { text, pos } = wordsOf(doc);
+  const hits: number[] = [];
+  for (let at = text.indexOf(q); at >= 0 && hits.length < 200; at = text.indexOf(q, at + 1)) hits.push(at);
+  if (!hits.length) return null;
+  const before = single(anchor.before), after = single(anchor.after);
+  const best = hits.reduce((b, h) => (tail(text.slice(0, h).trimEnd(), before) + head(text.slice(h + q.length).trimStart(), after)
+    > tail(text.slice(0, b).trimEnd(), before) + head(text.slice(b + q.length).trimStart(), after) ? h : b), hits[0]);
+  return [pos[best], pos[best + q.length - 1] + 1];
+}
+/** The words picked, as a comment points at them: {kind: "text", quote, before, after}. */
+function pickedWords(): Record<string, unknown> | null {
+  if (!view) return null;
+  const { from, to, empty } = view.state.selection;
+  if (empty) return null;
+  const doc = view.state.doc, quote = doc.textBetween(from, to, "\n").trim();
+  if (!quote) return null;
+  return { kind: "text", quote: quote.slice(0, MAX_QUOTE), before: doc.textBetween(Math.max(0, from - 160), from, "\n").slice(-80),
+           after: doc.textBetween(to, Math.min(doc.content.size, to + 160), "\n").slice(0, 80) };
+}
+function offerNow(): void {
+  if (!notes || !view) return;
+  const anchor = view.hasFocus() ? pickedWords() : null;
+  if (!anchor) { notes.hide(); return; }
+  const { from, to } = view.state.selection;
+  try {
+    const a = view.coordsAtPos(from), b = view.coordsAtPos(to);
+    notes.offer(anchor, { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) });
+  } catch { notes.hide(); }
+}
+let marksFor: { doc: any; threads: any[]; set: DecorationSet } | null = null;
+const commentMarks = new Plugin({
+  props: {
+    decorations(s) {
+      if (!threads.length) return null;
+      if (!marksFor || marksFor.doc !== s.doc || marksFor.threads !== threads) {
+        const decos: Decoration[] = [];
+        for (const t of threads) {
+          if (t.status === "resolved" || t.found === "changed" || t.anchor?.kind !== "text") continue;
+          const at = findQuote(s.doc, t.anchor);
+          if (at && at[1] > at[0]) decos.push(Decoration.inline(at[0], at[1], { class: "cv-cm-mark", "data-thread": String(t.id) }));
+        }
+        marksFor = { doc: s.doc, threads, set: DecorationSet.create(s.doc, decos) };
+      }
+      return marksFor.set;
+    },
+    handleClick(_v, _pos, event) {
+      const mark = (event.target as HTMLElement)?.closest?.(".cv-cm-mark") as HTMLElement | null;
+      if (mark && notes) notes.focus(mark.dataset.thread);
+      return false;
+    },
+  },
+  view: () => ({ update: () => offerNow() }),
+});
+function paintRail(n: { open: number; all: number }): void {
+  if (!railBox || !railBtn) return;
+  const show = railChoice ?? n.all > 0;
+  railBox.hidden = !show;
+  railBtn.hidden = false;
+  railBtn.setAttribute("aria-pressed", String(show));
+  const label = `Comments${n.open ? `: ${n.open} open` : ""}. ${show ? "Hide" : "Show"} them`;
+  railBtn.setAttribute("aria-label", label); railBtn.title = label;
+}
+function startComments(): void {
+  const C = (window as any).DgcComments;
+  if (notes || !railBox || !C) return;
+  notes = C.make({ rail: railBox, kind: "document", hint: "Pick words to comment on them, or comment on the whole document.", sayInRail: true,
+    post: (m: unknown) => { flush(); host.postMessage(m); },
+    current: () => pickedWords(),
+    reveal: (anchor: any) => {
+      const at = anchor?.kind === "text" ? findQuote(view.state.doc, anchor) : null;
+      if (!at) return;
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at[0], at[1])).scrollIntoView());
+      view.focus();
+    },
+    changed: (n: { open: number; all: number; threads: any[] }) => { paintRail(n); },
+  });
+  railBtn?.addEventListener("click", () => { railChoice = !!railBox.hidden; paintRail({ open: notes.open(), all: notes.threads().length }); });
+  document.querySelector(".cv-page")?.addEventListener("scroll", () => requestAnimationFrame(offerNow));
+}
+function commentsHeard(msg: any): boolean {
+  if (msg.type === "commentsOffer") { if (msg.on) startComments(); return true; }
+  if (msg.type === "comments") {
+    startComments();
+    threads = Array.isArray(msg.threads) ? msg.threads : [];
+    notes?.set(threads, msg.version);
+    if (view) view.dispatch(view.state.tr.setMeta("addToHistory", false));      // (its marks drawn again)
+    return true;
+  }
+  if (msg.type === "commentsRejected") {
+    // (Said on the rail, which shows for it: this page has no other line.)
+    if (notes) { railChoice = true; notes.rejected(msg.message); paintRail({ open: notes.open(), all: notes.threads().length }); }
+    return true;
+  }
+  return false;
+}
+
 view = new EditorView(document.getElementById("cv-editor") as HTMLElement, {
   state: state(source.doc),
   nodeViews: {
@@ -663,6 +789,7 @@ view = new EditorView(document.getElementById("cv-editor") as HTMLElement, {
 window.addEventListener("message", (event) => {
   const msg = event.data;
   if (!msg || typeof msg !== "object") return;
+  if (commentsHeard(msg)) return;
   if (msg.type === "doc" && typeof msg.text === "string") load(msg.text, msg.external === true);
   else if (msg.type === "askSelection") ask();
   else if (msg.type === "flush") flush();

@@ -20,6 +20,11 @@ export interface CanvasDocHost {
   artifactVersions?(id: string, page?: DownloadPage): unknown;
   artifactExport?(id: string, page?: DownloadPage): unknown;
   artifactBrowser?(id: string): unknown;
+  /** Comments on an artifact's document (dgc/artifact_comments): whether the process offers them; a watch on its
+   *  threads (the page hears each change); and what the page asks of them ({op, …}, src/artifacts.ts commentCommand). */
+  artifactCommentsOffered?(): boolean;
+  artifactCommentsWatch?(id: string, post: (message: Record<string, unknown>) => void): { dispose(): void } | undefined;
+  artifactComment?(id: string, message: unknown, post: (message: Record<string, unknown>) => void): void;
   /** Ask about these lines of the canvas (1-based, inclusive), as the Markdown editor's Ask does. */
   canvasAskAbout(conversation: string, canvas: string, text: string, startLine: number, endLine: number): Promise<void>;
   canvasShortcut(): Promise<void>;
@@ -29,8 +34,8 @@ const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "
 
 export function canvasDocDocument(asset: (name: string) => string, cspSource: string, artifact = false): string {
   const b = (does: string, icon: string, label: string, extra = "") =>
-    `<button type="button" class="cv-btn" data-do="${does}" title="${attr(label)}" aria-label="${attr(label)}"${extra}>${icon === "download"
-      ? '<span data-dgc-icon="download" aria-hidden="true"></span>' : `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`}</button>`;
+    `<button type="button" class="cv-btn" data-do="${does}" title="${attr(label)}" aria-label="${attr(label)}"${extra}>${icon === "download" || icon === "comment"
+      ? `<span data-dgc-icon="${icon}" aria-hidden="true"></span>` : `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`}</button>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/canvas.css"))}">
@@ -46,7 +51,7 @@ ${b("bullet", "list-unordered", "Bulleted list")}${b("ordered", "list-ordered", 
 ${b("table", "table", "Table")}${b("equation", "symbol-operator", "Equation (on an empty line, an equation of its own)")}
 <span class="cv-spacer"></span>
 ${artifact
-  ? `${b("versions", "history", "Versions: restore one, or export it")}${b("export", "download", "Export as Word, PDF or Markdown")}${b("browser", "link-external", "Open in browser")}${b("markdown", "markdown", "Open as Markdown")}`
+  ? `${b("comments", "comment", "Comments: pick words to comment on them", ' id="cv-comments-btn" aria-pressed="false" aria-controls="cv-comments" hidden')}${b("versions", "history", "Versions: restore one, or export it")}${b("export", "download", "Export as Word, PDF or Markdown")}${b("browser", "link-external", "Open in browser")}${b("markdown", "markdown", "Open as Markdown")}`
   : `<button type="button" id="cv-ask" class="cv-ask" data-do="ask" title="Ask ChatDGC about the selection"><span class="codicon codicon-sparkle" aria-hidden="true"></span><span>Ask ChatDGC</span></button>
 ${b("shortcuts", "wand", "Shortcuts: suggest edits, length, reading level, polish")}${b("markdown", "markdown", "Open as Markdown")}`}
 </div>
@@ -59,8 +64,9 @@ ${b("shortcuts", "wand", "Shortcuts: suggest edits, length, reading level, polis
 <label class="sr-only" for="cv-align">Column alignment</label><select id="cv-align" class="cv-style" title="Column alignment">
 <option value="">Align: none</option><option value="left">Align left</option><option value="center">Align center</option><option value="right">Align right</option></select>
 </div>
-<main class="cv-page"><div id="cv-editor" class="cv-editor"></div></main>
-<script src="${attr(asset("media/shared/icons.js"))}"></script><script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("dist/canvas.js"))}"></script></body></html>`;
+${artifact ? `<div class="cv-work"><main class="cv-page"><div id="cv-editor" class="cv-editor"></div></main><aside id="cv-comments" class="cv-comments" aria-label="Comments" hidden></aside></div>
+<script src="${attr(asset("media/shared/menu.js"))}"></script>` : '<main class="cv-page"><div id="cv-editor" class="cv-editor"></div></main>'}
+<script src="${attr(asset("media/shared/icons.js"))}"></script>${artifact ? `<script src="${attr(asset("media/shared/dismiss.js"))}"></script><script src="${attr(asset("media/shared/comments.js"))}"></script>` : ""}<script src="${attr(asset("media/shared/download.js"))}"></script><script src="${attr(asset("dist/canvas.js"))}"></script></body></html>`;
 }
 
 /** The part of `before` that `after` changed: one range and its new text, so an edit doesn't replace the file. */
@@ -132,6 +138,8 @@ export class CanvasDocEditor implements vscode.CustomTextEditorProvider {
     if (panel.active) { this.activePanel = panel; this.changed.fire(); }
 
     let fromPage: string | undefined;          // the text this page last sent: its own change, not to be sent back
+    let comments: { dispose(): void } | undefined;
+    const tell = (message: Record<string, unknown>) => void panel.webview.postMessage(message);
     let saving: ReturnType<typeof setTimeout> | undefined;
     const send = (external: boolean) => void panel.webview.postMessage({ type: "doc", text: document.getText(), external });
     const save = () => {
@@ -141,7 +149,23 @@ export class CanvasDocEditor implements vscode.CustomTextEditorProvider {
     const subscriptions = [
       panel.webview.onDidReceiveMessage(async (msg: any) => {
         switch (msg?.type) {
-          case "ready": send(false); break;
+          case "ready":
+            send(false);
+            if (artifact && this.host.artifactCommentsWatch) {
+              // (Watched even while the process is starting: its threads arrive once it is ready, and the page then
+              // starts its comments; a process that offers none sends none.)
+              if (this.host.artifactCommentsOffered?.()) tell({ type: "commentsOffer", on: true });
+              comments?.dispose();
+              comments = this.host.artifactCommentsWatch(artifact.id, tell);
+            }
+            break;
+          case "comments": {
+            // (What you typed is saved first, so a comment, and a suggestion accepted, meet the words as you left them.)
+            if (!artifact || !this.host.artifactComment) return;
+            if (document.isDirty && (msg.op === "add" || msg.op === "accept" || msg.op === "ask" || msg.op === "reply")) await document.save();
+            this.host.artifactComment(artifact.id, msg, tell);
+            break;
+          }
           case "edit": {
             if (typeof msg.text !== "string" || msg.text.length > MAX_TEXT) return;
             const change = minimalChange(document.getText(), msg.text);
@@ -199,6 +223,7 @@ export class CanvasDocEditor implements vscode.CustomTextEditorProvider {
     panel.onDidDispose(() => {
       if (saving) { clearTimeout(saving); if (document.isDirty) void document.save(); }
       subscriptions.forEach((s) => s.dispose());
+      comments?.dispose();
       this.open.delete(panel);
       if (this.activePanel === panel) { this.activePanel = undefined; this.changed.fire(); }
     });

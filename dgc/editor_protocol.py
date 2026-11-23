@@ -2000,6 +2000,30 @@ EVENT_FIELDS.update({
     "artifact_comparison": {"comparison": _O(), "request_id": _S(False)},
 })
 
+# Comments on an artifact (dgc/artifact_comments), offered as ready.capabilities.artifacts.comments: you point at part of
+# it (`anchor`: {kind: text|cells|slide|item|element|whole, quote?, …}: a doc's words and the words around them, a sheet's
+# cells, a deck's slide and field, a checklist's item, a page's element) and say something. `ask` (or
+# artifact_comment_ask later) has DGC answer in the thread, change the artifact and say so there, or offer wording as
+# suggestions, which artifact_suggestion_accept makes a new version and artifact_suggestion_reject leaves. Every command
+# is answered by artifact_comments, the artifact's threads now; the same event, with no request_id, tells every screen
+# when they change (DGC answering, its answer, a change it made).
+COMMAND_FIELDS.update({
+    "artifact_comment_list": {"request_id": _S(), "id": _S()},
+    "artifact_comment_add": {"request_id": _S(), "id": _S(), "anchor": _O(), "text": _S(), "version": _I(False),
+                             "ask": _B(False)},
+    "artifact_comment_reply": {"request_id": _S(), "id": _S(), "thread": _S(), "text": _S(), "ask": _B(False)},
+    "artifact_comment_resolve": {"request_id": _S(), "id": _S(), "thread": _S(), "resolved": _B()},
+    "artifact_comment_delete": {"request_id": _S(), "id": _S(), "thread": _S()},
+    "artifact_comment_ask": {"request_id": _S(), "id": _S(), "thread": _S()},
+    "artifact_suggestion_accept": {"request_id": _S(), "id": _S(), "thread": _S(), "suggestion": _S()},
+    "artifact_suggestion_reject": {"request_id": _S(), "id": _S(), "thread": _S(), "suggestion": _S()},
+})
+EVENT_FIELDS.update({
+    # threads: [{id, anchor, version, status: open|resolved, at, by, messages: [{id, by, at, text, kind}],
+    # suggestions: [{id, old, new, state: open|accepted|rejected}], answering, found: here|moved|changed, where}].
+    "artifact_comments": {"id": _S(), "version": _I(), "threads": _A(), "request_id": _S(False)},
+})
+
 # ---- Mods (dgc/mods): the user's own panels, status lines, commands and guards, per chat -------------------------
 # Offered as ready.capabilities.mods. `mods` lists every mod this chat knows (each {name, title, version, description,
 # builtin, dev, state: running|stopped|crashed|starting|off|needs_allow, error, asks: [plain-words lines], missing,

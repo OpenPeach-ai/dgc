@@ -167,6 +167,8 @@
       if (hint) box.append(el("span", "sl-hint", hint));
       return box;
     }
+    /** A field's box, marked with the part of the slide it is (what a comment on words in it points at). */
+    const tagged = (name, n) => { n.dataset.field = name; return n; };
     function input(value, onInput, attrs = {}) {
       const n = el("input", "sl-input");
       n.type = "text"; n.value = value || ""; n.disabled = locked;
@@ -218,6 +220,14 @@
         const b = el("button", "art-icon"); b.type = "button"; b.title = label; b.setAttribute("aria-label", label);
         b.append(icon(name)); b.disabled = locked || disabled; b.addEventListener("click", run); return b;
       };
+      if (u.commentsOn?.()) {
+        const talk = el("button", "art-icon sl-comment"); talk.type = "button";
+        talk.title = "Comment on this slide"; talk.setAttribute("aria-label", `Comment on slide ${sel + 1}`);
+        talk.append(window.DgcIcons?.node?.("comment", { size: 16 }) || icon("comment"));
+        talk.disabled = locked;
+        talk.addEventListener("click", () => u.askComment({ kind: "slide", slide: sel + 1, field: "slide", title: String(slide.title || "") }, talk.getBoundingClientRect()));
+        tools.append(talk);
+      }
       tools.append(tool("arrow-up", "Move up (Alt+Up)", () => move(sel, sel - 1), sel === 0),
                    tool("arrow-down", "Move down (Alt+Down)", () => move(sel, sel + 1), sel === deck.slides.length - 1),
                    tool("copy", "Duplicate slide", duplicate, deck.slides.length >= MAX_SLIDES),
@@ -236,12 +246,12 @@
       }
       layout.addEventListener("change", () => { setLayout(slide, layout.value); paintFields(); paintList(); touch(); fields.querySelector(".sl-select")?.focus(); });
       fields.append(field("Layout", layout));
-      fields.append(field("Title", input(slide.title, (v) => { slide.title = v; }, { maxLength: 160 })));
-      fields.append(field("Subtitle", input(slide.subtitle, (v) => { slide.subtitle = v; }, { maxLength: 240 })));
+      fields.append(field("Title", tagged("title", input(slide.title, (v) => { slide.title = v; }, { maxLength: 160 }))));
+      fields.append(field("Subtitle", tagged("subtitle", input(slide.subtitle, (v) => { slide.subtitle = v; }, { maxLength: 240 }))));
       const shows = CONTENT[slide.layout] || [];
       if (shows.includes("bullets")) {
         fields.append(field(slide.layout === "bullets" ? "Bullets" : `Points beside the ${slide.layout === "image" ? "picture" : "chart"}`,
-          area(bulletsText(slide.bullets), (v) => { slide.bullets = parseBullets(v); }, 6), BULLET_HINT));
+          tagged("bullets", area(bulletsText(slide.bullets), (v) => { slide.bullets = parseBullets(v); }, 6)), BULLET_HINT));
       }
       if (shows.includes("left")) {
         const cols = el("div", "sl-columns");
@@ -249,8 +259,8 @@
           const col = el("fieldset", "sl-column");
           col.append(el("legend", "sl-label", name));
           const c = slide[side] || (slide[side] = { heading: "", bullets: [] });
-          col.append(field("Heading", input(c.heading, (v) => { c.heading = v; }, { maxLength: 80 })));
-          col.append(field("Points", area(bulletsText(c.bullets), (v) => { c.bullets = parseBullets(v); }, 5)));
+          col.append(field("Heading", tagged(side, input(c.heading, (v) => { c.heading = v; }, { maxLength: 80 }))));
+          col.append(field("Points", tagged(side, area(bulletsText(c.bullets), (v) => { c.bullets = parseBullets(v); }, 5))));
           cols.append(col);
         }
         fields.append(cols);
@@ -258,8 +268,8 @@
       }
       if (shows.includes("quote")) {
         const q = slide.quote || (slide.quote = { text: "", by: "" });
-        fields.append(field("Quote", area(q.text, (v) => { q.text = v; }, 3, { maxLength: 500 })));
-        fields.append(field("Said by", input(q.by, (v) => { q.by = v; }, { maxLength: 120 })));
+        fields.append(field("Quote", tagged("quote", area(q.text, (v) => { q.text = v; }, 3, { maxLength: 500 }))));
+        fields.append(field("Said by", tagged("quote", input(q.by, (v) => { q.by = v; }, { maxLength: 120 }))));
       }
       if (shows.includes("table")) fields.append(tableEditor(slide));
       if (shows.includes("image") && slide.image) {
@@ -268,8 +278,8 @@
         if (/^data:image\//.test(String(img.src || ""))) { const pic = el("img"); pic.src = img.src; pic.alt = img.alt || ""; box.append(pic); }
         box.append(el("span", "sl-hint", "The picture itself comes from the agent: ask it for another one."));
         fields.append(box);
-        fields.append(field("What it shows (for screen readers)", input(img.alt, (v) => { img.alt = v; }, { maxLength: 300 })));
-        fields.append(field("Caption", input(img.caption, (v) => { img.caption = v; }, { maxLength: 200 })));
+        fields.append(field("What it shows (for screen readers)", tagged("alt", input(img.alt, (v) => { img.alt = v; }, { maxLength: 300 }))));
+        fields.append(field("Caption", tagged("caption", input(img.caption, (v) => { img.caption = v; }, { maxLength: 200 }))));
       }
       if (shows.includes("chart") && slide.chart) {
         const c = slide.chart;
@@ -278,7 +288,7 @@
         const kind = String(c.type || "bar");
         fields.append(el("p", "sl-chart", `${kind[0].toUpperCase()}${kind.slice(1)} chart · ${points} point${points === 1 ? "" : "s"} · ${series.length} series${series.length ? ` (${series.map((s) => s.name).filter(Boolean).join(", ")})` : ""}. Ask the agent to change its numbers.`));
       }
-      fields.append(field("Speaker notes", area(slide.notes, (v) => { slide.notes = v; }, 5, { maxLength: 6000 }), "Shown under the slide when you present, and on PowerPoint's notes pages."));
+      fields.append(field("Speaker notes", tagged("notes", area(slide.notes, (v) => { slide.notes = v; }, 5, { maxLength: 6000 })), "Shown under the slide when you present, and on PowerPoint's notes pages."));
     }
     function tableEditor(slide) {
       const t = slide.table || (slide.table = { columns: ["Column 1"], rows: [[""]] });
@@ -395,6 +405,17 @@
         addBtn.addEventListener("click", add);
         side.append(list, addBtn);
         fields = el("section", "sl-fields"); fields.setAttribute("aria-label", "The chosen slide");
+        const pickedWords = () => {
+          const n = document.activeElement;
+          if (!u.commentsOn?.() || locked || !n || !fields.contains(n) || !n.dataset?.field) { u.offerComment?.(null); return; }
+          const from = n.selectionStart ?? 0, to = n.selectionEnd ?? 0, words = String(n.value || "").slice(from, to).trim();
+          if (!words) { u.offerComment(null); return; }
+          u.offerComment({ kind: "slide", slide: sel + 1, field: n.dataset.field, title: String(deck.slides[sel]?.title || ""), quote: words.slice(0, 2000) },
+                         n.getBoundingClientRect());
+        };
+        for (const kind of ["select", "mouseup", "keyup"]) fields.addEventListener(kind, () => setTimeout(pickedWords, 0));
+        fields.addEventListener("focusout", () => setTimeout(pickedWords, 0));
+        fields.addEventListener("scroll", () => u.offerComment?.(null));
         const preview = el("section", "sl-preview"); preview.setAttribute("aria-label", "Preview");
         caption = el("p", "sl-caption");
         frame = u.viewFrame(`${ctx.state.view.title}: preview`);
@@ -439,6 +460,25 @@
         paintList(); paintFields(); touch();
       },
       get renderedFor() { return renderedFor; },
+      commentAnchor() {
+        const n = document.activeElement;
+        if (n && fields?.contains(n) && n.dataset?.field && n.selectionEnd > n.selectionStart) {
+          return { kind: "slide", slide: sel + 1, field: n.dataset.field, title: String(deck.slides[sel]?.title || ""), quote: String(n.value).slice(n.selectionStart, n.selectionEnd).trim().slice(0, 2000) };
+        }
+        return deck.slides[sel] ? { kind: "slide", slide: sel + 1, field: "slide", title: String(deck.slides[sel].title || "") } : null;
+      },
+      /** A thread's slide, chosen, and its words picked in their field. */
+      reveal(a) {
+        if (!a || a.kind !== "slide") return;
+        if (!deck.slides[a.slide - 1]) { u.announce(`Slide ${a.slide} isn't in this version.`); return; }
+        choose(a.slide - 1, false);
+        const box = a.field && a.field !== "slide" ? [...fields.querySelectorAll("[data-field]")].find((n) => n.dataset.field === a.field && (!a.quote || String(n.value).includes(a.quote)))
+          || fields.querySelector(`[data-field="${a.field}"]`) : null;
+        if (!box) { list.children[sel]?.focus(); return; }
+        box.scrollIntoView({ block: "nearest" }); box.focus({ preventScroll: true });
+        const at = a.quote ? String(box.value).indexOf(a.quote) : -1;
+        if (at >= 0) box.setSelectionRange(at, at + a.quote.length);
+      },
     };
   };
   A.slides = { bulletsText, parseBullets, cleanDeck };

@@ -1935,6 +1935,46 @@ test("a DGC document (an artifact's working file) opens formatted with its versi
   assert.deepEqual(calls, [["versions", id], ["export", id], ["browser", id]]);
 });
 
+test("a DGC document's comments: its page watches its threads and asks through the hub; what you typed is saved first", async () => {
+  const hub = fakeArtifacts();
+  const id = "ar_" + "4".repeat(16);
+  const path = `/home/u/.dgc/artifacts/${id}/work/Trip plan.md`;
+  const watched = [], asked = [];
+  let stopped = 0;
+  Object.assign(hub, { docAt: (p) => (p === path ? { id, title: "Trip plan" } : undefined),
+    offers() { return { ...this.offer, comments: true }; },
+    watchComments: (a, post) => { watched.push(a); post({ type: "comments", id: a, version: 2, threads: [] }); return { dispose() { stopped++; } }; },
+    comment: (a, message, post) => { asked.push([a, message]); post({ type: "commentsRejected", op: message.op, message: "no" }); } });
+  chat.useArtifacts(hub);
+  chat.register();
+  const file = doc(path, "# Trip\n\nThe early train.\n");
+  world.docs = [file];
+  const page = fakePanel("dgc.chatdgcCanvasDoc", "Trip plan.md");
+  page.active = true; page.onDidChangeViewState = () => ({ dispose() {} });
+  await world.customEditors.provider.resolveCustomTextEditor(file, page);
+  assert.match(page.webview.html, /media\/shared\/comments\.js/, "the page loads the comments module");
+  assert.match(page.webview.html, /id="cv-comments"/, "and has its rail");
+  assert.match(page.webview.html, /media\/shared\/menu\.js/, "and menu.js, for the solid raised grey (--raised)");
+  page.say({ type: "ready" }); await tick();
+  assert.deepEqual(page.webview.posted.filter((m) => m.type === "commentsOffer"), [{ type: "commentsOffer", on: true }]);
+  assert.deepEqual(watched, [id]);
+  assert.deepEqual(page.last("comments"), { type: "comments", id, version: 2, threads: [] });
+  file.isDirty = true;
+  page.say({ type: "comments", op: "add", anchor: { kind: "text", quote: "early train" }, text: "Later?", ask: true }); await tick(); await tick();
+  assert.equal(file.saved, 1, "the words as you left them are saved before the comment goes");
+  assert.deepEqual(asked, [[id, { type: "comments", op: "add", anchor: { kind: "text", quote: "early train" }, text: "Later?", ask: true }]]);
+  assert.equal(page.last("commentsRejected").message, "no", "a refusal comes back to this page");
+  page.dispose();
+  assert.equal(stopped, 1, "closed: it stops watching");
+  // A chat's own canvas (not an artifact's document) has no comments.
+  const canvas = doc(canvasFile(ID(7)), "# Plan\n");
+  world.docs = [canvas];
+  const chatPage = fakePanel("dgc.chatdgcCanvasDoc", "Plan.md");
+  chatPage.active = true; chatPage.onDidChangeViewState = () => ({ dispose() {} });
+  await world.customEditors.provider.resolveCustomTextEditor(canvas, chatPage);
+  assert.doesNotMatch(chatPage.webview.html, /cv-comments|comments\.js/);
+});
+
 // ---- a folder the chat reads, and Continue in Work (ready.capabilities.chatdgc.folder)
 
 /** A tab on chat `n`, opened, on a backend that offers folders (or doesn't). */

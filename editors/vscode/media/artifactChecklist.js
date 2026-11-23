@@ -175,7 +175,17 @@
           ["Remove", () => { U().hideBanner(); change((d) => { const at = d.items.findIndex((i) => i.id === item.id); if (at < 0 || d.items.length < 2) return false; d.items.splice(at, 1); }, `Removed ${item.title}`); }, true],
           ["Cancel", () => U().hideBanner()]]);
       });
-      top.append(box, title, chip(item), remove);
+      top.append(box, title, chip(item));
+      if (U().commentsOn?.()) {
+        // A comment on this item ("redo this one", "this isn't done"): it points at the item, by its id.
+        const talk = U().el("button", "art-icon ck-comment"); talk.type = "button";
+        talk.append(window.DgcIcons?.node?.("comment", { size: 16 }) || U().icon("comment"));
+        talk.title = "Comment on this item"; talk.setAttribute("aria-label", `Comment on ${item.title}`);
+        talk.disabled = locked;
+        talk.addEventListener("click", () => U().askComment({ kind: "item", item: item.id, title: item.title }, talk.getBoundingClientRect()));
+        top.append(talk);
+      }
+      top.append(remove);
       li.append(top, line(item, "done_when", "Done when", "Not said yet"));
       if (item.note || (editing && editing.item === item.id && editing.field === "note") || item.status !== "Not started") li.append(line(item, "note", "Note", "No note"));
       const shown = proof(item);
@@ -205,6 +215,21 @@
         (again?.querySelector(`.${String(cls).split(" ").filter(Boolean).pop() || "ck-tick"}`) || again?.querySelector(".ck-tick"))?.focus?.();
       }
       for (const n of addForm.querySelectorAll("input,button")) n.disabled = locked;
+    }
+
+    /** Words picked inside one item: {anchor: {kind: "item", item, title, quote}, rect}, or null. */
+    function commentPick() {
+      if (!U().commentsOn?.() || locked) return null;
+      const picked = document.getSelection();
+      const words = String(picked || "").replace(/\s+/g, " ").trim();
+      if (!words || !picked.rangeCount) return null;
+      const range = picked.getRangeAt(0);
+      const start = (range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement)?.closest?.(".ck-item");
+      const end = (range.endContainer.nodeType === 1 ? range.endContainer : range.endContainer.parentElement)?.closest?.(".ck-item");
+      if (!start || start !== end || !list.contains(start)) return null;
+      const item = find(data, start.dataset.item);
+      if (!item) return null;
+      return { anchor: { kind: "item", item: item.id, title: item.title, quote: words.slice(0, 2000) }, rect: range.getBoundingClientRect() };
     }
 
     return {
@@ -243,6 +268,14 @@
           title.value = ""; when.value = ""; title.focus();
         });
         root.append(bar, ...(about ? [about] : []), list, addForm);
+        // Words picked in an item: a comment on that item, with those words.
+        const pickedWords = () => {
+          const got = commentPick();
+          ctx.util.offerComment?.(got?.anchor || null, got?.rect);
+        };
+        list.addEventListener("mouseup", () => setTimeout(pickedWords, 0));
+        list.addEventListener("keyup", (e) => { if (e.shiftKey) setTimeout(pickedWords, 0); });
+        document.addEventListener("selectionchange", () => { if (!document.getSelection()?.toString()) ctx.util.offerComment?.(null); });
         main.append(root);
         paint();
       },
@@ -284,6 +317,16 @@
         U().post({ type: "reload" });       // back to what is kept
       },
       render() {},                          // drawn here from the data; DGC's page of it is for the browser
+      commentAnchor: () => commentPick()?.anchor || null,
+      /** A thread's item, scrolled to and lit for a moment. */
+      reveal(a) {
+        if (!a || a.kind !== "item") return;
+        const li = [...list.children].find((n) => n.dataset.item === a.item);
+        if (!li) { U().announce(`${a.item} isn't in this version of the checklist.`); return; }
+        li.scrollIntoView({ block: "nearest" });
+        li.classList.add("ck-lit"); setTimeout(() => li.classList.remove("ck-lit"), 1200);
+        li.querySelector(".ck-tick")?.focus({ preventScroll: true });
+      },
       lock(on) { locked = !!on; editing = null; paint(); },
     };
   };

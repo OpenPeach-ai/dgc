@@ -21,6 +21,9 @@ export const ARTIFACT_PANEL = "dgc.artifactPanel";
 export const ARTIFACT_PRESENT = "dgc.artifactPresent";
 export const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
 export const ARTIFACT_TYPES = ["page", "doc", "slides", "sheet", "dashboard", "checklist"];
+/** The answers this hub takes (onEvent); the panel routes exactly these to it, so the two can never differ. */
+export const ARTIFACT_EVENTS = ["artifact_items", "artifact_changed", "artifact_detail", "artifact_served", "artifact_exported",
+  "artifact_comparison", "artifact_comments"];
 /** The Output chip's choices, in its menu's order; "auto" lets the model choose (and is never sent). */
 export const ARTIFACT_OUTPUTS = ["auto", "document", "slides", "spreadsheet", "page", "dashboard"];
 const LABELS: Record<string, string> = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist" };
@@ -36,7 +39,9 @@ const MAX_SAVE_BYTES = 4 * 1024 * 1024 - 64 * 1024;
 /** A doc's working file, wherever the store is: `<store>/ar_…/work/<title>.md`. */
 const DOC_FILE = /[\\/](ar_[a-f0-9]{16})[\\/]work[\\/][^\\/]+$/;
 
-export type ArtifactsOffer = { version: number; types: string[]; outputs: string[]; exports: Record<string, string[]>; present: boolean; compare?: boolean; sourceConsentVersion?: boolean };
+export type ArtifactsOffer = { version: number; types: string[]; outputs: string[]; exports: Record<string, string[]>; present: boolean; compare?: boolean; sourceConsentVersion?: boolean;
+                               /** artifact_comment_* and artifact_suggestion_* are understood (dgc/artifact_comments). */
+                               comments?: boolean };
 /** How far along a checklist is: its items done of all, the ones that need you, the next one, pinned to its project. */
 export type ChecklistProgress = { done: number; total: number; needs: string[]; next?: { id: string; title: string; status: string };
                                   waiting?: { id: string; title: string }; pinned: boolean };
@@ -50,6 +55,8 @@ export type ArtifactView = {
   made_by?: { kind: string; id: string; name: string };
   /** A Page a reply's card ("card") or a ChatDGC widget ("widget") made. */
   made_as?: "card" | "widget";
+  /** Its comment threads, counted: the open ones and all (the Library row says how many are open). */
+  comments?: { open: number; all: number };
 };
 
 /** ready.capabilities.artifacts, checked; undefined when the process doesn't offer artifacts. */
@@ -63,7 +70,8 @@ export function artifactsOffer(capabilities: unknown): ArtifactsOffer | undefine
   }
   return { version: Number(raw.version), types: list(raw.types), outputs: list(raw.outputs), exports, present: Number(raw.present) >= 1,
            ...(Number(raw.compare) >= 1 ? { compare: true } : {}),
-           ...(Number(raw.source_consent_version) >= 1 ? { sourceConsentVersion: true } : {}) };
+           ...(Number(raw.source_consent_version) >= 1 ? { sourceConsentVersion: true } : {}),
+           ...(Number(raw.comments) >= 1 ? { comments: true } : {}) };
 }
 
 /** What a send carries for the Output chip: the choice when it isn't Auto and the process offers it, else "". */
@@ -132,7 +140,70 @@ export function artifactView(raw: any): ArtifactView | undefined {
   // A checklist: how far along it is (its card, the Library and Work's list say it without reading the list).
   const progress = checklistProgress(raw.progress);
   if (raw.type === "checklist" && progress) view.progress = progress;
+  const said = raw.comments;
+  if (said && typeof said === "object" && Number.isSafeInteger(said.all) && said.all > 0 && said.all <= 500) {
+    view.comments = { open: Number.isSafeInteger(said.open) ? Math.max(0, Math.min(said.open, said.all)) : 0, all: said.all };
+  }
   return view;
+}
+
+// ---- comments (dgc/artifact_comments): what a page may ask, checked here before it goes to the process
+const COMMENT_COMMANDS: Record<string, string> = {
+  list: "artifact_comment_list", add: "artifact_comment_add", reply: "artifact_comment_reply", resolve: "artifact_comment_resolve",
+  delete: "artifact_comment_delete", ask: "artifact_comment_ask", accept: "artifact_suggestion_accept", reject: "artifact_suggestion_reject",
+};
+const THREAD_ID = /^t_[a-f0-9]{12}$/;
+const SUGGESTION_ID = /^s_[a-f0-9]{12}$/;
+const MAX_COMMENT = 4000;
+
+/** What a comment points at, as a page said it: only the fields a place has, as the right kinds (the process checks it
+ *  again for the artifact's type). Undefined when it isn't one. */
+export function commentAnchor(raw: any): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== "object" || !["text", "cells", "slide", "item", "element", "whole"].includes(String(raw.kind))) return undefined;
+  const out: Record<string, unknown> = { kind: raw.kind };
+  const text = (key: string, max: number) => { if (typeof raw[key] === "string" && raw[key]) out[key] = raw[key].slice(0, max); };
+  text("quote", 2000); text("before", 200); text("after", 200); text("sheet", 80); text("range", 24); text("field", 20);
+  text("title", 200); text("item", 8); text("path", 600); text("near", 200); text("tag", 20);
+  if (Number.isSafeInteger(raw.slide) && raw.slide > 0 && raw.slide <= 1000) out.slide = raw.slide;
+  if (Array.isArray(raw.values) && raw.values.length <= 50 && raw.values.every((row: unknown) => Array.isArray(row) && row.length <= 50)
+      && raw.values.flat().length <= 50
+      && raw.values.flat().every((v: unknown) => v === null || typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v)) || (typeof v === "string" && v.length <= 2000))) {
+    out.values = raw.values;
+  }
+  return out;
+}
+
+/** A page's {type: "comments", op, …} as the command the process takes, or undefined when it isn't one. */
+export function commentCommand(id: string, message: any): Record<string, unknown> | undefined {
+  const op = String(message?.op || "");
+  const type = COMMENT_COMMANDS[op];
+  if (!type || !ARTIFACT_ID.test(String(id || ""))) return undefined;
+  const cmd: Record<string, unknown> = { type, id };
+  if (op !== "list" && op !== "add") {
+    if (!THREAD_ID.test(String(message.thread || ""))) return undefined;
+    cmd.thread = message.thread;
+  }
+  if (op === "accept" || op === "reject") {
+    if (!SUGGESTION_ID.test(String(message.suggestion || ""))) return undefined;
+    cmd.suggestion = message.suggestion;
+  }
+  if (op === "add" || op === "reply") {
+    const words = typeof message.text === "string" ? message.text.trim().slice(0, MAX_COMMENT) : "";
+    if (!words) return undefined;
+    cmd.text = words;
+    if (message.ask === true) cmd.ask = true;
+  }
+  if (op === "add") {
+    const anchor = commentAnchor(message.anchor);
+    if (!anchor) return undefined;
+    cmd.anchor = anchor;
+    if (Number.isSafeInteger(message.version) && message.version > 0) cmd.version = message.version;
+  }
+  if (op === "resolve") {
+    if (typeof message.resolved !== "boolean") return undefined;
+    cmd.resolved = message.resolved;
+  }
+  return cmd;
 }
 
 /** A file name from a title: what a save dialog suggests. */
@@ -210,6 +281,7 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 <span class="art-mark" id="art-mark" aria-hidden="true"><span class="codicon codicon-file"></span></span>
 <div class="art-titles"><h1 class="art-title" id="art-title">Loading…</h1><p class="art-meta" id="art-meta"></p></div>
 <div class="art-actions" id="art-actions" role="toolbar" aria-label="Artifact">
+<button type="button" class="art-btn" id="art-comments-btn" aria-pressed="false" aria-controls="art-comments" title="Comments: what you and DGC said about parts of it" hidden><span class="art-glyph" data-dgc-icon="comment" data-dgc-icon-size="14" aria-hidden="true"></span><span class="art-btn-label">Comments</span><span class="art-count" id="art-comments-count"></span></button>
 <button type="button" class="art-btn" id="art-versions" aria-haspopup="dialog" aria-expanded="false" title="Every version: who made it, when, and what changed" disabled><span class="codicon codicon-history" aria-hidden="true"></span><span class="art-btn-label">Versions</span></button>
 <div class="art-menu-wrap"><button type="button" class="art-btn" id="art-export" aria-haspopup="menu" aria-expanded="false" title="Download a copy" disabled><span class="art-glyph" data-dgc-icon="download" data-dgc-icon-size="14" aria-hidden="true"></span><span class="art-btn-label">Download</span><span class="codicon codicon-chevron-down art-caret" aria-hidden="true"></span></button>
 <div class="art-menu dgc-popover" id="art-export-menu" role="menu" aria-label="Download as" hidden></div></div>
@@ -217,9 +289,10 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 </div></header>
 <section class="art-versions dgc-popover" id="art-versions-panel" role="dialog" aria-label="Versions" hidden><div class="art-versions-head"><h2>Versions</h2><button type="button" class="art-icon" id="art-versions-close" title="Close" aria-label="Close versions"><span class="codicon codicon-close" aria-hidden="true"></span></button></div><ol class="art-version-list" id="art-version-list"></ol></section>
 <div class="art-banner" id="art-banner" role="alert" hidden></div>
-<main class="art-main" id="art-main"><p class="art-empty" id="art-loading">Loading…</p></main>
+<div class="art-work" id="art-work"><main class="art-main" id="art-main"><p class="art-empty" id="art-loading">Loading…</p></main>
+<aside class="art-comments" id="art-comments" aria-label="Comments" hidden></aside></div>
 <div class="sr-only" id="art-announce" aria-live="polite"></div>
-${s("media/shared/icons.js")}${s("media/shared/dismiss.js")}${s("media/shared/download.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifactChecklist.js")}${s("media/artifact.js")}
+${s("media/shared/menu.js")}${s("media/shared/icons.js")}${s("media/shared/dismiss.js")}${s("media/shared/download.js")}${s("media/shared/comments.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifactChecklist.js")}${s("media/artifact.js")}
 </body></html>`;
 }
 
@@ -249,6 +322,7 @@ class ArtifactPanel {
   private loadSeq = 0;
 
   private unwatch?: () => void;    // a live dashboard's watch on its files (src/dashboardWatch.ts)
+  private comments?: vscode.Disposable;   // its comment threads, heard as they change
   private filesPending = false;    // they changed while the panel wasn't showing
 
   constructor(private readonly hub: Artifacts, readonly id: string, readonly panel: vscode.WebviewPanel) {
@@ -256,7 +330,7 @@ class ArtifactPanel {
     panel.onDidChangeViewState?.(() => {
       if (this.panel.visible && this.filesPending) { this.filesPending = false; this.post({ type: "filesChanged" }); }
     });
-    panel.onDidDispose(() => { this.unwatch?.(); this.unwatch = undefined; hub.forget(this); });
+    panel.onDidDispose(() => { this.unwatch?.(); this.unwatch = undefined; this.comments?.dispose(); this.comments = undefined; hub.forget(this); });
   }
 
   /** One of a live dashboard's files changed: its page refreshes, now if it shows, else when it shows again. */
@@ -335,7 +409,10 @@ class ArtifactPanel {
         void this.panel.webview.postMessage({ type: "init", id: this.id });
         for (const queued of this.queue.splice(0)) void this.panel.webview.postMessage(queued);
         this.load();
+        this.comments?.dispose();
+        this.comments = this.hub.watchComments(this.id, (m) => this.post(m));
         return;
+      case "comments": this.hub.comment(this.id, message, (m) => this.post(m)); return;
       case "reload": this.load(); return;
       case "preview": if (view && view.type !== "doc") this.serve(); return;
       case "copyPageText":
@@ -484,8 +561,34 @@ export class Artifacts implements vscode.Disposable {
   /** A doc's working file -> its artifact, as the views said (and the store's own layout says, after a reload). */
   private readonly docFiles = new Map<string, string>();
   private readonly titles = new Map<string, string>();
+  /** The pages showing an artifact's comments (its panel, a document's editor), by artifact. */
+  private readonly commentWatch = new Map<string, Set<(message: Record<string, unknown>) => void>>();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  /** A page that shows this artifact's comments hears every change to them (artifact_comments), from now on; its
+   *  threads are asked at once (again when the process is ready, if it is still starting). */
+  watchComments(id: string, post: (message: Record<string, unknown>) => void): vscode.Disposable {
+    if (!ARTIFACT_ID.test(String(id || ""))) return { dispose: () => undefined };
+    const set = this.commentWatch.get(id) ?? new Set();
+    set.add(post);
+    this.commentWatch.set(id, set);
+    if (this.offers()?.comments) this.comment(id, { op: "list" }, post);
+    return { dispose: () => { set.delete(post); if (!set.size && this.commentWatch.get(id) === set) this.commentWatch.delete(id); } };
+  }
+
+  /** What a page asked of an artifact's comments ({op: list|add|reply|resolve|delete|ask|accept|reject, …}), checked
+   *  and sent; its answer (the threads) goes to every page watching. A refusal goes back to the page that asked. */
+  comment(id: string, message: unknown, post?: (message: Record<string, unknown>) => void): void {
+    if (!this.offers()?.comments) return;
+    const cmd = commentCommand(id, message);
+    if (!cmd) return;
+    const op = String((message as any)?.op || "");
+    this.ask(cmd, {
+      ok: () => undefined,
+      fail: (reason, text) => { try { post?.({ type: "commentsRejected", op, reason, message: text }); } catch { /* the page closed */ } },
+    });
+  }
 
   attach(host: ArtifactsHost): void { this.host = host; }
 
@@ -525,6 +628,7 @@ export class Artifacts implements vscode.Disposable {
   /** The side bar's process finished its handshake: what waited goes now, and every screen learns what it offers. */
   backendReady(): void {
     for (const cmd of this.held.splice(0)) this.deliver(cmd);
+    if (this.offers()?.comments) for (const [id, set] of this.commentWatch) for (const post of set) this.comment(id, { op: "list" }, post);
     this.tell({ type: "artifactsOffered", offered: this.offers() ?? null });
   }
 
@@ -572,7 +676,19 @@ export class Artifacts implements vscode.Disposable {
       reply.fail(String(ev.reason || "failed"), String(ev.message || "DGC couldn't do that."));
       return true;
     }
-    if (!["artifact_items", "artifact_changed", "artifact_detail", "artifact_served", "artifact_exported", "artifact_comparison"].includes(type)) return false;
+    if (!ARTIFACT_EVENTS.includes(type)) return false;
+    if (type === "artifact_comments") {
+      // An artifact's threads now: to every page showing them, and a count to every screen (the Library row).
+      const id = String(ev.id || "");
+      if (ARTIFACT_ID.test(id) && Array.isArray(ev.threads)) {
+        const threads = ev.threads.slice(0, 500);
+        const message = { type: "comments", id, version: Number.isSafeInteger(ev.version) ? ev.version : 0, threads };
+        for (const post of [...(this.commentWatch.get(id) ?? [])]) { try { post(message); } catch { /* one page never stops the rest */ } }
+        this.tell({ type: "artifactComments", id, open: threads.filter((t: any) => t?.status !== "resolved").length, all: threads.length });
+      }
+      if (reply) { this.requests.delete(requestId); reply.ok(ev); }
+      return true;
+    }
     if (type === "artifact_changed") {
       const view = artifactView(ev.artifact);
       if (view) {

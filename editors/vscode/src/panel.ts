@@ -10,7 +10,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { AttachMode, AttachedChatState, ChildExitInfo, DgcBackend, DgcEvent, MOVED_CAUSE, STOP_CAUSE } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, isChatdgcModsEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
-import { artifactsOffer, forwardedArtifactPage, outputChoice, workChecklistRows, type Artifacts, type ArtifactView } from "./artifacts";
+import { ARTIFACT_EVENTS, artifactsOffer, forwardedArtifactPage, outputChoice, workChecklistRows, type Artifacts, type ArtifactView } from "./artifacts";
 import { keepRunningAfterClose } from "./closingTab";
 import { editorName, holderFacts, holderLine, type HolderFacts, type HolderLine } from "./holderWords";
 import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VoiceClient, type DictationOwner } from "./voice";
@@ -2524,7 +2524,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (isChatdgcModsEvent(ev as any)) { this.chatdgc?.onModsEvent(ev); return; }
     // An artifact's (artifacts.ts): its replies, and what changed. A Work turn's change goes on to its chat as well,
     // which draws the card. (artifact_ready and artifacts are the older previews' own, and stay the chat's.)
-    const artifactEvent = /^artifact_(items|changed|detail|served|exported)$/.test(String(ev.type)) || ev.type === "command_rejected";
+    const artifactEvent = ARTIFACT_EVENTS.includes(String(ev.type)) || ev.type === "command_rejected";
     if (artifactEvent && this.artifacts?.onEvent(ev)) return;
     if (ev.type === "artifact_changed" && (ev as any).surface !== "work") return;
     // A dictation's answer, whichever chat's process carried it: no session's.

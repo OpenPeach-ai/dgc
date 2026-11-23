@@ -1436,6 +1436,13 @@ def _make_page_handler(server: "_Server", art: Artifact):
             if not self._host_ok():
                 return
             sub = unquote(urlparse(self.path).path).lstrip("/")
+            from . import artifact_comment_frame as comment_frame
+            if server is not _PLAN_SRV and sub == comment_frame.PATH:
+                # Comments on a page: the helper a framed page's HTML names (dgc/artifact_comment_frame). No page file
+                # can have this name (the store refuses dot files), so it never hides one.
+                self._send(200, comment_frame.SCRIPT.encode("utf-8"), "text/javascript; charset=utf-8",
+                           csp=_page_csp(server, server.file_csp, also=self._request_host()))
+                return
             target, status, why = resolve_request(art, sub)
             if target is None:
                 if sub == "favicon.ico":
@@ -1448,8 +1455,10 @@ def _make_page_handler(server: "_Server", art: Artifact):
                 download = (server is _PLAN_SRV and getattr(art, "_document_source", False)
                             and sub == "document.md")
                 data, _version = read_regular_bytes(target)
-                self._send(200, data,
-                           "text/markdown; charset=utf-8" if download else _guess_type(target),
+                kind = "text/markdown; charset=utf-8" if download else _guess_type(target)
+                if server is not _PLAN_SRV and kind == "text/html" and comment_frame.framed(self.headers):
+                    data = comment_frame.inject(data)       # (in a frame: what is picked can be commented on)
+                self._send(200, data, kind,
                            csp=_page_csp(server, server.file_csp, also=self._request_host()),
                            headers={"Content-Disposition": 'attachment; filename="document.md"'}
                            if download else None)

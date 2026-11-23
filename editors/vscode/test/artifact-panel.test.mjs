@@ -421,6 +421,47 @@ test("DGC's page is framed with no script, in VS Code's theme; a page artifact a
   } finally { server.close(); }
 });
 
+// A page with no colours of its own showed its black words on the dark editor's ground (its frame had no colour scheme,
+// so Chrome left the page's canvas see-through over the panel). It reads as a browser shows it: dark words on white, in a
+// dark editor too; a page that says it does dark (color-scheme: light dark) follows the editor's theme.
+test("a page at its own address with no colours of its own is white, as in a browser; one that does dark follows the editor", async (t) => {
+  if (skipOrFail(t)) return;
+  const pages = { "/plain": "<!doctype html><title>Plain</title><p>Plain words</p>",
+    "/both": "<!doctype html><meta name=\"color-scheme\" content=\"light dark\"><title>Both</title><p>Both ways</p>" };
+  const server = createServer((req, res) => { res.writeHead(200, { "Content-Type": "text/html" }); res.end(pages[req.url] || ""); });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const corner = async (page) => {        // the page's ground, as painted, away from its words
+    const box = await page.locator("iframe.art-page").boundingBox();
+    const png = await page.screenshot({ clip: { x: box.x + box.width - 30, y: box.y + box.height - 30, width: 20, height: 20 } });
+    const scratch = await browser.newPage();          // (the panel's own policy refuses a data: fetch)
+    try { return await scratch.evaluate(async (b64) => {
+      const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height), ctx = canvas.getContext("2d");
+      ctx.drawImage(bitmap, 0, 0);
+      const d = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data; let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
+      return Math.round(sum / (d.length / 4));
+    }, png.toString("base64")); } finally { await scratch.close(); }
+  };
+  try {
+    for (const theme of ["dark-modern", "light-modern"]) {
+      for (const [path, darkGround] of [["/plain", false], ["/both", theme.startsWith("dark")]]) {
+        const s = await openPanel(browser, { kind: "page", frameUrl: base + path, theme });
+        try {
+          // The editor tells its pages its own light or dark (prefers-color-scheme); headless Chromium says light.
+          await s.page.emulateMedia({ colorScheme: theme.startsWith("dark") ? "dark" : "light" });
+          await framesLoaded(s.page);
+          await s.page.waitForTimeout(300);
+          const ground = await corner(s.page);
+          if (darkGround) assert.ok(ground < 80, `${theme} ${path}: a page that does dark follows the dark editor (${ground})`);
+          else assert.ok(ground > 235, `${theme} ${path}: white, as a browser shows a page with no colours (${ground})`);
+        } finally { await s.page.close(); }
+      }
+    }
+  } finally { server.close(); }
+});
+
 test("the stylesheet holds in the browser: filled primaries, hidden menus, icons drawn, nothing off the edge at 360px", async (t) => {
   if (skipOrFail(t)) return;
   for (const kind of ["slides", "sheet", "dashboard"]) {

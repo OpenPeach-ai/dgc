@@ -1,5 +1,7 @@
 @import url("./shared/tokens.css");
 @import url("./shared/dialog.css");
+@import url("./shared/comments.css");
+@import url("./shared/dismiss.css");
 /* ChatDGC's formatted canvas (src/canvasEditor.ts): a page of writing in the editor's own colours,
    with a quiet row of formatting buttons above it. Only VS Code's theme variables, so it reads in every theme. */
 :root {
@@ -133,3 +135,17 @@ body { margin: 0; padding: 0; background: var(--vscode-editor-background); color
 .ProseMirror-hideselection { caret-color: transparent; }
 .ProseMirror [draggable][contenteditable=false] { user-select: text; }
 .ProseMirror-separator { display: inline !important; border: none !important; margin: 0 !important; }
+
+/* A DGC document's comments (media/shared/comments.js): the rail beside the page where there is room, under it where
+   there isn't; the words a thread points at are marked in the page. */
+.cv-work { flex: 1; min-height: 0; display: flex; }
+.cv-work > .cv-page { min-width: 0; }
+.cv-comments { flex: none; width: 300px; min-height: 0; border-left: 1px solid var(--cv-line); background: var(--vscode-editor-background); }
+@media (max-width: 899px) {
+  .cv-work { flex-direction: column; }
+  .cv-comments { width: auto; max-height: 42%; border-left: 0; border-top: 1px solid var(--cv-line); }
+}
+.cv-cm-mark { background: color-mix(in srgb, var(--need, #D1902B) 22%, transparent); border-bottom: 2px solid color-mix(in srgb, var(--need, #D1902B) 70%, transparent); cursor: pointer; }
+.cv-cm-mark.cv-cm-now { background: color-mix(in srgb, var(--need, #D1902B) 40%, transparent); }
+#cv-comments-btn[aria-pressed="true"] { background: var(--cv-hover); color: var(--cv-text); }
+@media (forced-colors: active) { .cv-cm-mark { background: Mark; color: MarkText; border-bottom-color: CanvasText; } }

@@ -508,6 +508,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (this.library) void this.library.webview.postMessage({ type: "artifactChanged", artifact: message.artifact, op: message.op });
         this.sidePanel.webview.postMessage({ type: "artifactChanged", artifact: message.artifact, op: message.op });
       }
+      // An artifact's comments changed: the Library's row counts the open ones.
+      if (message.type === "artifactComments") {
+        const said = { type: "artifactComments", id: message.id, open: message.open, all: message.all };
+        if (this.library) void this.library.webview.postMessage(said);
+        this.sidePanel.webview.postMessage(said);
+      }
     });
   }
 
@@ -608,6 +614,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       artifactVersions: (id, page) => this.artifacts?.docVersions(id, page),
       artifactExport: (id, page) => this.artifacts?.docExport(id, page),
       artifactBrowser: (id) => this.artifacts?.openInBrowser({ id, title: this.artifacts?.title(id) ?? "this document" }),
+      artifactCommentsOffered: () => !!this.artifacts?.offers()?.comments,
+      artifactCommentsWatch: (id, post) => this.artifacts?.watchComments(id, post),
+      artifactComment: (id, message, post) => this.artifacts?.comment(id, message, post),
       canvasAskAbout: (conversation, canvas, text, start, end) => this.canvasAskAbout(conversation, canvas, text, start, end),
       canvasShortcut: () => this.canvasShortcut(),
     });

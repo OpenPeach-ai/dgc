@@ -38,6 +38,7 @@ export const ACTION_OF = `(label) => { const w = String(label || "").replace(/\\
   if (/^more\\b/.test(w) || w === "…" || w === "...") return "more";
   if (/^back\\b/.test(w)) return "back";
   if (/^(pips |work |chat |sub-agent )?settings\\b/.test(w) || /^open settings\\b/.test(w)) return "settings";
+  if (/^(new )?comment\\b/.test(w)) return "comment";              // (Comment, New comment on…: the comment glyph)
   if (/^new (space|folder)\\b/.test(w)) return "";                 // (a new folder's own glyph: a folder with a plus)
   if (/^(new|add)\\b/.test(w)) return "add";
   if (/^close\\b/.test(w)) return "close";

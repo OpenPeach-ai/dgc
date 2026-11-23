@@ -9,7 +9,7 @@ import { openLibraryTab, openLibraryPage } from "./library-scene.mjs";
 import { openOnePips, MORNINGS } from "./one-pips-scene.mjs";
 
 /** The one glyph each action draws. */
-export const GLYPH = { "open-in-editor": "go-to-file", more: "more", back: "arrow-left", settings: "settings-gear", add: "add", close: "close", copy: "copy", delete: "trash", pin: "pin", unpin: "unpin", archive: "archive", stop: "debug-stop", save: "download", library: "library" };
+export const GLYPH = { "open-in-editor": "go-to-file", more: "more", back: "arrow-left", settings: "settings-gear", add: "add", close: "close", copy: "copy", delete: "trash", pin: "pin", unpin: "unpin", archive: "archive", stop: "debug-stop", save: "download", library: "library", comment: "comment" };
 // (The box's own Stop is the Send button's other state, drawn by each box: read, and held to one drawing, but not the row glyph.)
 
 /** Every surface, read: [{ where, action, label, sig, size, shown, menu }]. */
