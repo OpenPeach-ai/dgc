@@ -3055,7 +3055,10 @@ class Agent(GoalLifecycle):
                     read_timeout: int | None = None, source: str = "other"):
         """A one-shot client that cannot overwrite the main Responses continuation chain."""
         if not isinstance(self.client, LLMClient):  # lightweight injected clients in embedders/tests
-            return self.client
+            fresh = getattr(self.client, "fresh", None)
+            # A CLI that is this turn's model (dgc/work_cli.py) answers a side request in a run of its own: its turn's
+            # run is waiting on a tool's answer.
+            return fresh() if callable(fresh) else self.client
         client = self._new_client(
             self.client.base_url, self.client.api_key, self.client.model,
             api_mode=getattr(self.client, "requested_api_mode", self.client.api_mode),
@@ -3455,6 +3458,9 @@ class Agent(GoalLifecycle):
 
     def context_size(self) -> int:
         """Return the configured operating window clamped to an authoritative model maximum."""
+        window = self._cli_model_window()
+        if window:
+            return window                        # the CLI's model's, between turns as during them
         try:
             configured = max(2_048, int(self.config.get("context_size", 32_768)))
         except (TypeError, ValueError):
@@ -3934,16 +3940,19 @@ class Agent(GoalLifecycle):
         on its UI instance: the TUI and the editor backend. A class method would be inherited by
         `dgc -p --output-format json` (which exits after one turn), and a permissive test fixture's
         ``__getattr__`` must not count, hence the identity check on a real instance attribute.
-        Sub-agents and a delegated subscription CLI never deliver them.
+        Sub-agents and a delegated subscription CLI never deliver them (a CLI that is only the model does: the turn
+        is the Agent's own, dev_mode.delegated).
         """
+        from .dev_mode import delegated
         return (self.depth == 0 and getattr(self.ui, "monitor_wake_enabled", False) is True
-                and not str(self.config.get("subscription_engine", "") or "").strip())
+                and not delegated(self.config))
 
     def _wakeup_exposed(self) -> bool:
         """Are `wake_later` and `wake_cancel` offered? Only where the frontend starts a wake-up's turn by itself (the editor
         says so: ui.wakeups_supported), for a top-level chat outside plan mode, not on a subscription CLI."""
+        from .dev_mode import delegated
         return (self.depth == 0 and getattr(self.ui, "wakeups_supported", False) is True and self.mode != "plan"
-                and not str(self.config.get("subscription_engine", "") or "").strip())
+                and not delegated(self.config))
 
     def _monitor_exposed(self) -> bool:
         """Is the `monitor` tool offered on this request?
@@ -9337,8 +9346,48 @@ class Agent(GoalLifecycle):
         rc = proc.returncode if proc.returncode is not None else 1
         return rc, (out or "(no output)")
 
-    def _run_turn(self, user_text: str, *, source: str = "prompt",
-                  notification: Notification | None = None, pip_setup_notice: dict | None = None) -> bool:
+    def _cli_model_client(self):
+        """Dev Mode's "Work on a subscription uses DGC's tools" (dgc/work_cli.py): the Claude Code or Codex client that
+        is this top-level turn's model, or None. Only a frontend that runs these turns itself says so
+        (``ui.cli_model_enabled``, dgc serve's); a helper never gets it, whatever its UI forwards: it keeps its own model."""
+        if self.depth != 0 or getattr(self.ui, "cli_model_enabled", False) is not True:
+            return None
+        from .work_cli import client_for
+        return client_for(self.config)
+
+    def _cli_model_window(self) -> int:
+        """The window of the CLI that is this chat's model in Dev Mode (dgc/work_cli.py), else 0. Cheap: settings only."""
+        if self.depth != 0 or getattr(self.ui, "cli_model_enabled", False) is not True:
+            return 0
+        from .dev_mode import subscription_tools
+        engine = subscription_tools(self.config)
+        if not engine:
+            return 0
+        from .work_cli import window_for
+        return window_for(engine, str(self.config.get("subscription_model", "") or ""))
+
+    def _run_turn(self, user_text: str, **kwargs) -> bool:
+        try:
+            cli = self._cli_model_client()
+        except Exception as exc:                 # a model name the CLI can't take: said, before anything runs
+            return self._fail_turn(str(getattr(exc, "message", "") or exc))
+        if cli is None:
+            return self._run_turn_now(user_text, **kwargs)
+        # The CLI is this turn's model and nothing more: the turn below is the Agent's own, so every call it makes runs
+        # through this Agent's handlers. Its run ends with the turn; between turns the client is the session's own.
+        previous, self.client = self.client, cli
+        try:
+            return self._run_turn_now(user_text, **kwargs)
+        finally:
+            current = self.client
+            for client in {id(cli): cli, id(current): current}.values():
+                if getattr(client, "work_cli", False) is True:
+                    client.close()
+            if current is cli or getattr(current, "work_cli", False) is True:
+                self.client = previous
+
+    def _run_turn_now(self, user_text: str, *, source: str = "prompt",
+                      notification: Notification | None = None, pip_setup_notice: dict | None = None) -> bool:
         wake = source == "monitor"
         self._turn_reasoning_pending = []           # reasoning never carries across turns
         self._heard()                               # the user's prompt (or the wake) starts the clock
@@ -9876,6 +9925,30 @@ class Agent(GoalLifecycle):
                         next_request_reason = "fallback"
                         continue
                 cli = str(self.config.get("fallback_engine") or "")
+                held = getattr(self.client, "work_cli", False) is True
+                other = self.client.other(cli) if held and cli else None
+                if held:
+                    cli = ""     # held to DGC's tools: its fallback is never a CLI running tools of its own
+                if other is not None:
+                    # Dev Mode: this turn's model is Claude Code or Codex with DGC's tools only, and its other CLI is
+                    # the fallback: it carries the turn on the same way, with the same tools.
+                    self._close_runs("gave_up")
+                    if not getattr(self, "_fallback_outage", False):
+                        self.ui.info(self._safe_text(f"⤳ {self.client.model} didn't answer; falling back to {other.model}"))
+                    from .reply_trace import failed_why
+                    handed = getattr(self.ui, "trace_handed_over", None)
+                    if callable(handed):
+                        handed(self._safe_text(f"{self.client.model} didn't answer: {failed_why(e)}"), other.model)
+                    self.client.close()
+                    self.client = other
+                    self._on_fallback = True
+                    if not getattr(self, "_fallback_outage", False):
+                        self._fallback_outage = True
+                        told = getattr(self.ui, "model_fallback", None)
+                        if callable(told):
+                            told(other.model, True)
+                    next_request_reason = "fallback"
+                    continue
                 if cli and self.depth == 0 and prompt_message is not None and not held_final_messages:
                     # D14: Claude Code or Codex is this chat's fallback: it takes the turn with the whole chat.
                     return self._cli_fallback_answers(cli, e, prompt_message)

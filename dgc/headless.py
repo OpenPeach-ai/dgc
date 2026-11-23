@@ -35,6 +35,7 @@ from .editor_context import _editor_context_json, _format_editor_context, _strip
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
+from .dev_mode import delegated
 from .config import (MAX_PARALLEL_TASKS, SEARCH_KEY_PROVIDERS, SEARCH_KEYS, SEARCH_PROVIDERS, Config, mcp_url_has_credentials,
                      search_key_name, search_settings)
 from .editor_protocol import (MAX_COMMAND_BYTES, MAX_EVENT_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
@@ -134,6 +135,26 @@ def sanitize_event(event: dict, secrets) -> dict:
     if picture is not None and isinstance(out.get("result"), dict):
         out["result"]["image"] = picture
     return out
+
+
+def _delegated_engine(config) -> str:
+    """The engine a Work turn is handed to whole (dev_mode.delegated), for a config with or without ``get``."""
+    if config is None:
+        return ""
+    if not callable(getattr(config, "get", None)):
+        data = dict(getattr(config, "data", {}) or {})
+        config = type("_Settings", (), {"get": staticmethod(data.get)})()
+    return delegated(config)
+
+
+def dev_subscription_capability(config) -> dict:
+    """ready.capabilities.dev_subscription_tools: set_config takes "Work on a subscription uses DGC's tools"
+    (`dev_subscription_tools`, Settings > Dev Mode); the switch as this chat opened (`set`), whether it is in force
+    (`on`: with Dev Mode); and the CLIs it applies to. It rides here, never as a new field of a released event."""
+    from .dev_mode import SUBSCRIPTION_TOOLS_ENGINES, on
+    get = getattr(config, "get", None)
+    switch = bool(callable(get) and get("dev_subscription_tools", False) is True)
+    return {"version": 1, "set": switch, "on": bool(switch and on(config)), "engines": list(SUBSCRIPTION_TOOLS_ENGINES)}
 
 
 def dev_mode_limits() -> list[dict]:
@@ -763,6 +784,7 @@ _CONFIG_BOOLEAN_KEYS = frozenset({
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
     "ultra_mode", "monitor_wake", "dev_mode",
     "dev_mode_tools",                 # "Let DGC change Dev Mode settings": the user's own switch (Settings › Dev Mode)
+    "dev_subscription_tools",         # "Work on a subscription uses DGC's tools" (Settings › Dev Mode; dgc/work_cli.py)
     "thinking_inline", "memory", "chatdgc_web", "chatdgc_followups",
 })
 _CONFIG_STRING_LIMITS = {
@@ -3016,6 +3038,9 @@ class Backend:
         self.ui.preview_root = config.project_root   # edit previews on approval cards
         # The editor starts a wake-up's turn by itself (dgc/wakeups.py): the chat is offered wake_later.
         self.ui.wakeups_supported = True
+        # This frontend runs a Work turn on Claude Code or Codex as its own turn when Dev Mode makes the CLI its model
+        # only (dgc/work_cli.py); the Agent asks before using the CLI as a turn's model.
+        self.ui.cli_model_enabled = True
         self.agent = Agent(config, self.ui)
         if host is not None:
             # Chats on one `dgc serve` share a pid, and the peer registry skips its own process's
@@ -3142,7 +3167,7 @@ class Backend:
                           "plugin_sign_in_scopes": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           # get_outline: every prompt of the session (`outline`), for the editor's prompt rail.
                           "outline": 1,
-                          "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not bool(self.config.get("subscription_engine", "")), "live_goal_edit": not bool(self.config.get("subscription_engine", "")), "live_goal_start": not bool(self.config.get("subscription_engine", "")), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
+                          "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not delegated(self.config), "live_goal_edit": not delegated(self.config), "live_goal_start": not delegated(self.config), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "steer_queued": True, "queue_edit": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
                           # resume_session takes saved_mode: true, sent when the person reopens a chat themselves
@@ -3310,6 +3335,8 @@ class Backend:
                           # Dev Mode's capacity limits (dgc/dev_mode.py), for Settings → Dev Mode's Limits group.
                           "dev_limits": dev_mode_limits(),
                           "dev_mode_tools": 1,          # set_config takes dev_mode_tools (the editor shows its switch)
+                          # set_config takes dev_subscription_tools; whether it is on; the CLIs it applies to.
+                          "dev_subscription_tools": dev_subscription_capability(self.config),
                           "settings_undo": 1,           # undo_setting_change: Undo on a settings change's line
                           # A spooled `image/heic` or `image/heif` (an iPhone photo) is taken and sent on as
                           # a JPEG (photos.heic_to_jpeg), or refused with one sentence saying what to install.
@@ -3358,7 +3385,9 @@ class Backend:
                           # Each of these providers keeps its own key (set_config search_api_key_<provider>,
                           # "" removes it), and which have one saved now; never a key itself.
                           "search_keys": self._search_keys_capability(),
-                          "steering_native": not bool(self.config.get("subscription_engine", "")),
+                          # A turn the CLI runs whole can't take a message half-way; one where it is only the model
+                          # (Dev Mode, dgc/work_cli.py) is the Agent's own turn, which can.
+                          "steering_native": not delegated(self.config),
                           "session_policy": self._session_policy_capability(),
                           **self._chats_capability(), **self._chatdgc_capability()},
             **self._chat_fields())
@@ -4379,7 +4408,7 @@ class Backend:
             if getattr(self, "_worker", None) is not None:
                 config = getattr(self, "config", getattr(self.agent, "config", None))
                 config_get = getattr(config, "get", None)
-                engine = config_get("subscription_engine", "") if callable(config_get) else ""
+                engine = delegated(config) if config is not None else ""
                 if delivery == "steer" and not engine and not self.agent.cancelled.is_set():
                     import uuid
                     identity = request_id or str(uuid.uuid4())
@@ -4437,7 +4466,7 @@ class Backend:
         with lock:
             config = getattr(self, "config", getattr(self.agent, "config", None))
             config_get = getattr(config, "get", None)
-            engine = config_get("subscription_engine", "") if callable(config_get) else ""
+            engine = delegated(config) if config is not None else ""
             if getattr(self, "_worker", None) is None or getattr(self, "_foreground_worker", None) is not None:
                 return moved, "No turn is running, so a queued message starts as the next one."
             if engine or self.agent.cancelled.is_set() or getattr(self, "_running_turn_kind", "") == "monitor":
@@ -4723,6 +4752,20 @@ class Backend:
             if retained:
                 self.em.emit("queued", count=self._queued_prompt_count(), text="")
 
+    def _say_not_offered(self, config, engine_key: str) -> None:
+        """Dev Mode's "Work on a subscription uses DGC's tools" is on, but this session's CLI can't be held to DGC's
+        tools (Kimi Code, Qwen Code, Copilot CLI): said once, in plain words, and the turn runs as before."""
+        from .dev_mode import on
+        get = getattr(config, "get", None)
+        if not (callable(get) and on(config) and get("dev_subscription_tools", False) is True):
+            return
+        said = self.__dict__.setdefault("_not_offered_said", set())
+        from .work_cli import not_offered
+        reason = not_offered(engine_key)
+        if reason and engine_key not in said:
+            said.add(engine_key)
+            self.ui.info(reason)
+
     def _run_subscription_turn(self, engine_key: str, prompt: str) -> bool:
         """Delegate one editor turn while preserving the native headless event contract."""
         from . import subscriptions as subs
@@ -4906,11 +4949,11 @@ class Backend:
                     self.agent.goal_turns = self._goal_turns_wanted()
                     self.agent._goal_continuing = turn_kind == "goal"
                 try:
-                    config_get = getattr(active_config, "get", None)
-                    engine_key = str(
-                        config_get("subscription_engine", "") if callable(config_get)
-                        else getattr(active_config, "data", {}).get("subscription_engine", "")
-                    ).strip().lower()
+                    # A turn the CLI runs whole (today's delegation), or none: Dev Mode can make Claude Code or Codex
+                    # the model of the Agent's own turn instead (dgc/work_cli.py).
+                    engine_key = _delegated_engine(active_config)
+                    if engine_key and turn_kind in ("prompt", "continue", "resume", "goal"):
+                        self._say_not_offered(active_config, engine_key)
                     if notification is not None:
                         outcome = self.agent.run_monitor_turn(notification, reset_cancel=False)
                     elif wakeup is not None:
@@ -5409,7 +5452,7 @@ class Backend:
             return True
         config = getattr(self, "config", getattr(agent, "config", None))
         get = getattr(config, "get", None)
-        engine = get("subscription_engine", "") if callable(get) else ""
+        engine = delegated(config) if config is not None else ""
         # Plan mode is read-only and a delegated CLI owns its own turns: events wait for a prompt.
         return bool(str(engine or "").strip() or getattr(agent, "mode", "default") == "plan")
 
@@ -6589,7 +6632,7 @@ class Backend:
             return None
         config = getattr(self, "config", getattr(self.agent, "config", None))
         config_get = getattr(config, "get", None)
-        if config is None or (callable(config_get) and config_get("subscription_engine", "")):
+        if config is None or (callable(config_get) and delegated(config)):
             return None
         mentioned = editor_image_mentions(context, config.project_root, images or ())
         if mentioned.notices:
@@ -9047,7 +9090,7 @@ class Backend:
                              message=str(exc) if isinstance(exc, PhotoError) else f"prompt images rejected: {exc}",
                              **_request_fields(request_id))
                 return
-            if images and self.config.get("subscription_engine", ""):
+            if images and delegated(self.config):
                 self.em.emit("command_rejected", command=t, reason="unsupported_images",
                              message="Subscription CLI delegation does not support DGC image attachments. Use a native vision model.",
                              **_request_fields(request_id))

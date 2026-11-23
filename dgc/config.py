@@ -531,6 +531,9 @@ DEFAULTS: dict = {
     "dev_mode": False,
     "dev_limits": {},
     "dev_mode_tools": False,          # "Let DGC change Dev Mode settings": only the user turns it on (Settings › Dev Mode)
+    # "Work on a subscription uses DGC's tools" (Settings › Dev Mode): with Dev Mode on, Claude Code or Codex is a Work
+    # turn's model only, its own tools off and DGC's served to it (dgc/work_cli.py). Off: the turn is handed to the CLI.
+    "dev_subscription_tools": False,
     "pips_model": "",                          # the model every Pip on Default uses, on DGC's own connection;
                                                #   "" follows DGC (its model, or its subscription CLI)
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never

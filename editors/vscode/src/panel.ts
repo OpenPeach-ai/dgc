@@ -42,7 +42,7 @@ import { dockOf, dockSettings, setDockSetting } from "./dock";
 import { homeCardsOf, usageForHome } from "./homeCards";
 import { folderLabel, folderRows, foldersOffered, fullFolder, homeAsTilde, keepProjectFolder, projectFolder, type FolderRow } from "./projectFolder";
 import { openCodePreview } from "./codePreview";
-import { DEV_SAVED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, devToolsOffered, devToolsShown, type DevLimit } from "./devMode";
+import { DEV_SAVED_KEY, DEV_SUB_WARNED_KEY, DEV_WARNED_KEY, devLimitsTable, devLimitValues, devShown, devSubOffered, devSubSaved, devSubShown, devToolsOffered, devToolsShown, onDevSubSaved, type DevLimit } from "./devMode";
 import { INSTANCE as STUCK_INSTANCE, heartbeatOf, isStuck, stuckHolder, type StuckFacts } from "./stuckHolder";
 import { whatsNewAnswered, whatsNewDue, whatsNewGoMessage, whatsNewMessage } from "./whatsNew";
 import { NO_PIPS_MOVED, WELCOME_API, boxesOf, macNoteAnswered, macNoteDue, noteSession, pipsWelcomeAnswered, pipsWelcomeDue, pipsWelcomeMessage, pipsWelcomeOf, sessionNoteClosed, sessionNoteGone } from "./pipsWelcome";
@@ -1080,6 +1080,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.adoptQueuedPromptsFromPreviousHost();
     // Settings -> General -> Pictures in replies: this page's pictures nobody folded or opened follow it at once.
     this.context.subscriptions.push(onPicturesSetting((message) => this.post(message)));
+    // Settings -> Dev Mode -> "Work on a subscription uses DGC's tools": this page's chat follows it at once (steering,
+    // the context meter), whichever window's Settings saved it.
+    this.context.subscriptions.push(onDevSubSaved((on) => { if (this.webviewReady) this.post({ type: "devSubscriptionTools", on }); }));
     // The dock and every session's colour: this page follows a pin, a move, a colour or a Dock setting at once.
     this.context.subscriptions.push(dockOf(this.context).onChange(() => {
       if (this.webviewReady) this.post(dockOf(this.context).state());
@@ -5529,6 +5532,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                                                    ...devShown(ev, this.context.globalState.get(DEV_SAVED_KEY)),
                                                                    // "Let DGC change Dev Mode settings": only with a DGC that takes the key.
                                                                    ...(this.devToolsCapable() ? { dev_tools_capable: true, dev_mode_tools: devToolsShown(ev, this.context.globalState.get(DEV_SAVED_KEY)) } : {}),
+                                                                   // "Work on a subscription uses DGC's tools": only with a DGC that takes the key.
+                                                                   ...(this.devSubCapable() ? { dev_sub_capable: true, dev_subscription_tools: devSubShown(this.lastReadyEvent?.capabilities),
+                                                                                                dev_sub_warned: this.context.globalState.get<boolean>(DEV_SUB_WARNED_KEY) === true } : {}),
                                                                    dev_mode_warned: this.context.globalState.get<boolean>(DEV_WARNED_KEY) === true } : {}),
                                    // Nor this: video generation's commands (ready.capabilities.videos); without, no video models.
                                    videos_capable: this.videosCapable(),
@@ -10659,6 +10665,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } else if (msg?.type === "devModeWarned") {
       // Settings → Dev Mode's warning shows once in this editor.
       await this.context.globalState.update(DEV_WARNED_KEY, true);
+    } else if (msg?.type === "devSubscriptionWarned") {
+      // "Work on a subscription uses DGC's tools": its warning shows once in this editor.
+      await this.context.globalState.update(DEV_SUB_WARNED_KEY, true);
     } else if (msg?.type === "saveSettings") {
       await this.saveSettings(msg.values || {}, String(msg.section || ""));
     } else if (msg?.type === "openProviderKeys") {
@@ -11066,6 +11075,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return devToolsOffered(this.lastReadyEvent?.capabilities);
   }
 
+  /** Whether this DGC takes "Work on a subscription uses DGC's tools" (dev_subscription_tools) in set_config. */
+  private devSubCapable(): boolean {
+    return devSubOffered(this.lastReadyEvent?.capabilities);
+  }
+
   async saveSettings(v: any, section = ""): Promise<void> {
     if (this.settingsSaveInFlight) {
       void vscode.window.showWarningMessage("DGC is already saving settings.");
@@ -11276,6 +11290,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // "Let DGC change Dev Mode settings": the user's own switch, off unless it says a real yes. Never to a DGC that
         // doesn't take the key: it would refuse the whole save.
         if (this.devToolsCapable()) { values.dev_mode_tools = v.dev_mode_tools === true; }
+        // "Work on a subscription uses DGC's tools": off unless it says a real yes; never to a DGC that doesn't take it.
+        if (this.devSubCapable()) { values.dev_subscription_tools = v.dev_subscription_tools === true; }
       }
 
       const saveConfig = async (prefix: string, configValues: any): Promise<void> => {
@@ -11285,6 +11301,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if ("dev_mode" in configValues) {
           await this.context.globalState.update(DEV_SAVED_KEY, { dev_mode: configValues.dev_mode, dev_limits: configValues.dev_limits,
             ...("dev_mode_tools" in configValues ? { dev_mode_tools: configValues.dev_mode_tools } : {}) });
+          // Every Work tab hears whether Claude Code or Codex is now its model only (steering, the context meter).
+          if ("dev_subscription_tools" in configValues) { devSubSaved(configValues.dev_mode === true, configValues.dev_subscription_tools === true); }
         }
       };
       const saveNativeModel = async (): Promise<void> => {

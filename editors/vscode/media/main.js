@@ -2597,6 +2597,12 @@
   let queuedCount = 0, customCommands = [], skillRows = [];
   let skillManagement = false;
   let liveSteering = false, nativeSteering = false;
+  // Dev Mode's "Work on a subscription uses DGC's tools" (ready.capabilities.dev_subscription_tools; the host says a new
+  // save): on, Claude Code or Codex is this chat's model only, so the turn is DGC's own: it takes a message half-way and
+  // DGC keeps its context window, as on any model.
+  let devSubTools = { on: false, engines: [] };
+  const cliModelOnly = (engine) => !!engine && devSubTools.on && devSubTools.engines.includes(engine);
+  const steersNatively = (engine) => liveSteering && (!engine || cliModelOnly(engine));
   // The backend reports its sub-agents as agent frames (capabilities.agents): their lines in the
   // transcript then say what the backend's own spawn notices used to.
   let agentsLive = false;
@@ -2975,7 +2981,7 @@
   function renderContextMenu() {
     // On a subscription the size would be DGC's own setting, nothing the CLI uses: no setter, no percentage of it, and
     // what the CLI reported stays (ctx-usage). Nothing else is shown, so nothing here is made up.
-    const cli = curSubscription ? subscriptionName() : "";
+    const cli = curSubscription && !cliModelOnly(curSubscription) ? subscriptionName() : "";
     $("ctxmenu").classList.toggle("cli-window", !!cli);
     $("ctx-cli").hidden = !cli;
     $("ctx-cli").textContent = cli ? `${cli} manages its own context window, so there is no size to set here.` : "";
@@ -3058,7 +3064,7 @@
     const size = Math.max(0, Number(contextState.size || 0));
     const pct = size ? Math.min(100, Math.round((used / size) * 100)) : 0;
     const threshold = Math.max(.01, Math.min(1, Number(contextState.compact_threshold || .85)));
-    if (curSubscription) {
+    if (curSubscription && !cliModelOnly(curSubscription)) {
       const cli = subscriptionName();
       $("ctx").textContent = "";
       $("btn-ctx").classList.remove("warn", "busy");
@@ -10415,6 +10421,8 @@ function permissionChoices(ev) {
         }
         liveSteering = ev.capabilities?.live_steering === true;
         nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
+        { const sub = ev.capabilities?.dev_subscription_tools;
+          devSubTools = { on: sub?.on === true, engines: Array.isArray(sub?.engines) ? sub.engines.filter((e) => typeof e === "string").slice(0, 8) : [] }; }
         agentsLive = ev.capabilities?.agents === true;
         goalRunsLive = ev.capabilities?.goal_runs === true;        // the session's goal history (goal_runs)
         agentControlLive = ev.capabilities?.agent_control === true;
@@ -10535,7 +10543,7 @@ function permissionChoices(ev) {
         lastConfig = ev;
         renderContext();                 // the window you chose, beside the one in use ("· this model's max")
         renderCacheClock();              // an untimed clock names the chat's provider
-        nativeSteering = liveSteering && !ev.subscription_engine;
+        nativeSteering = steersNatively(ev.subscription_engine);
         renderComposerControls();
         paintMonitorsRow();              // Wake on monitor events decides whether events are "waiting"
         curUltra = ev.ultra_mode === true;
@@ -14897,6 +14905,12 @@ function permissionChoices(ev) {
       joinGoal(msg.state.goal);                 // a goal already running when this window opened: its end is said too
     }
     else if (msg.type === "agentsModel") onAgentsModel(msg);
+    else if (msg.type === "devSubscriptionTools") {
+      devSubTools = { ...devSubTools, on: msg.on === true };
+      if (lastConfig) nativeSteering = steersNatively(lastConfig.subscription_engine);
+      renderComposerControls();
+      renderContext();
+    }
     else if (msg.type === "usageMeter") onUsageMeter(msg);
     else if (msg.type === "planConnecting") onPlanConnecting(msg);
     else if (msg.type === "agentsWindow") onAgentsWindow(msg);

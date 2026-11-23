@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Settings › Dev Mode › Work on a subscription uses DGC's tools** (off by default, with a plain warning the first
+  time it is turned on): Claude Code or Codex is Work's model only, and DGC's tools, permissions and helpers do the
+  work. A chat on it steers while it works (Enter to steer) and shows DGC's context window, as on any model.
 - **A typed `/goal <objective>` starts that goal**, as Goal chosen from the `/` menu does. `/goal` alone shows the goal
   there is; `/goal pause`, `resume`, `clear` and `budget N` stay commands.
 - **Sites Pips can use…** in Your Browser's dock menu ("(N new)" while any is new): each site with All Pips, Some Pips

@@ -16,6 +16,8 @@ import threading
 import uuid
 from contextlib import contextmanager
 
+from .dev_mode import delegated as _delegated
+
 STATUSES = ("active", "paused", "completed", "blocked")
 MAX_REPORT_CHARS = 12_000
 
@@ -791,7 +793,7 @@ class GoalLifecycle:
             eligible = getattr(self, "_goal_running", False) or (replace and getattr(self, "_goal_accepts_start", False))
             if (not eligible or not self._accepting_steer
                     or self.cancelled.is_set() or getattr(self, "_queued_goal_replacement", None)
-                    or self.config.get("subscription_engine", "")):
+                    or _delegated(self.config)):
                 self._last_persist_error = "This turn cannot accept a goal replacement yet. Your draft is retained."
                 return False
             if expected_goal_id != (self._goal_details["id"] if self.goal else ""):
@@ -933,7 +935,7 @@ class GoalLifecycle:
                     selected = normalize_inputs({**selected, "skills": list(dict.fromkeys([
                         *selected.get("skills", []), *explicit_skill_names(self.skills, clean)]))})
                     prepare_inputs(clean, selected, self, external=status == "active"
-                                   and bool(self.config.get("subscription_engine", "")))
+                                   and bool(_delegated(self.config)))
                 except (TypeError, ValueError) as exc:
                     self._last_persist_error = str(exc)
                     return False
@@ -1003,7 +1005,7 @@ class GoalLifecycle:
             if status == "active":
                 try:
                     self.reload_skills()
-                    self.prepare_goal_inputs(self.goal, external=bool(self.config.get("subscription_engine", "")), force=True)
+                    self.prepare_goal_inputs(self.goal, external=bool(_delegated(self.config)), force=True)
                 except (TypeError, ValueError) as exc:
                     self._last_persist_error = str(exc)
                     return False

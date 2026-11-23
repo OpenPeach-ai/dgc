@@ -67,6 +67,7 @@ ORDINARY: dict[str, tuple] = {
 NEVER = {
     "dev_mode": "Settings › Dev Mode (only you turn it on)",
     "dev_mode_tools": "Settings › Dev Mode (only you let DGC change its limits)",
+    "dev_subscription_tools": "Settings › Dev Mode (only you choose to run Claude Code or Codex with DGC's tools)",
     "sandbox": "Settings › Safety", "sandbox_network": "Settings › Safety", "sandbox_env_allow": "Settings › Safety",
     "browser_allow_unsandboxed": "Settings › Safety", "session_redaction": "Settings › Safety",
     "hooks": "your settings file, by hand", "mcp_servers": "Settings › Plugins", "language_servers": "your settings file",

@@ -7,7 +7,8 @@ names in its environment, the tools DGC offered, the answers it got), because th
 nothing from the test.
 
 Script steps: {"say": text} | {"call": tool, "args": {...}} | {"own": tool} (one of its own tools, which a locked-
-down CLI must never reach) | {"fail": message}.
+down CLI must never reach) | {"fail": message} | {"think": text} | {"wait": seconds} (it starts a child process, writes
+its own and the child's pid to ``pids.json``, then waits: Stop must end both).
 """
 import json
 import os
@@ -40,6 +41,8 @@ if "--help" in argv:
         "" if (HERE / "old-claude").exists() else "  --restricted  Restricted mode\n"))
     sys.exit(0)
 
+with open(HERE / "runs.jsonl", "a", encoding="utf-8") as runs:      # every run, in order: its engine and argv
+    runs.write(json.dumps({"engine": ENGINE, "argv": argv}) + "\n")
 script = json.loads((HERE / "script.json").read_text())
 seen = {"engine": ENGINE, "argv": argv, "cwd": os.getcwd(), "env": sorted(os.environ), "home": os.environ.get("HOME"),
         "answers": []}
@@ -106,6 +109,15 @@ for number, step in enumerate(script, 1):
                                                              "input": {"command": "ls ~"}}]}} if ENGINE == "claude" else
             {"type": "item.started", "item": {"id": f"i{number}", "type": "command_execution", "command": "ls ~"}})
         time.sleep(10)                              # a locked-down run is stopped before this ends
+    elif "think" in step:
+        out({"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": step["think"]}]}}
+            if ENGINE == "claude" else
+            {"type": "item.completed", "item": {"id": f"i{number}", "type": "reasoning", "text": step["think"]}})
+    elif "wait" in step:
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        (HERE / "seen.json").write_text(json.dumps(seen))
+        (HERE / "pids.json").write_text(json.dumps({"cli": os.getpid(), "child": child.pid}))
+        time.sleep(step["wait"])
     elif "fail" in step:
         out({"type": "result", "subtype": "error_during_execution", "is_error": True, "error": step["fail"]}
             if ENGINE == "claude" else {"type": "turn.failed", "error": {"message": step["fail"]}})

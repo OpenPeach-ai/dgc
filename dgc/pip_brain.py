@@ -293,7 +293,7 @@ def codex_catalog(launch: dict, folder: Path) -> Path:
 
 
 def codex_argv(binary: str, *, relay: list[str], env_names: list[str], system_file: Path, folder: Path,
-               catalog: Path, model: str = "", effort: str = "", images=()) -> list[str]:
+               catalog: Path, model: str = "", effort: str = "", images=(), tool_timeout_s: int = 900) -> list[str]:
     toml = lambda value: json.dumps(value)               # a JSON string or array is TOML too
     argv = [binary, "exec", "--json", "--skip-git-repo-check", "--ephemeral",
             "--ignore-user-config", "--ignore-rules",    # no config.toml (its MCP servers, profiles), no exec rules
@@ -308,7 +308,7 @@ def codex_argv(binary: str, *, relay: list[str], env_names: list[str], system_fi
             "-c", f"mcp_servers.{SERVER}.env_vars=" + toml(env_names),
             "-c", f'mcp_servers.{SERVER}.default_tools_approval_mode="approve"',
             "-c", f"mcp_servers.{SERVER}.startup_timeout_sec=60",
-            "-c", f"mcp_servers.{SERVER}.tool_timeout_sec=900"]
+            "-c", f"mcp_servers.{SERVER}.tool_timeout_sec={int(tool_timeout_s)}"]
     for feature in CODEX_OFF:
         argv += ["-c", f"features.{feature}=false"]
     if model:

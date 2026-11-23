@@ -1237,13 +1237,16 @@ export class PipsEditor implements vscode.Disposable {
   open(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string; compose?: string } | { overview: true }): void {
     this.embeddedPost = undefined;
     this.panelNavigation = navigation;
+    // Ask in chat from a design's canvas (compose): beside the canvas, never in its group, where it would push the
+    // canvas out of sight; a tab already open stays where it is.
+    const asked = !!navigation && 'compose' in navigation && !!navigation.compose;
     if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.Active);
+      this.panel.reveal(asked ? (this.panel.viewColumn ?? vscode.ViewColumn.Beside) : vscode.ViewColumn.Active);
       this.connect();
       if (navigation) this.post({ type: 'pipsNavigate', navigation });
       return;
     }
-    const panel = vscode.window.createWebviewPanel('dgc.pips', 'DGC Pips', vscode.ViewColumn.Active, {
+    const panel = vscode.window.createWebviewPanel('dgc.pips', 'DGC Pips', asked ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active, {
       enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.extensionUri],
     });
     this.panel = panel;

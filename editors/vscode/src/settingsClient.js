@@ -218,7 +218,7 @@ for (const [page, keys] of Object.entries({
     web: ['search_provider', 'search_url', 'search_api_key'],
     chatdgc: ['chatdgc_about', 'chatdgc_style', 'chatdgc_personality', 'chatdgc_window', 'chatdgc_web', 'chatdgc_followups'],
     security: ['sandbox', 'sandbox_network', 'plan_artifact', 'artifact_autostart', 'artifact_in_plan', 'artifact_bind', 'artifact_hostname'],
-    dev: ['dev_mode', 'dev_limits', 'dev_mode_tools'] })) for (const key of keys) PAGE_OF[key] = page;
+    dev: ['dev_mode', 'dev_limits', 'dev_mode_tools', 'dev_subscription_tools'] })) for (const key of keys) PAGE_OF[key] = page;
 /** "Unsaved changes on Models and Agents": Save covers every page, so its line names the pages it will save. */
 function unsavedLine() {
     const pages = sections.filter(([id]) => [...dirty].some(key => PAGE_OF[key] === id)).map(([, label]) => label);
@@ -289,6 +289,14 @@ function applyConfig(ev) {
     draft.dev_tools_capable = draft.dev_capable && ev.dev_tools_capable === true;
     if (!draft.dev_tools_capable) { delete draft.dev_mode_tools; dirty.delete('dev_mode_tools'); }
     else if (!dirty.has('dev_mode_tools')) draft.dev_mode_tools = ev.dev_mode_tools === true;
+    // "Work on a subscription uses DGC's tools" (dev_subscription_tools): only with a DGC that says it takes the key
+    // (ready.capabilities.dev_subscription_tools). Never sent otherwise. Its warning shows once in this editor.
+    draft.dev_sub_capable = draft.dev_capable && ev.dev_sub_capable === true;
+    if (!draft.dev_sub_capable) { delete draft.dev_subscription_tools; dirty.delete('dev_subscription_tools'); }
+    else {
+        if (!dirty.has('dev_subscription_tools')) draft.dev_subscription_tools = ev.dev_subscription_tools === true;
+        draft.dev_sub_warned = draft.dev_sub_warned === true || ev.dev_sub_warned === true;
+    }
     if (!draft.dev_capable) { delete draft.dev_mode; delete draft.dev_limits; dirty.delete('dev_mode'); dirty.delete('dev_limits'); }
     else {
         if (!dirty.has('dev_mode')) draft.dev_mode = ev.dev_mode === true;
@@ -645,6 +653,11 @@ function wireDevMode(main) {
     if (tools) tools.onchange = () => setDraft('dev_mode_tools', tools.checked);
     const ok = $('dev-warning-ok');
     if (ok) ok.onclick = () => { draft.dev_mode_warned = true; send({ type: 'devModeWarned' }); render(); main.querySelector('[data-dev-limit]')?.focus(); };
+    // Turning on "Work on a subscription uses DGC's tools" shows its warning the first time; Got it puts it away for good.
+    const sub = $('dev_subscription_tools');
+    if (sub) { const flip = sub.onclick; sub.onclick = () => { flip(); render(); $('dev_subscription_tools')?.focus(); }; }
+    const subOk = $('dev-sub-warning-ok');
+    if (subOk) subOk.onclick = () => { draft.dev_sub_warned = true; send({ type: 'devSubscriptionWarned' }); render(); $('dev_subscription_tools')?.focus(); };
 }
 function appLogo(row, app) { const mark = signInProviders[row.name]?.apps[app?.id]; return mark ? logo({name:app.id, display_name:app.name, logo:mark}) : logo(row); }
 // One-colour marks drawn for one background vanish on the other theme (Superpowers' black mark on dark,

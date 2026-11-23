@@ -109,6 +109,14 @@ export function contextSizeShown(c) {
 // Settings → Dev Mode: the user's own switch for DGC's Dev Mode tools (config key dev_mode_tools), and its one quiet line.
 export const DEV_TOOLS_NAME = "Let DGC change Dev Mode settings";
 export const DEV_TOOLS_LINE = "When you ask, DGC can change these limits itself (it says what it changed, with Undo). It can never turn on Dev Mode.";
+// Settings → Dev Mode: "Work on a subscription uses DGC's tools" (config key dev_subscription_tools), its line, and the
+// warning that shows once, the first time it is turned on.
+export const DEV_SUB_NAME = "Work on a subscription uses DGC's tools";
+export const DEV_SUB_LINE = "Claude Code or Codex is Work's model only: its own tools stay off, and DGC's tools, permissions and helpers do the work.";
+export const DEV_SUB_WARNING_TITLE = "Claude Code or Codex as Work's model, with DGC's tools";
+export const DEV_SUB_WARNING_WORDS = "The provider's terms may not allow running its CLI as the model behind another tool's loop: you decide whether to use it. "
+    + "DGC never reads, copies or refreshes the CLI's login, and never calls the provider with it: the CLI signs in for itself. "
+    + "Every tool call is DGC's, by your permission mode. Off, Work hands each turn to the CLI as before. Kimi Code, Qwen Code and Copilot CLI always run as before.";
 // Settings → Dev Mode → Limits: a limit's box, by DGC's own name for it.
 export const devLimitId = (name) => `dev_limit_${name}`;
 /** DGC's rows of limits as the page may draw them: a name, a label, today's default and a cost line. */
@@ -662,6 +670,17 @@ export function renderFields(section, main, config, providers, ui) {
         const toolsOffered = c.dev_tools_capable === true;
         const warned = c.dev_mode_warned === true;
         const toolsRow = on && toolsOffered && warned ? field(DEV_TOOLS_NAME, DEV_TOOLS_LINE, bool("dev_mode_tools", c.dev_mode_tools === true)) : "";
+        // "Work on a subscription uses DGC's tools" (dev_subscription_tools): only with a DGC that takes the key, only
+        // while Dev Mode is on. The first time it is turned on, its warning shows under it, once (Got it).
+        const subOffered = c.dev_sub_capable === true;
+        const subOn = c.dev_subscription_tools === true;
+        const subRow = on && subOffered ? field(DEV_SUB_NAME, DEV_SUB_LINE, bool("dev_subscription_tools", subOn)) : "";
+        const subWarning = on && subOffered && subOn && c.dev_sub_warned !== true
+            ? '<section class="dev-warning" id="dev-sub-warning" role="alert"><svg viewBox="0 0 21 21" aria-hidden="true"><path d="M10.5 3.5 18.5 17h-16z M10.5 8.5v4 M10.5 14.6v.2"/></svg>'
+                + `<div class="dev-warning-body"><strong class="dev-warning-title">${escapeHtml(DEV_SUB_WARNING_TITLE)}</strong>`
+                + `<span class="dev-warning-words">${escapeHtml(DEV_SUB_WARNING_WORDS)}</span></div>`
+                + '<button type="button" class="secondary" id="dev-sub-warning-ok">Got it</button></section>'
+            : "";
         const warning = '<section class="dev-warning" id="dev-warning" role="alert"><svg viewBox="0 0 21 21" aria-hidden="true"><path d="M10.5 3.5 18.5 17h-16z M10.5 8.5v4 M10.5 14.6v.2"/></svg>'
             + '<div class="dev-warning-body"><strong class="dev-warning-title">Dev Mode lifts DGC\'s capacity limits</strong>'
             + '<span class="dev-warning-words">It is for a big machine: more at once, and more kept. Each limit you raise costs memory, disk or model load, and its line says which. '
@@ -672,8 +691,9 @@ export function renderFields(section, main, config, providers, ui) {
             + '<button type="button" class="secondary" id="dev-warning-ok">Got it</button></section>';
         main.innerHTML = head("Dev Mode", "For experimenting on a big machine: it lifts DGC's capacity limits.",
                 "A capacity limit is how many things run at once, or how many are kept. Each one you raise costs memory, disk or model load. Safety limits never move: the sandbox, redaction, approvals and what a Pip may do.")
-            + `<section class="group"><div class="rows">${field("Dev Mode", on ? "On: each limit below is yours to set." : "Off: every limit is today's default.", bool("dev_mode", on))}${toolsRow}</div></section>`
+            + `<section class="group"><div class="rows">${field("Dev Mode", on ? "On: each limit below is yours to set." : "Off: every limit is today's default.", bool("dev_mode", on))}${toolsRow}${subRow}</div></section>`
             + (on && !warned ? warning : "")
+            + subWarning
             + (on ? group("Limits", table.map(line).join("")
                     + `<div class="field dev-reset"><span class="words"><span class="hint">Empties every box, so each limit is today's default again.</span></span>`
                     + `<button type="button" class="secondary" id="dev-limits-reset"${table.some((l) => mine[l.name] !== undefined && mine[l.name] !== "") ? "" : " disabled"}>Reset to defaults</button></div>`,
@@ -681,6 +701,7 @@ export function renderFields(section, main, config, providers, ui) {
             + saveBar;
         main.querySelector("#dev_mode")?.setAttribute("aria-label", "Dev Mode");
         main.querySelector("#dev_mode_tools")?.setAttribute("aria-label", DEV_TOOLS_NAME);
+        main.querySelector("#dev_subscription_tools")?.setAttribute("aria-label", DEV_SUB_NAME);
         wire(main);
     }
     const renderers = { general: renderGeneral, models: renderModels,

@@ -1019,6 +1019,44 @@ test("Let DGC change Dev Mode settings is saved as dev_mode_tools, only to a CLI
   assert.equal("dev_mode_tools" in older, false, "a DGC that doesn't take the key is never sent it");
 });
 
+test("Work on a subscription uses DGC's tools is saved as dev_subscription_tools, only to a CLI that says it takes the key", async () => {
+  // Settings › Dev Mode. set_config refuses a whole save for one key it doesn't know, so the key goes only to a DGC that
+  // offers it (ready.capabilities.dev_subscription_tools). Work's tabs hear the new state, so steering follows it.
+  const LIMITS = [{ name: "pips_parallel_runs", label: "Pip runs at once (all Pips)", default: 4, ceiling: 32, cost: "Memory and model load." }];
+  const SUB = { version: 1, set: false, on: false, engines: ["claude", "codex"] };
+  const sentFor = async (capabilities, values) => {
+    const { provider, commands } = harness();
+    provider.lastReadyEvent = { capabilities: { ...provider.lastReadyEvent.capabilities, ...capabilities } };
+    await provider.saveSettings(settings(values));
+    return commands.find((c) => c.type === "set_config" && "dev_mode" in (c.values || {}))?.values;
+  };
+  const offered = { dev_limits: LIMITS, dev_subscription_tools: SUB };
+  assert.equal((await sentFor(offered, { dev_mode: true, dev_limits: {}, dev_subscription_tools: true })).dev_subscription_tools, true);
+  assert.equal((await sentFor(offered, { dev_mode: true, dev_limits: {}, dev_subscription_tools: false })).dev_subscription_tools, false);
+  assert.equal((await sentFor(offered, { dev_mode: true, dev_limits: {} })).dev_subscription_tools, false, "unsaid is off");
+  assert.equal((await sentFor(offered, { dev_mode: true, dev_limits: {}, dev_subscription_tools: "true" })).dev_subscription_tools, false, "only a real yes");
+  const older = await sentFor({ dev_limits: LIMITS }, { dev_mode: true, dev_limits: {}, dev_subscription_tools: true });
+  assert.equal(older.dev_mode, true);
+  assert.equal("dev_subscription_tools" in older, false, "a DGC that doesn't take the key is never sent it");
+  // A Work tab hears what was saved: on only with Dev Mode on too.
+  const told = [];
+  const { provider } = harness();
+  provider.lastReadyEvent = { capabilities: { ...provider.lastReadyEvent.capabilities, ...offered } };
+  provider.view = { visible: true, webview: { postMessage: async (message) => { told.push(message); return true; } } };
+  provider.webviewReady = true;
+  await provider.saveSettings(settings({ dev_mode: true, dev_limits: {}, dev_subscription_tools: true }));
+  await provider.saveSettings(settings({ dev_mode: false, dev_limits: {}, dev_subscription_tools: true }));
+  assert.deepEqual(told.filter((m) => m.type === "devSubscriptionTools").map((m) => m.on), [true, false]);
+});
+
+test("the warning for Work on a subscription with DGC's tools is remembered in this editor: it shows once", async () => {
+  const kept = new Map();
+  const { provider } = harness();
+  provider.context.globalState = { get: (key) => kept.get(key), async update(key, value) { kept.set(key, value); } };
+  await provider.onSettingsMessage({ type: "devSubscriptionWarned" });
+  assert.equal(kept.get("dgc.devSubscriptionWarned.v1"), true);
+});
+
 test("the sub-agents' context window goes only to a CLI that answered it, blank or 0 as the main model's", async () => {
   // Settings -> Agents -> Sub-agents -> Context size. The host built `values` without it unless the page posted it,
   // and the page never did: Save could not write it at all.

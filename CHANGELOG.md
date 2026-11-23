@@ -11,6 +11,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   own, never in that chat's history.
 - **A chat reopened where Auto isn't trusted says so calmly**: "Reopened in Default, so DGC asks before each change.
   Auto runs only in folders you've chosen to trust; switch to Auto to use it here."
+- **Dev Mode: Work on a subscription can use DGC's tools** (`dev_subscription_tools`, Settings › Dev Mode, off by
+  default; `set_config` takes it and `ready.capabilities.dev_subscription_tools` says so, with whether it is on). With
+  Dev Mode on and this on, a Work turn on Claude Code or Codex is DGC's own turn with that CLI as its model only: the CLI
+  runs with its own tools off, none of your settings or MCP servers, and only DGC's server on a private socket (as for a
+  Personal Pip and ChatDGC); every call goes through Work's own handlers, so Allow cards, auto mode and its safety check,
+  the sandbox, checkpoints and the Edited card, steering, goals, compaction and helpers (on their own model) work as on
+  any model. Stop ends the CLI's whole process group. DGC never reads, copies or refreshes the CLI's login. Off, or with
+  Dev Mode off, each turn is handed to the CLI as before. Kimi Code, Qwen Code and Copilot CLI run as before, and say
+  why once.
 - **Sites Pips can use in Your Browser** (Pips API 113: `seen_your_browser_sites`, `get_your_browser_lanes`): the sites
   you are signed in to, each with All Pips, Some Pips or No Pips; a site you sign in to yourself is noticed (a bank or
   payment site starts at No Pips, others at All Pips); a grant from a chat card can be taken back. While a Pip's run

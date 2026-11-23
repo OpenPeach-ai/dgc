@@ -142,6 +142,31 @@ def chosen(name: str, config=None) -> int | None:
     return value if _whole(value) else None
 
 
+# The CLIs that can be a Work turn's model with only DGC's tools: each was checked by trying (dgc/pip_brain.py).
+SUBSCRIPTION_TOOLS_ENGINES = ("claude", "codex")
+
+
+def _engine(config) -> str:
+    return str(_get(config, "subscription_engine", "") or "").strip().lower()
+
+
+def subscription_tools(config=None) -> str:
+    """"Work on a subscription uses DGC's tools" (`dev_subscription_tools`, off by default): with Dev Mode on and the
+    switch on, the Claude Code or Codex a Work session runs on is its turns' model and nothing more (dgc/work_cli.py).
+    Returns that engine ("claude" or "codex"), or "" when Work hands its turns to the CLI as before, or runs natively."""
+    if not on(config) or _get(config, "dev_subscription_tools", False) is not True:
+        return ""
+    engine = _engine(config)
+    return engine if engine in SUBSCRIPTION_TOOLS_ENGINES else ""
+
+
+def delegated(config=None) -> str:
+    """The subscription engine a Work turn is handed to whole (the CLI runs its own loop and its own tools): the session's
+    engine, unless Dev Mode's switch makes that CLI the model only. "" when DGC runs the turn itself."""
+    engine = _engine(config)
+    return "" if not engine or subscription_tools(config) else engine
+
+
 def helpers_ceiling(config=None) -> int:
     """The most Work helpers one `task` call may start and that may run at once: config.MAX_PARALLEL_TASKS, or more
     when Dev Mode sets more."""

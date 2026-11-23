@@ -114,6 +114,13 @@ External subscription CLIs currently receive a one-shot prompt. Their follow-ups
 change applies when DGC launches the next subscription turn. The active external process keeps its
 launch permissions. The editor displays this limitation instead of claiming live steering.
 
+With Dev Mode's **Work on a subscription uses DGC's tools** on (Settings › Dev Mode, off by default), Claude Code or
+Codex is only the turn's model: the turn is DGC's own, so a message sent while it works steers it (it reaches the CLI
+with the next tool answer, or starts its next run when the CLI was only writing), and a mode change applies to the next
+tool call, as on any model. The CLI runs with its own tools off and only DGC's tools, served to it for that run on a
+private socket; DGC never reads or copies its login. The providers' terms may not allow a CLI behind another tool's
+loop, which is why it is off by default and warns once when turned on.
+
 Native permission changes affect upcoming decisions and recheck a pending tool approval. Explicit
 deny and ask rules take precedence over Auto. Workspace trust and the existing Auto confirmation
 remain required. An action already dispatched may finish under its previously granted permission.

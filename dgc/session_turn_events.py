@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import uuid
 
+from .dev_mode import delegated as _delegated
 from .pip_access import restricted
 from .redaction import contains_secret, secret_values
 from . import workspace_registry
@@ -300,7 +301,7 @@ def _eligible(agent):
             and getattr(agent, '_parent_agent', None) is None
             and getattr(agent, '_subagent_id', None) is None
             and getattr(agent, '_agent_tool_allowlist', None) is None
-            and not agent.config.get('subscription_engine', '')
+            and not _delegated(agent.config)
             and agent.config.get('pips_enabled', False) is True and not restricted(agent.config)
             and not agent.cancelled.is_set() and not getattr(agent, 'stopping', False)
             and workspace_registry.in_use())
