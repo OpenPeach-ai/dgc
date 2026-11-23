@@ -54,6 +54,8 @@
    or has the keyboard, and never moving under reduced motion. */
 .halo.dgc-dock-halo { --size: calc(var(--s) * .72); --halo-play: paused; display: block; }
 .dgc-dock-item:hover .halo.dgc-dock-halo, .dgc-dock-item:focus-visible .halo.dgc-dock-halo { --halo-play: running; }
+/* (A Pip working in it: the halo moves, as a busy session's mark does; reduced motion keeps it still, halo.css.) */
+.halo.dgc-dock-halo.is-live { --halo-play: running; }
 /* The number waiting for you, on the tile's corner: the text colour, never the accent. */
 .dgc-dock-badge {
   position: absolute; top: -4px; right: -4px; z-index: 1; box-sizing: border-box; min-width: 14px; height: 14px; padding: 0 3.5px; border-radius: 7px;

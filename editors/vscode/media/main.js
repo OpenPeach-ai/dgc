@@ -703,7 +703,7 @@
       }
       pipsApp = window.DgcPips.mount({
         root, stylesheetUri:host.dataset.styleUri,
-        postMessage:message => vscode.postMessage({...message,documentId:document.documentElement.dataset.pipsDocumentId}),
+        postMessage:message => { ybAskedOfPip(message); vscode.postMessage({...message,documentId:document.documentElement.dataset.pipsDocumentId}); },
         onMessage:listener => { pipsListeners.add(listener); return () => pipsListeners.delete(listener); },
         getState:() => { const state=vscode.getState(); return state?.pipsScope===document.documentElement.dataset.draftScope ? state.pips : undefined; },
         setState:state => vscode.setState({...vscode.getState(),pips:state,pipsScope:document.documentElement.dataset.draftScope}),
@@ -1506,9 +1506,13 @@
   // own tab instead of a window.
   // Clear browsing data (Pips API 112): a right-click on Your Browser in the dock offers it; one small dialog ticks what
   // goes, each kind with one line of what it removes, and the button says what it clears. Nothing is cleared before it.
-  const YB_API = 107, YB_CLEAR_API = 112, YB_POLL_MS = 60000, YB_INSTALL_POLL_MS = 2000;
+  const YB_API = 107, YB_CLEAR_API = 112, YB_SITES_API = 113, YB_POLL_MS = 60000, YB_INSTALL_POLL_MS = 2000;
   const yb = { generation: 0, connected: false, api: 0, links: [], lanes: [], available: true, reason: "", open: false, error: "", seq: 0, pending: new Map(), asked: 0,
-    install: null, view: "window", installTimer: 0, account: false };
+    install: null, view: "window", installTimer: 0, account: false, newSites: 0, runsLive: false, lanesAsked: 0, lanesAsking: false };
+  const YB_LANES_LIVE_MS = 2000, YB_LANES_IDLE_MS = 5000;
+  /** The Pips with a tab in Your Browser as DGC says them: each named, and whether its run is working in it now. */
+  const ybLanesOf = (said) => (Array.isArray(said?.lanes) ? said.lanes.filter((l) => l && /^pip_[A-Za-z0-9]{1,64}$/.test(String(l.pip_id)) && typeof l.name === "string" && l.name.trim()).slice(0, 8)
+    .map((l) => ({ pip_id: String(l.pip_id), name: String(l.name).trim().slice(0, 120), working: l.working === true })) : []);
   const ybOffered = () => yb.connected && yb.api >= YB_API;
   /** Where this editor's window is and the work area of its screen, in screen pixels; null where the page can't tell. */
   function editorBounds() {
@@ -1539,8 +1543,9 @@
       yb.account = said?.chrome_account === true;
       ybInstallPoll();
       // The Pips working in it (each in its own tab): the dock's menu offers to watch one in a streamed tab.
-      yb.lanes = Array.isArray(said?.lanes) ? said.lanes.filter((l) => l && /^pip_[A-Za-z0-9]{1,64}$/.test(String(l.pip_id)) && typeof l.name === "string" && l.name.trim()).slice(0, 8)
-        .map((l) => ({ pip_id: String(l.pip_id), name: String(l.name).trim().slice(0, 120) })) : [];
+      yb.lanes = ybLanesOf(said);
+      // Sites noticed from your own sign-ins since you last opened Sites Pips can use (Pips API 113).
+      yb.newSites = Number.isSafeInteger(said?.new_sites) && said.new_sites > 0 ? Math.min(said.new_sites, 999) : 0;
       ybPaint();
     }, () => {});
   }
@@ -1572,7 +1577,7 @@
     const i = yb.install;
     if (!ybOffered() || !i) return;
     if (i.state === "running") { dock?.note?.("browser", "Installing Google Chrome…"); return; }
-    ybCloseDialog(false);
+    ybCloseDialog(false); window.DgcYbSites?.close(false);
     const terminal = i.how === "terminal";
     const dialog = document.createElement("dialog");
     dialog.className = "new-session-dialog yb-install-dialog dgc-dialog";
@@ -1638,7 +1643,7 @@
   }
   function ybClear() {
     if (!ybOffered() || yb.api < YB_CLEAR_API) return;
-    ybCloseClear(false); ybCloseDialog(false);
+    ybCloseClear(false); ybCloseDialog(false); window.DgcYbSites?.close(false);
     const dialog = document.createElement("dialog");
     dialog.className = "new-session-dialog yb-clear-dialog dgc-dialog";
     dialog.setAttribute("aria-labelledby", "yb-clear-title");
@@ -1680,6 +1685,14 @@
     boxes[0].focus();
     setTimeout(() => { if (ybClearing?.dialog === dialog && !dialog.contains(document.activeElement)) boxes[0].focus(); }, 0);
   }
+  /** Sites Pips can use (Pips API 113): the one panel of every site you're signed in to in Your Browser and which Pips
+      may use it (media/shared/ybsites.js, the same one a Pip's page opens). Opening it is looking: the dock's "N new" goes. */
+  function ybSitesOpen() {
+    if (!ybOffered() || yb.api < YB_SITES_API || !window.DgcYbSites) return;
+    ybCloseClear(false); ybCloseDialog(false);
+    window.DgcYbSites.panel({ ask: (type, fields) => ybAsk(type, fields), doc: document,
+      onSeen: () => { if (yb.newSites) { yb.newSites = 0; ybPaint(); } } });
+  }
   /** Open Your Browser with what was typed (a search or an address), a link, or nothing (its window comes forward). */
   function ybOpen(text) {
     if (!ybOffered()) return;
@@ -1697,6 +1710,28 @@
       ybPaint();
     });
   }
+  /** A Pip asked to work from this side bar (a message in its chat, Run now, an answer, a card's Allow): the dock looks at
+      Your Browser every couple of seconds from now, so the Pip's tab there is on it at once. */
+  function ybAskedOfPip(message) {
+    try {
+      if (message?.type === "pipsRequest" && ["send_pip_message", "run_pip", "answer_pip_questions", "decide_pip_computer_action", "start_pip_job"].includes(message.request?.type)) {
+        yb.runsLive = true; yb.lanesAsked = 0;
+      }
+    } catch { /* (before Your Browser's part of the page is up: its first look comes with the connection) */ }
+  }
+  /** The quick look at the Pips working in Your Browser (Pips API 113): asked every few seconds while any Pip's run is
+      live or one is working there, so a Pip's new tab is on the dock at once (Watch), and seldom otherwise. */
+  function ybLanes() {
+    if (!ybOffered() || yb.api < YB_SITES_API || yb.lanesAsking || document.hidden) return;
+    yb.lanesAsked = Date.now(); yb.lanesAsking = true;
+    ybAsk("get_your_browser_lanes").then((said) => {
+      yb.lanesAsking = false;
+      const lanes = ybLanesOf(said), live = said?.runs_live === true;
+      const changed = JSON.stringify(lanes) !== JSON.stringify(yb.lanes);
+      yb.lanes = lanes; yb.runsLive = live;
+      if (changed) ybPaint();
+    }, () => { yb.lanesAsking = false; });
+  }
   function ybReceive(msg) {
     if (msg.type === "pipsConnection") {
       if (msg.generation !== yb.generation) { for (const p of yb.pending.values()) { clearTimeout(p.timer); p.reject(new Error("The connection changed.")); } yb.pending.clear(); }
@@ -1704,7 +1739,7 @@
       yb.generation = msg.generation;
       yb.connected = msg.connected === true && msg.supported !== false && msg.enabled === true;
       yb.api = Number(msg.apiVersion) || 0;
-      if (ybOffered()) ybRecent();
+      if (ybOffered()) { ybRecent(); yb.lanesAsking = false; ybLanes(); }
       if (was !== ybOffered()) ybPaint();
       return;
     }
@@ -1715,22 +1750,37 @@
   }
   if (chatPlace === "home") {
     setInterval(() => { if (ybOffered() && !document.hidden && Date.now() - yb.asked >= YB_POLL_MS) ybRecent(); }, 5000);
-    window.addEventListener("focus", () => { if (ybOffered() && Date.now() - yb.asked >= 3000) ybRecent(); });
+    setInterval(() => {
+      const busy = yb.runsLive || yb.lanes.some((l) => l.working);
+      if (Date.now() - yb.lanesAsked >= (busy ? YB_LANES_LIVE_MS : YB_LANES_IDLE_MS)) ybLanes();
+    }, YB_LANES_LIVE_MS);
+    window.addEventListener("focus", () => { if (ybOffered() && Date.now() - yb.asked >= 3000) ybRecent(); if (Date.now() - yb.lanesAsked >= 3000) ybLanes(); });
   }
   const HALO = '<span class="halo dgc-dock-halo" aria-hidden="true"><i></i><i></i><i></i></span>';
+  // (While a Pip works in it, its halo moves as a busy session's mark does: dock.css .is-live.)
+  const HALO_LIVE = '<span class="halo dgc-dock-halo is-live" aria-hidden="true"><i></i><i></i><i></i></span>';
   /** The dock's one item that is always there (his call, 17 Nov): Your Browser, just before "+". */
   function dockFixed() {
     if (!ybOffered()) return [];
     const here = yb.view === "tab" ? "in a tab here" : "to the right of the editor";
+    // A Pip's run working in its tab there: said on the tile ("Ava is working in it"), with the running dot and a moving halo.
+    const working = yb.available && !yb.install ? yb.lanes.filter((l) => l.working) : [];
+    const who = working.length === 1 ? working[0].name : working.length === 2 ? `${working[0].name} and ${working[1].name}`
+      : working.length > 2 ? `${working[0].name}, ${working[1].name} and ${working.length - 2} more` : "";
     const state = yb.install?.state === "running" ? "Installing Google Chrome" : yb.install ? "Needs Google Chrome" : !yb.available ? "Can't open here"
-      : yb.open ? `Open, ${here}` : `Opens ${here}`;
+      : who ? `${who} ${working.length === 1 ? "is" : "are"} working in it` : yb.open ? `Open, ${here}` : `Opens ${here}`;
     // Its menu: Open (or, where it is needed, Install Google Chrome), then each Pip working in it, to watch that Pip's tab
     // in an editor tab beside the chat.
     const watch = yb.lanes.map((l) => ({ id: `lane:${l.pip_id}`, label: `Watch ${l.name}'s tab`, icon: "open-in-editor" }));
     const first = yb.install ? { id: "open", label: "Install Google Chrome…", icon: "save" } : { id: "open", label: "Open Your Browser", icon: "open" };
+    // Sites Pips can use (Pips API 113): which Pips may use each site you're signed in to there; "N new" for sites noticed
+    // from your own sign-ins since you last looked.
+    const sites = yb.api >= YB_SITES_API ? [{ id: "sites", label: yb.newSites ? `Sites Pips can use… (${yb.newSites} new)` : "Sites Pips can use…", icon: "globe" }] : [];
     // Clear browsing data (Pips API 112): only where it can run here, and with DGC that has it.
-    const clear = yb.api >= YB_CLEAR_API && yb.available && !yb.install ? [[{ id: "clear", label: "Clear browsing data…", icon: "delete" }]] : [];
-    return [{ key: "browser", kind: "browser", title: "Your Browser", state, icon: HALO, menu: [[first], ...(watch.length ? [watch] : []), ...clear] }];
+    const clear = yb.api >= YB_CLEAR_API && yb.available && !yb.install ? [{ id: "clear", label: "Clear browsing data…", icon: "delete" }] : [];
+    const last = [...sites, ...clear];
+    return [{ key: "browser", kind: "browser", title: "Your Browser", state, icon: who ? HALO_LIVE : HALO, dot: who ? "live" : "",
+      menu: [[first], ...(watch.length ? [watch] : []), ...(last.length ? [last] : [])] }];
   }
   /** The dock itself, made once on the side bar's page: the last thing on it, under every screen. */
   function mountDock() {
@@ -1755,6 +1805,7 @@
       onMenu: (key, what) => {
         if (key === "browser") {
           if (what === "clear") { ybClear(); return; }
+          if (what === "sites") { ybSitesOpen(); return; }
           // A Pip's own tab in Your Browser, streamed into an editor tab beside the chat.
           const lane = String(what).startsWith("lane:") ? yb.lanes.find((l) => l.pip_id === String(what).slice(5)) : null;
           if (lane) vscode.postMessage({ type: "pipsOpenYourBrowser", pip: { id: lane.pip_id, name: lane.name }, documentId: document.documentElement.dataset.pipsDocumentId });
@@ -11792,10 +11843,10 @@ function permissionChoices(ev) {
     const resources = attachments.filter((a) => a.resource).map((a) => a.resource);
     const skills = attachments.filter((a) => a.skill).map((a) => a.skill);
     const templates = attachments.filter((a) => a.template).map((a) => a.template);
-    // A goal starts only from the "/" menu's Goal (goalDraftArmed, decided 12 Nov). Typed, `/goal` is a command only
-    // alone (it shows the goal there is) and with the words that manage a goal: `/goal pause`, `/goal resume`,
-    // `/goal clear`, `/goal budget N` and the rest of goalStateCommand. `/goal fix the build` typed and sent, and a
-    // message that ends in ` /goal`, go as the plain text they are.
+    // A goal starts from the "/" menu's Goal (goalDraftArmed) or typed: `/goal fix the build` sent starts that goal.
+    // `/goal` alone shows the goal there is, and the words that manage a goal stay commands: `/goal pause`,
+    // `/goal resume`, `/goal clear`, `/goal budget N` and the rest of goalStateCommand. A message that ends in
+    // ` /goal` goes as the plain text it is (only the menu's Goal makes it an objective).
     const typedGoal = /^\/goal(?:\s+([\s\S]+))?$/i.exec(text);
     const typedGoalRest = typedGoal?.[1]?.trim() || "";
     const goalStateCommand = ["clear", "off", "none", "remove", "complete", "completed",
@@ -11822,6 +11873,7 @@ function permissionChoices(ev) {
       vscode.postMessage({ type: "slashText", text });
       clearComposer(); persistDraft(); return;
     }
+    if (typedGoalText) { submitGoal(typedGoalRest, text); return; }
     const workflowPrompt = (/^\/(plan|review|init)(?:\s|$)/i.test(text)
       || /\s+\/(plan|review|init)$/i.test(text)) && !(text.toLowerCase() === "/plan" && !attachments.length);
     if (isSlashCommandText(text) && !attachments.length && !workflowPrompt && !typedGoalText) {
@@ -12355,10 +12407,9 @@ function permissionChoices(ev) {
     const query = token[2].slice(1).toLowerCase();
     if(pipPicker.active){const search=query==="pip"?"":query.startsWith("pip:")?query.slice(4):query;
       if(search!==pipPicker.query)requestPromptPips(search);else renderPipPicker();return;}
-    // A goal starts only when Goal is chosen from this menu (a click, Enter or Tab on its row;
-    // decided 12 Nov). Typing the whole `/goal` token arms nothing: it lists Goal, as any command's name
-    // lists it, and sent as typed it is plain text (submit, below). `/goal pause` and the other words that manage
-    // a goal stay commands, typed or chosen.
+    // Goal chosen from this menu (a click, Enter or Tab on its row) pins it to the draft. Typing the whole `/goal`
+    // token arms nothing: it lists Goal, as any command's name lists it; `/goal <objective>` sent as typed starts that
+    // goal (submit, below). `/goal pause` and the other words that manage a goal stay commands, typed or chosen.
     if (popMode === "/" || popMode === "$") {
       const skillItems = skillRows.filter((s) => s && s.enabled !== false).map((s) => ({
         label: "$" + s.name, detail: s.description || "Reusable agent instructions",

@@ -663,7 +663,12 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # sync on, the account keeps its own copy). Also in 0.52 (capability your_browser_screen): where there is no screen,
 # Your Browser's own tab streams Chrome's real window on a VNC screen of its own over your_browser_screen /
 # your_browser_screen_data, as a Pip computer's screen streams; Pip lanes there open in a window off that screen.
-PIPS_API_VERSION = 112
+# Pips API 113: the sites Pips may use in Your Browser, in one panel. seen_your_browser_sites {} (M, local only): the person
+# opened it, so the sites noticed from their own sign-ins until now are no longer new. get_your_browser's sites carry
+# `new`, and it lists `pips` (every Pip the person may choose, never an archived one); get_your_browser_recent carries
+# `new_sites` (how many are new). A site the person signs in to in Your Browser joins the list by itself.
+# get_your_browser_lanes {} (R, local only): the Pips working there now and whether any run is live (the dock's look).
+PIPS_API_VERSION = 113
 
 
 _THINK_WORDS = {"off": "Off", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"}
@@ -11489,13 +11494,13 @@ class Backend:
         records = [record for record in list(getattr(getattr(self, "agent", None), "image_views", None) or [])
                    if hasattr(record, "to_item")]
         messages = list(getattr(getattr(self, "agent", None), "messages", None) or [])
-        tool_calls: set = set()
+        last_result: dict = {}          # call id -> the index of its last saved result
         summary = None
         for position, message in enumerate(messages):
             if not isinstance(message, dict):
                 continue
             if message.get("role") == "tool":
-                tool_calls.add(str(message.get("tool_call_id") or ""))
+                last_result[str(message.get("tool_call_id") or "")] = position
             elif (summary is None and message.get("role") == "user"
                   and isinstance(message.get("content"), str)
                   and message["content"].startswith(_COMPACT_PREFIX)):
@@ -11504,7 +11509,10 @@ class Backend:
         for position, record in enumerate(records):
             if getattr(record, "compacted", False):
                 folded.append(position)
-            elif str(record.call_id or "") in tool_calls:
+            elif last_result.get(str(record.call_id or ""), -1) >= record.anchor:
+                # (Only a result at or after where it was viewed is its step's. A model that reuses short step ids
+                # can name an EARLIER step: that image is placed where it was viewed, as one with no step is; matched
+                # to the earlier call it was never placed, and all such went after the chat's last reply.)
                 by_call.setdefault(str(record.call_id or ""), []).append(position)
             else:
                 orphans.append(position)

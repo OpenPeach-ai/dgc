@@ -722,6 +722,9 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .composer-ctx-pct{font-size:11px;font-variant-numeric:tabular-nums}
 /* DGC's working row: (time · ↓ tokens) after what the Pip is doing; and what each reply took. */
 .pip-working-meta{margin-left:-4px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted)}
+/* Watch on the working line of a run at work in Your Browser, and among a live post's answers: the shared small button
+   (.dgc-btn.small: the one corner, the small height), as wide as its word, never stretched across the line. */
+.dgc-btn.small.pip-working-watch{flex:none;justify-self:start;align-self:center;width:auto;min-width:0;max-width:max-content}
 @keyframes pip-working-shimmer{0%{background-position:120% 0}25%,100%{background-position:-20% 0}}
 @media(prefers-reduced-motion:no-preference) and (forced-colors:none){
   .pip-working-verb{--shimmer-base:color-mix(in srgb,var(--vscode-foreground,#eeeaf8) 50%,var(--vscode-editor-background,#171719));background:linear-gradient(90deg,var(--shimmer-base) 45%,color-mix(in srgb,var(--vscode-foreground,#eeeaf8) 75%,var(--shimmer-base)) 47.5%,var(--vscode-foreground,#eeeaf8) 50%,color-mix(in srgb,var(--vscode-foreground,#eeeaf8) 75%,var(--shimmer-base)) 52.5%,var(--shimmer-base) 55%);background-size:200% 100%;background-position:120% 0;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:pip-working-shimmer 4s linear var(--shimmer-delay,.6s) infinite}

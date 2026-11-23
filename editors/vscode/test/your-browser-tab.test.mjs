@@ -125,6 +125,19 @@ test("the page: the Pip's tab live, its address in DGC's own bar, the Pips' tabs
   } finally { await x.close(); }
 });
 
+test("the row of Pips names its own Pip where DGC's list of tabs carries no name (never \"A Pip\")", async (t) => {
+  if (skipOrFail(t)) return;
+  const x = await openTab();
+  try {
+    // (What an older supervisor's list says: each Pip's id and its page, no name.)
+    await x.page.evaluate(([AVA, BEN]) => { window.__frame = { ...window.__frame, title: "Mystery | Books to Scrape",
+      lanes: [{ pip_id: AVA, title: "Mystery | Books to Scrape", url: "https://books.toscrape.com/" }, { pip_id: BEN, name: "", title: "Inbox", url: "https://mail.example.net/" }] }; }, [AVA, BEN]);
+    await x.page.waitForFunction(() => document.querySelector(".yb-tab .yb-tab-title")?.textContent === "Mystery | Books to Scrape", null, { timeout: 10000 });
+    const tabs = await x.page.evaluate(() => [...document.querySelectorAll(".yb-tab")].map((b) => [b.querySelector(".yb-tab-name").textContent, b.title]));
+    assert.deepEqual(tabs[0], ["Ava", "Ava: Mystery | Books to Scrape"], "its own Pip by the name the tab was opened with");
+  } finally { await x.close(); }
+});
+
 test("the page: a click lands where it was made, typing and keys reach the tab, and the bar drives it", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openTab();

@@ -40,7 +40,7 @@ test("Open Your Browser on a sign-in card in the Pips tab: the site, in your own
   assert.deepEqual(h.browserTabs().map((p) => p.title), ["Your Browser"], "no screen here: your own tab, in an editor tab");
 });
 
-test("from a chat's own editor tab: your own tab opens, a Pip's lane never does, and nothing else rides along", () => {
+test("from a chat's own editor tab: your own tab opens, only that chat's own Pip's tab (its Watch), and nothing else rides along", () => {
   const h = host();
   h.editor.openChat({ ...PIP }, { id: CONV, title: "Kettle prices" });
   const chat = h.panels.find((p) => p.id === "dgc.pipChat");
@@ -49,10 +49,13 @@ test("from a chat's own editor tab: your own tab opens, a Pip's lane never does,
   const generation = chat.posted.filter((m) => m.type === "pipsConnection").at(-1)?.generation ?? h.generation();
   chat.receive({ type: "pipsRequest", id: "c1", generation, request: { type: "open_your_browser", url: "https://shop.lanestore.com/account" } });
   assert.deepEqual(h.controls().map((r) => [r.type, r.url]), [["open_your_browser", "https://shop.lanestore.com/account"]]);
-  chat.receive({ type: "pipsOpenYourBrowser", pip: { id: PIP.id, name: PIP.name } });
-  assert.deepEqual(h.browserTabs(), [], "a chat tab never opens a Pip's lane: only the dock's Watch does");
+  // (Its working line's Watch, Pips API 113: that chat's own Pip's tab, under the name the tab knows; never another's.)
+  chat.receive({ type: "pipsOpenYourBrowser", pip: { id: "pip_" + "f".repeat(32), name: "Fern" } });
+  assert.deepEqual(h.browserTabs(), [], "a chat tab never opens another Pip's tab");
+  chat.receive({ type: "pipsOpenYourBrowser", pip: { id: PIP.id, name: "Someone else" } });
+  assert.deepEqual(h.browserTabs().map((p) => p.title), [`${PIP.name} · Your Browser`], "its own Pip's tab, by its own name");
   chat.receive({ type: "pipsOpenYourBrowser", own: true });
-  assert.deepEqual(h.browserTabs().map((p) => p.title), ["Your Browser"]);
+  assert.deepEqual(h.browserTabs().map((p) => p.title), [`${PIP.name} · Your Browser`, "Your Browser"]);
   chat.receive({ type: "pipsRequest", id: "c2", generation, request: { type: "open_your_browser", url: "https://shop.lanestore.com/", pip_id: PIP.id } });
   assert.equal(h.controls().length, 1, "a Pip's tab is never asked for from a card");
   assert.ok(chat.posted.some((m) => m.type === "pipsReply" && m.id === "c2" && m.ok === false));

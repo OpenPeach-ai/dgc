@@ -82,6 +82,8 @@ class StandIn:
         self.paused: dict[str, tuple] = {}       # request id -> (session, method, url, body)
         self.centred: dict[str, str] = {}        # session -> the ref a click is about to land on
         self.typed: dict[str, str] = {}
+        self.hidden = False                       # a lane in the background of the person's window (windowed mode)
+        self.in_page: list = []                   # what a Pip's step did inside a hidden page: (op, ref, text)
 
     def settimeout(self, timeout):
         pass
@@ -171,6 +173,8 @@ class StandIn:
             return json.dumps([tab["url"], tab["title"]])
         if expression == "document.readyState":
             return "complete"
+        if expression == "document.visibilityState":
+            return "hidden" if self.hidden and target != "P1" else "visible"
         if "scrollIntoView" in expression:
             ref = re.search(r'data-dgc-ref=\\?"(e\d+)', expression)
             ref = ref.group(1) if ref else ""
@@ -209,6 +213,20 @@ class StandIn:
             return "secret" if action and action[0] == "secret" else ("missing" if ref and not any(f"[{ref}]" in l for l in page.get("lines", [])) else "ok")
         if "function (want)" in declaration:
             return {"buttons": [], "title": ""}
+        if "document.visibilityState" in declaration:
+            return "hidden" if self.hidden and target != "P1" else "visible"
+        if "dgcInPage" in declaration:
+            values = [a.get("value") for a in (arguments or [])]
+            op, ref, text = (values + [None, None, None])[:3]
+            self.in_page.append((op, ref, text))
+            if op in ("click", "hover") and ref not in page.get("refs", {}) and not any(f"[{ref}]" in l for l in page.get("lines", [])):
+                return {"ok": False, "missing": True}
+            if op == "click":
+                self.centred[session] = ref
+                self.press(session)
+            if op == "type":
+                self.typed[session] = self.typed.get(session, "") + str(text or "")
+            return {"ok": True, "label": ref or ""}
         return None
 
     def press(self, session):
@@ -708,8 +726,9 @@ class Attribution(LaneBase):
                         "no file picker of a lane's ever opens on the person's screen")
         person = self.chrome.session_of(self.person)
         self.assertEqual([m for m in self.chrome.sent if m.get("sessionId") == person and m.get("method") in
-                          ("Page.addScriptToEvaluateOnNewDocument", "Fetch.enable", "Page.setInterceptFileChooserDialog")], [],
-                         "the person's own tab: no gate, no Pip's name, nothing of a lane's")
+                          ("Fetch.enable", "Page.setInterceptFileChooserDialog")], [], "the person's own tab: no gate")
+        self.assertEqual([m["params"].get("worldName") for m in self.chrome.calls("Page.addScriptToEvaluateOnNewDocument", person)],
+                         [your_browser.NOTICE_WORLD], "no Pip's name in their tab: only DGC's watcher for their own sign-ins")
         self.assertEqual(your_browser.lane_title("Ava \u00b7 Lane Store", "Ava"), "Lane Store")
         browser = self.yb.browser
         browser._observe({"method": "Network.requestWillBeSent", "sessionId": session,

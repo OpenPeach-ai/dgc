@@ -102,6 +102,7 @@ import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
 import {carefulPage,carefulMarkup,carefulWords,heldRequestAnswers,reviewWords,wordsHtml,addressHtml,settledWords,isPayment,asksEveryTime,offersAlways,limitWords,asksWords,coversWords,coversDetail,isCode,codeWords,codeProblem,codeFieldMarkup,takeCode,tidyCodeField,pasteCode} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
+import {ybPipSitesMarkup,ybPipChange} from './pipYourBrowser.js';   // its sites in Your Browser, and the one Sites panel (media/shared/ybsites.js)
 import {pipLogins,pipLogin,SLOW_READ} from './pipsModel.js';
 import {mergeChatPage} from './pipsModel.js';
 import {livePlan,livePlanFromText,livePip} from './pipsModel.js';
@@ -1203,7 +1204,29 @@ function workingWords(sending){
   const label=runDoing(act)||'Working',key=`${S.pip.id}:${run.id}:${label}`;
   if(key!==workingVerbKey){workingVerbKey=key;workingVerbAt=Date.now();}
   const delay=600-(Date.now()-workingVerbAt);
-  return `<span class="pip-working-verb" style="--shimmer-delay:${Math.round(delay)}ms">${name} · ${esc(label)}</span>${Number.isFinite(since)?`<span class="pip-working-meta" data-since="${since}" data-chars="${chars}">${workingMeta(since,chars)}</span>`:''}`;
+  return `<span class="pip-working-verb" style="--shimmer-delay:${Math.round(delay)}ms">${name} · ${esc(label)}</span>${Number.isFinite(since)?`<span class="pip-working-meta" data-since="${since}" data-chars="${chars}">${workingMeta(since,chars)}</span>`:''}${ybWatchMarkup()}`;
+}
+// Its run at work in Your Browser (Pips API 113): the working line has Watch, which opens its tab there streamed into an
+// editor tab, the one the dock's "Watch Ava's tab" opens. Asked every few seconds while its run is live.
+const ybWatch={pip:'',working:false,asking:false,at:0};
+const ybWatchShown=()=>S.apiVersion>=113&&!remoteHost&&hasBox();
+async function checkYbWatch(){
+ if(!ybWatchShown()||!ybRunLive()||ybWatch.asking||disposed)return;
+ const pip=S.selected,token=scope();ybWatch.asking=true;ybWatch.at=Date.now();
+ try{const said=await send('get_your_browser_lanes',{});if(token!==scope()||S.selected!==pip)return;
+  const working=ybRunLive()&&Array.isArray(said?.lanes)&&said.lanes.some(l=>l&&l.pip_id===pip&&l.working===true);
+  if(ybWatch.pip!==pip||ybWatch.working!==working){ybWatch.pip=pip;ybWatch.working=working;render();}}
+ catch{/* (no Watch this time: asked again in a moment) */}
+ finally{ybWatch.asking=false;}
+}
+// (A run of it is live: its chat's reply, or a routine's or Run now's live post.)
+const ybRunLive=()=>!!S.chatActiveRun||!!(S.live&&S.live.pipId===S.selected&&S.live.state!=='ending');
+const ybWatchTimer=window.setInterval(()=>{if(ybRunLive()&&S.visible!==false&&Date.now()-ybWatch.at>=1800)void checkYbWatch();},2000);
+function ybWatchMarkup(chip=false){
+ if(!ybWatchShown()||ybWatch.pip!==S.selected||!ybWatch.working||!ybRunLive())return '';
+ const said=`Watch ${S.pip.name}’s tab in Your Browser`;
+ // (The shared small button, as wide as its word: beside the working line's words, or among a live post's answers.)
+ return `<button type="button" class="dgc-btn small pip-working-watch${chip?' run-post-watch':''}" data-yb-watch="1" aria-label="${esc(said)}" title="${esc(said)}">Watch</button>`;
 }
 function workingMeta(since,chars){return `(${Math.max(0,Math.floor((Date.now()-since)/1000))}s · ↓ ${Math.round(chars/4)} tok)`;}
 const workingClock=window.setInterval(()=>{for(const el of document.querySelectorAll('.pip-working-meta'))el.textContent=workingMeta(Number(el.dataset.since),Number(el.dataset.chars));
@@ -1420,7 +1443,7 @@ function liveMarkup(markdown){
     const state=live.stopping||run?.status==='cancelling'?'stopping':run?.status==='queued'?'queued':'running';
     return livePostMarkup({runId:live.runId,name:S.pip.name,face:pipAvatar(S.pip,state==="queued"?"idle":"working",`post-${live.runId}`,type),routine:live.routine,
       doing:!S.runner?.online?['Waiting for Pips to start']:state==='queued'?['Waiting to start']:runDoing(act)?[runDoing(act)]:['Getting started'],since:Date.parse(run?.started_at||''),state,started:live.started,
-      body:text?`<div class="run-post-reply">${markdown(replyParts(text).join('\n\n'))}</div>`:''});
+      body:text?`<div class="run-post-reply">${markdown(replyParts(text).join('\n\n'))}</div>`:'',watch:ybWatchMarkup(true)});
   }
   // Its state and start from the latest look (get_pip, list_pip_runs); from the full read only what never changes (when
   // it was due, what started it): read while it waited, that read has no start time.
@@ -1431,7 +1454,7 @@ function liveMarkup(markdown){
   const pulse=pulseProgress({...run,command_progress:S.pip.active_run?.id===live.runId&&S.pip.active_run.command_progress||run.command_progress});
   const doing=!S.runner?.online&&state!=='ending'?['Waiting for Pips to start']:state==='queued'?['Waiting to start']:pulse?[`Checked ${pulse.passed+pulse.failed} of ${pulse.total}`]:live.activity||['Getting started'];
   return livePostMarkup({runId:live.runId,name:S.pip.name,face:pipAvatar(S.pip,state==="queued"?"idle":"working",`post-${live.runId}`,type),
-    doing,since:Date.parse(run.started_at||''),state,started:startedWords(run,{first:live.first}),canStop:usable()});
+    doing,since:Date.parse(run.started_at||''),state,started:startedWords(run,{first:live.first}),canStop:usable(),watch:ybWatchMarkup(true)});
 }
 // To a run in the chat: its live post while it runs, else its post.
 async function jumpToRun(runId){
@@ -1550,7 +1573,7 @@ async function loadMessages(more=false){
     else{const held=new Set([...S.messages.filter(m=>m.steer_status!=='missed').map(m=>m.id),...S.chatWaiting.map(m=>m.id)]);if(!S.messagesLoaded)S.messageCursor=page.next_before_id;S.messages=mergeChatPage(S.messages,page.messages).slice(-200);S.chatWaiting=page.waiting;if(!before){S.routineNotes=routineNotes(page.routine_notes);S.fallbackOn=fallbackOn(page.fallback_on);S.askingJobs=Array.isArray(page.asking_jobs)?page.asking_jobs.slice(0,8):[];}
       // A mid-turn message the reply ended without reading wasn't sent, and comes back to an empty box, as in Work. Only as it happens, never on a reload.
       back=S.messages.find(m=>m.steer_status==='missed'&&held.has(m.id));}
-    S.messagesLoaded=true;S.messagesError='';S.chatActiveRun=page.active_run;if(!more)lookAgainForWaitingTurn(page);if(back&&!draft.chatText.trim())giveBackToBox(id,back);queueMicrotask(()=>{if(!disposed)drainChatQueue();});S.omitted=page.history_context_omitted_count;S.continuity=chatContinuity(page.continuity,id,S.workspace.id);syncRoutineLive();
+    S.messagesLoaded=true;S.messagesError='';S.chatActiveRun=page.active_run;if(ybRunLive()){if(Date.now()-ybWatch.at>=1000)void checkYbWatch();}else ybWatch.working=false;if(!more)lookAgainForWaitingTurn(page);if(back&&!draft.chatText.trim())giveBackToBox(id,back);queueMicrotask(()=>{if(!disposed)drainChatQueue();});S.omitted=page.history_context_omitted_count;S.continuity=chatContinuity(page.continuity,id,S.workspace.id);syncRoutineLive();
     if(!more&&S.tab==='chat'&&!S.conv&&!S.messages.length&&!page.active_run&&S.pip?.id===id&&S.pip.status==='active')void introduceOnFirstOpen(id);
     if(!more)voiceMode?.check(!!page.active_run);
     if(!page.active_run){streamSeq++;streamLoading=false;S.stream=null;}else if(!S.stream||S.stream.runId!==page.active_run.id){streamSeq++;streamLoading=false;S.stream={runId:page.active_run.id,cursor:0,text:'',limited:false,error:'',truncated:false,cuts:[],read:false};}
@@ -4707,6 +4730,38 @@ async function loginCall(type,fields,notice){
  finally{loginsState.busy=false;if(token===scope()){render();void loadLogins();}}
 }
 function pipNames(){return Object.fromEntries((S.jobs||[]).map(j=>[j.id,j.name]));}
+// Its sites in Your Browser (Pips API 113): the ones it may use with your sign-in there (Remove), the others (Let it
+// use), and All sites…, the Sites panel the dock's Your Browser menu opens too (media/shared/ybsites.js). Only for a Pip
+// whose runs reach Your Browser (beside its computer), and only on this computer.
+const ybSitesState={pip:'',value:null,error:'',busy:false,seq:0,confirm:''};
+const ybSitesShown=()=>S.apiVersion>=113&&!remoteHost&&hasBox();
+async function loadYbSites(){
+ if(!ybSitesShown()||!globalThis.DgcYbSites)return;
+ const token=scope(),pip=S.selected,sequence=++ybSitesState.seq;
+ try{const value=globalThis.DgcYbSites.read(await send('get_your_browser',{}));if(token!==scope()||sequence!==ybSitesState.seq||S.selected!==pip)return;
+  ybSitesState.pip=pip;ybSitesState.value=value;ybSitesState.error='';render();}
+ catch(error){if(token===scope()&&sequence===ybSitesState.seq){ybSitesState.pip=pip;ybSitesState.error=errorText(error);render();}}
+}
+async function ybSiteCall(kind,site){
+ const pip=S.selected,fields=ybSitesState.pip===pip?ybPipChange(ybSitesState.value,kind,site,pip):null;
+ if(!fields||ybSitesState.busy||!usable())return;
+ const token=scope(),name=S.pip?.name||'It';ybSitesState.busy=true;ybSitesState.error='';render();
+ try{await send('set_your_browser_site',fields);if(token!==scope()||S.selected!==pip)return;ybSitesState.confirm='';
+  S.notice=kind==='add'?`${name} may use your sign-in on ${site} in Your Browser now.`:`${name} won’t use your sign-in on ${site} now.`;}
+ catch(error){if(token===scope())ybSitesState.error=errorText(error);}
+ finally{ybSitesState.busy=false;if(token===scope()){render();void loadYbSites();}}
+}
+function ybSitesPanel(){
+ if(!ybSitesShown()||!globalThis.DgcYbSites||!usable())return;
+ globalThis.DgcYbSites.panel({ask:(type,fields)=>send(type,fields||{}),doc:document,onClose:()=>{void loadYbSites();}});
+}
+function ybSitesMarkup(p,off){
+ if(!ybSitesShown())return '';
+ const value=ybSitesState.pip===p.id?ybSitesState.value:null;
+ // (Where Your Browser can't run here and no site was ever kept, there is nothing to choose.)
+ if(value&&!value.available&&!value.sites.length)return '';
+ return ybPipSitesMarkup(value,{esc,busy:off||ybSitesState.busy,error:ybSitesState.pip===p.id?ybSitesState.error:'',pipId:p.id,pipName:p.name,confirm:ybSitesState.confirm});
+}
 function openLoginForm(action=null){
  if(S.apiVersion<56||!usable()||!S.pip)return;
  const s=action?.summary||{};
@@ -6889,7 +6944,7 @@ function routinePopoverMarkup(){
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
  S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;titleEditing=false;lookDirty=false;routineEditing='';routineError='';closeHook();
- void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();void loadLevel();void loadPipBackup();void loadTemplate();void loadLogins();void loadArtifacts();void loadAppsUse();void loadSkillsUse();noteConfirmAll=false;sitesAll=false;loginsState.confirm='';pipKeyConfirm='';appsUse.confirm='';
+ void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();void loadLevel();void loadPipBackup();void loadTemplate();void loadLogins();void loadYbSites();void loadArtifacts();void loadAppsUse();void loadSkillsUse();noteConfirmAll=false;sitesAll=false;loginsState.confirm='';ybSitesState.confirm='';pipKeyConfirm='';appsUse.confirm='';
 }
 function putProfile(pipId,value){
  const p=profile(value);if(S.pip?.id===pipId)S.pip={...S.pip,profile:p};S.jobs=S.jobs.map(j=>j.id===pipId?{...j,profile:p}:j);
@@ -6934,7 +6989,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:keepsAll()?routinesSectionMarkup(true):null,notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(personalPip()?placePartMarkup():folderPartsMarkup(p))+appsUseMarkup(off)+skillsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&everyPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimits:payFormMarkup(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&(personalPip()?p.computer_plan:folderBox())?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&hasBox()?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+sentSection(off)+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost&&keepsAll()?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll,knows:knowsYou()}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost&&everyPip()?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :(templateShown()?templateMarkup(templateState.pip===p.id?templateState.value:null,{esc,busy:off||templateState.busy,error:templateState.pip===p.id?templateState.error:'',pipName:p.name}):'')+infoMarkup({esc,goal:p.goal,routines:keepsAll()?routinesSectionMarkup(true):null,notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(personalPip()?placePartMarkup():folderPartsMarkup(p))+appsUseMarkup(off)+skillsUseMarkup(off)+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&everyPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(levelShown()?levelMarkup(levelState.pip===p.id?levelState.value:null,{esc,busy:off||levelState.busy,error:levelState.error,pipName:p.name,payLimits:payFormMarkup(levelState.pip===p.id?levelState.value:null),when:at=>shortDate(at)}):'')+artifactsSectionMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&(personalPip()?p.computer_plan:folderBox())?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&hasBox()?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+ybSitesMarkup(p,off)+sentSection(off)+(pipKeysShown()?pipKeysPageMarkup(S.pipKeys,{esc,busy:off||!!pipKeyBusy,pipName:p.name,confirm:pipKeyConfirm,error:S.pipKeysError,level:levelState.pip===p.id?levelState.value?.level||'':''}):'')+(S.apiVersion>=44&&!remoteHost&&keepsAll()?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll,knows:knowsYou()}):'')+(workingNotesShown()?workingNotesMarkup(S.workingNotesPip===p.id?S.workingNotes:null,{esc,busy:off||workingNotesBusy,error:S.workingNotesError,pipName:p.name,editing:workingNotesEditing,text:draft.workingNotesText})+dailyLogMarkup(S.dailyLogPip===p.id?S.dailyLog:null,{esc,error:S.dailyLogError,pipName:p.name,today:localDay()}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost&&everyPip()?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${healthMarkup(p.routine_health,{busy:off,canSignIn:!remoteHost})}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -7863,6 +7918,12 @@ document.addEventListener('click',event=>{
   if(target.dataset.loginRemove){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginRemove);void loginCall('remove_pip_login',{login_id:target.dataset.loginRemove},`Removed. No Pip signs in to ${l?.site||'that site'} with it now.`);return;}
   if(target.dataset.loginShare){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginShare);if(l&&l.pips!=='all')void loginCall('grant_pip_login',{login_id:l.id,pips:[...l.pips,S.selected]},`${S.pip?.name||'It'} can use the login for ${l.site} now.`);return;}
   if(target.dataset.ybOpen){void ybOpenFromCard(target.dataset.ybOpen);return;}
+  if(target.dataset.ybWatch!==undefined){if(S.pip&&ybWatch.working)vscode.postMessage({type:'pipsOpenYourBrowser',pip:{id:S.pip.id,name:S.pip.name}});return;}
+  if(target.dataset.ybPipAskRemove){ybSitesState.confirm=target.dataset.ybPipAskRemove;render();return;}
+  if(target.dataset.ybPipKeep!==undefined){ybSitesState.confirm='';render();return;}
+  if(target.dataset.ybPipRemove){void ybSiteCall('remove',target.dataset.ybPipRemove);return;}
+  if(target.dataset.ybPipAdd){void ybSiteCall('add',target.dataset.ybPipAdd);return;}
+  if(target.dataset.ybSitesAll!==undefined){ybSitesPanel();return;}
   if(target.dataset.computerDecide){void decideInChat(target.dataset.computerDecide,target.dataset.approve==='1');return;}
   if(target.dataset.computerAlways){void alwaysInChat(target.dataset.computerAlways);return;}
   if(target.dataset.cardOpen){cardRefused='';if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();render();return;}
@@ -8550,7 +8611,7 @@ if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(fitChat
 const pollingTimer=window.setInterval(()=>{broker.expire(Date.now());if(polling||!S.visible||document.hidden||!usable()||S.busy||S.review||S.create||!['runs','chat'].includes(S.tab))return;polling=true;void refresh(false).finally(()=>{polling=false;});},4000);
 motion();render();waitForConnection();vscode.postMessage({type:'pipsReady'});
 return {async navigate(value){attentionAll.open=false;   // the host asks for another page: not Needs attention's own
- if(value?.overview===true){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;S.overview=true;return;}await navigateFromHost(value);return;}if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},focusInside(){const box=chatBox?.el?.isConnected?chatBox.el:pageBack();try{box?.focus({preventScroll:true});}catch{}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},setFocused(focused){const back=S.focused===false&&focused!==false;S.focused=focused!==false;if(back)maybeMarkRead();},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);window.clearTimeout(appLinkTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);window.clearInterval(workingClock);window.clearTimeout(streamTimer);window.clearTimeout(liveTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
+ if(value?.overview===true){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;S.overview=true;return;}await navigateFromHost(value);return;}if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},focusInside(){const box=chatBox?.el?.isConnected?chatBox.el:pageBack();try{box?.focus({preventScroll:true});}catch{}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},setFocused(focused){const back=S.focused===false&&focused!==false;S.focused=focused!==false;if(back)maybeMarkRead();},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);window.clearTimeout(appLinkTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);window.clearInterval(workingClock);window.clearInterval(ybWatchTimer);window.clearTimeout(streamTimer);window.clearTimeout(liveTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
 
 }
 if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar,mountHomePips};

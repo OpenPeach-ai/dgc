@@ -102,6 +102,8 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "fill_pip_code",
     "get_your_browser", "set_your_browser_site", "sign_out_your_browser_site", "open_your_browser",
     "use_your_browser_view", "get_your_browser_recent", "install_google_chrome", "clear_your_browser",
+    "seen_your_browser_sites",
+    "get_your_browser_lanes",
     "get_pip_level", "set_pip_level",
     "list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow",
     "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
@@ -231,6 +233,9 @@ _COMMAND_ARGS = {
     "install_google_chrome": set(),
     # API 112: Clear browsing data in Your Browser (what was ticked; at least one true).
     "clear_your_browser": {"history", "sign_ins", "passwords"},
+    # Pips API 113: the person opened the panel of sites Pips may use in Your Browser (noticed ones are no longer new).
+    "seen_your_browser_sites": set(),
+    "get_your_browser_lanes": set(),
     "always_allow_pip_computer_action": {"action_id", "expected_digest"},
     "get_pip_computer_frame": {"run_id", "frame"}, "list_pip_computer_frames": {"run_id", "pointers"},
     "stop_pip_computer": {"pip_id"}, "open_pip_computer": {"pip_id", "number"},
@@ -6651,7 +6656,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_webhook_reach", "set_webhook_reach", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "fill_pip_code", "get_your_browser", "set_your_browser_site", "sign_out_your_browser_site", "open_your_browser", "use_your_browser_view", "get_your_browser_recent", "install_google_chrome", "clear_your_browser", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention", "get_pips_welcome", "list_related_pips", "get_pip_job", "list_pip_jobs", "start_pip_job", "decline_pip_job") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_webhook_reach", "set_webhook_reach", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "fill_pip_code", "get_your_browser", "set_your_browser_site", "sign_out_your_browser_site", "open_your_browser", "use_your_browser_view", "get_your_browser_recent", "install_google_chrome", "clear_your_browser", "seen_your_browser_sites", "get_your_browser_lanes", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention", "get_pips_welcome", "list_related_pips", "get_pip_job", "list_pip_jobs", "start_pip_job", "decline_pip_job") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -6903,11 +6908,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                                                 request.get('expected_digest'), request.get('code'), actor)
             elif command in ('get_your_browser', 'set_your_browser_site', 'sign_out_your_browser_site',
                              'open_your_browser', 'use_your_browser_view', 'get_your_browser_recent',
-                             'install_google_chrome', 'clear_your_browser'):
+                             'install_google_chrome', 'clear_your_browser', 'seen_your_browser_sites',
+                             'get_your_browser_lanes'):
                 # Your Browser (0.52, API 105): its sites and which Pips use each; (API 107) its window, opened by the
                 # supervisor to the right of the editor, a Pip's tab streamed, Home's last visited links, your own tab
-                # streamed where there is no screen, and Install Google Chrome; (API 112) Clear browsing data. Local
-                # only.
+                # streamed where there is no screen, and Install Google Chrome; (API 112) Clear browsing data; (API 113)
+                # the Sites panel's seen, and the dock's quick look at the Pips working there. Local only.
                 from . import your_browser
                 if command == 'open_your_browser' and actor in ('editor-user', 'local-console') \
                         and not your_browser._runner_live(registry):

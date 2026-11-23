@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **A typed `/goal <objective>` starts that goal**, as Goal chosen from the `/` menu does. `/goal` alone shows the goal
+  there is; `/goal pause`, `resume`, `clear` and `budget N` stay commands.
+- **Sites Pips can use…** in Your Browser's dock menu ("(N new)" while any is new): each site with All Pips, Some Pips
+  or No Pips, and Sign out. A Pip's page lists its own sites with Remove. While a Pip works in Your Browser, the dock
+  tile says so ("Ava is working in it") and the Pip's chat has a small Watch button.
+- **Comments on artifacts**: pick part of a doc, sheet, deck, page or checklist and a Comment button appears by it
+  (Ctrl+Alt+M too); write a comment, or Ask DGC, which answers in that thread or makes the change and says so ("Changed
+  it: … (version 2)"). Doc and page wording can come as a suggestion you accept or reject. You resolve threads; resolved
+  ones fold into "N resolved". The rail sits beside the artifact from 960 px, under it below. The Library shows each
+  artifact's open comments.
+- **Compare in Versions answers again**: its answer never reached the panel, so Compare waited for nothing.
+- **A page with no colours of its own is white in a dark editor**, as a browser shows it (its black words showed on
+  the editor's dark ground); a page that does dark follows the editor.
+- **A Pip working in Your Browser**: a card in its chat asks to let it use a site there (Allow, Not now), and a sign-in
+  card opens the site in your own tab (Open Your Browser, I've signed in, Not now). Watch a Pip's tab from Your
+  Browser's dock menu.
+
 - **Checklists**: a checklist DGC makes for a job opens in a panel that looks like one: how far along it is, then each
   item with its tick box, its status as a chip, what done means, its note and its proof (test results, and pictures
   that open larger). Tick or reopen an item, pick a status, change what done means, add or remove an item, pin or

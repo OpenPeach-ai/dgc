@@ -176,6 +176,56 @@ class OnTheScreen(OwnHost):
         self.program.start()
         self.vnc.start()
 
+    def test_without_the_vnc_program_it_fetches_the_pip_computers_and_is_its_screen_next_time(self):
+        """The same screen as a Pip's computer everywhere: where its program isn't here yet, Your Browser starts the
+        same download a Pip's computer does (no password, DGC's own folder) and shows pictures until it is there."""
+        from dgc import pip_screen_setup
+        self.program.stop()
+        self.vnc.stop()
+        started, back_on = [], False
+        try:
+            with patch.object(your_browser, "vnc_program", return_value=None), \
+                    patch.object(your_browser, "start_vnc_screen", return_value=None), \
+                    patch.object(your_browser, "start_virtual_screen", lambda which: (":147", FakeScreen())), \
+                    patch.object(pip_screen_setup, "supported", return_value=(True, "")), \
+                    patch.object(pip_screen_setup, "wanted", return_value=["tigervnc-standalone-server", "openbox"]), \
+                    patch.object(pip_screen_setup, "start", side_effect=lambda needs: started.append(list(needs)) or True):
+                self.host.open("https://example.com/", None, headless=True)
+                self.assertEqual(started, [["tigervnc-standalone-server", "openbox"]], "the whole set a Pip's computer fetches")
+                self.assertIsNone(self.host.screen_socket(), "pictures until it is there")
+                self.host.close()
+            with patch.object(pip_screen_setup, "supported", return_value=(True, "")), \
+                    patch.object(pip_screen_setup, "wanted", return_value=[]), \
+                    patch.object(pip_screen_setup, "start", side_effect=lambda needs: started.append(list(needs)) or True):
+                self.program.start()
+                self.vnc.start()
+                back_on = True
+                self.host.open("https://example.com/", None, headless=True)
+                self.assertEqual(self.host.screen_socket(), self.sock, "next time, the Pip computer's screen")
+                self.assertEqual(len(started), 1, "nothing fetched when it is here")
+        finally:
+            self.host.close()
+            if not back_on:                         # (setUp's cleanups stop them once: started once, never twice)
+                self.program.start()
+                self.vnc.start()
+
+    def test_where_the_download_cant_run_it_is_pictures_and_nothing_is_fetched(self):
+        from dgc import pip_screen_setup
+        self.program.stop()
+        self.vnc.stop()
+        try:
+            with patch.object(your_browser, "vnc_program", return_value=None), \
+                    patch.object(your_browser, "start_vnc_screen", return_value=None), \
+                    patch.object(your_browser, "start_virtual_screen", lambda which: (":147", FakeScreen())), \
+                    patch.object(pip_screen_setup, "supported", return_value=(False, "This Linux has no apt-get")), \
+                    patch.object(pip_screen_setup, "start", side_effect=AssertionError("never")):
+                self.host.open("https://example.com/", None, headless=True)
+            self.assertIsNone(self.host.screen_socket())
+        finally:
+            self.host.close()
+            self.program.start()
+            self.vnc.start()
+
     def test_the_editor_tabs_size_fills_the_screen_with_chromes_window_and_casts_nothing(self):
         self.host.open("", None, headless=True)
         said = self.host.view_own("size", {"width": 1200, "height": 700})

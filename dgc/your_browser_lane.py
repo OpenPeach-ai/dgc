@@ -128,7 +128,7 @@ REOPENED = ("Your tab in Your Browser had closed, so DGC opened a new, blank one
 
 # A site's sign-in host (accounts.example.com, login.example.com) or sign-in page (/login, /oauth/authorize): a lane sent
 # there asks the person to sign in, never for a new site.
-SIGN_IN_HOST = re.compile(r"^(?:accounts?|login|logon|signin|sign-in|auth|sso|id|identity|passport|secure)\d*\.", re.I)
+SIGN_IN_HOST = your_browser.SIGN_IN_HOST
 SIGN_IN_PATH = re.compile(r"/(?:log-?in|log-?on|sign-?in|sign_in|auth|oauth2?|sso|saml|openid|authorize)(?:[/?#.]|$)", re.I)
 # A form field that carries a password or a one-time code (never a "token" a page adds to every form).
 CREDENTIAL = re.compile(r"(?:^|[\W_])(?:pass(?:word|wd|code)?|pwd|otp|one[\W_]?time[\W_]?code)(?:$|[\W_])", re.I)
@@ -424,6 +424,7 @@ class LaneHost(Host):
         # tab, has the browser in between).
         self.front, self.page_state, self.url, self.front_gone = None, None, "", None
         self._saved = None
+        self._inside = False                     # this step acts inside its page (a tab Chrome doesn't draw)
         try:
             with WorkspaceRegistry(self.state_directory) as registry:
                 self.name = your_browser._pip_names(registry, [pip_id]).get(pip_id, "")
@@ -448,6 +449,7 @@ class LaneHost(Host):
         lane.hold_dialogs = running
         self._saved = (browser, browser._ws, browser._page, browser.current_url, browser.driving)
         browser.driving = self.pip_id
+        browser.in_page = bool(getattr(self, "_inside", False))
         target = self.front if self._mine(browser, self.front) else None
         if target is None:
             self.front_gone = self.front
@@ -472,6 +474,7 @@ class LaneHost(Host):
         lane = browser.lane(self.pip_id)
         if self.run_id is None:
             lane.site_gate, lane.hold_dialogs = None, False
+        browser.in_page = False
         browser._ws, browser._page, browser.current_url, browser.driving = ws, page, url, driving
 
     def _mine(self, browser, target) -> bool:
@@ -507,10 +510,14 @@ class LaneHost(Host):
                     self._turns.wait(min(left, 1.0))
                 if run_id not in self.runs:
                     return {"text": "error: this run has ended; its steps in Your Browser are over."}
-                if self.run_id is None:
+                began = self.run_id is None
+                if began:
                     frames_dir, label, settings = self.runs[run_id]
                     Host.begin(self, run_id, frames_dir, label=label, **settings)
-        return self.act(op, args if isinstance(args, dict) else {})
+        said = self.act(op, args if isinstance(args, dict) else {})
+        if began or op == "open":
+            self.yb.publish_now()          # (its tab at work, said at once: the dock's tile and its chat's Watch)
+        return said
 
     def end(self, run_id: str | None = None) -> None:
         """A run ended: its lane idles (its run's settings off; what it left waiting for the person stays), and
@@ -527,6 +534,7 @@ class LaneHost(Host):
                 self._queued = []
             self.ended_at = time.monotonic()
             self._turns.notify_all()
+        self.yb.publish_now()                  # (its run over: not working in it any more, said at once)
 
     def _say_at_work(self, run_id) -> None:
         pass                                    # (a Pip computer's dots in the editor: a lane isn't one of its computers)
@@ -593,6 +601,9 @@ class LaneHost(Host):
                     return {"text": "error: Your Browser closed. Try that again."}
                 mark, before = browser.seq, browser.current_url
                 moved = self._moved_note()
+                # A tab in the background of the person's window (a computer with a screen): Chrome takes no input for
+                # it, so this step acts inside the page instead (kept through a wait that lets the browser go a moment).
+                self._inside = browser.in_page = not self._shown()
                 if getattr(self, "careful", False) and self.run_id is not None:
                     stop = self._careful(op, args)
                     if stop:
@@ -610,9 +621,13 @@ class LaneHost(Host):
                     reply = {**reply, "text": moved + "\n" + reply["text"]}
                 return reply
         except (BrowserError, RegistryError, OSError, ValueError) as error:
+            self._inside = False
             return {"text": f"error: {str(error)[:500]}"}
         except Exception as error:                     # noqa: BLE001 - never into the worker
+            self._inside = False
             return {"text": f"error: Your Browser failed ({type(error).__name__})"}
+        finally:
+            self._inside = False
 
     def _ensure_lane(self) -> bool:
         """Its lane, opened (and Your Browser with it) when it has none. True when a new, blank one was made for a run

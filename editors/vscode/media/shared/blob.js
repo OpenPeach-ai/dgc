@@ -20,7 +20,7 @@
   };
   // A row's icon. An action that has one glyph on every surface (Open in editor, Settings, Delete, Archive, Pin, Unpin:
   // media/shared/icons.js) draws that glyph, at a menu row's 15; the rest are this menu's own marks.
-  const SHARED = { "open-in-editor": "open-in-editor", settings: "settings", trash: "delete", archive: "archive", pin: "pin", unpin: "unpin", add: "add", close: "close", copy: "copy", save: "save", favorite: "favorite", unfavorite: "unfavorite" };
+  const SHARED = { "open-in-editor": "open-in-editor", settings: "settings", globe: "globe", trash: "delete", archive: "archive", pin: "pin", unpin: "unpin", add: "add", close: "close", copy: "copy", save: "save", favorite: "favorite", unfavorite: "unfavorite" };
   const own = (name, filled = false) => `<svg viewBox="0 0 16 16" width="15" height="15" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
   const icon = (name, filled = false) => (SHARED[name] && root.DgcIcons ? root.DgcIcons.html(SHARED[name], { size: 15 }) : own(name, filled));
 

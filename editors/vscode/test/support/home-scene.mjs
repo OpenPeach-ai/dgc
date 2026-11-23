@@ -132,6 +132,20 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
       // Clear browsing data (Pips API 112): what was ticked is cleared, unless the state refuses it.
       clear_your_browser: (r) => (S().browser?.clearRefuse ? { __error: S().browser.clearRefuse }
         : { ok: true, cleared: ["history", "sign_ins", "passwords"].filter((k) => r[k] === true), reopened: S().browser?.recent?.open === true, chrome_account: S().browser?.recent?.chrome_account === true }),
+      // The dock's quick look at the Pips working there (Pips API 113): the state's `browser.lanes` and `browser.runsLive`.
+      get_your_browser_lanes: () => ({ lanes: S().browser?.lanes || [], runs_live: S().browser?.runsLive === true }),
+      // The Sites panel (Pips API 113): the state's `browser.sites` / `browser.pips`, changed as DGC would; a site in
+      // `browser.refuseSite` is refused.
+      get_your_browser: () => ({ kind: "host_profile", weaker: true, available: true, reason: "", sites: S().browser?.sites || [], pips: S().browser?.pips || [],
+        signing_out: S().browser?.signingOut || [], yours: { open: false, tabs: [{ title: "Bank", url: "https://bank.example/" }], error: "" }, lanes: [] }),
+      set_your_browser_site: (r) => { const b = S().browser, s = (b?.sites || []).find((x) => x.site === r.site);
+        if (!s) return { __error: `You aren't signed in to ${r.site} in Your Browser.` };
+        if (b.refuseSite === r.site) return { __error: "DGC couldn't change that site just now." };
+        s.mode = r.mode; s.pips = r.mode === "chosen" ? (r.pips || []).map((id) => ({ pip_id: id, name: (b.pips || []).find((p) => p.pip_id === id)?.name || "" })) : [];
+        return { site: s }; },
+      sign_out_your_browser_site: (r) => { const b = S().browser; if (!(b?.sites || []).some((x) => x.site === r.site)) return { __error: "Not there." };
+        b.sites = b.sites.filter((x) => x.site !== r.site); b.signingOut = [...(b.signingOut || []), r.site]; return { site: r.site, sign_out: "waiting" }; },
+      seen_your_browser_sites: () => { for (const s of S().browser?.sites || []) s.new = false; if (S().browser?.recent) S().browser.recent.new_sites = 0; return { ok: true }; },
     };
     function waitsNoMore(card) { const a = S().attention; if (!a) return;
       for (const list of ["items", "reviews"]) { const at = (a[list] || []).findIndex((i) => i.card === card); if (at < 0) continue;

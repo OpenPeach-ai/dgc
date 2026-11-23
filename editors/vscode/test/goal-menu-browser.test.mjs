@@ -98,7 +98,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
   });
 }
 
-test("Enter and Tab on Goal choose it too; typed and sent without the menu, /goal text is plain text and the managing words are commands", async (t) => {
+test("Enter and Tab on Goal choose it too; typed and sent without the menu, /goal text starts that goal and the managing words are commands", async (t) => {
   if (skipOrFail(t)) return;
   const x = await open("dark-modern", 460);
   try {
@@ -112,19 +112,19 @@ test("Enter and Tab on Goal choose it too; typed and sent without the menu, /goa
       await x.page.evaluate(() => document.getElementById("input").replaceChildren()); await x.page.click("#input");
     }
     assert.deepEqual(await x.sent(), { goals: [], prompts: [], commands: [] });
-    // Typed whole and sent: the menu closed at the space, and Enter sends the words as they are.
+    // Typed whole and sent: the menu closed at the space, and Enter starts that goal.
     await x.page.keyboard.type("/goal fix the build");
     assert.equal(await x.menuOpen(), false); assert.equal(await x.pinned(), false);
     await x.page.keyboard.press("Enter");
-    assert.deepEqual(await x.sent(), { goals: [], prompts: ["/goal fix the build"], commands: [] });
+    assert.deepEqual(await x.sent(), { goals: ["fix the build"], prompts: [], commands: [] });
     // Ending in " /goal": the menu lists Goal; Escape leaves it, and Enter sends the words as they are.
     await x.page.click("#input"); await x.page.keyboard.type("fix the build /goal");
     assert.equal(await x.menuOpen(), true); assert.equal(await x.pinned(), false);
     await x.page.keyboard.press("Escape"); await x.page.keyboard.press("Enter");
-    assert.deepEqual(await x.sent(), { goals: [], prompts: ["/goal fix the build", "fix the build /goal"], commands: [] });
+    assert.deepEqual(await x.sent(), { goals: ["fix the build"], prompts: ["fix the build /goal"], commands: [] });
     await x.page.click("#input"); await x.page.keyboard.type("/goal pause"); await x.page.keyboard.press("Enter");
     assert.deepEqual((await x.sent()).commands, ["/goal pause"]);
-    assert.deepEqual((await x.sent()).goals, []);
+    assert.deepEqual((await x.sent()).goals, ["fix the build"]);
     assert.deepEqual(x.errors, []);
   } finally { await x.page.close(); }
 });

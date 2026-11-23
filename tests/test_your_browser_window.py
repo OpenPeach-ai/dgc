@@ -302,10 +302,14 @@ class ItSaysWhatItIs(Base):
                  "lanes": [{"pip_id": self.ava["id"], "title": "Shop", "url": "https://shop.example.com/"}]}
         with self.registry.transaction():
             self.registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (your_browser.STATE_KEY, json.dumps(state)))
+        live = patch.object(your_browser, "_runner_live", return_value=True)      # (the supervisor that said it runs)
+        live.start()
+        self.addCleanup(live.stop)
         got = self.ok("get_your_browser")
         self.assertEqual(got["yours"], {"open": True, "tabs": state["tabs"], "error": ""})
         self.assertEqual(got["lanes"], [{"pip_id": self.ava["id"], "name": "Ava", "title": "Shop",
-                                         "url": "https://shop.example.com/"}])
+                                         "url": "https://shop.example.com/", "working": False}],
+                         "(working: whether its run is on its tab now; an older supervisor's word says nothing: not working)")
         self.assertEqual(self.ok("get_your_browser_recent")["lanes"], got["lanes"], "the dock's menu offers to watch it")
 
 

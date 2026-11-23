@@ -368,7 +368,7 @@ export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=fal
 /** The live post. `doing`: what it is doing now, as parts; `since`: when it started (ms); `state`: running, queued,
  *  stopping or ending (its post is on the way); `started`: how it started; `routine`: a routine's title; `body`: a
  *  routine's reply so far, drawn under what it is doing; `canStop`: Stop is offered. */
-export function livePostMarkup({runId,name,face='',doing=[],since=null,state='running',started='',routine='',body='',canStop=true,now=Date.now()}){
+export function livePostMarkup({runId,name,face='',doing=[],since=null,state='running',started='',routine='',body='',canStop=true,watch='',now=Date.now()}){
   const id=esc(runId),doingText=state==='stopping'?'Stopping…':state==='ending'?'Finishing up…':doing.map(partText).join('')||'Getting started';
   const doingHtml=state==='stopping'||state==='ending'?esc(doingText):doing.length?doing.map(partHtml).join(''):esc(doingText);
   const clockText=Number.isFinite(since)?elapsed(now-since):'';
@@ -376,7 +376,7 @@ export function livePostMarkup({runId,name,face='',doing=[],since=null,state='ru
   const stop=canStop&&state!=='ending'?`<button type="button" class="run-post-chip run-post-stop" data-live-stop="${id}"${state==='stopping'?' disabled':''} title="${state==='stopping'?'Stopping it. It can take a moment.':'Stop this run. Nothing is posted for it.'}">${icon('stop')}<span>${state==='stopping'?'Stopping…':'Stop'}</span></button>`:'';
   const head=`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong>${routine?`<span class="run-post-routine">${esc(routine)}</span>`:''}${clock}</div>`;
   const label=`${name}${routine?`, ${routine}`:''}: ${doingText}${state==='queued'?'':clockText?`. Running ${clockText}`:''}${started?`. ${started}`:''}`;
-  return `<article class="pip-message assistant dgc run-post run-post-live" data-run-post="${id}" data-live="${esc(state)}" tabindex="-1" aria-label="${esc(label)}" aria-busy="true">${head}<div class="answer"><div class="message-body text final run-post-body"><p class="run-post-doing"><span class="run-post-spinner" aria-hidden="true"></span><span>${doingHtml}</span></p>${body}</div></div><div class="run-post-attach">${stop}${started?`<span class="run-post-started">${esc(started)}</span>`:''}</div></article>`;
+  return `<article class="pip-message assistant dgc run-post run-post-live" data-run-post="${id}" data-live="${esc(state)}" tabindex="-1" aria-label="${esc(label)}" aria-busy="true">${head}<div class="answer"><div class="message-body text final run-post-body"><p class="run-post-doing"><span class="run-post-spinner" aria-hidden="true"></span><span>${doingHtml}</span></p>${body}</div></div><div class="run-post-attach">${stop}${watch}${started?`<span class="run-post-started">${esc(started)}</span>`:''}</div></article>`;
 }
 
 /** The chat's messages and runs in time order. Each run is {post, previous}; all-clear runs of one kind in a row

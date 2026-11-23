@@ -337,8 +337,8 @@ test("typing /goal lists Goal and pins nothing; choosing it there pins Goal to t
     window.__posted.filter((m) => m.type === "startGoal").length,
     window.__posted.filter((m) => m.type === "prompt").length]);
   await page.keyboard.type("finish the build /goal");
-  // A goal starts only when Goal is chosen from the "/" menu (12 Nov): the whole token typed
-  // lists Goal first and changes nothing else.
+  // At the end of a message, the whole token typed lists Goal first and changes nothing else: only Goal chosen
+  // from the menu makes the message its objective.
   assert.equal(await page.locator("#btn-goal").isVisible(), false, "typing the token pins nothing");
   assert.equal(await value(), "finish the build /goal", "the token stays as typed");
   assert.equal(await page.locator("#pop").evaluate((node) => getComputedStyle(node).display), "block", "the menu is open");

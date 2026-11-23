@@ -89,7 +89,9 @@ function paint() {
   sayNote();
   // The Pips' tabs: this Pip's first and chosen; another opens its own editor tab.
   const lanes = S.lanes.length ? S.lanes : S.pip ? [{ pip_id: S.pip.id, name: S.pip.name, title: f?.title || '' }] : [];
-  const html = lanes.map((l) => `<button type="button" role="tab" class="yb-tab" data-pip="${esc(l.pip_id)}" data-name="${esc(l.name || '')}" aria-selected="${l.pip_id === S.pip?.id}" title="${esc(`${l.name || 'A Pip'}: ${l.title || l.url || ''}`)}"><span class="yb-tab-name">${esc(l.name || 'A Pip')}</span>${l.title ? `<span class="yb-tab-title">${esc(l.title)}</span>` : ''}</button>`).join('');
+  // (Each by its name; this tab's own Pip by the name it was opened with where DGC's list says none.)
+  const named = (l) => String(l.name || '').trim() || (l.pip_id === S.pip?.id ? S.pip.name : '') || 'A Pip';
+  const html = lanes.map((l) => `<button type="button" role="tab" class="yb-tab" data-pip="${esc(l.pip_id)}" data-name="${esc(String(l.name || '').trim())}" aria-selected="${l.pip_id === S.pip?.id}" title="${esc(`${named(l)}: ${l.title || l.url || ''}`)}"><span class="yb-tab-name">${esc(named(l))}</span>${l.title ? `<span class="yb-tab-title">${esc(l.title)}</span>` : ''}</button>`).join('');
   if (tabs.__html !== html) { tabs.__html = html; tabs.innerHTML = html; }
   for (const b of app.querySelectorAll('.yb-btn')) b.disabled = !ready() || !f;
 }

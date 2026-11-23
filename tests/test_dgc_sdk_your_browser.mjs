@@ -79,3 +79,23 @@ test('Your Browser, API 112: Clear browsing data, refused before 112, then sent'
   const sent = await current.session.pips.mutate('clear_your_browser', { history: true, sign_ins: false, passwords: true }, { approved: true });
   assert.deepEqual([sent.request.type, sent.request.history, sent.request.sign_ins, sent.request.passwords], ['clear_your_browser', true, false, true]);
 });
+
+test('Your Browser, API 113: the Sites panel was opened, refused before 113, then sent', async () => {
+  assert.deepEqual([...COMMAND_FIELDS.seen_your_browser_sites], []);
+  const older = fixture(112);
+  await assert.rejects(older.session.pips.mutate('seen_your_browser_sites', {}, { approved: true }),
+    (e) => e instanceof DGCUnsupportedError && /API 113/.test(e.message));
+  assert.equal(older.calls.length, 0);
+  const current = fixture(113);
+  assert.equal((await current.session.pips.mutate('seen_your_browser_sites', {}, { approved: true })).request.type, 'seen_your_browser_sites');
+});
+
+test('Your Browser, API 113: the dock\'s look at the Pips working there, a read refused before 113, then sent', async () => {
+  assert.deepEqual([...COMMAND_FIELDS.get_your_browser_lanes], []);
+  const older = fixture(112);
+  await assert.rejects(older.session.pips.read('get_your_browser_lanes', {}),
+    (e) => e instanceof DGCUnsupportedError && /API 113/.test(e.message));
+  assert.equal(older.calls.length, 0);
+  const current = fixture(113);
+  assert.equal((await current.session.pips.read('get_your_browser_lanes', {})).request.type, 'get_your_browser_lanes');
+});

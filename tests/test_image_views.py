@@ -1321,6 +1321,36 @@ class CompactionAnchorTests(unittest.TestCase):
             finally:
                 agent.mcp.stop_all()
 
+    def test_an_image_whose_step_id_came_back_earlier_replays_where_it_was_viewed_not_at_the_end(self):
+        """Some models reuse short step ids. An image recorded later under an id an EARLIER step had (its own step's
+        result saved under another id, or a helper's) has no result at or after it: it replays where it was viewed,
+        in its own turn, not after the chat's last reply (141 of them did, in one row, "Viewed 141 images")."""
+        with tempfile.TemporaryDirectory(prefix="dgc-images-reused-id-") as directory:
+            agent = self.build(Path(directory))
+            try:
+                m = agent.messages
+                m.append({"role": "user", "content": "and e.png"})
+                viewed_at = len(m)
+                agent.image_views.append(image_views.ImageRecord(
+                    ref="img_" + "e" * 32, name="e.png", mime="image/png", width=8, height=8, bytes=10,
+                    source="view_image", call_id="call_0", tool="view_image", anchor=viewed_at))
+                m.append({"role": "assistant", "content": "It is e."})
+                m.append({"role": "user", "content": "thanks"})
+                m.append({"role": "assistant", "content": "You're welcome."})
+                backend = object.__new__(Backend)
+                backend.agent = agent
+                items = Backend._history(backend)
+                starts = [i for i, item in enumerate(items) if item.get("type") == "turn_start"]
+                e_turn = next(i for i in starts if items[i]["prompt"] == "and e.png")
+                last_turn = next(i for i in starts if items[i]["prompt"] == "thanks")
+                row = next(i for i, item in enumerate(items) if item.get("type") == "tool_images" and self.names(item) == ["e.png"])
+                self.assertTrue(e_turn < row < last_turn, (e_turn, row, last_turn))
+                self.assertIsNone(items[row]["call_id"], "a row of its own: the earlier call_0's card is not its step")
+                kept = [self.names(item) for item in items if item.get("type") == "tool_images"]
+                self.assertEqual(kept, [["a.png"], ["c.png"], ["b.png"], ["d.png"], ["e.png"]], "the others stay where they were")
+            finally:
+                agent.mcp.stop_all()
+
     def test_a_second_compaction_and_a_rollback(self):
         with tempfile.TemporaryDirectory(prefix="dgc-images-compact2-") as directory:
             agent = self.build(Path(directory))

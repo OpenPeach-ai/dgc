@@ -11943,6 +11943,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const homeCardsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "homecards.js"));
     // A site's own icon beside its link (Home's Browser card) or tab (media/shared/siteicon.js, window.DgcSiteIcon).
     const siteIconJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "siteicon.js"));
+    // The sites Pips may use in Your Browser: the Sites panel, the same here and on a Pip's page (media/shared/ybsites.js, window.DgcYbSites).
+    const ybSitesJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "ybsites.js"));
     // The header row every page of the side bar wears (media/shared/pagehead.js, window.DgcPageHead).
     const pageHeadJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "pagehead.js"));
     // One × for every warning, error or done line that stays, the same on every surface (media/shared/dismiss.js, window.DgcDismiss).
@@ -12295,7 +12297,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${composerJs}"></script><script nonce="${nonce}" src="${trayJs}"></script><script nonce="${nonce}" src="${ruleWordsJs}"></script>
 <script nonce="${nonce}" src="${cardJs}"></script><script nonce="${nonce}" src="${pipJobJs}"></script>
 <script nonce="${nonce}" src="${sheetJs}"></script>
-<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${usageMeterJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${siteIconJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${dismissJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
+<script nonce="${nonce}" src="${marksJs}"></script><script nonce="${nonce}" src="${blobJs}"></script><script nonce="${nonce}" src="${dockJs}"></script><script nonce="${nonce}" src="${iconActionsJs}"></script><script nonce="${nonce}" src="${hubJs}"></script><script nonce="${nonce}" src="${folderPickJs}"></script><script nonce="${nonce}" src="${ageJs}"></script><script nonce="${nonce}" src="${modelPickerJs}"></script><script nonce="${nonce}" src="${usageMeterJs}"></script><script nonce="${nonce}" src="${notesJs}"></script><script nonce="${nonce}" src="${siteIconJs}"></script><script nonce="${nonce}" src="${ybSitesJs}"></script><script nonce="${nonce}" src="${homeCardsJs}"></script><script nonce="${nonce}" src="${pageHeadJs}"></script><script nonce="${nonce}" src="${dismissJs}"></script><script nonce="${nonce}" src="${libraryPageJs}"></script><script nonce="${nonce}" src="${whatsNewJs}"></script><script nonce="${nonce}" src="${pipsWelcomeJs}"></script>
 <script nonce="${nonce}" src="${mcpAppsJs}"></script>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>

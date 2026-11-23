@@ -552,6 +552,15 @@ MUTATION_COMMANDS |= API111_MUTATIONS
 # and get_your_browser_recent carry chrome_account. Local only.
 API112_MUTATIONS = frozenset({'clear_your_browser'})
 MUTATION_COMMANDS |= API112_MUTATIONS
+# API 113: the sites Pips may use in Your Browser, in one panel. seen_your_browser_sites {} says the person opened it (the
+# sites noticed from their own sign-ins until now are no longer new); get_your_browser's sites carry new, it lists pips
+# (those the person may choose), and get_your_browser_recent carries new_sites. get_your_browser_lanes {} is the
+# dock's quick look: the Pips with a tab there, each named and saying whether its run is working in it now (working),
+# and whether any Pip's run is live (runs_live); every lane list carries working. Local only.
+API113_READS = frozenset({'get_your_browser_lanes'})
+API113_MUTATIONS = frozenset({'seen_your_browser_sites'})
+READ_COMMANDS |= API113_READS
+MUTATION_COMMANDS |= API113_MUTATIONS
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
 
 
@@ -721,6 +730,8 @@ COMMAND_FIELDS = {
     'sign_out_your_browser_site': frozenset({'site'}),
     'open_your_browser': frozenset({'url', 'pip_id', 'editor_bounds'}),
     'get_your_browser_recent': frozenset(),
+    'seen_your_browser_sites': frozenset(),
+    'get_your_browser_lanes': frozenset(),
     'use_your_browser_view': frozenset({'op', 'x', 'y', 'text', 'key', 'dy', 'url', 'pip_id', 'own', 'seq', 'events', 'tab',
                                         'width', 'height'}),
     'install_google_chrome': frozenset(),
@@ -1057,7 +1068,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API112_MUTATIONS:
+        if command in API113_READS | API113_MUTATIONS:
+            minimum = 113
+        elif command in API112_MUTATIONS:
             minimum = 112
         elif command in API111_READS | API111_MUTATIONS:
             minimum = 111

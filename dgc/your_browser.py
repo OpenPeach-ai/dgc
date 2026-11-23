@@ -205,6 +205,23 @@ def notice_site(registry, host, *, sso_hosts=(), card_fields: bool = False, path
     return _site(registry, site)
 
 
+SEEN_KEY = "your_browser_sites_seen"   # metadata: when the person last opened the Sites panel (seen_your_browser_sites)
+
+
+def _seen_at(registry) -> str:
+    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (SEEN_KEY,)).fetchone()
+    return str(row[0]) if row else ""
+
+
+def seen_sites(registry, actor) -> dict:
+    """seen_your_browser_sites (Pips API 113): the person opened the panel of sites Pips may use in Your Browser, so the
+    ones noticed until now are no longer new."""
+    _local(actor, "Only you look at the sites Pips may use in Your Browser, on this computer.")
+    with registry.transaction():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (SEEN_KEY, registry.clock()))
+    return {"ok": True}
+
+
 def _site(registry, site) -> dict | None:
     row = registry.db.execute("SELECT * FROM your_browser_sites WHERE site=?", (site,)).fetchone()
     if row is None:
@@ -216,7 +233,9 @@ def _site(registry, site) -> dict | None:
     return {"site": row["site"], "shown": row["shown"], "mode": row["mode"], "money": money_site(row["site"]),
             "pips": [{"pip_id": p["pip_id"], "name": p["name"]} for p in pips] if row["mode"] == "chosen" else [],
             "sso_hosts": _sso_list(row["sso_hosts"]), "added_by": row["added_by"], "added_at": row["added_at"],
-            "used_at": row["used_at"]}
+            "used_at": row["used_at"],
+            # Noticed from the person's own sign-in since they last opened the Sites panel (seen_sites).
+            "new": row["added_by"] == "noticed" and str(row["added_at"]) > _seen_at(registry)}
 
 
 def sites(registry) -> list[dict]:
@@ -664,13 +683,19 @@ def install_chrome(registry) -> dict:
 
 
 def _state(registry) -> dict:
-    """What the supervisor last said of Your Browser (STATE_KEY): its window, the person's tabs and the lanes."""
+    """What the supervisor last said of Your Browser (STATE_KEY): its window, the person's tabs and the lanes. Only while
+    that supervisor runs: one that ended without a word (killed, a crash) left its last say behind, and none of what it
+    named is there now (no window open, no tabs, no Pip's tab to watch or working). Its error is still said."""
     row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (STATE_KEY,)).fetchone()
     try:
         value = json.loads(row[0]) if row else {}
     except (TypeError, ValueError):
         value = {}
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    if (value.get("open") or value.get("tabs") or value.get("lanes")) and not _runner_live(registry):
+        value = {**value, "open": False, "tabs": [], "lanes": []}
+    return value
 
 
 def _pip_names(registry, ids) -> dict:
@@ -699,9 +724,18 @@ def get(registry) -> dict:
             for t in state.get("tabs", []) if isinstance(t, dict)][:MAX_TABS] if isinstance(state.get("tabs"), list) else []
     return {"kind": KIND, "weaker": True, "available": available, "reason": reason, "chrome": which,
             "install": _offer(registry.directory, available, reason), "view": _view_here(),
-            "sites": sites(registry), "signing_out": signing_out(registry) if _has_metadata(registry) else [],
+            "sites": sites(registry), "pips": _all_pips(registry),
+            "signing_out": signing_out(registry) if _has_metadata(registry) else [],
             "yours": {"open": state.get("open") is True, "tabs": tabs, "error": str(state.get("error") or "")[:400]},
             "lanes": _lanes(registry, state), "chrome_account": chrome_account(registry.directory)}
+
+
+def _all_pips(registry) -> list[dict]:
+    """Every Pip on this computer the person may choose for a site (never an archived one), by name."""
+    rows = registry.db.execute("SELECT p.id, COALESCE(json_extract(v.definition,'$.name'), '') AS name FROM pips p LEFT JOIN "
+                               "pip_versions v ON v.pip_id=p.id AND v.version=p.current_version WHERE p.status<>'archived' "
+                               "ORDER BY name COLLATE NOCASE, p.id LIMIT ?", (MAX_PIPS,)).fetchall()
+    return [{"pip_id": r["id"], "name": r["name"]} for r in rows]
 
 
 def _lanes(registry, state) -> list[dict]:
@@ -709,8 +743,18 @@ def _lanes(registry, state) -> list[dict]:
     lanes = [l for l in state.get("lanes", []) if isinstance(l, dict) and isinstance(l.get("pip_id"), str)][:MAX_PIPS] \
         if isinstance(state.get("lanes"), list) else []
     names = _pip_names(registry, [l["pip_id"] for l in lanes])
+    # (``state`` is _state's: what a supervisor that still runs said.)
     return [{"pip_id": l["pip_id"], "name": names[l["pip_id"]], "title": str(l.get("title", ""))[:200],
-             "url": str(l.get("url", ""))[:2000]} for l in lanes if l["pip_id"] in names]
+             "url": str(l.get("url", ""))[:2000], "working": l.get("working") is True} for l in lanes if l["pip_id"] in names]
+
+
+def lanes_now(registry) -> dict:
+    """get_your_browser_lanes (Pips API 113): the Pips with a tab in Your Browser, each named and saying whether its run
+    is working in it now, and whether any Pip's run is waiting or running on this computer (``runs_live``: while one is,
+    the dock asks again every few seconds, so a Pip's new tab shows there at once). Only what the supervisor last said
+    and one look at the runs: cheap enough to ask often. Never the person's own tabs."""
+    live = registry.db.execute("SELECT 1 FROM pip_runs WHERE status IN ('queued','running','cancelling') LIMIT 1").fetchone()
+    return {"lanes": _lanes(registry, _state(registry)), "runs_live": live is not None}
 
 
 def _has_metadata(registry) -> bool:
@@ -1005,6 +1049,7 @@ def recent(registry) -> dict:
     state = _state(registry)
     return {"links": recent_links(registry.directory, RECENT_SHOWN), "open": state.get("open") is True,
             "available": available, "reason": reason, "lanes": _lanes(registry, state),
+            "new_sites": sum(1 for s in sites(registry) if s["new"]),
             "install": _offer(registry.directory, available, reason), "view": _view_here(),
             "chrome_account": chrome_account(registry.directory)}
 
@@ -1071,11 +1116,18 @@ def view_call(registry, request, actor: str = "editor-user") -> dict:
     if op == "close":
         return {"ok": True, "closed": True}
     fields = {k: v for k, v in request.items() if k in ("x", "y", "text", "key", "dy", "url")}
-    return _view_socket(registry, {"op": op, "pip_id": pip_id, **fields})
+    said = _view_socket(registry, {"op": op, "pip_id": pip_id, **fields})
+    if isinstance(said, dict) and isinstance(said.get("lanes"), list):
+        # The tab's row of Pips, each by its name here (the supervisor knows a Pip's name only from the run that opened
+        # its tab); a Pip no longer on this computer is left out.
+        lanes = [l for l in said["lanes"] if isinstance(l, dict) and isinstance(l.get("pip_id"), str)][:MAX_PIPS]
+        names = _pip_names(registry, [l["pip_id"] for l in lanes])
+        said = {**said, "lanes": [{**l, "name": names[l["pip_id"]]} for l in lanes if l["pip_id"] in names]}
+    return said
 
 
 def control(registry, command: str, request: dict, actor: str) -> dict:
-    """The Your Browser commands (Pips API 105, 107), from handle_control. Every one is local only."""
+    """The Your Browser commands (Pips API 105, 107, 112, 113), from handle_control. Every one is local only."""
     _local(actor, "Your Browser is on this computer only.")
     if command == "get_your_browser":
         return get(registry)
@@ -1093,11 +1145,16 @@ def control(registry, command: str, request: dict, actor: str) -> dict:
         return install_chrome(registry)
     if command == "clear_your_browser":
         return clear(registry, request)
+    if command == "seen_your_browser_sites":
+        return seen_sites(registry, actor)
+    if command == "get_your_browser_lanes":
+        return lanes_now(registry)
     raise RegistryError("unsupported_command", "This runner does not support that Pip command.")
 
 
 COMMANDS = frozenset({"get_your_browser", "set_your_browser_site", "sign_out_your_browser_site", "open_your_browser",
-                      "use_your_browser_view", "get_your_browser_recent", "install_google_chrome", "clear_your_browser"})
+                      "use_your_browser_view", "get_your_browser_recent", "install_google_chrome", "clear_your_browser",
+                      "seen_your_browser_sites", "get_your_browser_lanes"})
 COMMAND_ARGS = {
     "get_your_browser": set(),
     "get_your_browser_recent": set(),
@@ -1108,6 +1165,8 @@ COMMAND_ARGS = {
                               "own", "seq", "events", "tab", "width", "height"},
     "install_google_chrome": set(),
     "clear_your_browser": {"history", "sign_ins", "passwords"},
+    "seen_your_browser_sites": set(),
+    "get_your_browser_lanes": set(),
 }
 
 
@@ -1419,6 +1478,22 @@ def vnc_program() -> Path | None:
     return Path(found) if found else None
 
 
+def fetch_screen_program() -> bool:
+    """Where a Pip computer's screen program isn't here yet: the download a Pip's computer starts (pip_screen_setup: no
+    password, nothing installed on the system, DGC's own folder), so Your Browser is the same screen as a Pip's
+    computer from its next start. True when a download was started or is running."""
+    try:
+        from . import pip_screen_setup
+        if not pip_screen_setup.supported()[0]:
+            return False
+        needs = pip_screen_setup.wanted()
+        if pip_screen_setup.DESKTOP_PACKAGES["vnc"] not in needs:
+            return False
+        return bool(pip_screen_setup.start(needs=needs))
+    except Exception:                        # noqa: BLE001 - a download never costs Your Browser its pictures
+        return False
+
+
 def screen_pixels(size) -> tuple[int, int]:
     """The VNC screen's pixels for a page of ``size`` (the editor tab's), drawn at VNC_SCALE."""
     return int(size[0]) * VNC_SCALE, int(size[1]) * VNC_SCALE
@@ -1574,6 +1649,102 @@ def launch_chrome(argv: list[str], env: dict, log_path: Path):
     return proc, pipe
 
 
+# Sites noticed from the person's own sign-ins: DGC's watcher in its own world of each of their pages (never
+# a Pip's lane) tells DGC the page's host when they send a password from it themselves: a trusted key press or click of
+# theirs on the page in the last seconds, with a password box that has something in it. The page's own scripts can't call
+# it (the binding lives in DGC's world only), can't fake a person's key or click, and never learn it is there. Nothing they
+# type is read out or kept: only the host, its path and title, and whether the page has a card number box.
+NOTICE_WORLD = "dgc-notice"
+NOTICE_BINDING = "dgcSignedIn"
+SSO_FOLLOW_SECONDS = 60             # a sign-in host's page, then this tab lands on another site soon after: that site's
+# A site's sign-in host (accounts.example.com, login.example.com): a sign-in there that lands on another site soon after
+# is that site's sign-in (an address the person typed elsewhere is never taken for one: only a sign-in host's).
+SIGN_IN_HOST = re.compile(r"^(?:accounts?|login|logon|signin|sign-in|auth|sso|id|identity|passport|secure)\d*\.", re.I)
+NOTICE_SCRIPT = r"""(() => { if (window.__dgcNotice) return; window.__dgcNotice = true;
+  const tell = globalThis.%s; if (typeof tell !== 'function') return;
+  let acted = 0, sent = false;
+  const own = (e) => e.isTrusted;
+  addEventListener('keydown', (e) => { if (own(e)) acted = Date.now(); }, true);
+  addEventListener('pointerdown', (e) => { if (own(e)) acted = Date.now(); }, true);
+  const card = () => !!document.querySelector('input[autocomplete^="cc-"], input[name*="card" i][name*="num" i], input[id*="card" i][id*="num" i]');
+  const check = () => {
+    if (sent || Date.now() - acted > 10000) return;
+    if (![...document.querySelectorAll('input[type=password]')].some((el) => el.value)) return;
+    sent = true;
+    try { tell(JSON.stringify({host: location.hostname, path: location.pathname.slice(0, 200),
+                               title: (document.title || '').slice(0, 200), card: card(), trusted: true})); } catch (e) {}
+  };
+  addEventListener('submit', () => check(), true);
+  addEventListener('keydown', (e) => { if (own(e) && e.key === 'Enter') setTimeout(check, 0); }, true);
+  addEventListener('click', (e) => { if (!own(e)) return;
+    const b = e.target && e.target.closest ? e.target.closest('button, input[type=submit], input[type=image], [role=button]') : null;
+    if (b) setTimeout(check, 0); }, true);
+})()""" % NOTICE_BINDING
+
+# A Pip's step inside a page Chrome doesn't draw (its lane in the background of the person's window, on a computer with a
+# screen): Chrome hands such a tab no input, so a click, typing, a key and a scroll are done in DGC's own world of the page,
+# as a person's would land (the page's own handlers see them; what they send is held as ever).
+IN_PAGE_JS = r"""function (op, ref, text, replace, key, dy) { /* dgcInPage */
+  if (op === 'scroll') { window.scrollBy(0, Number(dy) || 0); return {ok: true}; }
+  const el = ref ? document.querySelector('[data-dgc-ref="' + ref + '"]') : (document.activeElement || document.body);
+  if (!el) return {ok: false, missing: true};
+  const secret = (el.type || '').toLowerCase() === 'password' || el.hasAttribute('data-dgc-secret')
+    || (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some((t) => /^(cc-|current-password$|new-password$|one-time-code$)/.test(t))
+    || /pass(word|wd|code)?|pwd|otp|cvv|cvc|card.?num|security.?code/i.test((el.name || '') + ' ' + (el.id || ''));
+  const label = (el.innerText || (secret ? '' : el.value) || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (el.disabled) return {ok: false, disabled: true};
+  const at = () => { const r = el.getBoundingClientRect(); return {clientX: r.left + r.width / 2, clientY: r.top + r.height / 2}; };
+  const fire = (type, Kind, extra) => el.dispatchEvent(new Kind(type, {bubbles: true, cancelable: true, composed: true, view: window, ...extra}));
+  if (op === 'click' || op === 'hover') {
+    el.scrollIntoView({block: 'center', inline: 'center'});
+    const p = at();
+    fire('pointerover', PointerEvent, p); fire('mouseover', MouseEvent, p); fire('pointermove', PointerEvent, p); fire('mousemove', MouseEvent, p);
+    if (op === 'hover') return {ok: true, label};
+    const a = el.closest ? el.closest('a[href]') : null;
+    if (a && /^_(blank|new)$/i.test(a.target || '')) return {ok: true, label, open: a.href};
+    fire('pointerdown', PointerEvent, {...p, button: 0, buttons: 1}); fire('mousedown', MouseEvent, {...p, button: 0, buttons: 1});
+    if (el.focus) el.focus({preventScroll: true});
+    fire('pointerup', PointerEvent, {...p, button: 0}); fire('mouseup', MouseEvent, {...p, button: 0});
+    el.click();
+    return {ok: true, label};
+  }
+  if (op === 'type') {
+    if (el.focus) el.focus({preventScroll: true});
+    if (el.isContentEditable) { if (replace) document.execCommand('selectAll'); document.execCommand('insertText', false, text); return {ok: true, label}; }
+    if (!('value' in el)) return {ok: false, why: 'not a text field'};
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const set = Object.getOwnPropertyDescriptor(proto, 'value').set;
+    set.call(el, (replace ? '' : (el.value || '')) + text);
+    el.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: text}));
+    el.dispatchEvent(new Event('change', {bubbles: true}));
+    return {ok: true, label};
+  }
+  if (op === 'key') {
+    const k = {key: key, code: key, bubbles: true, cancelable: true, composed: true};
+    const go = el.dispatchEvent(new KeyboardEvent('keydown', k));
+    if (go && key === 'Enter') {
+      el.dispatchEvent(new KeyboardEvent('keypress', k));
+      const form = el.form || (el.closest ? el.closest('form') : null);
+      if (form && el.tagName !== 'TEXTAREA') { if (form.requestSubmit) form.requestSubmit(); else form.submit(); }
+      else if (/^(BUTTON|A)$/.test(el.tagName)) el.click();
+    }
+    if (go && key === 'Tab') {
+      const all = [...document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')].filter((n) => !n.disabled && n.tabIndex >= 0 && n.getClientRects().length);
+      const next = all[(all.indexOf(el) + 1) % (all.length || 1)]; if (next && next.focus) next.focus();
+    }
+    if (go && /^(PageDown|PageUp|Home|End)$/.test(key)) {
+      window.scrollBy(0, key === 'PageDown' ? innerHeight * 0.85 : key === 'PageUp' ? -innerHeight * 0.85 : key === 'Home' ? -1e7 : 1e7);
+    }
+    el.dispatchEvent(new KeyboardEvent('keyup', k));
+    return {ok: true, label: key};
+  }
+  return {ok: false, why: 'unknown step'};
+}"""
+IN_PAGE_KEYS = {"enter": "Enter", "tab": "Tab", "escape": "Escape", "esc": "Escape", "backspace": "Backspace",
+                "arrowdown": "ArrowDown", "arrowup": "ArrowUp", "arrowleft": "ArrowLeft", "arrowright": "ArrowRight",
+                "pagedown": "PageDown", "pageup": "PageUp", "home": "Home", "end": "End"}
+
+
 def lane_title_script(name: str) -> str:
     """A Pip's lane says whose it is in its tab's title ("Ava · Shop"): run in DGC's own world of each page, where the
     page's scripts can't reach it; the page's own title follows after the Pip's name."""
@@ -1654,6 +1825,11 @@ class HostBrowser(BoxedBrowser):
         self._own_session_id = ""
         self.lane_names: dict[str, str] = {}    # pip id -> its name, for its lane's tab title
         self.frame_owners: dict[str, str] = {}  # a frame inside a lane's page -> that Pip (a download it starts)
+        # While a Pip's step drives a lane Chrome doesn't draw (in the background of the person's window), its steps act
+        # inside the page (IN_PAGE_JS) instead of by input, which Chrome gives no such tab.
+        self.in_page = False
+        self.on_sign_in = None                  # the person's own sign-in on one of their tabs (target, what the page said)
+        self.making_lane = False                # (a blank tab DGC is opening for a Pip: never watched as the person's)
 
     def start(self) -> None:
         if self._ws is not None:
@@ -1765,6 +1941,12 @@ class HostBrowser(BoxedBrowser):
                 raise BrowserError("That tab isn't this Pip's own in Your Browser.")
         return super()._browser_call(method, params, timeout=timeout)
 
+    def _make_lane(self, target: str, pip_id: str, grants=None) -> None:
+        super()._make_lane(target, pip_id, grants)
+        session = self._attached.get(target)
+        if session:
+            self._fire("Runtime.removeBinding", {"name": NOTICE_BINDING}, session)    # (a lane's sign-ins are never the person's)
+
     def _guard_lane(self, session: str) -> None:
         """A Pip's lane, as BoxedBrowser keeps it, and in Your Browser also: no file picker ever opens on the person's
         screen from it (Chrome hands it to DGC, which leaves it unanswered), and its page's tab says whose it is."""
@@ -1792,6 +1974,18 @@ class HostBrowser(BoxedBrowser):
     def _observe(self, message: dict) -> None:
         method = message.get("method", "")
         params = message.get("params", {}) or {}
+        if method == "Runtime.bindingCalled" and params.get("name") == NOTICE_BINDING:
+            self._signed_in(str(message.get("sessionId", "")), params.get("payload"))
+            return
+        if method.startswith("Runtime.") and message.get("sessionId") and self._session_owner(message["sessionId"]) == PERSON:
+            return                    # (the person's own pages: what their scripts say is never read, kept or shown)
+        if method == "Target.attachedToTarget" and isinstance(params.get("targetInfo"), dict) and not self.making_lane:
+            # The person's own tab (or one theirs opened), watched before Chrome lets it run: its first page has the
+            # watcher too (a binding reaches only pages made after it).
+            info = params["targetInfo"]
+            opener = str(info.get("openerId") or "")
+            if info.get("type") == "page" and params.get("sessionId") and (not opener or self.owner_of(opener) == PERSON):
+                self._watch_sign_ins(str(params["sessionId"]))
         if method in ("Page.frameAttached", "Page.frameNavigated"):
             self._frame_seen(params, str(message.get("sessionId", "")))
         elif method == "Browser.downloadWillBegin" and self._lane_download(params):
@@ -1808,6 +2002,29 @@ class HostBrowser(BoxedBrowser):
             # What a tab is when DGC first hears of it (a tab open before DGC listened says nothing more until it moves).
             if str(params["targetInfo"].get("targetId", "")) not in self.infos:
                 self.told(params["targetInfo"])
+
+    def _watch_sign_ins(self, session: str) -> None:
+        """The person's own tab: DGC's watcher for their own sign-ins, in DGC's own world of each of its pages. Chrome runs
+        such a script only with the tab's Page events on, and puts the binding in only with its Runtime events on; DGC
+        keeps nothing of either (the Runtime ones from the person's pages are dropped as they come)."""
+        self._fire("Page.enable", {}, session)
+        self._fire("Runtime.enable", {}, session)     # (a binding is put in a page only with it on; its events are dropped)
+        self._fire("Runtime.addBinding", {"name": NOTICE_BINDING, "executionContextName": NOTICE_WORLD}, session)
+        self._fire("Page.addScriptToEvaluateOnNewDocument", {"source": NOTICE_SCRIPT, "worldName": NOTICE_WORLD,
+                                                             "runImmediately": True}, session)
+
+    def _signed_in(self, session: str, payload) -> None:
+        """What DGC's watcher said: a sign-in of the person's own, on one of their tabs (never a Pip's lane)."""
+        target = self._session_target(session)
+        if not target or target not in self._pages or self.owner_of(target) != PERSON or not callable(self.on_sign_in):
+            return
+        try:
+            said = json.loads(payload) if isinstance(payload, str) and len(payload) <= 4000 else None
+        except ValueError:
+            said = None
+        if isinstance(said, dict) and said.get("trusted") is True and isinstance(said.get("host"), str):
+            self.on_sign_in(target, {"host": said["host"][:253], "path": str(said.get("path") or "")[:200],
+                                     "title": str(said.get("title") or "")[:200], "card": said.get("card") is True})
 
     def _frame_seen(self, params: dict, session: str) -> None:
         """A frame inside a Pip's lane page (in the page's own process): its Pip, so a download it starts is known as
@@ -1868,6 +2085,72 @@ class HostBrowser(BoxedBrowser):
             self.infos.pop(next(iter(self.infos)))
         if self.on_info is not None:
             self.on_info(target, before.get("url") != url)
+
+    # -- a Pip's steps inside a page Chrome doesn't draw ------------------------------------------------------------
+    def _inside(self) -> bool:
+        return bool(self.driving) and self.in_page
+
+    def _in_page(self, op: str, ref: str = "", text: str = "", replace: bool = True, key: str = "", dy: float = 0.0) -> dict:
+        said = self._in_world(self._isolated(), IN_PAGE_JS, op, ref, text, bool(replace), key, float(dy))
+        if not isinstance(said, dict):
+            raise BrowserError("the page didn't answer")
+        if said.get("missing"):
+            raise BrowserError(f"{ref or 'that'} is not on the page. Take a fresh read: refs change whenever the page does.")
+        if said.get("disabled"):
+            raise BrowserError(f"{ref} is disabled")
+        if said.get("ok") is not True:
+            raise BrowserError(str(said.get("why") or "the page didn't take that"))
+        return said
+
+    def click(self, ref: str) -> str:
+        if not self._inside():
+            return super().click(ref)
+        self.acted_at = time.monotonic()
+        said = self._in_page("click", ref)
+        if said.get("open"):
+            # (A link that opens a tab: a page in the background may open none, so its own tab goes there, gated as ever.)
+            self.navigate(str(said["open"])[:2000])
+        self._pump(0.8)
+        return str(said.get("label") or "")
+
+    def type_text(self, ref: str, text: str, *, replace: bool = True) -> str:
+        if not self._inside():
+            return super().type_text(ref, text, replace=replace)
+        self.acted_at = time.monotonic()
+        said = self._in_page("type", ref, str(text), replace)
+        self._pump(0.4)
+        return str(said.get("label") or "")
+
+    def type_into_focus(self, text: str) -> None:
+        if not self._inside():
+            return super().type_into_focus(text)
+        self.acted_at = time.monotonic()
+        self._in_page("type", "", str(text)[:2000], False)
+        self.acted_at = time.monotonic()
+
+    def press(self, key: str) -> str:
+        if not self._inside():
+            return super().press(key)
+        name = IN_PAGE_KEYS.get(str(key).strip().lower())
+        if name is None:
+            raise BrowserError(f"{key!r} is not a supported key; use one of {', '.join(sorted(IN_PAGE_KEYS))}")
+        self.acted_at = time.monotonic()
+        self._in_page("key", "", "", False, name)
+        self._pump(0.8)
+        return name
+
+    def scroll_by(self, dy: float) -> None:
+        if not self._inside():
+            return super().scroll_by(dy)
+        self._in_page("scroll", dy=float(dy))
+
+    def hover_ref(self, ref: str) -> str:
+        if not self._inside():
+            return super().hover_ref(ref)
+        self.acted_at = time.monotonic()
+        said = self._in_page("hover", ref)
+        self._pump(0.4)
+        return str(said.get("label") or "")
 
     def whose(self, target: str) -> str:
         """Whose a tab is, even before DGC has attached to it: a tab a lane opened is that Pip's."""
@@ -1936,6 +2219,10 @@ class YourBrowserHost:
         # The Pips whose runs drive a lane here (your_browser_lane.LaneHost, by pip id): what their lane holds goes to
         # their run, and a lane nobody's run uses closes after LANE_IDLE_SECONDS.
         self.lane_users: dict[str, object] = {}
+        # The person's own sign-ins, to be noticed at the next tick (notice_site), and the tab whose sign-in went through
+        # a sign-in host, so the site it lands on next keeps that exact host.
+        self.signed_in: list[dict] = []
+        self.sso_pending: dict[str, tuple] = {}
 
     # -- running -------------------------------------------------------------------------------------
 
@@ -1973,8 +2260,32 @@ class YourBrowserHost:
         browser = HostBrowser(self.root, chrome, self.launch, on_info=self._noticed, on_frame=self._frame_came,
                               test_flags=self.test_flags)
         browser.on_write = self.write_held
+        browser.on_sign_in = self._sign_in_seen
         browser.lane_sent = LaneSent(self.root / "sent.jsonl")
         return browser
+
+    def _sign_in_seen(self, target: str, said: dict) -> None:
+        """The person signed in on one of their own tabs: kept for the next tick, which notices the site (never one on
+        this computer or the network: notice_site)."""
+        host = public_host(said.get("host"))
+        if not host:
+            return
+        self.signed_in.append({"host": host, "sso_hosts": [], "card_fields": said.get("card") is True,
+                               "paths": [said.get("path") or ""], "titles": [said.get("title") or ""]})
+        del self.signed_in[:-50]
+        if SIGN_IN_HOST.match(host):
+            self.sso_pending[target] = (host, self.clock())
+        while len(self.sso_pending) > 50:
+            self.sso_pending.pop(next(iter(self.sso_pending)))
+
+    def _notice_signed_in(self, registry) -> None:
+        waiting, self.signed_in = self.signed_in, []
+        for entry in waiting:
+            try:
+                notice_site(registry, entry["host"], sso_hosts=entry["sso_hosts"], card_fields=entry["card_fields"],
+                            paths=entry["paths"], titles=entry["titles"])
+            except (RegistryError, OSError, ValueError):
+                pass
 
     def open(self, url: str = "", place: dict | None = None, pip_id: str | None = None, *, headless: bool = False) -> dict:
         """Open the window (or bring it forward), at ``url`` in a new tab of the person's, or at a Pip's own tab, and put
@@ -1999,6 +2310,8 @@ class YourBrowserHost:
                 # (start_virtual_screen: pictures, as before).
                 linux = str(self.platform).startswith("linux")
                 vnc = vnc_program() if self.headless and linux else None
+                if self.headless and linux and vnc is None:
+                    fetch_screen_program()         # pictures this time; the Pip computer's screen once it is here
                 self.browser.virtual = self.headless and linux and bool(vnc or self.which("Xvfb"))
                 self.browser.start_screen = lambda: ((start_vnc_screen(self.own_size, program=vnc) if vnc else None)
                                                      or start_virtual_screen(self.which))
@@ -2010,8 +2323,15 @@ class YourBrowserHost:
                     raise
                 opened, self.error, self.empty_since = True, "", None
                 self.own, self.own_viewed = None, self.clock()
-                self._start_pump()
                 target = self.person_tabs()[0] if self.person_tabs() else None
+                if url and target:
+                    # Chrome loaded its first page before DGC was attached to it, so that page has no sign-in watcher:
+                    # loaded once more, it has (a sign-in on the very page Your Browser opened at is noticed too).
+                    try:
+                        self.browser.person_call(target, "Page.reload", {}, timeout=5)
+                    except (BrowserError, socket.timeout, OSError):
+                        pass
+                self._start_pump()
             elif pip_id:
                 target = self.lane_of(pip_id)
                 if target is None:
@@ -2232,8 +2552,12 @@ class YourBrowserHost:
             if owner != PERSON and owner not in seen:
                 seen.add(owner)
                 info = browser.infos.get(target, {})
-                out.append({"pip_id": owner, "title": lane_title(info.get("title", ""), browser.lane_names.get(owner, "")),
-                            "url": info.get("url", "")})
+                # (working: a run of its Pip is on its tab now, from its first step to its end: what the dock's tile and
+                # the Pip's chat say, "Ava is working in it".)
+                user = self.lane_users.get(owner)
+                out.append({"pip_id": owner, "name": browser.lane_names.get(owner, ""),
+                            "title": lane_title(info.get("title", ""), browser.lane_names.get(owner, "")),
+                            "url": info.get("url", ""), "working": getattr(user, "run_id", None) is not None})
         return out
 
     def open_lane(self, pip_id: str, url: str, grants, name: str = "") -> str:
@@ -2271,9 +2595,13 @@ class YourBrowserHost:
                 # itself after its first (Chrome 158), so neither the Watch nor the Pip's own steps could show it.
                 width, height = self.own_size
                 made.update(newWindow=True, left=-(width + LANE_GAP), top=0, width=width, height=height)
-            target = str(browser._browser_call("Target.createTarget", made).get("targetId", ""))
-            self._off_screen.add(target)
-            browser._wait_attached(target)
+            browser.making_lane = True
+            try:
+                target = str(browser._browser_call("Target.createTarget", made).get("targetId", ""))
+                self._off_screen.add(target)
+                browser._wait_attached(target)
+            finally:
+                browser.making_lane = False
             browser._opened.add(target)
             browser._make_lane(target, pip_id, grants)
             return target
@@ -2304,6 +2632,17 @@ class YourBrowserHost:
             return
         info = browser.infos.get(target, {})
         url = info.get("url")
+        pending = self.sso_pending.get(target)
+        if pending and visit:
+            # Signed in through a sign-in host, then on to another site: that site, with that exact host (its lanes may
+            # follow its own sign-in there).
+            here = public_host(urlsplit(str(url or "")).hostname or "")
+            if self.clock() - pending[1] > SSO_FOLLOW_SECONDS:
+                self.sso_pending.pop(target, None)
+            elif here and site_key(here) != site_key(pending[0]):
+                self.sso_pending.pop(target, None)
+                self.signed_in.append({"host": here, "sso_hosts": [pending[0]], "card_fields": False, "paths": [],
+                                       "titles": [str(info.get("title") or "")]})
         self.recent.note(url, info.get("title"), visit, self.icons.get(self.icon_of.get(url, ""), ""))
         self._icon_soon(target, url)
         if self.headless and self.own and target != self.own and info.get("openerId") == self.own \
@@ -2381,6 +2720,9 @@ class YourBrowserHost:
                 return {"ok": False, "error": "This Pip has no tab in Your Browser yet: it opens one when it works there."}
             session = browser._attached[target]
             try:
+                hidden = self._lane_hidden(session)
+                if hidden:
+                    return hidden
                 if op not in ("frame", "move"):
                     refused = self._act(pip_id, target, session, op, fields)
                     if refused:
@@ -2388,6 +2730,22 @@ class YourBrowserHost:
                 return self._picture(pip_id, target, session, base64)
             except (BrowserError, socket.timeout, OSError, ValueError) as error:
                 return {"ok": False, "error": str(error)[:300] or "Your Browser didn't answer."}
+
+    def _lane_hidden(self, session) -> dict | None:
+        """A lane in the background of the person's window (a computer with a screen): Chrome draws no new picture of
+        it and takes no input for it, so its Watch says where it is instead of showing a picture that no longer moves."""
+        browser = self.browser
+        try:
+            state = browser._session_call(session, "Runtime.evaluate", {"expression": "document.visibilityState",
+                                                                         "returnByValue": True}, timeout=3)
+        except (BrowserError, socket.timeout, OSError):
+            return None
+        if ((state.get("result") or {}).get("value")) != "hidden":
+            return None
+        target = browser._session_target(session)
+        name = browser.lane_names.get(browser.owner_of(target), "") or "This Pip"
+        return {"ok": False, "hidden": True, "error": (f"{name}'s tab is in the background of your Your Browser window, so "
+                f"it can't be pictured here. To watch it live, click its tab there (“{name} · …”).")}
 
     def _act(self, pip_id, target, session, op, fields) -> str:
         browser = self.browser
@@ -2862,6 +3220,8 @@ class YourBrowserHost:
 
     def tick(self, registry) -> None:
         with self.lock:
+            if registry is not None and self.signed_in:
+                self._notice_signed_in(registry)
             if self.browser is not None and not self.browser.alive():
                 self._drop()                       # its Chrome ended (the person quit it): nothing to close
             if not self.running():
@@ -2922,6 +3282,17 @@ class YourBrowserHost:
         with registry.transaction():
             left = [s for s in _sign_outs(registry) if s["site"] not in {e["site"] for e in waiting}]
             registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (SIGN_OUTS, json.dumps(left)))
+
+    def publish_now(self) -> None:
+        """What get_your_browser and the dock read, written at once: a lane's run began or ended, and the dock's tile and
+        the Pip's chat say "working in it" while it is, not a tick later. Never in the way of the run."""
+        from .workspace_registry import WorkspaceRegistry
+        try:
+            with WorkspaceRegistry(self.directory) as registry:
+                with self.lock:
+                    self._publish(registry)
+        except Exception:                          # noqa: BLE001 - the next tick writes it anyway
+            pass
 
     def _publish(self, registry) -> None:
         """What get_your_browser shows (the window, the person's tabs, the lanes) and the view's socket, written only

@@ -1,9 +1,10 @@
-// A goal starts only when Goal is chosen from the "/" menu (decided 12 Nov).
+// A goal starts when Goal is chosen from the "/" menu, or when "/goal <objective>" is typed and sent.
 // The composer's goal paths, in the panel's own script (media/main.js) with a stub host:
 //   - Goal chosen in the menu (Enter, Tab or a click on its row) pins the Goal choice to this draft; what is sent
 //     next is the goal's objective;
 //   - the whole token "/goal" typed pins nothing by itself;
-//   - "/goal some text" typed and sent without the menu, and a message that ends in " /goal", go as plain text;
+//   - "/goal some text" typed and sent without the menu starts that goal; a message that ends in " /goal" goes as the
+//     plain text it is;
 //   - the words that manage a goal stay commands, typed or with Goal chosen: pause, resume, clear, budget N.
 // Real keys and the menu's look are checked in Chromium (goal-menu-browser.test.mjs, composer-pills-live.test.mjs).
 import { test } from "node:test";
@@ -60,20 +61,18 @@ test("Goal chosen at the end of a message that is already written keeps the mess
   assert.deepEqual(p.sentAs(), { goals: ["finish the build"], prompts: [], commands: [] });
 });
 
-test('"/goal some text" typed and sent without the menu goes as plain text', () => {
+test('"/goal some text" typed and sent without the menu starts that goal', () => {
   const p = panel();
   p.type("/goal fix the build");
   assert.equal(p.menu(), null, "no menu: the caret is past the token");
-  assert.equal(p.goal.hidden, true);
   p.key("Enter");
-  assert.deepEqual(p.sentAs(), { goals: [], prompts: ["/goal fix the build"], commands: [] });
-  assert.equal(p.doc.querySelector(".goal-prompt"), null, "no goal row in the transcript");
-  assert.equal([...p.doc.querySelectorAll(".msg.user .bubble")].at(-1).textContent, "/goal fix the build", "your message, as you wrote it");
+  assert.deepEqual(p.sentAs(), { goals: ["fix the build"], prompts: [], commands: [] });
+  assert.ok(p.doc.querySelector(".goal-prompt"), "the goal's own row in the transcript, as from the menu");
   assert.equal(p.input.value, "");
   // Pasted or set without an input event (no menu was ever open), and with a budget flag: the same.
   const q = panel();
   q.input.value = "/goal --tokens 9000 Prepare a weekly plan"; q.key("Enter");
-  assert.deepEqual(q.sentAs(), { goals: [], prompts: ["/goal --tokens 9000 Prepare a weekly plan"], commands: [] });
+  assert.deepEqual(q.sentAs(), { goals: ["--tokens 9000 Prepare a weekly plan"], prompts: [], commands: [] });
   assert.deepEqual([...p.errors, ...q.errors], []);
 });
 

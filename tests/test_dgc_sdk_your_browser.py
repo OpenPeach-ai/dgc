@@ -79,6 +79,30 @@ class YourBrowserSDKTests(unittest.TestCase):
         self.assertEqual({k: sent["request"][k] for k in ("type", "history", "sign_ins", "passwords")},
                          {"type": "clear_your_browser", "history": True, "sign_ins": False, "passwords": True})
 
+    def test_api113_seen_sites_is_refused_before_113_then_sent(self):
+        from dgc.pips import _COMMAND_ARGS
+        self.assertEqual(COMMAND_FIELDS["seen_your_browser_sites"], _COMMAND_ARGS["seen_your_browser_sites"])
+        self.assertIn("seen_your_browser_sites", MUTATION_COMMANDS)
+        wire = Wire(); older = session(wire, caps={**CAPS, "pips_api_version": 112})
+        with self.assertRaisesRegex(DGCUnsupportedError, "API 113"):
+            older.pips.mutate("seen_your_browser_sites", {}, approved=True)
+        self.assertFalse(wire.calls)
+        wire = Wire(); current = session(wire, caps={**CAPS, "pips_api_version": 113})
+        self.assertEqual(current.pips.mutate("seen_your_browser_sites", {}, approved=True)["request"]["type"],
+                         "seen_your_browser_sites")
+
+    def test_api113_the_docks_look_at_pips_working_there_is_a_read_refused_before_113(self):
+        from dgc.pips import _COMMAND_ARGS
+        self.assertEqual(COMMAND_FIELDS["get_your_browser_lanes"], _COMMAND_ARGS["get_your_browser_lanes"])
+        self.assertIn("get_your_browser_lanes", READ_COMMANDS)
+        self.assertNotIn("get_your_browser_lanes", MUTATION_COMMANDS)
+        wire = Wire(); older = session(wire, caps={**CAPS, "pips_api_version": 112})
+        with self.assertRaisesRegex(DGCUnsupportedError, "API 113"):
+            older.pips.read("get_your_browser_lanes", {})
+        self.assertFalse(wire.calls)
+        wire = Wire(); current = session(wire, caps={**CAPS, "pips_api_version": 113})
+        self.assertEqual(current.pips.read("get_your_browser_lanes", {})["request"]["type"], "get_your_browser_lanes")
+
 
 if __name__ == "__main__":
     unittest.main()

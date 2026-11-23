@@ -6,6 +6,41 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Sites Pips can use in Your Browser** (Pips API 113: `seen_your_browser_sites`, `get_your_browser_lanes`): the sites
+  you are signed in to, each with All Pips, Some Pips or No Pips; a site you sign in to yourself is noticed (a bank or
+  payment site starts at No Pips, others at All Pips); a grant from a chat card can be taken back. While a Pip's run
+  works in its tab, the editor hears within seconds.
+- **A Pip's tab on a computer with a screen acts**: hidden in your Chrome window, its clicks and typing were ignored and
+  a scroll timed out after 30 s; its steps now act inside the page (scroll 0.6 s).
+- **Your Browser fetches a Pip computer's screen program where it isn't here** (no password, DGC's own folder), so over
+  Remote-SSH it is the same fast screen as a Pip's computer from its next start; pictures until then.
+- **A reopened chat shows each image where it was viewed**: with a model that reuses short step ids, images viewed later
+  under an earlier step's id all went after the chat's last reply in one row ("Viewed 141 images").
+- **A Pip's runs drive its own tab in Your Browser**, only on the sites you let it use there: a new `your_browser` tool
+  (open, read, click, type, choose, press, scroll, back, forward, reload, wait, tabs, status, dialog, sign_in, and
+  look for a Pip that can see). Its tab is a Pip computer's browser in every rule: its level, careful mode, Always
+  allow and cards. It never reads or drives your own tabs or another Pip's; a page outside its sites never loads and a
+  write outside them is never sent (a card in its chat asks "Let Ava use this site in Your Browser?"); it never types
+  into or reads a password, code or card field, and a sign-in is yours, in your own tab, from a card; a payment, an
+  order or anything sent on a bank or payment site waits for your yes every time; downloads from its tab are
+  cancelled. Its tab's title says whose it is, what it sent is in its "Sent to the web" log, and it closes after ten
+  idle minutes.
+- **Comments on artifacts** (`artifact_comment_*`, `artifact_suggestion_*`, event `artifact_comments`, capability
+  `artifacts.comments`): pick part of a doc, sheet, deck, page or checklist (or the whole artifact) and comment; Ask
+  DGC answers in that thread, or makes the change and says so there, in a quiet background turn on your default model.
+  Wording on a doc or page can come as a suggestion you accept or reject. Comments live beside the versions, so every
+  window, a reload and a Pip read the same threads.
+- **A Pip's computer shows Chinese, Japanese, Korean and emoji** where this machine has no such fonts: its setup fetches
+  Noto's (only what's missing) and both of the computer's boxes add them to the machine's own fonts.
+- **A chat you leave keeps its own model and thinking level**: a thinking level still saving in the background when you
+  started a new chat, cleared, branched or reopened another could save the chat being left with the next one's default
+  model (reopening it brought it back on the default). Those now let the save finish first.
+- **The Edited card leaves out what Git ignores**: a virtual environment a command made (and the project ignores) put
+  thousands of files on the card while the bar said 15; a turn spread over many folders groups them by top folder.
+- **The last socket relays that used select() use a selector** (DGC's to a Pip computer, boxd's, the box's proxy
+  forwarder): in a long-running process with more than 1024 files open, select() refused and the relay dropped the
+  connection.
+
 - **DGC keeps a checklist**: ask it to make a checklist for a job and work through it, and it makes a Checklist
   artifact: each item's title, what done means, a status (Not started, Building, Testing, Checked live, Needs you,
   Done), a note and its proof (test results, screenshots). It changes one item at a time, so Versions shows every
