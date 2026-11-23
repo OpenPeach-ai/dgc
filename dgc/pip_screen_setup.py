@@ -46,6 +46,15 @@ VSCODIUM_REPOSITORY = "https://download.vscodium.com/debs"
 # apt's extra lists (icons, translations, command-not-found) are most of an update's download.
 QUIET_TARGETS = ("CNF", "DEP-11", "DEP-11-icons", "DEP-11-icons-hidpi", "DEP-11-icons-large",
                  "DEP-11-icons-large-hidpi", "DEP-11-icons-small", "Translations")
+# Chinese, Japanese and Korean, and emoji, on a Pip's computer even where this machine has no such fonts: the setup
+# fetches Noto's into DGC's own copy (each package only when fontconfig finds no font for its pattern here), and both of
+# the computer's boxes add DGC's fonts to the machine's own (font_args). A Mac's computer image carries them already.
+FONT_PACKAGES = (("fonts-noto-cjk", ":lang=ja"), ("fonts-noto-color-emoji", ":charset=1f600"))
+FONT_FOLDERS = (Path("/usr/share/fonts"), Path("/usr/local/share/fonts"))      # looked in where fc-list isn't here
+_FONT_FILES = {":lang=ja": ("*CJK*", "*Droid*Fallback*", "*wqy*", "*IPA*", "*Takao*"),
+               ":charset=1f600": ("*Emoji*", "*Symbola*")}
+FONTS_IN_BOX = "/opt/dgc-fonts"            # DGC's fonts, read-only, in a computer's boxes
+FONTS_CONF_IN_BOX = "/run/dgc-fonts.conf"  # the fontconfig file that adds them to the machine's own
 CHECK_EVERY = 24 * 3600
 STEP_TIMEOUT = 20 * 60
 ETC = Path("/etc")             # where this machine's distribution and package sources are named
@@ -232,10 +241,60 @@ def wanted() -> list[str]:
     if not any(_real_binary(path) for path in GOOGLE_CHROME):
         names.append(CHROME_PACKAGE)
     # The image editor, document editor and PDF viewer, once the user said yes to downloading them (pip_apps).
+    names += [package for package, pattern in FONT_PACKAGES if not _font_found(pattern)]
     from . import pip_apps
     if pip_apps.consented():
         names += [name for name in pip_apps.wanted_packages() if name not in names]
     return names
+
+
+def _font_found(pattern: str) -> bool:
+    """Whether this machine has a font for ``pattern`` (fontconfig's own answer; without fc-list, a look for the usual
+    files in the font folders). A check that can't run counts as found: nothing is fetched on a guess."""
+    if shutil.which("fc-list"):
+        try:
+            out = subprocess.run(["fc-list", pattern, "family"], capture_output=True, text=True, timeout=20,
+                                 stdin=subprocess.DEVNULL)
+            return out.returncode != 0 or bool(out.stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            return True
+    names = _FONT_FILES.get(pattern, ())
+    for folder in FONT_FOLDERS:
+        try:
+            if any(next(folder.rglob(name), None) is not None for name in names):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def fonts_conf(folder: str = FONTS_IN_BOX) -> str:
+    """A fontconfig file: the machine's own fonts (its /etc/fonts, bound into the box), and ``folder`` besides."""
+    return ('<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n<fontconfig>\n'
+            '  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>\n'
+            f"  <dir>{folder}</dir>\n</fontconfig>\n")
+
+
+def font_args() -> list[str]:
+    """What a computer's box (its desktop, its browser) adds for the fonts DGC fetched: their folder, read-only, and the
+    fontconfig file that adds them to the machine's own. Nothing when DGC fetched none."""
+    root = current_root()
+    fonts = root / "usr" / "share" / "fonts" if root is not None else None
+    try:
+        if fonts is None or not fonts.is_dir() or next((f for f in fonts.rglob("*") if f.is_file()), None) is None:
+            return []
+        conf = home() / "fonts.conf"
+        text = fonts_conf()
+        if not conf.is_file() or conf.read_text(encoding="utf-8") != text:
+            conf.parent.mkdir(parents=True, exist_ok=True)
+            partial = conf.with_suffix(".partial")
+            partial.write_text(text, encoding="utf-8")
+            partial.chmod(0o644)
+            os.replace(partial, conf)
+    except OSError:
+        return []
+    return ["--ro-bind", str(fonts), FONTS_IN_BOX, "--ro-bind", str(conf), FONTS_CONF_IN_BOX,
+            "--setenv", "FONTCONFIG_FILE", FONTS_CONF_IN_BOX]
 
 
 # ---------------------------------------------------------------- the setup itself

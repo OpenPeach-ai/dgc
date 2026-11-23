@@ -578,8 +578,9 @@ class AppsTests(Temp):
         with patch.object(pip_apps, "consented", lambda: True), \
                 patch.object(pip_apps, "wanted_packages", lambda keys=None: ["evince"]), \
                 patch("dgc.pip_screen.PROGRAMS", {}), patch("dgc.pip_computer_box._real_binary", lambda p: True), \
-                patch("dgc.pip_screen_setup.shutil.which", lambda name, *a, **k: f"/usr/bin/{name}"):
-            # (The desktop's programs, its Terminal and Chrome all here: only the apps are wanted.)
+                patch("dgc.pip_screen_setup.shutil.which", lambda name, *a, **k: f"/usr/bin/{name}"), \
+                patch("dgc.pip_screen_setup._font_found", lambda pattern: True):
+            # (The desktop's programs, its Terminal, its fonts and Chrome all here: only the apps are wanted.)
             self.assertEqual(pip_screen_setup.wanted(), ["evince"])
 
 

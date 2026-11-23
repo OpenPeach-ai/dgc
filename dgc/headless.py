@@ -5663,6 +5663,14 @@ class Backend:
         self._think_save_thread = thread                 # a turn that starts now waits for it (_run_turn_queue)
         thread.start()
 
+    def _settle_think_save(self) -> None:
+        """Before this chat becomes another (a new chat, a clear, a branch, a reopen): a thinking level still saving in
+        the background finishes first, into the chat it was set in. Run later, it saved the chat being left with the
+        next chat's default model and level, or saved the level into the next chat instead."""
+        saving = self.__dict__.get("_think_save_thread")
+        if saving is not None and saving is not threading.current_thread() and saving.is_alive():
+            saving.join(15)
+
     def _think_save_lock(self):
         lock = self.__dict__.get("_think_lock")
         if lock is None:
@@ -10004,6 +10012,7 @@ class Backend:
                                  **_request_fields(request_id))
                     return
             mode_before = getattr(self.agent, "mode", "")
+            self._settle_think_save()
             self.agent.reset()
             if str(request_id or "").startswith(RETIRE_REQUEST_PREFIX):
                 # The editor closed this chat's tab while other chats stay on the process. The
@@ -10031,6 +10040,7 @@ class Backend:
         elif t == "fork_session":
             # "Branch from here" keeps the conversation and hands it a new identity, so the
             # chat it came from stops where the branch began instead of being overwritten.
+            self._settle_think_save()
             if not self.agent.fork_session(str(cmd.get("name") or "")):
                 self.em.emit("command_rejected", command=t, reason="session_fork_failed",
                              message=getattr(self.agent, "_last_persist_error", "")
@@ -10059,6 +10069,7 @@ class Backend:
             # The old webview implementation only removed DOM nodes while the model retained every
             # prior turn, which made `/clear` misleading and potentially leaked stale context.
             mode_before = getattr(self.agent, "mode", "")
+            self._settle_think_save()
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="cleared", message_count=0,
@@ -10081,6 +10092,7 @@ class Backend:
                 path = str(p) if p else None
             if path:
                 mode_before = getattr(self.agent, "mode", "")
+                self._settle_think_save()
                 # One process writes to a session at a time (dgc/session_owner.py). Another live process has it open:
                 # a client that shows such a session read-only (watch_session_owner) gets it to read, and is told;
                 # any other is refused, and nothing here is changed.

@@ -539,6 +539,8 @@ def desktop_argv(runtime: Path, files: Path, name: str, egress: Path | None = No
              "--bind", str(runtime / "log"), "/run/dgc/log"]
     if prefix is not None:
         argv += ["--ro-bind", str(prefix), "/opt/desk"]
+    from .pip_screen_setup import font_args
+    argv += font_args()                    # CJK and emoji fonts DGC fetched where this machine has none
     if bin_overlay is not None:
         argv += ["--ro-bind", "/usr/bin", "/opt/host-bin",
                  "--ro-bind", str(bin_overlay), "/usr/bin"]

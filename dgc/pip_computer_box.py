@@ -676,6 +676,15 @@ def quiet_profile(profile: Path) -> None:
         return
 
 
+def _font_args() -> list[str]:
+    """The fonts DGC fetched for its computers (pip_screen_setup.font_args); none where it can't say."""
+    try:
+        from . import pip_screen_setup
+        return pip_screen_setup.font_args()
+    except Exception:                    # noqa: BLE001 -- a font never costs a computer its browser
+        return []
+
+
 @dataclass
 class Box:
     """One running box: bubblewrap around Chromium, with its devtools pipe."""
@@ -721,6 +730,7 @@ class Box:
                 "--ro-bind", str(chrome_dir), "/opt/chrome", *_own_libraries(self.chrome),
                 "--dir", "/run/dgc", "--bind", str(self.egress_socket), "/run/dgc/egress.sock",
                 "--ro-bind", str(forwarder), "/run/dgc/forward.py",
+                *_font_args(),                        # CJK and emoji fonts DGC fetched where this machine has none
                 "sh", "-c", inner]
 
     def start(self, log_path: Path) -> None:

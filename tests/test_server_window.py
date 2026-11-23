@@ -542,6 +542,35 @@ class TheEditorIsTold(IsolatedHome):
         self.assertEqual(host.default.agent.client.model, "big")
         self.assertEqual(self.frames("config")[-1]["model"], "big")
 
+    def test_a_thinking_level_still_saving_lands_in_its_own_chat_when_you_switch_chats(self):
+        """The level is saved in the background; a new chat (or a reopen) right after waits for that save, so it lands
+        in the chat it was set in, and the chat being left never gets the next chat's default model (it did, now and
+        then, when the save ran between the new chat's reset and its new file)."""
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        host.dispatch({"type": "set_model", "scope": "session", "route": "native",
+                       "model": "big", "request_id": "native-model"})
+        agent = host.default.agent
+        saved = agent.session_file
+        real_persist, release = agent._persist, threading.Event()
+
+        def slow_persist(*args, **kwargs):
+            if threading.current_thread().name == "dgc-think-save":
+                release.wait(10)                    # a long session's save, still running when the new chat comes
+            return real_persist(*args, **kwargs)
+        agent._persist = slow_persist
+        timer = threading.Timer(0.6, release.set)
+        timer.start()
+        self.addCleanup(timer.cancel)
+        host.dispatch({"type": "set_think", "scope": "session", "level": "high", "request_id": "native-effort"})
+        host.dispatch({"type": "new_session", "request_id": "fresh-native"})
+        agent._persist = real_persist
+        record = sessions.load_record(saved, self.root)
+        self.assertEqual(record["native_route"]["model"], "big", "the chat left keeps its own model")
+        self.assertEqual(record["native_route"]["thinking"], "high", "and the level set in it")
+        self.assertEqual(host.default.config.model, "qwen2.5-0.5b")
+        host.dispatch({"type": "resume_session", "path": str(saved), "saved_mode": True, "request_id": "resume-native"})
+        self.assertEqual((host.default.config.model, host.default.config.get("thinking")), ("big", "high"))
+
     def test_session_model_window_stays_out_of_the_new_chat_default(self):
         self.server.served_models = [VLLM_ENTRY, {"id": "big", "owned_by": "vllm", "max_model_len": 131072}]
         host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1",
