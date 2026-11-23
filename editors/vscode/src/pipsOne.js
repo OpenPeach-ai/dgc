@@ -1,4 +1,4 @@
-// One Pips (0.52, his calls of 13 Nov; Pips API 94): one list for every Pip, where the page had Personal | Project tabs.
+// One Pips (0.52, decided 13 Nov; Pips API 94): one list for every Pip, where the page had Personal | Project tabs.
 // "Should we have made them like only one? ... Single Pips section becomes much cleaner"; "the new latest message pip
 // should auto come on top, like it happens on messaging apps ... Except of Core Pip". Core is pinned first; then the
 // Pip with the latest message or report, newest first, as DGC lists them (list_pips {scope: "all"}). A Pip whose new

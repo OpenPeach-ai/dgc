@@ -96,7 +96,7 @@ test('a cancelled Add file… leaves the panel as it was; copying rows show only
  assert.equal(y.d.querySelector('.pc-copying'),null);
 });
 
-// His ask (18 Nov): Download saves on the computer the editor runs on. DGC copies the file out and the host hands it to
+// Asked 18 Nov: Download saves on the computer the editor runs on. DGC copies the file out and the host hands it to
 // this page, which saves it there (media/shared/download.js); one too large for a page goes to the person's browser.
 test('Download asks the host with the file in Files, whatever its size, and says "Downloaded <name>" or DGC\'s words',async()=>{
  const x=await openFiles();

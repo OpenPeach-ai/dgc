@@ -1,4 +1,4 @@
-// One action, one icon, on every surface (his call, 16 Nov): Open in editor, More, Back, Settings, New / Add, Close,
+// One action, one icon, on every surface (decided 16 Nov): Open in editor, More, Back, Settings, New / Add, Close,
 // Copy, Delete, Pin, Unpin, Archive, Stop and Save each have one glyph, the one Work draws, wherever the control is:
 // Work's rows, header and menus, ChatDGC, a Pip's list, chat and page, Home, the Library, the dock and every row's "…"
 // menu. A classic script, like media/shared/menu.js: the pages load it after menu.js and before their own script, and

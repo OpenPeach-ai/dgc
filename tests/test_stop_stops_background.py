@@ -1,4 +1,4 @@
-"""A manual Stop stops the turn's background work too (his call, 20 Nov): its background helpers, troupes and background
+"""A manual Stop stops the turn's background work too (decided 20 Nov): its background helpers, troupes and background
 commands, each written down as stopped by request (so a reopen never starts them by itself). The next prompt tells the
 model what stopped, once, so "continue" can start again what is still needed."""
 import threading

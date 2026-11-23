@@ -1237,7 +1237,7 @@ class GoalLifecycle:
                     return result
                 signature = str(result.get("progress_signature") or "") if external else self._goal_progress.signature()
                 details = self._goal_details
-                # The rule (12 Nov, his call): a goal turn is empty when it did no tool work and said nothing;
+                # The rule (decided 12 Nov): a goal turn is empty when it did no tool work and said nothing;
                 # three in a row and the goal is blocked. A turn that only waited on a job, or repeated a check, is
                 # not empty: whether that is progress is the model's audit (the cycle prompt's no-progress check).
                 if external:
@@ -1285,7 +1285,7 @@ class GoalLifecycle:
                 if listed_note:
                     prompt += "\n\n" + listed_note
                 if getattr(self, "goal_turns", False):
-                    # 12 Nov, his call: each goal cycle is a turn of its own, with its own reply and
+                    # decided 12 Nov: each goal cycle is a turn of its own, with its own reply and
                     # file changes; the frontend starts the next one when it is idle (after anything queued).
                     self._goal_next_turn = prompt
                     return result

@@ -1,4 +1,4 @@
-"""A Pip computer's desktop (his calls, 16 Nov): it opens on the desktop, with no browser started; one wallpaper in two
+"""A Pip computer's desktop (decided 16 Nov): it opens on the desktop, with no browser started; one wallpaper in two
 versions, the teal one by day and the dark grey one by night, by this computer's clock; a rounded glass dock; smaller
 icons on the desktop.
 
@@ -245,7 +245,7 @@ class SmallerDesktopIcons(unittest.TestCase):
 
 
 class OpensOnTheDesktop(unittest.TestCase):
-    """His call (16 Nov): the computer opens on its desktop; the Pip or the user opens the browser when it's wanted."""
+    """Decided 16 Nov: the computer opens on its desktop; the Pip or the user opens the browser when it's wanted."""
 
     def host(self, root, started):
         browser = types.SimpleNamespace(display_dir=None, start=lambda: started.append("browser"), close=lambda: None,

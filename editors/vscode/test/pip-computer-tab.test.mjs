@@ -138,7 +138,7 @@ test('a held payment says what it pays, and never a hidden card field',async()=>
  assert.match(card,/Pay on pay.hospital.example/);
  assert.match(card,/billno SMH\/OP\/26\/118734 · amount 5350.00/);
  assert.doesNotMatch(card,/card_number/);
- // His call, 15 Nov: Always allow on every card, a payment's too, and it says it pays only inside the Pip's daily limit.
+ // Decided 15 Nov: Always allow on every card, a payment's too, and it says it pays only inside the Pip's daily limit.
  assert.ok(x.d.querySelector(`[data-always="${actionId}"]`),'a payment has Always allow');
  assert.match(card,/Inside its daily limit/);
 });
@@ -356,7 +356,7 @@ function fakeViewer(){
  return {Viewer,made};
 }
 
-test('copy and paste go straight through the computer\'s screen (his 20 Nov ask)',async()=>{
+test('copy and paste go straight through the computer\'s screen (asked 20 Nov)',async()=>{
  const {Viewer,made}=fakeViewer();
  const x=setup({screen:true,viewer:Viewer});await x.drain();
  x.message({type:'pipDesktopData',data:Buffer.from('RFB 003.008\n').toString('base64')});made[0].listeners.connect();

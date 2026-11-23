@@ -1,4 +1,4 @@
-"""The Project Folder dropdown (his calls, 12 Nov, for 0.52), what the editor needs for it (Pips API 93).
+"""The Project Folder dropdown (decided 12 Nov, for 0.52), what the editor needs for it (Pips API 93).
 
 One shared choice, "All projects" or one folder, filters the Work sessions, Home's recent sessions, the Pips view's
 Project tab and Needs Attention for Project Pips. A session or a Project Pip from another folder opens here and keeps

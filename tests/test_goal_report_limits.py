@@ -1,4 +1,4 @@
-"""A goal's completion report is never refused for its length (his 21 Nov session: a 61-item goal's report was turned
+"""A goal's completion report is never refused for its length (the 21 Nov session: a 61-item goal's report was turned
 away again and again with "include a concise summary and a nonempty evidence list", and the model called it a
 validation error): more than 12 evidence lines fold into the twelfth, a long line or summary is trimmed, and only an
 empty or malformed report is refused, saying exactly what is wrong."""

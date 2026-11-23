@@ -1,4 +1,4 @@
-// A question card in a Pip's chat, as Work has it (Pips API 106; his call 18 Nov: "it can instead propose questions
+// A question card in a Pip's chat, as Work has it (Pips API 106; decided 18 Nov: "it can instead propose questions
 // which user can just select and submit"), in real Chromium with the real client and its CSS (test/support/pip-chat-scene.mjs,
 // opts.questions), in the side bar (a shadow root in Work's page) and in its tab:
 // - the card under the reply that asked is Work's own (media/shared/askcard.js and askcard.css): its rows, the

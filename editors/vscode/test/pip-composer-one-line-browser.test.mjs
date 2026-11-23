@@ -1,4 +1,4 @@
-// A Pip's prompt box keeps its controls on ONE line at every width, as Work's and ChatDGC's composers do (his call,
+// A Pip's prompt box keeps its controls on ONE line at every width, as Work's and ChatDGC's composers do (decided,
 // 14 Nov: at narrow widths the "Ask me first" chip and the model selector broke onto two lines). Nothing wraps: as the
 // box narrows, labels give way to their icons at the widths Work's composer changes at (media/main.css: 640, 560, 420,
 // 360 and 320 px of the side bar), and every control that is only an icon keeps its name in aria-label and title.

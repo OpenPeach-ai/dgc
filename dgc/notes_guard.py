@@ -1,4 +1,4 @@
-"""Home's Notes are kept from the model (0.52, his call 14 Nov: "never shown to the model unless you share a note").
+"""Home's Notes are kept from the model (0.52, decided 14 Nov: "never shown to the model unless you share a note").
 
 The editor keeps each note as a file in its storage for the extension: <editor storage>/globalStorage/vibedgc.dgc/notes/
 (VS Code, Cursor, a Remote-SSH server, macOS's Application Support alike). Any file or search tool aimed inside that

@@ -89,7 +89,7 @@ test("a model's name earns only the marks its family is known for", () => {
 });
 
 test("each connection wears its company's own website icon, carried in the picker: nothing to fetch, nothing to clash", () => {
-  // His calls (17 Nov): the exact logo for each, then the icons their websites use. A picture is a data: image; a drawing
+  // Decided 17 Nov: the exact logo for each, then the icons their websites use. A picture is a data: image; a drawing
   // (the three black ones, in the text's colour) has no id (two pickers' marks would clash) and no link.
   for (const mark of ["anthropic", "claudecode", "openai", "ollama", "qwen", "kimi", "moonshot", "copilot", "openrouter", "groq", "deepseek", "together", "mistral", "lmstudio", "vllm", "gemini", "xai", "llamacpp"]) {
     const html = P.markHtml(mark, mark);

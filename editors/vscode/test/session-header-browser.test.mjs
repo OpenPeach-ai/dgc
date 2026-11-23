@@ -1,4 +1,4 @@
-// A session's header (0.52, his call on 12 Nov night), in real Chromium on the real pages: inside a Work session's tab
+// A session's header (0.52, decided 12 Nov night), in real Chromium on the real pages: inside a Work session's tab
 // and a ChatDGC chat's tab the header holds DGC's animated logo and the session's name, and no coloured mark of the
 // session (its editor tab already wears it, and the two did not sit well together). The logo and the name are on one
 // line, on one baseline (13 Nov: they were centred on each other by their boxes), and the gap between them is the editor tab's own gap between its icon and its title:

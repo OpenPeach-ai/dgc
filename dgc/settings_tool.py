@@ -4,7 +4,7 @@
 and Dev Mode with its limits and what raising each costs. `dgc_settings` changes one: an ordinary setting, a permission
 rule (a tool and a pattern, `Bash(npm test:*)`), or a Dev Mode limit — that last only while Dev Mode is on AND the user's
 own "Let DGC change Dev Mode settings" switch is on. The ordinary permission engine decides each call (auto mode: no
-card, his call; the other modes ask). Every change is recorded so Undo can put it back while the setting still holds what
+card; the other modes ask). Every change is recorded so Undo can put it back while the setting still holds what
 the change wrote. Never through it: keys and secrets, the sandbox, redaction, hooks, MCP server commands, language
 servers, browser paths, network-facing ports and hosts, provider addresses, worktree roots, Dev Mode itself and the
 switch that lets DGC change its limits: those are the user's, in Settings.

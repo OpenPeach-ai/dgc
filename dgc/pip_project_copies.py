@@ -1099,7 +1099,7 @@ def undo(store, pip_id, change_id, *, inside=False) -> dict:
     return _decided(store, row, "undone", {**previous, "restored": restored, "kept": kept}, inside=inside)
 
 
-# A Pip at Do it all applies its change by itself (auto_apply); the user can ask it in the chat to put it back (his call,
+# A Pip at Do it all applies its change by itself (auto_apply); the user can ask it in the chat to put it back (decided
 # 17 Nov, (a)). The Pip's tool only asks; DGC undoes it as the reply is kept, for a turn the user's own message started.
 UNDO_TOOL = "undo_pip_change"
 UNDO_SCHEMA = {"type": "function", "function": {"name": UNDO_TOOL, "description": (

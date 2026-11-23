@@ -226,7 +226,7 @@ _COMMAND_ARGS = {
     "get_your_browser": set(), "set_your_browser_site": {"site", "mode", "pips"}, "sign_out_your_browser_site": {"site"},
     # API 107: its window opens to the right of the editor (editor_bounds), and Home's card reads the last links.
     "open_your_browser": {"url", "pip_id", "editor_bounds"}, "get_your_browser_recent": set(),
-    # (API 107, his calls 18 Nov) your own tab streamed where there is no screen (own, seq, events, tab, width, height),
+    # (API 107, decided 18 Nov) your own tab streamed where there is no screen (own, seq, events, tab, width, height),
     # and Install Google Chrome through the system's own password prompt.
     "use_your_browser_view": {"op", "x", "y", "text", "key", "dy", "url", "pip_id", "own", "seq", "events", "tab", "width",
                               "height"},
@@ -348,7 +348,7 @@ _COMMAND_ARGS = {
     "reject_pip_handoff": {"handoff_id", "expected_revision", "reason"},
 }
 # A folder Pip's runs with what its chat has (its box, apps, plugins, Library, images, videos): its chat and its scheduled
-# runs (his call, 18 Nov). Every other run of it keeps its reviewed tools.
+# runs (decided 18 Nov). Every other run of it keeps its reviewed tools.
 FOLDER_WORLD_RUNS = ("conversation", "audit", "draft")
 READ_TOOLS = frozenset({"read_file", "glob", "grep", "repo_map", "todo"})
 # What a chat may offer beside reading (13 Nov, one chat style for every Pip): buttons under its reply. It reads,
@@ -545,7 +545,7 @@ def _folder_words(own, *, boxed: bool) -> str:
 
 
 def folder_boxes() -> bool:
-    """Whether this machine gives a folder Pip its own box (0.52, his call 13 Nov: "every pip gets everything"):
+    """Whether this machine gives a folder Pip its own box (0.52, decided 13 Nov: "every pip gets everything"):
     wherever it can run one, as a new Personal Pip gets its computer by default."""
     return computer_by_default()
 
@@ -2328,7 +2328,7 @@ class PipStore:
         # What a check found becomes a fix by the Pip's level; a fix's turn says what became of it (pip_fixes, 0.52).
         from . import pip_fixes
         pip_fixes.after_run(self, run, status=status, result=result, error=error)
-        # Every widget its reply draws is kept in the Library, as its own (artifact_cards; his call 15 Nov).
+        # Every widget its reply draws is kept in the Library, as its own (artifact_cards; decided 15 Nov).
         if (status == "succeeded" and run["manifest"].get("run_kind") == "conversation" and not run["manifest"].get("agent")
                 and isinstance(result, dict) and "```dgc-ui" in str(result.get("text") or "")):
             try:
@@ -3324,7 +3324,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     keeps_notes = (conversation is not None and manifest.get('user_turn') is True      # every Pip (Q8, 14 Nov)
                    and isinstance(conversation.get('text'), str))
     # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work. A folder Pip's
-    # scheduled runs (an audit, a draft) have everything its chat has too (his call, 18 Nov): its box, apps, plugins,
+    # scheduled runs (an audit, a draft) have everything its chat has too (decided 18 Nov): its box, apps, plugins,
     # Library, images and videos. A reviewed execution, a handoff's run and live data keep their reviewed tools.
     computer_pin = (manifest.get('computer_socket') if (kind in ('personal_task', 'conversation') if personal
                                                          else kind in FOLDER_WORLD_RUNS) else None)
@@ -3833,7 +3833,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 return said
 
             if personal or conversation is not None:
-                # One kind of Pip (his decision 13 Nov; "nothing related ships half", 16 Nov): every Pip's chat hears
+                # One kind of Pip (decided 13 Nov; "nothing related ships half", 16 Nov): every Pip's chat hears
                 # what a Personal Pip's chat hears. A Pip with a folder also hears where its folder's copy is in its
                 # computer, that what it changes there comes back to the user as a card, and keeps its project reads.
                 folder = not personal
@@ -3877,7 +3877,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 base_instructions += _world_words()
                 role_instructions = ('Your character is ' + selected_type.name + '. Your job is defined by the approved goal, '
                                      + ('not a coding preset.' if not folder else
-                                        # A Pip's type is its face and its starting voice, never a limit (his call, 13 Nov).
+                                        # A Pip's type is its face and its starting voice, never a limit (decided 13 Nov).
                                         'and what your character usually does in a project is a starting point, never a '
                                         'limit: ' + selected_type.instructions))
                 if conversation is not None:
@@ -3968,7 +3968,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 base_instructions = base_instructions.replace('committed-source snapshot', 'captured current-tree snapshot').replace('committed source snapshot', 'captured current-tree snapshot').replace('committed snapshot', 'captured current-tree snapshot').replace('or current working-tree changes were inspected', 'or a complete live working tree was inspected')
                 role_instructions = role_instructions.replace('committed source', 'captured source')
             if computer_pin is not None and not personal:
-                # A Pip's type is its face and its starting voice, never a limit (his call, 13 Nov): a coding preset's
+                # A Pip's type is its face and its starting voice, never a limit (decided 13 Nov): a coding preset's
                 # "never run commands" is about the user's own folder, not the Pip's own box.
                 role_instructions += ('\nThese limits are about the user\'s real folder and workspace. In your own '
                                       'computer (its Files, its Terminal, your copy of this project) you may edit files '
@@ -7188,7 +7188,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if actor not in ("editor-user", "local-console"):
                     raise RegistryError("local_only", "A Pip's computer is used on this computer only.")
                 if command == "add_pip_computer":
-                    # API 79: one more computer, shared by all its conversations (his call, 10 Nov).
+                    # API 79: one more computer, shared by all its conversations (decided 10 Nov).
                     store._job(pip_id)
                     result = pip_computer.add_computer(registry, pip_id)
                 elif command == "rename_pip_computer":

@@ -6,6 +6,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Ask DGC on a comment also reads, in brief, the chat that made the artifact** (a Work session, a ChatDGC chat or a
+  Pip's chat): the last few things said, words only, so "use the hotel we picked" finds it. Still a quiet turn of its
+  own, never in that chat's history.
+- **A chat reopened where Auto isn't trusted says so calmly**: "Reopened in Default, so DGC asks before each change.
+  Auto runs only in folders you've chosen to trust; switch to Auto to use it here."
 - **Sites Pips can use in Your Browser** (Pips API 113: `seen_your_browser_sites`, `get_your_browser_lanes`): the sites
   you are signed in to, each with All Pips, Some Pips or No Pips; a site you sign in to yourself is noticed (a bank or
   payment site starts at No Pips, others at All Pips); a grant from a chat card can be taken back. While a Pip's run
@@ -41,6 +46,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   forwarder): in a long-running process with more than 1024 files open, select() refused and the relay dropped the
   connection.
 
+- **Designs: a canvas of artboards DGC draws while you watch**: ask for something to look at (a landing page at desktop
+  and phone sizes, an app's screens, a poster, a clickable prototype) and DGC makes a Design artifact: it names the
+  artboards first, each an empty frame it places 80 px apart in a row, then draws them one at a time, each its own
+  version, so the canvas fills as it goes. An artboard is one self-contained HTML page: nothing loaded from the web,
+  real copy, no filler; a link to another artboard is `data-goto`, and an artboard may declare tweaks (a colour, a
+  size, a switch) for you to change. To change one later DGC edits only that artboard, by exact edits or its whole
+  page; `edit_artifact` also adds, moves, resizes, renames, duplicates and removes artboards, and adds notes and
+  pages. A comment on an artboard, with Ask DGC, changes exactly that artboard. Downloads: one artboard or all as
+  pictures, a PDF with an artboard a page, or a web page. A Pip makes one like its other artifacts.
 - **DGC keeps a checklist**: ask it to make a checklist for a job and work through it, and it makes a Checklist
   artifact: each item's title, what done means, a status (Not started, Building, Testing, Checked live, Needs you,
   Done), a note and its proof (test results, screenshots). It changes one item at a time, so Versions shows every

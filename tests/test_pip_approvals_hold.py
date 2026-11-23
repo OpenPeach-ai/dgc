@@ -413,7 +413,7 @@ class PaymentsAskEveryTime(Gate):
     CHECKOUT = "https://shop.example/checkout/complete"
 
     def test_a_real_checkout_is_a_payment_at_every_level_and_its_card_offers_always_allow(self):
-        # His call 15 Nov: Always allow on every card, payments included; a payment grant pays only inside the Pip's
+        # Decided 15 Nov: Always allow on every card, payments included; a payment grant pays only inside the Pip's
         # daily dollar limit (an amount DGC can't read, or one past the limit, still asks).
         for level in ("ask", "approve"):
             with self.subTest(level=level):
@@ -424,7 +424,7 @@ class PaymentsAskEveryTime(Gate):
                 pip_computer.approve_always(self.registry, card["id"], card["digest"], "editor-user")
                 [grant] = grants.list_grants(self.registry, pip["id"])
                 self.assertIn("payment", grant["label"])
-        # At Do it all it asks too, in the chat: no card (his rule, 17 Nov; dgc/pip_holds.py, tests/test_pip_holds.py).
+        # At Do it all it asks too, in the chat: no card (the rule, 17 Nov; dgc/pip_holds.py, tests/test_pip_holds.py).
         pip, host = self.host("full")
         self.assertEqual(self.hold(host, self.CHECKOUT), [], "no card")
         self.assertEqual(self.waiting(pip), [])
@@ -479,7 +479,7 @@ class PaymentsAskEveryTime(Gate):
 
     def test_an_order_press_can_be_always_allowed_and_is_sent_only_inside_the_dollar_limit(self):
         """An order may be a payment: its own grant (never one given for a Save on the address), and it goes only when
-        DGC reads an amount inside the daily limit (his call 15 Nov: Always allow on every card)."""
+        DGC reads an amount inside the daily limit (decided 15 Nov: Always allow on every card)."""
         from unittest import mock
         pip, host = self.host()
         self.assertEqual(len(self.hold(host, f"https://shop.example/items/{HEX_A}", target="Order")), 1)

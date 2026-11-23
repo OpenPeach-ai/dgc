@@ -57,7 +57,7 @@ test("59 host: Open asks DGC for the file, checks it, and opens a copy under its
   assert.equal(h.posted.some((m) => JSON.stringify(m).includes(k.path)), false, "the page is never told where it is kept");
 });
 
-// His ask (18 Nov): Save a copy… saves on the computer the editor runs on: the kept file goes to the page, which saves it
+// Asked 18 Nov: Save a copy… saves on the computer the editor runs on: the kept file goes to the page, which saves it
 // there (media/shared/download.js). Never a save dialog, which over a remote connection browses the remote machine.
 test("59 host: Save a copy… hands the kept file to the page, under its own name, to save on this computer; no save dialog", async () => {
   const s = stubs(), h = host(101, s.vscode), bytes = Buffer.alloc(9000, 9), k = kept(bytes);

@@ -162,7 +162,7 @@ export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName =
   const a = draft.payload.action, id = esc(draft.id), off = busy ? ' disabled' : '';
   // A plugin the user set to Always ask offers Allow once and Don't only, as an ask rule of their own does: an Always
   // allow there would save a grant their Always ask overrides.
-  // (15 Nov, his call: Always allow on every card. A plugin that can move money has it too, and what runs on that grant
+  // (decided 15 Nov: Always allow on every card. A plugin that can move money has it too, and what runs on that grant
   // pays only inside the Pip's daily dollar limit; the card says so in one quiet line.)
   const sub = plugin.money ? `${esc(plugin.name)} can move money, so ${esc(pipName)} asks you first.`
     : plugin.asks ? `You set ${esc(plugin.name)} to Always ask, so ${esc(pipName)} asks you every time.`

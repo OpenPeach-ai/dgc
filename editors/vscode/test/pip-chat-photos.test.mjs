@@ -206,7 +206,7 @@ test('opening a photo shows the original in an editor tab, under a name a person
  assert.ok(existsSync(target.fsPath));
 });
 
-// pips-08, and his ask of 18 Nov: Download on a picture's row (or in its pop-up) saves the original on the computer the
+// pips-08, and asked 18 Nov: Download on a picture's row (or in its pop-up) saves the original on the computer the
 // editor runs on, under a name a person can read: its bytes go to the page, which saves them (media/shared/download.js).
 // Never VS Code's save dialog, which over a remote connection browses the remote machine.
 test('Download on a picture a Pip made hands the original to the page, which saves it on this computer; no save dialog', async()=>{

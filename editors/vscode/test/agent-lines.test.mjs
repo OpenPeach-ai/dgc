@@ -49,7 +49,7 @@ function batchOfThree(p, names = ["A", "B", "C"]) {
   p.advance(2000);
 }
 
-test("a project with no Git HEAD says so on the agent's page, never as a line under each sub-agent (his call, 20 Nov)", () => {
+test("a project with no Git HEAD says so on the agent's page, never as a line under each sub-agent (decided 20 Nov)", () => {
   const p = panel();
   p.event({ type: "turn_start", turn_id: "t1", prompt: "audit the dashboard" });
   spawn(p.event, 0, "Vision audit of dashboard routes");
@@ -509,7 +509,7 @@ test("a nested agent's updates repaint its line on the page in place, keeping a 
 });
 
 test("the spawn notices are not drawn when the backend reports agents; other notices are", () => {
-  // (20 Nov, his call: "no Git HEAD" is said on each agent's page, not under every sub-agent.)
+  // (decided 20 Nov: "no Git HEAD" is said on each agent's page, not under every sub-agent.)
   const notices = ["⟳ sub-task: map auth [explorer]", "↳ isolated checkout: /tmp/wt/map-auth",
     "↯ running 2 isolated sub-tasks in parallel (max 4)", "↳ this project has no Git HEAD; sub-task writes use the shared checkout"];
   // ("↯ running 2 independent reads in parallel" is never drawn since 21 Nov: how DGC ran the steps, which their rows show.)

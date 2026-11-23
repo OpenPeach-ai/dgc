@@ -25,7 +25,7 @@ test("the tabs Main model and Sub-agents are across the picker's top; Main model
   assert.deepEqual(x.p.tabs(), [["Main model", "true"], ["Sub-agents", "false"]]);
   const order = [...x.p.box().children].map((n) => n.className.split(" ")[0]);
   assert.ok(order.indexOf("dgc-mp-tabs") >= 0 && order.indexOf("dgc-mp-tabs") < order.indexOf("dgc-mp-main"), `the tabs, then the rail and the card: ${order}`);
-  // His reference look (17 Nov): Thinking sits inside the card, under the list.
+  // The reference look (17 Nov): Thinking sits inside the card, under the list.
   const card = x.p.box().querySelector(".dgc-mp-main .dgc-mp-card"), parts = [...card.children].map((n) => n.className.split(" ")[0]);
   assert.ok(parts.indexOf("dgc-mp-list") >= 0 && parts.indexOf("dgc-mp-list") < parts.indexOf("dgc-mp-think"), `in the card, the list, then Thinking: ${parts}`);
   assert.ok(x.p.rows().length > 0, "the Main tab shows the model list");

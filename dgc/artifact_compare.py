@@ -111,6 +111,27 @@ def compare(store: Store, aid: str, before: int, after: int | None = None) -> di
                     av, bv = ac[c] if c < len(ac) else None, bc[c] if c < len(bc) else None
                     if av != bv or type(av) is not type(bv):
                         add(f"{name}!{letters(c)}{r + 2}", av, bv)
+    elif art.type == "design":
+        # Each artboard: drawn, redrawn (its page's size then and now), moved, resized, renamed, added or removed.
+        def boards(data, version):
+            out = {}
+            for board in data.get("boards", []):
+                held = version.files.get(f"boards/{board['id']}.html")
+                out[board["id"]] = {**{k: board.get(k) for k in ("title", "page", "x", "y", "w", "h", "fit", "interactive",
+                                                                  "tweaks")},
+                                    "page_bytes": held["size"] if held else 0, "page_sha": held["sha"][:12] if held else ""}
+            return out
+        old_boards, new_boards = boards(old, left), boards(new, right)
+        for ident in dict.fromkeys([*old_boards, *new_boards]):
+            a, b = old_boards.get(ident), new_boards.get(ident)
+            if a != b:
+                add(f"{ident} “{str((b or a)['title'])[:60]}”", a, b,
+                    kind="added" if a is None else "removed" if b is None else "changed")
+        if [b["id"] for b in old.get("boards", [])] != [b["id"] for b in new.get("boards", [])]:
+            add("Artboard order", [b["id"] for b in old.get("boards", [])], [b["id"] for b in new.get("boards", [])])
+        for key, label in (("notes", "Notes"), ("pages", "Pages"), ("start", "Where it opens")):
+            if old.get(key) != new.get(key):
+                add(label, old.get(key), new.get(key))
     elif art.type == "checklist":
         old_items = {item["id"]: item for item in old.get("items", [])}
         new_items = {item["id"]: item for item in new.get("items", [])}

@@ -1,4 +1,4 @@
-// Settings › Dev Mode › "Let DGC change Dev Mode settings" (his call, 14 Nov), on the real Settings page in Chromium
+// Settings › Dev Mode › "Let DGC change Dev Mode settings" (decided 14 Nov), on the real Settings page in Chromium
 // (test/support/settings-scene.mjs): the user's own switch for DGC's Dev Mode tools (config key dev_mode_tools, off by
 // default). It shows only while Dev Mode is on and only with a DGC that says it takes the key; the one-time warning
 // that comes with turning Dev Mode on carries the same choice as a tick box, off by default; Save all writes it with

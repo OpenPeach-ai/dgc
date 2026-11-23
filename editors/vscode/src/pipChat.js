@@ -110,7 +110,7 @@ export function agentTook(a, now = Date.now()) {
 export const agentDot = a => a.state === 'queued' || a.state === 'retry_due' ? 'queued' : AGENT_LIVE.includes(a.state) ? 'running' : a.state === 'failed' || a.state === 'stopped' ? a.state : 'finished';
 const liveSince = a => { const t = Date.parse(a.started_at || a.created_at); return AGENT_LIVE.includes(a.state) && Number.isFinite(t) ? ` data-agent-since="${t}"` : ''; };
 
-/** A Pip's sub-agent wears the Pip's own face in black and white (his call, 14 Nov), never a specialist's mark. */
+/** A Pip's sub-agent wears the Pip's own face in black and white (decided 14 Nov), never a specialist's mark. */
 export const bwFace = (face, {live = false, cls = 'pip-agent-face'} = {}) => `<span class="${cls} is-bw${live ? ' is-live' : ''}" aria-hidden="true">${face}</span>`;
 
 const stepsMarkup = (steps, {esc = escape, cls = 'pip-agent-steps', attrs = ''} = {}) => !steps ? '' : steps.loading && !steps.lines.length ? `<p class="${cls} pip-agent-steps-note"${attrs} role="status">Reading its steps…</p>`

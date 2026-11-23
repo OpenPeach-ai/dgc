@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeDom } from "./support/webview-dom.mjs";
-import { SECONDS, THOUGHTS, founderTurn } from "./support/tool-rows-scene.mjs";
+import { SECONDS, THOUGHTS, ownerTurn } from "./support/tool-rows-scene.mjs";
 
 function panel() {
   const h = makeDom();
@@ -86,7 +86,7 @@ test("the model can speak between tool stretches; its next call gets a new line"
 
 test("a user's six think-and-run pairs between two sentences are one line, six steps, a thought mark on each", () => {
   const { event, doc, turn, errors } = panel();
-  for (const frame of founderTurn()) event(frame);
+  for (const frame of ownerTurn()) event(frame);
   const groups = [...doc.querySelectorAll(".tool-group")];
   assert.equal(groups.length, 1, "one group for the stretch, not six");
   // The "Worked for" row heads the turn once it has answered: the sentence and the line fold under it
@@ -123,7 +123,7 @@ test("a user's six think-and-run pairs between two sentences are one line, six s
 
 test("while the stretch works one live row says what runs now, updated in place", () => {
   const { event, doc, turn } = panel();
-  const frames = founderTurn("t1", { answer: false });
+  const frames = ownerTurn("t1", { answer: false });
   for (const frame of frames.slice(0, 3)) event(frame);
   // The first thought, before the stretch has a step, is today's row.
   event(frames[3]);
@@ -162,7 +162,7 @@ test("while the stretch works one live row says what runs now, updated in place"
 
 test("an opened group shows the steps themselves and the thought still streaming at its end", () => {
   const { event, doc } = panel();
-  const frames = founderTurn("t1", { answer: false });
+  const frames = ownerTurn("t1", { answer: false });
   for (const frame of frames.slice(0, 7)) event(frame);
   event({ type: "thinking_delta", block: "t1:think2", source: "raw", text: "Still deciding" });
   const group = doc.querySelector(".tool-group");
@@ -196,7 +196,7 @@ test("thinking before prose stays: a row with no step around it, the group's las
 
 test("an approval inside a stretch stays outside the folded line, visible", () => {
   const { event, doc, turn } = panel();
-  const frames = founderTurn("t1", { answer: false });
+  const frames = ownerTurn("t1", { answer: false });
   for (const frame of frames.slice(0, 6)) event(frame);
   event({ type: "permission_request", id: "p1", name: "bash", command: frames[5].summary, args: frames[5].args });
   const card = doc.querySelector(".card[data-request-id]");
@@ -267,7 +267,7 @@ test("a thought before a delegation stays a row: the spawn's group hides once it
 test("hide-reasoning hides the marks and the line's thinking words", () => {
   const { event, doc } = panel();
   event({ type: "config", model: "m", mode: "default", think: "off", base_url: "http://h", show_reasoning: false });
-  for (const frame of founderTurn()) event(frame);
+  for (const frame of ownerTurn()) event(frame);
   assert.ok(doc.body.classList.contains("hide-reasoning"));
   assert.ok(doc.querySelector(".tool-group-label .tg-thought"), "the words are there for when it is shown again");
 });
@@ -275,9 +275,9 @@ test("hide-reasoning hides the marks and the line's thinking words", () => {
 // Replay parity: the history of the same turn draws the same line, steps and marks.
 test("a replayed stretch renders identically to the live one", () => {
   const live = panel();
-  for (const frame of founderTurn("t1")) live.event(frame);
+  for (const frame of ownerTurn("t1")) live.event(frame);
   const restored = makeDom();
-  const items = founderTurn("h1").map((frame) => frame.type === "turn_end" ? { ...frame, token_estimate: 0 } : frame);
+  const items = ownerTurn("h1").map((frame) => frame.type === "turn_end" ? { ...frame, token_estimate: 0 } : frame);
   restored.send({ type: "event", event: { type: "history", items } });
   const normalise = (html) => html
     .replace(/<button class="ract ract-trace"[^>]*>Trace<\/button>/g, "") // this fixture omits historical timestamps
@@ -304,7 +304,7 @@ test("a replayed stretch renders identically to the live one", () => {
 
 test("a webview reloaded mid-stretch draws the line and its live row again", () => {
   const { send, doc } = makeDom();
-  const frames = founderTurn("t1", { answer: false }).slice(0, 10);   // c2 is running
+  const frames = ownerTurn("t1", { answer: false }).slice(0, 10);   // c2 is running
   send({ type: "turn_active", turnId: "t1", kind: "prompt", prompt: frames[0].prompt, startedAt: Date.now() - 5000, history: true });
   send({ type: "event", event: { type: "history", items: frames } });
   assert.equal(doc.querySelectorAll(".tool-group").length, 1);

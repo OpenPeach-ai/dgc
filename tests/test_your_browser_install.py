@@ -1,4 +1,4 @@
-"""Your Browser, phase 3b (0.52, Pips API 107; his calls 18 Nov): Install Google Chrome, one button.
+"""Your Browser, phase 3b (0.52, Pips API 107; decided 18 Nov): Install Google Chrome, one button.
 
 - Your Browser uses the installed Google Chrome (/opt/google/chrome/chrome, whose package installs a root-owned
   chrome-sandbox and which Ubuntu's own AppArmor profile already names). Where none is installed and Chrome's sandbox

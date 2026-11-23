@@ -1,4 +1,4 @@
-"""A Pip at Do it all makes a paid picture or video without asking first (his call, 17 Nov: "Image and video costs
+"""A Pip at Do it all makes a paid picture or video without asking first (decided 17 Nov: "Image and video costs
 don't carry that risk, so for them, drop all limits" -- "yes agreed"), in its chat and in a routine with nobody there.
 What it cost is in the result. A monthly limit the user set on a generator still holds: past it, or at a price DGC
 can't hold to it, the Pip asks in its reply as before. The other levels ask as they always did."""

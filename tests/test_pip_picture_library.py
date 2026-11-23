@@ -1,4 +1,4 @@
-"""A Pip's chat and the Library (0.52; his ask, 18 Nov: "maybe for these images, on the card we give an option for 'Save',
+"""A Pip's chat and the Library (0.52; asked 18 Nov: "maybe for these images, on the card we give an option for 'Save',
 and that saves the image in library? or give pip tool to do so as well, so user can ask, save this image in library?").
 
 Pips API 108: `library_pip_message_image {pip_id, message_id, index, keep}` says whether a picture of the chat is in the

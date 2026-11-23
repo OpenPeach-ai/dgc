@@ -1,4 +1,4 @@
-"""A sub-agent with Work tools, from a Pip's chat (0.52, his calls of 14 Nov).
+"""A sub-agent with Work tools, from a Pip's chat (0.52, decided 14 Nov).
 
 For a fix its copy can't do (it needs what Git ignores, like .env, or a service to run), a Pip's sub-agent may be a
 real Work run on the REAL project folder: a `dgc -p --output-format json --mode auto` child the Pips runner starts, on
@@ -287,7 +287,7 @@ class AWorkJobRunsInTheRealFolder(WorkWorld, unittest.TestCase):
                         "the Sub-agents key reached its model")
 
     def test_an_untrusted_folder_is_trusted_for_this_run_only(self):
-        # (His call through mine, 18 Nov: the press, or Do it all, is the yes to this run in this folder; it never makes
+        # (Decided 18 Nov: the press, or Do it all, is the yes to this run in this folder; it never makes
         # the folder trusted for the user's own Work afterwards. `--trust` would have saved it in their config.)
         config_file = self.user_home / ".dgc" / "config.json"
         before = json.loads(config_file.read_text())

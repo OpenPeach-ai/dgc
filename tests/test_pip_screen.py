@@ -268,7 +268,7 @@ class WhoseSubmitTests(unittest.TestCase):
         self.assertEqual((released, recorded), (["r1"], []))
 
     def test_while_you_use_it_what_its_pages_send_is_yours(self):
-        # His call (20 Nov): browsing on a Pip's computer himself, a page's own beacon became an Allow card and the Pip
+        # Decided 20 Nov: browsing on a Pip's computer himself, a page's own beacon became an Allow card and the Pip
         # looked into it. While the person is at it (a click or key in the last few minutes), it is their browsing.
         host, released, recorded = self.host(60)
         pip_computer._settle_writes(host)
@@ -306,7 +306,7 @@ class WhoseSubmitTests(unittest.TestCase):
 
 
 class DesktopWithoutBrowserTests(unittest.TestCase):
-    """The screen opens without the browser (his call, 16 Nov: the computer opens on its desktop; the Pip or the user
+    """The screen opens without the browser (decided 16 Nov: the computer opens on its desktop; the Pip or the user
     opens the browser). A browser that couldn't start never comes into it: Terminal and Files work."""
 
     def test_the_screen_opens_without_starting_the_browser(self):

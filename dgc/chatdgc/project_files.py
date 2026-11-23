@@ -1,4 +1,4 @@
-"""A ChatDGC project's files a chat can search and read when they don't all fit its window (his call, 12 Nov, after
+"""A ChatDGC project's files a chat can search and read when they don't all fit its window (decided 12 Nov, after
 Claude's Projects: "enhanced project knowledge" searches a project's files when they outgrow the context).
 
 A chat in a project is given the project's files within a share of its window (engine._project_context); what doesn't

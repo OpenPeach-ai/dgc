@@ -1,4 +1,4 @@
-"""His call, 18 Nov: at Do it all, the cards a Pip made from outside a step it makes again are asked in its chat too.
+"""Decided 18 Nov: at Do it all, the cards a Pip made from outside a step it makes again are asked in its chat too.
 
 - A job another Pip handed a Project Pip, that its level doesn't take by itself (a check nobody approved).
 - A change to the Pip's own setup, which only the user's own next message can say yes to (never a routine's turn).
@@ -273,7 +273,7 @@ class PersonalPipAsks(unittest.TestCase):
 
 
 class CoreAsksToCreateAPip(unittest.TestCase):
-    """His call, 18 Nov: at Do it all, Core's "Create the Pip …?" card is asked in its chat too."""
+    """Decided 18 Nov: at Do it all, Core's "Create the Pip …?" card is asked in its chat too."""
     setUp = local.LocalPipsTests.setUp
 
     def candidate(self, name="Crypto Market Research"):

@@ -136,7 +136,7 @@ def commit(store, run, result):
         saved = _store_draft(registry, request, root, session_id)
         from .pip_levels import at_full
         if at_full(registry, job["id"]) and saved.get("status") == "pending":
-            # At Do it all, asked in Core's chat instead of a Create Pip card (his call, 18 Nov). DGC's own words.
+            # At Do it all, asked in Core's chat instead of a Create Pip card (decided 18 Nov). DGC's own words.
             from .pip_holds import ask
             from .pip_routines import label
             when = label({"kind": "schedule", "schedule": candidate["schedule"]}) if candidate.get("schedule") else ""

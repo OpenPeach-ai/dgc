@@ -1,7 +1,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { CONTRAST_SOURCE, openThinkingPage } from "./render-thinking.mjs";
-import { founderTurn } from "./support/tool-rows-scene.mjs";
+import { ownerTurn } from "./support/tool-rows-scene.mjs";
 
 // One line per stretch of work, as Chromium lays it out. A user's deepseek turn drew twelve rows
 // (452px) between two sentences: "Thought for 2s · raw", "Ran 1 command", six times over. The same
@@ -51,7 +51,7 @@ const STRETCH_SOURCE = `() => {
 for (const width of [460, 900]) {
   test(`a user's six think-and-run pairs are one line at ${width}px, at most 80px between the sentences`, async (t) => {
     if (skipOrFail(t)) return;
-    const page = await open({ width, events: founderTurn() });
+    const page = await open({ width, events: ownerTurn() });
     try {
       const facts = await page.evaluate(`(${STRETCH_SOURCE})()`);
       assert.deepEqual(facts.parts, ["tool-group"], "nothing on screen between the sentences but the line");
@@ -102,7 +102,7 @@ for (const width of [300, 460]) {
 for (const width of [300, 460]) {
   test(`opened at ${width}px: six rows, each with its thought mark on the row, readable, the thought one click away`, async (t) => {
     if (skipOrFail(t)) return;
-    const page = await open({ width, events: founderTurn() });
+    const page = await open({ width, events: ownerTurn() });
     try {
       await page.click(".tool-group > summary");
       const facts = await page.evaluate((contrastSource) => {
@@ -189,7 +189,7 @@ for (const width of [300, 460, 900]) {
 
 test("the line is a button: Enter opens it, Space closes it, and Tab reaches each thought mark", async (t) => {
   if (skipOrFail(t)) return;
-  const page = await open({ width: 460, events: founderTurn() });
+  const page = await open({ width: 460, events: ownerTurn() });
   try {
     await page.focus(".tool-group > summary");
     await page.keyboard.press("Enter");
@@ -216,7 +216,7 @@ test("the line is a button: Enter opens it, Space closes it, and Tab reaches eac
 for (const width of [300, 460]) {
   test(`at ${width}px, while the stretch works, one live row under the line says what runs now, updated in place`, async (t) => {
     if (skipOrFail(t)) return;
-    const frames = founderTurn("t1", { answer: false });
+    const frames = ownerTurn("t1", { answer: false });
     const page = await open({ width, events: frames.slice(0, 6) });
     try {
       const read = () => page.evaluate(() => {
@@ -277,7 +277,7 @@ for (const width of [300, 460]) {
 
 test("reduced motion stops the live row's spinner and text shimmer", async (t) => {
   if (skipOrFail(t)) return;
-  const page = await open({ width: 460, events: founderTurn("t1", { answer: false }).slice(0, 6) });
+  const page = await open({ width: 460, events: ownerTurn("t1", { answer: false }).slice(0, 6) });
   try {
     await page.emulateMedia({ reducedMotion: "reduce" });
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".tg-live-spin")).animationName), "none");
@@ -290,7 +290,7 @@ test("reduced motion stops the live row's spinner and text shimmer", async (t) =
 
 test("an approval inside a working stretch is on screen, below the line and its live row", async (t) => {
   if (skipOrFail(t)) return;
-  const frames = founderTurn("t1", { answer: false });
+  const frames = ownerTurn("t1", { answer: false });
   const page = await open({ width: 460, events: [...frames.slice(0, 6),
     { type: "permission_request", id: "p1", name: "bash", command: frames[5].summary, args: frames[5].args }] });
   try {

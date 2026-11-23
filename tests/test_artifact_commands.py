@@ -67,7 +67,7 @@ class ArtifactCommandsTest(unittest.TestCase):
 
     def test_the_capability_names_every_type_output_and_export(self):
         caps = CAPABILITY["artifacts"]
-        self.assertEqual(set(caps["types"]), {"page", "doc", "slides", "sheet", "dashboard", "checklist"})
+        self.assertEqual(set(caps["types"]), {"page", "doc", "slides", "sheet", "dashboard", "checklist", "design"})
         self.assertIn("slides", caps["outputs"])
         self.assertEqual(caps["exports"]["slides"], ["pptx", "pdf", "html"])
 

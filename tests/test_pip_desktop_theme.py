@@ -1,4 +1,4 @@
-"""pc-look, the rest (0.52, his list of 9 Nov): "a modern window and app theme, an icon theme ... so the file manager
+"""pc-look, the rest (0.52, the list of 9 Nov): "a modern window and app theme, an icon theme ... so the file manager
 and LibreOffice stop looking dated."
 
 A Pip's desktop takes the best dark theme the machine has: Yaru's purple dark (DGC's colour), else Yaru dark, else

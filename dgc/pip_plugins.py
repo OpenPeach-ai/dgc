@@ -1268,7 +1268,7 @@ class Session:
         said_yes = False
         from .pip_levels import does_it_all
         if waits and not reads and (pip_level == "full" or does_it_all(self.directory, self.pip_id)):
-            # Do it all never shows a card (his rule, 17 Nov): a plugin set to Always ask, or one that can move money
+            # Do it all never shows a card (the rule, 17 Nov): a plugin set to Always ask, or one that can move money
             # when this Pip may not pay now, is held and asked in the chat; the user's next own message answers it.
             from . import pip_holds
             step = {"server": server, "tool": tool, "arguments": arguments}

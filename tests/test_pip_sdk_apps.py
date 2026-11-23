@@ -563,7 +563,7 @@ class ChangeTests(AppWorld, unittest.TestCase):
         self.assertEqual([c["arguments"]["order_id"] for c in self.shop.posted()], ["ord_17", "ord_18"])
         said = dict(grants.ran_on_their_own(self.registry))[outcome["action_id"]]
         self.assertIn("ran create_dispatch with Shop app, as you always allow.", said)
-        # Money (his call 15 Nov: Always allow on every card): its card offers Always allow too, and a later draft of it
+        # Money (decided 15 Nov: Always allow on every card): its card offers Always allow too, and a later draft of it
         # runs on the grant only when DGC reads an amount inside the Pip's daily dollar limit.
         refund = self.propose("refund_order", key="refund")
         allowed = self.control("always_allow_pip_app_action", action_id=refund["id"], expected_digest=refund["digest"])

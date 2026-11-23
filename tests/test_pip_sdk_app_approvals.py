@@ -312,7 +312,7 @@ class DecideTests(ApprovalWorld, unittest.TestCase):
 
 class FloorTests(ApprovalWorld, unittest.TestCase):
     def test_a_change_that_moves_money_asks_even_at_full_access_and_both_sides_see_it(self):
-        # His call 15 Nov: its card offers Always allow too (inside the Pip's dollar limit; ChangeTests covers that);
+        # Decided 15 Nov: its card offers Always allow too (inside the Pip's dollar limit; ChangeTests covers that);
         # here nobody chose it, so it waits for a person, in DGC or in the app.
         self.register(tools=(UNPAID, DISPATCH, REFUND))
         pip_levels.set_level(self.registry, self.source["id"], "full", "editor-user")

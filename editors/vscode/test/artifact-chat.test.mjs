@@ -138,7 +138,7 @@ test("the Library's Artifacts tab: only when offered, newest first, by kind and 
     assert.deepEqual(await libNames(s), ["Q3 plan", "Home budget", "Store sales", "Tip calculator", "Launch notes"], "newest change first");
     assert.match(await s.page.locator("#library-list .lib-row-meta").first().textContent(), /^made in Chat · \S+ · Deck · version 3$/);
     await s.page.click("#library-filter-kind"); await s.page.waitForSelector(".dgc-pop .dgc-menu-row");
-    assert.deepEqual(await s.page.locator(".dgc-pop .dgc-menu-label").allTextContents(), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards", "Checklists"]);
+    assert.deepEqual(await s.page.locator(".dgc-pop .dgc-menu-label").allTextContents(), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards", "Checklists", "Designs"]);
     await s.page.keyboard.press("Escape"); await s.page.waitForTimeout(200);
     await libPick(s, "maker", "Work");
     assert.deepEqual(await libNames(s), ["Home budget", "Tip calculator"]);

@@ -79,7 +79,7 @@ class PagesFromOtherDevices(unittest.TestCase):
         self.fail(f"no {kind} frame: {self.frames()[-3:]}")
 
     """Settings -> Security -> Previews: whether pages open from other devices (your network and Tailscale) and the
-    address links use (his 21 Nov question: the CLI had it, the extension didn't)."""
+    address links use (the 21 Nov question: the CLI had it, the extension didn't)."""
 
     def test_settings_reads_and_saves_where_pages_open_from(self):
         self.host.dispatch({"type": "get_config", "request_id": "c0"})

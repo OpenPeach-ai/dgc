@@ -1,6 +1,6 @@
 """Give a Pip a folder later, and Remove its folder (0.52, Pips API 110).
 
-His call (14 Nov): a Pip made without a folder (a Pip for anything) can become a folder Pip for a folder you give it, and
+Decided 14 Nov: a Pip made without a folder (a Pip for anything) can become a folder Pip for a folder you give it, and
 a folder Pip can become a Pip for anything again. Either way it keeps its chat, notes, routines, computer (its Files),
 level, model, sub-agents and history.
 

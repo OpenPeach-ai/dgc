@@ -1,4 +1,4 @@
-// No Pips in a Work session's agent map (his call, 14 Nov night; live round 1, finding 14). No session owns a Pip:
+// No Pips in a Work session's agent map (decided 14 Nov night; live round 1, finding 14). No session owns a Pip:
 // they run their own chats in the background. The map is this session's own sub-agents and its background tasks, and
 // nothing else: there is no Pips section, the page asks DGC for no related Pips, a Pip working on a job this chat
 // gave it is not a row of the map (it is the chip above the box, as before) and does not light the map's button.

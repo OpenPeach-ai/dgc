@@ -35,7 +35,7 @@ MAX_LIST = 500
 MAX_TEXT_BYTES = 64 * 1024
 MAX_FILE_BYTES = 2 * 1024 * 1024          # read back or added through the editor
 MAX_FILE_URI_CHARS = 2_800_000
-MAX_FOLDER_BYTES = 0                      # the Files folder, all in: 0 is no quota (his call 15 Nov; Dev Mode may set one)
+MAX_FOLDER_BYTES = 0                      # the Files folder, all in: 0 is no quota (decided 15 Nov; Dev Mode may set one)
 # What DGC keeps free on the user's disk: a Pip's computer has no size limit, but it never fills the disk (15 Nov).
 DISK_FLOOR_BYTES = 10 * 1024 ** 3
 MAX_COMMAND_CHARS = 4000
@@ -558,7 +558,7 @@ def _user_tasks() -> int:
 def _limits(processes: int):
     def apply() -> None:
         import resource
-        # No CPU time or file size limit (his call, 15 Nov). The disk floor guards the disk (_room_for, _watch_disk).
+        # No CPU time or file size limit (decided 15 Nov). The disk floor guards the disk (_room_for, _watch_disk).
         # The limit counts all of this user's processes, so it is set above what already runs:
         # room for a real command, not for a fork bomb.
         resource.setrlimit(resource.RLIMIT_NPROC, (processes + 256, processes + 256))
@@ -660,7 +660,7 @@ def run_command(computer_root: Path, command, by: str, *, policy=None, env: dict
 
 def _run_or_carry_on(computer_root: Path, files: Path, command: str, by: str, *, policy=None, env: dict | None = None,
                      on_end=None, expect_minutes=None, meta=None) -> dict:
-    """Run it with no time limit and wait up to COMMAND_SECONDS (his call, 15 Nov). Done by then: today's entry. Not
+    """Run it with no time limit and wait up to COMMAND_SECONDS (decided 15 Nov). Done by then: today's entry. Not
     done: it is never stopped; it carries on in the background as a job (jobs, job_output, stop_job) and the Terminal is
     free again. Its end is kept in the job and in the history, as a background command's is."""
     marker = Path(computer_root) / "terminal.running"
@@ -1095,7 +1095,7 @@ class _Tail(bytearray):
     seen = 0                                     # every byte it was given, kept or not: a check-in's progress
 
 
-# Check-ins on a Pip's background commands (his call, 18 Nov; tests/test_check_ins.py): a running job's live output, and
+# Check-ins on a Pip's background commands (decided 18 Nov; tests/test_check_ins.py): a running job's live output, and
 # its check-in state, in memory (a job doesn't outlive the DGC that runs it). Same rule as Work's (dgc/monitors.py):
 # past its expected time, or quiet for CHECK_IN_QUIET_S, then again after a growing gap.
 _LIVE: dict[str, "_Tail"] = {}

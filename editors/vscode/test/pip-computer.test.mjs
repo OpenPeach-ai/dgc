@@ -103,7 +103,7 @@ test('a held submit is reviewed with its screenshot; Send once sends that exact 
 });
 
 test('a payment held in its browser offers Always allow too, and says it pays only inside its daily limit',async()=>{
- // His call, 15 Nov (live round 1, finding 39): Always allow on EVERY Pip card, payments included. (Reported 2026-10-19
+ // Decided 15 Nov (live round 1, finding 39): Always allow on EVERY Pip card, payments included. (Reported 2026-10-19
  // it was "Payments are never Always-allow"; the backend now pins a payment's grant and pays only inside the Pip's limit.)
  const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[action({frame:null,summary:{...action().summary,payment:true}})]})});await x.openJob();
  x.click(`[data-computer-action="${actionId}"]`);await flush();
@@ -272,7 +272,7 @@ test('validators accept the backend shapes and refuse anything else',()=>{
 
 // Careful mode (#9, Pips API 44): a new site or something it read from your apps is held before anything
 // happens. Its card says which; Allow lets the Pip do it (a site stays allowed). A new site has no Always allow (Allow
-// adds it for good); carrying what it read from your apps has one, for that one destination (his call, 15 Nov).
+// adds it for good); carrying what it read from your apps has one, for that one destination (decided 15 Nov).
 test('a careful hold says what it is: a new site to allow (never Always allow), or app data to put on a page (Always allow for that site)',async()=>{
  const site=action({frame:null,summary:{kind:'site',site:'shop.example',shown:'shop.example',method:'GET',host:'shop.example',path:'/deals',page:'https://shop.example/deals',fields:[],more_fields:0,body_bytes:0}});
  const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[site]})});await x.openJob();

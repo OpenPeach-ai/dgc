@@ -64,7 +64,7 @@ for (const theme of ["dark-modern", "light-modern"]) test(`the model picker is a
     await x.page.waitForTimeout(250);
     const dialog = await look(x.page, ".dgc-mp"), token = await tokenColours(x.page, ["--surface2"]);
     assert.equal(dialog.corner, "20px", "the dialog's corner");
-    // His reference look (17 Nov): a two-tone dialog, the card of models in the raised grey on a frame a shade apart,
+    // The reference look (17 Nov): a two-tone dialog, the card of models in the raised grey on a frame a shade apart,
     // a neutral grey (never purple).
     const card = await look(x.page, ".dgc-mp-card");
     assert.equal(card.fill, token["--surface2"], "the card: the raised grey");

@@ -1,4 +1,4 @@
-"""Your Browser, phase 1 (0.52, Pips API 105; his answers 17 Nov): the model and the API.
+"""Your Browser, phase 1 (0.52, Pips API 105; decided 17 Nov): the model and the API.
 
 One shared browser on this computer where the person signs in once; each Pip works in its own tab (lane) of it, only on
 the sites the person lets that Pip use. Sites are noticed from the person's own sign-ins; a new bank or payment site
@@ -40,7 +40,7 @@ class Base(unittest.TestCase):
 
 
 class MoneySites(unittest.TestCase):
-    """The one bank-or-payment decision, in one place (his answer 3)."""
+    """The one bank-or-payment decision, in one place (decision 3)."""
 
     def test_banks_and_payment_services_are_money_sites(self):
         for host in ("www.paypal.com", "secure.chase.com", "netbanking.hdfcbank.com", "retail.onlinesbi.sbi",
@@ -198,7 +198,7 @@ class DeletedForGood(Base):
 
 
 class ThirdPartyCookiesOff(unittest.TestCase):
-    """His answer 2: third-party cookies off in Your Browser's profile; the person's own settings otherwise untouched."""
+    """Decision 2: third-party cookies off in Your Browser's profile; the person's own settings otherwise untouched."""
 
     def setUp(self):
         import tempfile

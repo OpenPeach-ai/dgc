@@ -222,7 +222,7 @@
   .dgc-mp-mark > svg, .dgc-mp-tile { forced-color-adjust: none; }
 }
 
-/* ---- The look (17 Nov, his reference picture): two layers. A quiet frame holds the rail of connections and the search;
+/* ---- The look (17 Nov, the reference picture): two layers. A quiet frame holds the rail of connections and the search;
    a card inside it holds the connection's models and Thinking. The connection being looked at sits on a raised tile; the
    current model's row is softly shaded, its check right after its name; a model's capabilities are a small framed group
    in colour. Every control keeps the family's 6 px corner (--btn-r): nothing here is a pill. ---- */
@@ -242,7 +242,7 @@ body.vscode-dark .dgc-menu.dgc-mp, .vscode-dark .dgc-menu.dgc-mp { --mp-frame: c
 .dgc-mp-conn[aria-selected="true"] { background: var(--mp-card); border-color: var(--hair); box-shadow: 0 1px 3px rgba(0, 0, 0, .14), 0 0 0 .5px rgba(0, 0, 0, .04); }
 .dgc-mp-mark, .dgc-mp-mark > svg { width: 20px; height: 20px; }
 .dgc-mp-badge { right: -4px; bottom: -4px; background: var(--mp-card); }
-/* The connection in use: a small dot under its tile, clear of it (his 17 Nov look: 1 px under it read as touching):
+/* The connection in use: a small dot under its tile, clear of it (the 17 Nov look: 1 px under it read as touching):
    4 px under the tile, 6 px over the next one, so it belongs to its own. */
 .dgc-mp-now { left: 50%; top: auto; bottom: -8px; width: 4px; height: 4px; margin: 0 0 0 -2px; border-radius: 50%; }
 /* Add provider: a tile at the foot of the rail, its words its hover label. */
@@ -363,7 +363,7 @@ body.vscode-high-contrast .dgc-mp-tabs, body.vscode-high-contrast-light .dgc-mp-
 }
 .dgc-menu.dgc-mp .dgc-mp-tag + .dgc-mp-tag { margin-left: 4px; }
 
-/* ---- The second page (17 Nov, his call): on the Sub-agents tab a model is chosen, then how they think and their
+/* ---- The second page (decided 17 Nov): on the Sub-agents tab a model is chosen, then how they think and their
    context window are chosen here, in the same dialog. One surface, the card's: its head (Back, the model's name, its
    connection quiet under it), the two choices, and Done at its foot. ---- */
 .dgc-mp.dgc-mp-paged { background: var(--mp-card); }
@@ -415,8 +415,8 @@ body.vscode-high-contrast .dgc-mp-tabs, body.vscode-high-contrast-light .dgc-mp-
 @media (max-height: 420px) { .dgc-mp-page-head { padding-block: 8px 6px; } .dgc-mp-page-part { padding-top: 8px; } .dgc-mp-page-foot { padding-block: 6px 8px; } }
 @media (forced-colors: active) { .dgc-mp-page-head, .dgc-mp-page-foot, .dgc-mp-page-part + .dgc-mp-page-part { border-color: CanvasText; } .dgc-mp .dgc-mp-back { border-color: ButtonText; } }
 @media (prefers-reduced-motion: reduce) { .dgc-mp .dgc-mp-back { transition: none; } }
-/* ---- Thinking: one slider from Faster to Smarter (his reference, 18 Nov) --------------------------------------------
-   Copied from the reference's own code, its shapes and motion exactly (his call: not the controls' 6px corners here):
+/* ---- Thinking: one slider from Faster to Smarter (the reference, 18 Nov) --------------------------------------------
+   Copied from the reference's own code, its shapes and motion exactly (not the controls' 6px corners here):
    a 28px track with 12.8px corners, the part filled up to the handle a moving picture of how hard it thinks, a stop
    for every level, and the 28x24 handle with 10.24px corners. Its spring is the
    reference's own curve. Ultra, at the top, wears the brightest colours and sparkles; its name turns purple. */

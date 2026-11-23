@@ -1,4 +1,4 @@
-"""Keep an image in the Library on purpose (0.52; his call 15 Nov: "images model thinks needs to go in library").
+"""Keep an image in the Library on purpose (0.52; decided 15 Nov: "images model thinks needs to go in library").
 
 ONE module every surface reaches ("one capability, one module"): Work's keep_image (a picture in the project, or an
 https image), ChatDGC's and a Pip's (an https image; a Pip's is read by the controller under careful mode, and, 18 Nov,
@@ -7,7 +7,7 @@ a picture in its own Files or one it sent in its chat). A kept image sits beside
 Library's Images tab lists it with who kept it. Only images are kept; an address carrying a secret DGC knows is never
 fetched. Nothing here sends anything anywhere else.
 
-Save to Library (18 Nov, his ask: "on the card we give an option for 'Save', and that saves the image in library"): a
+Save to Library (18 Nov, asked: "on the card we give an option for 'Save', and that saves the image in library"): a
 person keeps a picture of a chat from its row or its pop-up, through ``keep`` with ``by="you"``. A picture already in the
 Library, made or kept, is found by its bytes (``held``) and is never kept twice: the chat says "In Library" instead.
 Nothing is kept on its own beyond what already is (a generated picture is in the Library from the start).

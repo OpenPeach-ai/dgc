@@ -1,4 +1,4 @@
-// Work's Sub-agents page (17 Nov, his words: "when user selects a sub agent model, then we further take user to a next
+// Work's Sub-agents page (17 Nov, asked: "when user selects a sub agent model, then we further take user to a next
 // page to select the context window and thinking effort, and context size only shows options of what that model is
 // capable of"; "and what about selecting fallback main model and sub agent model?"). On the picker's Sub-agents tab a
 // model is chosen and saved at once, then its page opens in the same dialog: Their thinking, Their context window (only

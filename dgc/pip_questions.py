@@ -1,6 +1,6 @@
 """A question card in a Pip's chat, as Work has it (Pips API 106, 18 Nov).
 
-His words: "pip asks in chat, but if user says propose me options with your suggestion, then pip can also send the
+The request: "pip asks in chat, but if user says propose me options with your suggestion, then pip can also send the
 question or multiple question propose tool, like the work chat does ... so it can instead propose questions which user
 can just select and submit".
 

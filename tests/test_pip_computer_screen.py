@@ -1,4 +1,4 @@
-"""pc-fills-tab (0.52, his list of 9 Nov): "The computer's screen fills the editor tab ... larger sizes (1440x900,
+"""pc-fills-tab (0.52, the list of 9 Nov): "The computer's screen fills the editor tab ... larger sizes (1440x900,
 1920x1080) are on offer. Today it is fixed at 1280x800."
 
 The backend half: a Pip's computers have a screen size, one of 1280x800 (everyone's to begin with), 1440x900 and

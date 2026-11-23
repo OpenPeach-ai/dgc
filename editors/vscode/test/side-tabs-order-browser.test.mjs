@@ -1,4 +1,4 @@
-// The header's tab order (0.52, his words of 15 Nov: "put library before pips, so pips remains last: Home, Work, Chat,
+// The header's tab order (0.52, asked 15 Nov: "put library before pips, so pips remains last: Home, Work, Chat,
 // Library and then Pips"). On the real side bar, in real Chromium: the order on screen and for the arrow keys, by name
 // from 280 px and as icons under it (the narrow-width rule is kept).
 import { after, before, test } from "node:test";

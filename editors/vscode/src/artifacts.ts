@@ -20,17 +20,24 @@ export { ArtifactNotice, madeWords, ARTIFACT_NOTICED_KEY, type MadeNotice } from
 export const ARTIFACT_PANEL = "dgc.artifactPanel";
 export const ARTIFACT_PRESENT = "dgc.artifactPresent";
 export const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
-export const ARTIFACT_TYPES = ["page", "doc", "slides", "sheet", "dashboard", "checklist"];
+export const ARTIFACT_TYPES = ["page", "doc", "slides", "sheet", "dashboard", "checklist", "design"];
 /** The answers this hub takes (onEvent); the panel routes exactly these to it, so the two can never differ. */
 export const ARTIFACT_EVENTS = ["artifact_items", "artifact_changed", "artifact_detail", "artifact_served", "artifact_exported",
   "artifact_comparison", "artifact_comments"];
 /** The Output chip's choices, in its menu's order; "auto" lets the model choose (and is never sent). */
 export const ARTIFACT_OUTPUTS = ["auto", "document", "slides", "spreadsheet", "page", "dashboard"];
-const LABELS: Record<string, string> = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist" };
+const LABELS: Record<string, string> = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist", design: "Design" };
 export const FORMAT_LABELS: Record<string, string> = {
   docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
-  xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)",
+  xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)", png: "Picture (.png)",
 };
+/** A design's own words for its formats (its zip holds a picture of each artboard, its PDF a page for each). */
+export const DESIGN_FORMAT_LABELS: Record<string, string> = {
+  zip: "Every artboard as pictures (.zip)", pdf: "PDF, an artboard a page", html: "The canvas as a web page (.html)", png: "Picture (.png)",
+};
+/** What a format is called for this kind of artifact. */
+export const formatLabel = (type: string, format: string): string => (type === "design" ? DESIGN_FORMAT_LABELS[format] : undefined) || FORMAT_LABELS[format] || format;
+const BOARD_ID = /^b[1-9][0-9]{0,4}$/;
 /** A served page DGC lays out is at most this big (a deck's pictures are inside it). */
 const MAX_PAGE_BYTES = 60 * 1024 * 1024;
 const MAX_REQUESTS = 256;
@@ -41,7 +48,9 @@ const DOC_FILE = /[\\/](ar_[a-f0-9]{16})[\\/]work[\\/][^\\/]+$/;
 
 export type ArtifactsOffer = { version: number; types: string[]; outputs: string[]; exports: Record<string, string[]>; present: boolean; compare?: boolean; sourceConsentVersion?: boolean;
                                /** artifact_comment_* and artifact_suggestion_* are understood (dgc/artifact_comments). */
-                               comments?: boolean };
+                               comments?: boolean;
+                               /** The "design" type is understood: artifact_design_edit, artifact_export's `board`. */
+                               designs?: boolean };
 /** How far along a checklist is: its items done of all, the ones that need you, the next one, pinned to its project. */
 export type ChecklistProgress = { done: number; total: number; needs: string[]; next?: { id: string; title: string; status: string };
                                   waiting?: { id: string; title: string }; pinned: boolean };
@@ -57,6 +66,8 @@ export type ArtifactView = {
   made_as?: "card" | "widget";
   /** Its comment threads, counted: the open ones and all (the Library row says how many are open). */
   comments?: { open: number; all: number };
+  /** A design: how many artboards it has, how many are still to draw, and its pages. */
+  design?: { boards: number; drawing: number; pages: number };
 };
 
 /** ready.capabilities.artifacts, checked; undefined when the process doesn't offer artifacts. */
@@ -71,7 +82,8 @@ export function artifactsOffer(capabilities: unknown): ArtifactsOffer | undefine
   return { version: Number(raw.version), types: list(raw.types), outputs: list(raw.outputs), exports, present: Number(raw.present) >= 1,
            ...(Number(raw.compare) >= 1 ? { compare: true } : {}),
            ...(Number(raw.source_consent_version) >= 1 ? { sourceConsentVersion: true } : {}),
-           ...(Number(raw.comments) >= 1 ? { comments: true } : {}) };
+           ...(Number(raw.comments) >= 1 ? { comments: true } : {}),
+           ...(Number(raw.designs) >= 1 ? { designs: true } : {}) };
 }
 
 /** What a send carries for the Output chip: the choice when it isn't Auto and the process offers it, else "". */
@@ -140,6 +152,11 @@ export function artifactView(raw: any): ArtifactView | undefined {
   // A checklist: how far along it is (its card, the Library and Work's list say it without reading the list).
   const progress = checklistProgress(raw.progress);
   if (raw.type === "checklist" && progress) view.progress = progress;
+  if (raw.type === "design" && raw.design && typeof raw.design === "object") {
+    const count = (v: unknown, most: number) => (Number.isSafeInteger(v) && (v as number) >= 0 ? Math.min(v as number, most) : 0);
+    const boards = count(raw.design.boards, 500);
+    view.design = { boards, drawing: Math.min(count(raw.design.drawing, 500), boards), pages: Math.max(1, count(raw.design.pages, 50)) };
+  }
   const said = raw.comments;
   if (said && typeof said === "object" && Number.isSafeInteger(said.all) && said.all > 0 && said.all <= 500) {
     view.comments = { open: Number.isSafeInteger(said.open) ? Math.max(0, Math.min(said.open, said.all)) : 0, all: said.all };
@@ -159,11 +176,12 @@ const MAX_COMMENT = 4000;
 /** What a comment points at, as a page said it: only the fields a place has, as the right kinds (the process checks it
  *  again for the artifact's type). Undefined when it isn't one. */
 export function commentAnchor(raw: any): Record<string, unknown> | undefined {
-  if (!raw || typeof raw !== "object" || !["text", "cells", "slide", "item", "element", "whole"].includes(String(raw.kind))) return undefined;
+  if (!raw || typeof raw !== "object" || !["text", "cells", "slide", "item", "element", "artboard", "whole"].includes(String(raw.kind))) return undefined;
   const out: Record<string, unknown> = { kind: raw.kind };
   const text = (key: string, max: number) => { if (typeof raw[key] === "string" && raw[key]) out[key] = raw[key].slice(0, max); };
   text("quote", 2000); text("before", 200); text("after", 200); text("sheet", 80); text("range", 24); text("field", 20);
   text("title", 200); text("item", 8); text("path", 600); text("near", 200); text("tag", 20);
+  if (raw.kind === "artboard") { if (!BOARD_ID.test(String(raw.board || ""))) return undefined; out.board = raw.board; }
   if (Number.isSafeInteger(raw.slide) && raw.slide > 0 && raw.slide <= 1000) out.slide = raw.slide;
   if (Array.isArray(raw.values) && raw.values.length <= 50 && raw.values.every((row: unknown) => Array.isArray(row) && row.length <= 50)
       && raw.values.flat().length <= 50
@@ -270,12 +288,17 @@ export { DOWNLOAD_MINUTES, downloadThroughBrowser } from "./download";
 
 /** The artifact panel's page. Its frames: a page artifact at its own address (frame-src), and DGC's own layout of a
  *  deck, a sheet or a dashboard as text the host fetched (srcdoc, sandboxed with no script). A page is served on this
- *  computer (127.0.0.1), or over https when asExternalUri forwards it for a remote window; nothing else is framed. */
+ *  computer (127.0.0.1), or over https when asExternalUri forwards it for a remote window; nothing else is framed.
+ *  A design's artboards are frames too (srcdoc, sandboxed with no origin): a srcdoc frame keeps this page's policy,
+ *  so the only script one can run carries this page's nonce: DGC's own helper, which media/artifactDesign.js writes
+ *  into it (it reads the nonce from the `dgc-frame-nonce` meta), and an interactive artboard's own while it plays.
+ *  Pictures, fonts and sound in an artboard are data inside it (data:, blob:); nothing in one is fetched. */
 export function artifactDocument(asset: (name: string) => string, cspSource: string, nonce: string): string {
   const s = (name: string) => `<script nonce="${nonce}" src="${attr(asset(name))}"></script>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src 'nonce-${nonce}'; frame-src http://127.0.0.1:* http://localhost:* https:;">
-<link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/artifact.css"))}">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: blob:; font-src ${attr(cspSource)} data:; media-src data: blob:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src 'nonce-${nonce}'; frame-src http://127.0.0.1:* http://localhost:* https:;">
+<link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/artifact.css"))}"><link rel="stylesheet" href="${attr(asset("media/artifactDesign.css"))}">
+<meta name="dgc-frame-nonce" content="${nonce}">
 <title>Artifact</title></head><body class="art-body">
 <header class="art-head" id="art-head">
 <span class="art-mark" id="art-mark" aria-hidden="true"><span class="codicon codicon-file"></span></span>
@@ -292,7 +315,7 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 <div class="art-work" id="art-work"><main class="art-main" id="art-main"><p class="art-empty" id="art-loading">Loading…</p></main>
 <aside class="art-comments" id="art-comments" aria-label="Comments" hidden></aside></div>
 <div class="sr-only" id="art-announce" aria-live="polite"></div>
-${s("media/shared/menu.js")}${s("media/shared/icons.js")}${s("media/shared/dismiss.js")}${s("media/shared/download.js")}${s("media/shared/comments.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifactChecklist.js")}${s("media/artifact.js")}
+${s("media/shared/menu.js")}${s("media/shared/icons.js")}${s("media/shared/dismiss.js")}${s("media/shared/download.js")}${s("media/shared/comments.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifactChecklist.js")}${s("media/artifactDesign.js")}${s("media/artifact.js")}
 </body></html>`;
 }
 
@@ -355,7 +378,8 @@ class ArtifactPanel {
         this.panel.title = view.title;
         this.post({ type: "detail", artifact: view, content: ev.content ?? null, state: ev.state && typeof ev.state === "object" ? ev.state : null,
                     offer: this.hub.offers() ?? null, ...(view.type === "dashboard" ? { refreshEvery: this.hub.refreshEvery(this.id) } : {}) });
-        if (view.type !== "doc") this.serve();
+        // (A design's canvas draws its artboards itself, from the content: nothing of it is served.)
+        if (view.type !== "doc" && view.type !== "design") this.serve();
       },
       fail: (reason, message) => { if (seq === this.loadSeq) this.post({ type: "rejected", what: "load", reason, message }); },
     });
@@ -414,7 +438,31 @@ class ArtifactPanel {
         return;
       case "comments": this.hub.comment(this.id, message, (m) => this.post(m)); return;
       case "reload": this.load(); return;
-      case "preview": if (view && view.type !== "doc") this.serve(); return;
+      case "preview": if (view && view.type !== "doc" && view.type !== "design") this.serve(); return;
+      case "designEdit": {
+        // A change made on a design's canvas: ops, as DGC's own edits are, one version by you.
+        if (view?.type !== "design" || !Array.isArray(message.edits) || !message.edits.length || message.edits.length > 20) return;
+        const edits = message.edits.filter((e: unknown) => e && typeof e === "object" && typeof (e as any).op === "string" && (e as any).op !== "measured");
+        if (edits.length !== message.edits.length) return;
+        if (Buffer.byteLength(JSON.stringify(edits), "utf8") > MAX_SAVE_BYTES) {
+          this.post({ type: "rejected", what: "save", reason: "too_large", message: "That change is more than one save from the editor can carry. Ask DGC to make it." });
+          return;
+        }
+        this.hub.ask({ type: "artifact_design_edit", id: this.id, edits }, {
+          ok: (ev) => { const next = artifactView(ev.artifact); if (next) { this.view = next; this.post({ type: "saved", artifact: next }); } this.load(); },
+          fail: (reason, text) => this.post({ type: "rejected", what: "save", reason, message: text }),
+        });
+        return;
+      }
+      case "designMeasured":
+        // How tall a whole-page artboard is at its width, as its frame measured it: remembered, never a version.
+        if (view?.type === "design" && BOARD_ID.test(String(message.board || "")) && Number.isSafeInteger(message.h) && message.h >= 100 && message.h <= 20000) {
+          this.hub.ask({ type: "artifact_design_edit", id: this.id, edits: [{ op: "measured", board: message.board, h: message.h }] }, { ok: () => undefined, fail: () => undefined });
+        }
+        return;
+      case "askChat":
+        if (view?.type === "design") this.hub.askInChat(view, message);
+        return;
       case "copyPageText":
         if (view?.type === "page" && this.servedUrl && this.servedFor === view.version) {
           try { this.post({ type: "copySource", html: await fetchPage(this.servedUrl) }); }
@@ -465,7 +513,8 @@ class ArtifactPanel {
       case "export":
         if (view && typeof message.format === "string") {
           void this.hub.exportArtifact(view, message.format, Number.isSafeInteger(message.version) ? message.version : undefined,
-                                       (m) => { this.post(m as Record<string, unknown>); return true; });
+                                       (m) => { this.post(m as Record<string, unknown>); return true; },
+                                       view.type === "design" && BOARD_ID.test(String(message.board || "")) ? String(message.board) : undefined);
         }
         return;
       case "browser": if (view) this.hub.openInBrowser(view); return;
@@ -825,12 +874,14 @@ export class Artifacts implements vscode.Disposable {
   /** Download a copy (src/download.ts): the process makes it, and its bytes go to `page`, the page it was asked from,
    *  which saves it on the person's computer (never a save dialog here: over a remote connection it would browse the
    *  remote machine). Asked from a command, with no page, the artifact's own panel opens and saves it. */
-  async exportArtifact(view: Pick<ArtifactView, "id" | "title" | "exports" | "type">, format: string, version?: number, page?: DownloadPage): Promise<void> {
-    const formats = view.exports?.length ? view.exports : this.offers()?.exports[view.type] ?? [];
+  async exportArtifact(view: Pick<ArtifactView, "id" | "title" | "exports" | "type">, format: string, version?: number, page?: DownloadPage,
+                       board?: string): Promise<void> {
+    // (One artboard of a design has formats the whole canvas doesn't: its picture.)
+    const formats = board ? this.offers()?.exports[view.type] ?? [] : view.exports?.length ? view.exports : this.offers()?.exports[view.type] ?? [];
     if (!formats.includes(format)) return;
-    const name = fileName(view.title, format);
+    let name = fileName(view.title, format);
     const made = new Promise<string>((resolve, reject) => {
-      this.ask({ type: "artifact_export", id: view.id, format, ...(version ? { version } : {}) }, {
+      this.ask({ type: "artifact_export", id: view.id, format, ...(version ? { version } : {}), ...(board ? { board } : {}) }, {
         ok: (ev) => resolve(String(ev.path || "")),
         fail: (_reason, message) => reject(new Error(message)),
       });
@@ -838,6 +889,8 @@ export class Artifacts implements vscode.Disposable {
     try {
       const path = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Preparing “${view.title}”…` }, () => made);
       if (!path) throw new Error("DGC said nothing about where it made the file.");
+      // (An artboard's file is named for it, as the process named it: "Landing - Phone.png".)
+      if (board) name = fileName(path.split(/[\\/]/).pop()!.replace(/\.[a-z0-9]{1,5}$/i, ""), format);
       if (!await downloadFile(page ?? this.ownPage(view), path, name)) throw new Error("the page that asked has closed");
     } catch (err: any) {
       void vscode.window.showWarningMessage(`“${view.title}” wasn't downloaded: ${String(err?.message || err)}`);
@@ -851,6 +904,23 @@ export class Artifacts implements vscode.Disposable {
     this.open(view.id, { type: view.type as ArtifactView["type"], title: view.title });
     const panel = this.panels.get(view.id);
     return panel ? (message) => { panel.post(message as Record<string, unknown>); return true; } : undefined;
+  }
+
+  /** Ask in chat about an artboard of a design (or part of one): every chat surface hears it, and the one the design
+   *  was made in (Work, a chat, a Pip's chat; Work when it was made elsewhere) puts a reference to it in its prompt
+   *  box. `text` is that reference in words, with the ids the model changes it by. */
+  askInChat(view: ArtifactView, raw: any): void {
+    const board = String(raw?.board || "");
+    if (view.type !== "design" || !BOARD_ID.test(board)) return;
+    const clean = (v: unknown, n: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, n) : "");
+    const title = clean(raw.title, 80) || board, tag = clean(raw.tag, 20).replace(/[^a-z0-9-]/g, ""), quote = clean(raw.quote, 160), path = clean(raw.path, 200);
+    const part = tag ? ` · its <${tag}>${quote ? ` “${quote}”` : ""}` : "";
+    const text = `[Artboard “${title}” of the design “${view.title}” (${view.id}, ${board}${path && tag ? `, ${path}` : ""})${part}] `;
+    const surface = typeof view.origin?.surface === "string" ? String(view.origin.surface) : "";
+    this.tell({ type: "artifactAsk", id: view.id, board, title, label: `${title} · ${view.title}`.slice(0, 120), text,
+                surface: surface === "chat" || surface === "pip" ? surface : "work",
+                chat: typeof view.origin?.chat === "string" ? view.origin.chat : "", pip: typeof view.origin?.pip === "string" ? view.origin.pip : "",
+                session: typeof view.origin?.session === "string" ? view.origin.session : "" });
   }
 
   /** Remove it from the artifacts, after asking: it goes to DGC's trash, so it can be put back. */
@@ -889,6 +959,7 @@ export class Artifacts implements vscode.Disposable {
       void vscode.window.showWarningMessage("A page can't be renamed here yet. Ask DGC to rename it.");
       return false;
     }
+    if (view.type === "design") return this.renameDesign(view);
     const typed = await vscode.window.showInputBox({
       title: `Rename “${view.title}”`, value: view.title, prompt: "Its new name",
       validateInput: (value: string) => !value.trim() ? "A name is needed." : value.trim().length > 200 ? "A name is at most 200 characters." : undefined,
@@ -907,6 +978,22 @@ export class Artifacts implements vscode.Disposable {
       this.ask({ type: "artifact_update", id: view.id, content, base_version: now.view.version, title, note: "Renamed" }, {
         ok: () => resolve(true),
         fail: (_reason, message) => resolve(refuse(message)),
+      });
+    });
+  }
+
+  /** A design renamed: its name only (its artboards stay as they are, each a file of the new version too). */
+  private async renameDesign(view: Pick<ArtifactView, "id" | "title">): Promise<boolean> {
+    const typed = await vscode.window.showInputBox({
+      title: `Rename “${view.title}”`, value: view.title, prompt: "Its new name",
+      validateInput: (value: string) => !value.trim() ? "A name is needed." : value.trim().length > 200 ? "A name is at most 200 characters." : undefined,
+    });
+    const title = String(typed ?? "").trim().slice(0, 200);
+    if (!title || title === view.title) return false;
+    return new Promise<boolean>((resolve) => {
+      this.ask({ type: "artifact_design_edit", id: view.id, edits: [{ op: "title", title }] }, {
+        ok: () => resolve(true),
+        fail: (_reason, message) => { void vscode.window.showWarningMessage(`“${view.title}” wasn't renamed: ${message}`); resolve(false); },
       });
     });
   }
@@ -988,7 +1075,7 @@ export class Artifacts implements vscode.Disposable {
     if (!pick) return;
     const n = (pick as any).n as number;
     const actions = [...(n !== view.version ? ["Restore this version", ...(this.offers()?.compare ? ["Compare with current"] : [])] : []),
-                     ...view.exports.map((f) => `Download as ${FORMAT_LABELS[f] || f}`)];
+                     ...view.exports.map((f) => `Download as ${FORMAT_LABELS[f] || f}`)];      // (a document's formats)
     const action = await vscode.window.showQuickPick(actions, { placeHolder: `Version ${n}` });
     if (!action) return;
     if (action === "Compare with current") {

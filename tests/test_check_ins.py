@@ -1,4 +1,4 @@
-"""Check-ins (his call, 18 Nov: "Build it in 0.52"; his idea, 14 Nov).
+"""Check-ins (decided 18 Nov: "Build it in 0.52"; an idea of 14 Nov).
 
 When the model starts a background command or a background sub-agent it says how long it expects (expect_minutes). Its
 end already wakes the chat. Past that time, or when it has printed nothing new (taken no new step) for 10 minutes, DGC
@@ -70,7 +70,7 @@ class Hub(unittest.TestCase):
         self.assertIn("nothing new for 10 min", batch.lines[0])
 
     def test_a_quiet_server_is_checked_in_on_once_not_every_five_minutes(self):
-        # (His 21 Nov session: an idle dev server woke the session every five minutes, hours after its turn ended,
+        # (The 21 Nov session: an idle dev server woke the session every five minutes, hours after its turn ended,
         # and the model said "no action needed" each time.)
         self.watch(5)
         self.out = 1

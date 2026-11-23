@@ -1,4 +1,4 @@
-// One header row for every page of the side bar (0.52, his words of 15 Nov: "make the work, chat and library match the
+// One header row for every page of the side bar (0.52, asked 15 Nov: "make the work, chat and library match the
 // Pip's style or vice versa"): the page's name at the left, ⋯ at the right, a line under it. Work, Chat, Library (in the
 // side bar and in its editor tab) and Pips all draw theirs with this, so the four cannot drift apart again: one font
 // size, weight and colour for the title, one height, one padding, one line (media/shared/pagehead.css). A classic

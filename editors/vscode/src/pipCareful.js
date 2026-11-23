@@ -113,7 +113,7 @@ export function asksEveryTime(summary) {
   return isPayment(summary) || (summary?.asks_because === 'maybe_payment' && summary?.asks_word === 'order');
 }
 
-/** Whether a held step's card offers Always allow (his call, 15 Nov: every card DGC can grant one for). A new site has
+/** Whether a held step's card offers Always allow (decided 15 Nov: every card DGC can grant one for). A new site has
  *  none (Allow adds the site for good) and neither has a login to save; every other card has: a form, a payment or an
  *  order, what it read from your apps going to one site or into its own Terminal, and the command that could delete
  *  everything in its Files (pip_computer.approve_always). */
@@ -191,7 +191,7 @@ export function pasteCode(box, event) {
 }
 
 /** A held request's answers, in its card's order: the ONE list that its card in the Pip's chat (src/pipsClient.js) and
- *  its notification in the computer view (src/pipComputerDrawer.js) both draw, so the two never differ (his call of
+ *  its notification in the computer view (src/pipComputerDrawer.js) both draw, so the two never differ (decided
  *  15 Nov: a login's notification offered only "Not now" while its chat card offered "Save login…" too).
  *  Each: `how` it is answered (code: its field's code, sent; login: the form that saves a login; review: what a payment sends, shown first, since a
  *  payment is never sent in one tap; send; always; reject), its `label`, and `done`, the quiet word once it is given. */

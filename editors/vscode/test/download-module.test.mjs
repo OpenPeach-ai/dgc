@@ -1,5 +1,5 @@
-// Download saves on the computer the editor runs on (his asks, 18 Nov: Download opened a folder picker of the machine
-// DGC runs on, where he wanted it saved on the computer his editor runs on, on all surfaces). ONE module, two halves: media/shared/download.js in every page (a Blob, an object URL and a hidden
+// Download saves on the computer the editor runs on (asked 18 Nov: Download opened a folder picker of the machine
+// DGC runs on, where it should be saved on the computer the editor runs on, on all surfaces). ONE module, two halves: media/shared/download.js in every page (a Blob, an object URL and a hidden
 // <a download> clicked, from the page itself, which runs in the editor's own window), and src/download.ts in the host
 // (the bytes handed to that page, never VS Code's save dialog, which over a remote connection browses the remote).
 // In real Chromium the download is caught and its file read back; the host half is bundled against a stub `vscode`.
@@ -408,7 +408,7 @@ test("a folder of notes is one .zip of their Markdown files, which unzips to the
 });
 
 test("every save dialog left in the extension is for a place in the project or on this machine, never a person's copy", () => {
-  // His call: every Download and Save a copy saves on the person's own computer. The dialog stays only where the place IS
+  // Decided: every Download and Save a copy saves on the person's own computer. The dialog stays only where the place IS
   // the project: Save to project….
   const src = here + "../src/";
   const found = [];

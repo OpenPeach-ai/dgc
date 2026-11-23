@@ -14,6 +14,8 @@
 .dgc-sheet[data-kind="code"] { --sheet-c: #475569; }      .dgc-sheet[data-kind="json"] { --sheet-c: #CA8A04; }
 .dgc-sheet[data-kind="zip"] { --sheet-c: #A16207; }         .dgc-sheet[data-kind="checklist"] { --sheet-c: #4D7C0F; }
 .dgc-sheet[data-kind="checklist"] { --sheet-h: 84; --sheet-s: 70%; }
+.dgc-sheet[data-kind="design"] { --sheet-c: #BE185D; }
+.dgc-sheet[data-kind="design"] { --sheet-h: 330; --sheet-s: 74%; }
 .dgc-sheet[data-kind="page"] { --sheet-h: 22; --sheet-s: 92%; }
 .dgc-sheet[data-kind="doc"] { --sheet-h: 213; --sheet-s: 91%; }
 .dgc-sheet[data-kind="slides"] { --sheet-h: 39; --sheet-s: 96%; }
@@ -87,6 +89,9 @@
 .dgc-sheet-page .tick { align-items: center; gap: 2px; }
 .dgc-sheet-page .tick .cb { flex: none; width: 3.5px; height: 3.5px; border-radius: 1px; box-sizing: border-box; border: .75px solid color-mix(in srgb, var(--sheet-ink) 82%, transparent); }
 .dgc-sheet-page .tick.on .cb { background: color-mix(in srgb, var(--sheet-ink) 82%, transparent); }
+/* a design: two artboards side by side, a wide one and a phone's */
+.dgc-sheet-page .boards { align-items: flex-start; gap: 2px; }
+.dgc-sheet-page .boards .wide { flex: 1.9 1 0; height: 58%; } .dgc-sheet-page .boards .tall { flex: 1 1 0; height: 92%; }
 /* a dashboard: two tiles and a chart's bars */
 .dgc-sheet-page .bars { flex: 1 1 auto; display: flex; align-items: flex-end; gap: 1.5px; padding: 2px; }
 .dgc-sheet-page .bars i { flex: 1 1 0; border-radius: 1px; background: linear-gradient(#fffffff0, #ffffff70); }

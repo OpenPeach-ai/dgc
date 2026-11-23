@@ -1,4 +1,4 @@
-"""Every widget is kept in the Library (his call 15 Nov: "every widget, automatically"). A dgc-ui card a Work session's
+"""Every widget is kept in the Library (decided 15 Nov: "every widget, automatically"). A dgc-ui card a Work session's
 or a Pip's reply draws becomes a Page of its own (as ChatDGC's widgets already do: artifact_index), drawn from its JSON,
 saying who made it; the same card drawn again in the same session or Pip is a new version of that Page, never a new
 item; nothing is deleted. HTML in a card's words is shown as words, never run."""

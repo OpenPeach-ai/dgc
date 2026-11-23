@@ -11,6 +11,8 @@ trash. A thread keeps the version it was made on and a place that survives later
   with the words picked;
 - a checklist (``item``): the item ("c3") and its title;
 - a page (``element``): the element (``path``, a CSS-ish path), the words picked and the heading over them (``near``);
+- a design (``artboard``): the artboard (``board``, "b2", and its title then) and, for part of it, the element
+  (``path``), the words picked and the heading over them, as a page's;
 - any of them (``whole``): the whole artifact.
 
 Each thread is read against the current version: ``found`` is "here", "moved" (a slide moved, rows were put above some
@@ -44,15 +46,18 @@ MAX_SUGGESTIONS = 40            # in one thread
 ANSWERING_FOR = timedelta(minutes=10)      # past this, a crashed answer no longer says "answering"
 # Where a comment on each kind of artifact can point.
 KINDS = {"doc": ("text", "whole"), "page": ("element", "whole"), "sheet": ("cells", "whole"),
-         "slides": ("slide", "whole"), "checklist": ("item", "whole"), "dashboard": ("whole",)}
+         "slides": ("slide", "whole"), "checklist": ("item", "whole"), "dashboard": ("whole",),
+         "design": ("artboard", "whole")}
 PLACE_WORDS = {"text": "words of it", "element": "part of the page", "cells": "its cells", "slide": "a slide",
-               "item": "one of its items", "whole": "the whole of it"}
+               "item": "one of its items", "artboard": "one of its artboards", "whole": "the whole of it"}
+BOARD = re.compile(r"b[1-9][0-9]{0,4}\Z")
 # A deck's fields, as the panel names them, and the words for each.
 FIELDS = {"title": "title", "subtitle": "subtitle", "bullets": "points", "left": "left column", "right": "right column",
           "quote": "quote", "table": "table", "notes": "speaker notes", "caption": "caption", "alt": "picture's description",
           "chart": "chart", "slide": "slide"}
 RANGE = re.compile(r"([A-Z]{1,3})([1-9][0-9]{0,6})(?::([A-Z]{1,3})([1-9][0-9]{0,6}))?\Z")
 ITEM = re.compile(r"c[1-9][0-9]{0,4}\Z")
+BOARDS = "_boards"              # a design read for its comments: its artboards' pages, by id
 THREAD_ID = re.compile(r"t_[a-f0-9]{12}\Z")
 SUGGESTION_ID = re.compile(r"s_[a-f0-9]{12}\Z")
 SUGGEST_TYPES = ("doc", "page")
@@ -146,7 +151,13 @@ def clean_anchor(type_: str, raw) -> dict:
             raise CommentError("Say which item, by its id (c1, c2, …).")
         out["item"] = item
         text("title")
-    elif kind == "element":
+    elif kind == "artboard":
+        board = raw.get("board")
+        if not isinstance(board, str) or not BOARD.fullmatch(board):
+            raise CommentError("Say which artboard, by its id (b1, b2, …).")
+        out["board"] = board
+        text("title")
+    if kind in ("element", "artboard"):
         path = raw.get("path")
         if path is not None and (not isinstance(path, str) or len(path) > MAX_PATH):
             raise CommentError("That part of the page is too deep to point at.")
@@ -430,6 +441,27 @@ def _locate_element(html: str, anchor: dict) -> dict:
     return {"found": "here", "where": where, "part": words[max(0, at - 300):at + len(q) + 300]}
 
 
+def _locate_artboard(content: dict, anchor: dict) -> dict:
+    """An artboard's anchor against the design now: the artboard by its id, and its picked words in its page."""
+    board = next((b for b in content.get("boards") or [] if b.get("id") == anchor["board"]), None)
+    if board is None:
+        return {"found": "changed", "where": f"The artboard “{_line(anchor.get('title') or anchor['board'], 80)}” it "
+                                              "pointed at was removed", "part": ""}
+    name = f"the artboard “{_line(board.get('title'), 80)}”"
+    near = anchor.get("near", "")
+    where = f"{name}, under “{_line(near, 120)}”" if near else name
+    html = (content.get(BOARDS) or {}).get(board["id"], "")
+    head = f"{board['id']} “{board.get('title')}” ({board.get('w')}×{board.get('h')})"
+    q = " ".join(str(anchor.get("quote") or "").split())
+    if not q:
+        return {"found": "here", "where": where, "part": head}
+    words = page_words(html)
+    at = words.find(q)
+    if at < 0:
+        return {"found": "changed", "where": f"The text it pointed at in {name} changed since", "part": head}
+    return {"found": "here", "where": where, "part": f"{head}: {words[max(0, at - 300):at + len(q) + 300]}"}
+
+
 def locate(type_: str, content, anchor: dict, *, label: str = "") -> dict:
     """Where a thread's anchor is in this version: {found: here|moved|changed, where: words, part: the text there now
     (for the model), and the place it moved to (range, slide) when it moved}."""
@@ -447,6 +479,8 @@ def locate(type_: str, content, anchor: dict, *, label: str = "") -> dict:
             return _locate_item(content, anchor)
         if kind == "element" and isinstance(content, str):
             return _locate_element(content, anchor)
+        if kind == "artboard" and isinstance(content, dict):
+            return _locate_artboard(content, anchor)
     except (KeyError, TypeError, ValueError, AttributeError):
         pass
     return {"found": "changed", "where": "What it pointed at changed since", "part": ""}
@@ -461,6 +495,9 @@ def current_content(aid: str, *, store: Store | None = None):
             return st.read_file(aid, art.entry or "index.html").decode("utf-8", "replace")
         except FileNotFoundError:
             return ""
+    if art.type == "design":
+        # Its index, with each drawn artboard's page beside it (a comment's words are looked for in its page).
+        return {**st.source(aid), BOARDS: service.design_boards(aid, store=st)}
     return st.source(aid)
 
 
@@ -524,6 +561,12 @@ def add(aid: str, anchor, text, *, by: str = "you", store: Store | None = None) 
             data = _store(store).source(aid)
             if not any(i.get("id") == clean["item"] for i in data.get("items") or []):
                 raise CommentError(f"This checklist has no item {clean['item']}.")
+        if clean["kind"] == "artboard":
+            data = _store(store).source(aid)
+            board = next((b for b in data.get("boards") or [] if b.get("id") == clean["board"]), None)
+            if board is None:
+                raise CommentError(f"This design has no artboard {clean['board']}.")
+            clean["title"] = str(board.get("title") or "")[:MAX_SHORT]      # (its name then, as DGC knows it)
         if len(threads) >= MAX_THREADS:
             raise CommentError(f"An artifact keeps {MAX_THREADS} comment threads at most. Delete resolved ones first.")
         thread = {"id": _id("t"), "anchor": clean, "version": art.version, "status": "open", "at": _now(),
@@ -704,6 +747,12 @@ def reanchor(aid: str, tid: str, *, replaced=(), store: Store | None = None) -> 
                     a.pop("quote", None)
         elif kind == "element" and found["found"] == "changed":
             a.pop("quote", None)
+        elif kind == "artboard":
+            board = next((b for b in content.get("boards") or [] if b.get("id") == a["board"]), None)
+            if board is not None:
+                a["title"] = str(board.get("title") or "")[:MAX_SHORT]
+                if found["found"] == "changed":
+                    a.pop("quote", None)
         elif kind == "item" and found["found"] == "here":
             item = next(i for i in content.get("items") or [] if i.get("id") == a["item"])
             a["title"] = str(item.get("title") or "")[:MAX_SHORT]

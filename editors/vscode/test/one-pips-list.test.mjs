@@ -1,4 +1,4 @@
-// One Pips (0.52, his calls of 13 Nov; Pips API 94): one list for every Pip, where the Pips page had Personal | Project
+// One Pips (0.52, decided 13 Nov; Pips API 94): one list for every Pip, where the Pips page had Personal | Project
 // tabs. "Should we have made them like only one? ... Single Pips section becomes much cleaner"; "the new latest message
 // pip should auto come on top, like it happens on messaging apps ... Except of Core Pip". From list_pips {scope: "all"}:
 // Core first, then the latest activity; a Pip whose new message arrives moves to the top at once, but the list holds

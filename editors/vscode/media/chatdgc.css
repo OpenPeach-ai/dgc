@@ -393,7 +393,7 @@ body.cd-blank .cd-fine { display: none; }
 .cd-model-chevron { flex: none; color: var(--faint); font-size: var(--t-sm); }
 /* Where ChatDGC's menus open and how big they are; how they look (surface, lift, rows, headings, motion) is the shared
    menu, media/shared/menu.css, the same as Work's and a Pip's. */
-/* Incognito (his pick, 9 Nov): a ghost and its word, like the tools beside it. The checkbox stays (focus, Space, the
+/* Incognito (picked 9 Nov): a ghost and its word, like the tools beside it. The checkbox stays (focus, Space, the
    screen reader's "checkbox, checked") but is drawn by the ghost, lit when on: a bare native box read as a white square. */
 .cd-toggle { position: relative; display: inline-flex; align-items: center; gap: 6px; height: var(--control); padding: 0 var(--sp-2);
   border-radius: var(--r-row); color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer;

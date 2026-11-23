@@ -617,7 +617,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # width, height, image, lanes}; the person's own tabs are never streamed (pip_id is required). get_your_browser_recent {}
 # (R): {links [{url, title, host, at}] (the newest three of the person's own tabs, never a lane), open, available,
 # reason, lanes [{pip_id, name, title, url}]}. get_your_browser's `yours` gains `error`, and `yours.tabs` / `lanes` [{pip_id, name, title, url}] are filled
-# while it runs. All local only. Also in 107 (his calls 18 Nov): where Google Chrome is needed, get_your_browser(_recent)
+# while it runs. All local only. Also in 107 (decided 18 Nov): where Google Chrome is needed, get_your_browser(_recent)
 # carry `install` {how password|terminal, state, error, line} and install_google_chrome {} (M) installs it through the
 # system's own password prompt (pkexec), one root step; `view` "window"|"tab" says how it opens here; with no screen
 # (Remote-SSH) Chrome runs headless and use_your_browser_view {own: true, op frame|input|go|back|forward|reload|new_tab|
@@ -5057,7 +5057,7 @@ class Backend:
                     self.em.emit("turn_end", turn_id=tid, reason=reason,
                                  token_estimate=est, final_message_id=final_message_id)
                     if reason == "completed":
-                        self._keep_cards()          # every widget the reply drew, in the Library (his call 15 Nov)
+                        self._keep_cards()          # every widget the reply drew, in the Library (decided 15 Nov)
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
                     self._flush_held_workspace_roots()
                     self._emit_context()
@@ -5651,7 +5651,7 @@ class Backend:
         return True
 
     def _save_think_later(self, command: str, request_id, revert, previous: str) -> None:
-        """A session's thinking level, saved in the background (his call, 16 Nov: a long session took ~2 s a step while
+        """A session's thinking level, saved in the background (decided 16 Nov: a long session took ~2 s a step while
         the slider waited). It applies and is answered at once; a save that fails puts the level back and says so.
         One save at a time: a newer change while one runs is saved by the next."""
         def run():
@@ -5728,7 +5728,7 @@ class Backend:
         self.ui.info(f"continuing the goal ({number} of {AUTO_RESUME_MAX})")
 
     def _maybe_continue_goal(self, failed: bool, cancelled: bool) -> bool:
-        """A goal as turns (12 Nov, his call): each cycle is a turn of its own, and when one ends with the goal
+        """A goal as turns (decided 12 Nov): each cycle is a turn of its own, and when one ends with the goal
         still running, DGC queues the next, after anything already queued (a message you queued runs first, as its
         own turn). Not after a turn that failed or was stopped (the goal is paused or being retried), not while a
         question to you is open (your answer comes first), and not while the backend is going down."""
@@ -9540,7 +9540,7 @@ class Backend:
 
         elif t in ("cancel", "interrupt"):
             self._stop_turn()
-            # His call (20 Nov): a manual Stop stops the turn's background helpers and commands too, said in one line;
+            # Decided 20 Nov: a manual Stop stops the turn's background helpers and commands too, said in one line;
             # the next prompt tells the model what stopped.
             stop_background = getattr(self.agent, "stop_background_by_user", None)
             stopped = stop_background() if callable(stop_background) else []

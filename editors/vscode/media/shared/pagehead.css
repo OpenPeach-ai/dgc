@@ -1,4 +1,4 @@
-/* One header row for every page of the side bar (media/shared/pagehead.js; 0.52, his words of 15 Nov: "make the work,
+/* One header row for every page of the side bar (media/shared/pagehead.js; 0.52, asked 15 Nov: "make the work,
    chat and library match the Pip's style or vice versa"): the page's name at the left, ⋯ at the right, a line under it.
    Work, Chat, Library (in the side bar and in its editor tab) and Pips all wear exactly this: one title (15 px, semibold,
    the strong text colour: quiet, never the accent), one 28 px ⋯ with the button family's 6 px corner, one height, one
@@ -8,7 +8,7 @@
   border: 0; border-bottom: 1px solid var(--hair); background: none; }
 /* The name never breaks inside a word: when the row is too short it ends in "…". Its box is its capitals, from their
    top to the baseline (text-box), so the row centres the status dot and ⋯ on the middle of the letters, not of a box
-   that also holds the space under the line (his note, 17 Nov: the dot and ⋯ sat under the middle of "Pips"). It clips
+   that also holds the space under the line (noted 17 Nov: the dot and ⋯ sat under the middle of "Pips"). It clips
    only sideways, for the "…": the descenders of "Pips" show under the trimmed box. */
 .dgc-pagehead > .dgc-pagehead-title { flex: 0 1 auto; min-width: 0; margin: 0; padding: 0; overflow-x: clip; overflow-y: visible; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; word-break: normal;
   color: var(--text-strong); font: var(--w-semi) 15px/1.3 var(--sans); letter-spacing: 0; text-transform: none; text-box: trim-both cap alphabetic; }

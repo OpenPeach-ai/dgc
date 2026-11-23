@@ -1579,7 +1579,7 @@ EVENT_FIELDS["models_at"] = {"request_id": _S(), "role": _f("string", enum=LIST_
                              "ids": _A(), "api_mode": _S(False), "error": _S(False)}
 
 # ---- the largest window a model at a host takes (0.52) --------------------------------------------
-# The model picker's Sub-agents page offers only the context sizes a model takes (his call, 17 Nov: "for a model
+# The model picker's Sub-agents page offers only the context sizes a model takes (decided 17 Nov: "for a model
 # whose max is 256k, we do not show 1M"). The editor names the model and its connection's address as for
 # list_models_at (the same roles, and a saved key only to the host it is bound to; `api_key` a key the editor holds for
 # that address, never kept). The answer is one `model_window`: `window`, the most tokens the model takes as DGC's
@@ -1596,7 +1596,7 @@ EVENT_FIELDS["model_window"] = {"request_id": _S(), "role": _f("string", enum=LI
                                 "model": _S(), "window": _I(), "error": _S(False)}
 
 # ---- a helper on one of the user's saved connections, by their words (0.52) ---------------------------------------
-# His call (17 Nov): "For the UI work, use the GLM 5 flash model on my ollama cloud". The editor names the user's saved
+# Decided 17 Nov: "For the UI work, use the GLM 5 flash model on my ollama cloud". The editor names the user's saved
 # connections, never their keys: set_helper_connections {connections: [{id, name, host, kind}]}, kind "api" or "cli"
 # (a CLI runs its own tools and is never a helper's connection); at most 30, sent when a session starts and when they
 # change. DGC then offers `task` a `connection`. When a helper starts on one, DGC asks for that one connection's route:
@@ -1957,7 +1957,7 @@ EVENT_FIELDS.update({
 # itself, whichever chat sends it, because an artifact belongs to the account, not to a folder. An artifact as these
 # events carry it is artifact_service.view(): {id, type, label, title, version, created, updated, origin, exports,
 # link?, canvas?, versions?: [{n, author, at, summary, size}]}.
-ARTIFACT_TYPES = ("page", "doc", "slides", "sheet", "dashboard", "checklist")
+ARTIFACT_TYPES = ("page", "doc", "slides", "sheet", "dashboard", "checklist", "design")
 # The Output chip: what the next reply should make. "auto" (or leaving it out) lets the model choose, as before.
 ARTIFACT_OUTPUTS = ("auto", "document", "slides", "spreadsheet", "page", "dashboard")
 ARTIFACT_OPS = ("made", "changed", "restored", "removed", "refreshed")
@@ -1975,7 +1975,12 @@ COMMAND_FIELDS.update({
     "artifact_restore": {"request_id": _S(), "id": _S(), "version": _I()},
     # Compare saved versions without changing either; gated by capabilities.artifacts.compare.
     "artifact_compare": {"request_id": _S(), "id": _S(), "before": _I(), "after": _I(False)},
-    "artifact_export": {"request_id": _S(), "id": _S(), "format": _S(), "version": _I(False)},
+    # `board` (offered as ready.capabilities.artifacts.designs): one artboard of a design, by its id.
+    "artifact_export": {"request_id": _S(), "id": _S(), "format": _S(), "version": _I(False), "board": _S(False)},
+    # A design (ready.capabilities.artifacts.designs): the person's own change in its canvas, as ops ([{op: move, board,
+    # x, y}, {op: change, board, html, rev}, …], dgc/artifact_design), one version by "you"; answered by artifact_changed.
+    # An op that changes an artboard which moved on since (`rev`) is command_rejected with reason "conflict".
+    "artifact_design_edit": {"request_id": _S(), "id": _S(), "edits": _A(), "note": _S(False)},
     # Show it in the browser at an address of its own: answered by artifact_served.
     # `mode` "present" (offered as ready.capabilities.artifacts.present): a deck's present mode, at its own address.
     "artifact_open": {"request_id": _S(), "id": _S(), "mode": _f("string", required=False, enum=("view", "present"))},
@@ -2001,8 +2006,8 @@ EVENT_FIELDS.update({
 })
 
 # Comments on an artifact (dgc/artifact_comments), offered as ready.capabilities.artifacts.comments: you point at part of
-# it (`anchor`: {kind: text|cells|slide|item|element|whole, quote?, …}: a doc's words and the words around them, a sheet's
-# cells, a deck's slide and field, a checklist's item, a page's element) and say something. `ask` (or
+# it (`anchor`: {kind: text|cells|slide|item|element|artboard|whole, quote?, …}: a doc's words and the words around them,
+# a sheet's cells, a deck's slide and field, a checklist's item, a page's element, a design's artboard) and say something. `ask` (or
 # artifact_comment_ask later) has DGC answer in the thread, change the artifact and say so there, or offer wording as
 # suggestions, which artifact_suggestion_accept makes a new version and artifact_suggestion_reject leaves. Every command
 # is answered by artifact_comments, the artifact's threads now; the same event, with no request_id, tells every screen

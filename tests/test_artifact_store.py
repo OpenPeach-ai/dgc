@@ -132,7 +132,7 @@ class StoreTest(unittest.TestCase):
 
     def test_ids_and_types_are_checked(self):
         with self.assertRaises(ArtifactError):
-            self.store.create("design", "X", {}, origin={"surface": "chat"})
+            self.store.create("sculpture", "X", {}, origin={"surface": "chat"})
         with self.assertRaises(ArtifactError):
             self.store.create("doc", "X", "x", origin={"surface": "somewhere"})
         with self.assertRaises(ArtifactError):

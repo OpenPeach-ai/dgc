@@ -174,7 +174,7 @@ def commit(store, run, result):
         run_id=run['id'], payload={'proposal_id': saved['id'], 'approval_id': saved['approval_id']})
     from .pip_levels import at_full
     if at_full(store.registry, job['id']):
-        # At Do it all, asked in its chat instead of a card (his call, 18 Nov): only the user's own next message says
+        # At Do it all, asked in its chat instead of a card (decided 18 Nov): only the user's own next message says
         # yes, never a routine's turn. The words are DGC's own summary of the change, not the model's.
         from .pip_holds import ask
         ask(store.registry, job['id'], 'approval', saved['id'], run_id=run['id'], version=version,

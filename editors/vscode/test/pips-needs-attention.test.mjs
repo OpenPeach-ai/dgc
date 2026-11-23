@@ -87,7 +87,7 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
  assert.equal(section.querySelector('.attention-head svg, .attention-head .codicon, .attention-fold'),null,'no chevron on the heading');
  assert.deepEqual([section.querySelector('.attention-toggle').textContent,section.querySelector('.attention-toggle').getAttribute('aria-label'),section.querySelector('.attention-toggle').id,section.querySelector('.attention-toggle').getAttribute('aria-controls')],['Hide','Hide the cards that need your attention','attention-toggle','attention-list']);
  assert.equal(section.querySelector('.attention-head').lastElementChild,section.querySelector('.attention-toggle'),'the last thing on the heading\'s line');
- // Open when something is in it (his call, 11 Nov; it started folded).
+ // Open when something is in it (decided 11 Nov; it started folded).
  assert.equal(section.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true','the list starts open');
  // One card in view; Next shows the one after it, newest first.
  const rows=[];for(let i=0;i<3;i++){const shown=x.d.querySelectorAll('.attention [data-attention]');assert.equal(shown.length,1,'one card in view');rows.push(shown[0].textContent);if(i<2)x.click('#attention-next');}
@@ -114,7 +114,7 @@ test('dismissing a proposed Pip checks its fresh digest, rejects it, then remove
  const x=setup({found,proposal});await x.drain();
  assert.equal(x.d.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true');
  assert.equal(x.requests('reject_pip_setup').length,0);
- // Reject is held a moment so it can be undone (his call, 11 Nov): the card goes at once, the reject is sent after.
+ // Reject is held a moment so it can be undone (decided 11 Nov): the card goes at once, the reject is sent after.
  const held=[],later=x.w.setTimeout.bind(x.w);x.w.setTimeout=(fn,ms,...a)=>ms===6000?(held.push(fn),900000+held.length):later(fn,ms,...a);
  x.click(`[data-attention-dismiss="setup:${SETUP}"]`);await x.drain();
  assert.equal(x.requests('reject_pip_setup').length,0,'not sent yet');
@@ -256,7 +256,7 @@ test('a Personal Pip’s waiting reviews come beside the cards: newest first, ea
 });
 
 // Needs attention opens when something is in it; folded by you, it stays folded until something new arrives, and an
-// Undo takes a held Reject back (his calls, 11 Nov).
+// Undo takes a held Reject back (decided 11 Nov).
 test('folded by you, Needs attention stays folded until something new comes in',async()=>{
  const one=item('app_link',LINK,PIP,'Connect Gmail?',{created_at:ago(5)}),two=item('email',DRAFT,MAX,'Send this email?',{created_at:ago(1)});
  const x=setup({found:page([one])});await x.drain();

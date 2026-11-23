@@ -1,4 +1,4 @@
-"""A Pip's sub-agent with Work tools (0.52, his calls of 14 Nov).
+"""A Pip's sub-agent with Work tools (0.52, decided 14 Nov).
 
 For a fix its copy can't do (it needs what Git ignores, like .env, or a service to run), a Pip hands the job to a
 sub-agent that is a real Work run on the REAL project folder: a ``dgc -p --output-format json --mode auto`` child the

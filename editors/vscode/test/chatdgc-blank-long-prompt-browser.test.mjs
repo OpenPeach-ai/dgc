@@ -1,4 +1,4 @@
-// A new chat with a long prompt pasted (17 Nov, his report: "the prompt box goes down and cut from bottom, no way to
+// A new chat with a long prompt pasted (17 Nov, reported: "the prompt box goes down and cut from bottom, no way to
 // then see or access the prompt box"). The welcome and the box share a new chat's page; the box must always be whole
 // and reachable, its buttons inside the window, however long the prompt, from a tall editor to a short one. In real
 // Chromium, on ChatDGC's own page.

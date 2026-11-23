@@ -1,4 +1,4 @@
-"""His call, 18 Nov: a Pip's helpers' model by the user's words, as Work's helpers have (ad5ea1a7).
+"""Decided 18 Nov: a Pip's helpers' model by the user's words, as Work's helpers have (ad5ea1a7).
 
 "Fix it with GLM 5 flash on my Ollama Cloud" in a Pip's chat sets what its helpers run on: the same setting as its
 Sub-agents tab (its fixes, and the helpers inside its runs). Only from the user's own message, and only on one of their

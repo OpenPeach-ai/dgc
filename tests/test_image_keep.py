@@ -1,4 +1,4 @@
-"""The Library's Images (0.52; his calls 15 Nov): every image from Work, ChatDGC and Pips says who made it, and the model
+"""The Library's Images (0.52; decided 15 Nov): every image from Work, ChatDGC and Pips says who made it, and the model
 can keep an image on purpose with ONE module (dgc.image_keep) every surface reaches: Work's keep_image tool (a picture
 in the project, or an https image), ChatDGC's and a Pip's (an https image; a Pip's read by the controller under careful
 mode). Kept images sit beside the generated ones in the images index, marked kept, with their title and why."""

@@ -1,4 +1,4 @@
-"""Archive for Work sessions (his call, 13 Nov): archiving moves the session out of the way and Restore
+"""Archive for Work sessions (decided 13 Nov): archiving moves the session out of the way and Restore
 brings it back as it was.
 
 Codex moves an archived thread's file into an archived folder and back (codex-rs thread-store archive_thread.rs,

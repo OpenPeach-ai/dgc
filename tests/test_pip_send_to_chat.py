@@ -1,4 +1,4 @@
-"""A Pip sends pictures, videos and files in its chat, like a person (his ask, 15 Nov: "Pip should have capability to
+"""A Pip sends pictures, videos and files in its chat, like a person (asked 15 Nov: "Pip should have capability to
 show images, or videos or such files in the chat itself, like it happens in regular chat between 2 people"; finding 59).
 
 Before: a reply carried only the pictures it generated, the videos it started and a long reply's document; a file it

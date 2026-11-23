@@ -1,4 +1,4 @@
-// A held request offers the same answers wherever it is shown (his call of 15 Nov, from a live test: "Save a login for
+// A held request offers the same answers wherever it is shown (decided 15 Nov, from a live test: "Save a login for
 // cloudflare.com so Test can sign in itself?" offered "Save login…" and "Not now" in the Pip's chat, and only "Not now"
 // in its computer's notifications): "the cards clickable options needs to come same as on the notification bar on the
 // personal computer." One list (src/pipCareful.js heldRequestAnswers) is what the chat's card and the computer's notification

@@ -1,5 +1,5 @@
-// Download: a copy of a file saved on the computer the editor runs on (his asks, 18 Nov: Download opened a folder picker
-// of the machine DGC runs on, where he wanted it simply saved on the computer his editor runs on, and the same on all
+// Download: a copy of a file saved on the computer the editor runs on (asked 18 Nov: Download opened a folder picker
+// of the machine DGC runs on, where it should simply be saved on the computer the editor runs on, and the same on all
 // surfaces). Every Download and Save a copy in DGC comes here: a chat's pictures and files (Work,
 // ChatDGC, a Pip's chat), the Library, output and artifact cards, videos, Home's cards, a Pip's computer files and
 // Notes' export.

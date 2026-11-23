@@ -422,7 +422,7 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
                          [("Ran create_record in Airtable", "full", "app", True)])
         self.assertEqual(len(pip_levels.outward(self.registry, self.pip["id"])), 1, "the fuse counts it")
         # A plugin that can move money still asks at Do it all, and so does one set to Always ask: in the chat, never a
-        # card (his rule, 17 Nov; dgc/pip_holds.py, tests/test_pip_holds.py).
+        # card (the rule, 17 Nov; dgc/pip_holds.py, tests/test_pip_holds.py).
         self.assertIn("WAITING FOR THE USER", self.use("call_plugin", session, plugin="aave", tool="create_record", arguments={}))
         # Unless you let this Pip at Do it all pay: then it runs, and counts against its day (pip_payments; changed on
         # purpose 13 Nov: it was "today's three").
@@ -671,7 +671,7 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         _, money = self.offer("aave", "create_record", {"amount": "1"})
         paid = self.accept(self.propose(money, key="aave"))
         self.assertEqual(paid["status"], "succeeded", "Allow works for a payment plugin")
-        # His call 15 Nov: Always allow on every card. A payment plugin's grant runs only inside the dollar limit
+        # Decided 15 Nov: Always allow on every card. A payment plugin's grant runs only inside the dollar limit
         # (dispatch_for_run / check); an app asking for one in a template is still refused (test_dgc_sdk_pip_templates).
         money_grant = grants.grant_from_action(self.store, paid["id"], paid["digest"], "editor-user")
         self.assertEqual((money_grant["server"], money_grant["tool"]), ("aave", "create_record"))
@@ -786,7 +786,7 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         self.assertEqual(pip_plugins.cleaned(fake, self.cfg), fake)
 
     def test_always_allow_on_a_payment_plugin_is_refused_only_in_an_apps_template(self):
-        # From its card it is allowed now (his call 15 Nov); require_can_always still refuses money when an app asks
+        # From its card it is allowed now (decided 15 Nov); require_can_always still refuses money when an app asks
         # for standing permission (not a card).
         _, money = self.offer("aave", "create_record", {"amount": "1"})
         action = self.propose(money)

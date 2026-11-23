@@ -1,4 +1,4 @@
-"""pc-vscode-terminal, the terminal half (his list of 9 Nov): "a modern terminal in place of xterm".
+"""pc-vscode-terminal, the terminal half (the list of 9 Nov): "a modern terminal in place of xterm".
 
 A Pip's desktop opens lxterminal (GTK 3, so it wears the desktop's dark theme; no session bus needed, unlike GNOME's)
 when the machine or DGC's own download has it, with xterm's colours, size and folder; xterm stays the fallback, so a

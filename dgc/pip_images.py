@@ -149,7 +149,7 @@ class Session:
         except image_tools.Refused as exc:
             return f"error: {exc}"
         if plan.asks and not (plan.over_limit or plan.unpriced):
-            # Do it all: a paid picture is made at once, in its chat and in a routine (his call, 17 Nov: "for images
+            # Do it all: a paid picture is made at once, in its chat and in a routine (decided 17 Nov: "for images
             # and videos, drop all limits"); what it cost is in the result. A monthly limit the user set still asks.
             from .pip_levels import does_it_all
             if does_it_all(self.directory, self.pip_id):

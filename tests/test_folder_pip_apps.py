@@ -1,6 +1,6 @@
 """Every Pip has its own box, step 2b: a folder Pip's chat gets the user's apps, plugins and the web (0.52).
 
-His words (13 Nov): "it gets folder access, read and write, web and apps, and personal computer, it gets all". A
+Asked (13 Nov): "it gets folder access, read and write, web and apps, and personal computer, it gets all". A
 folder Pip with its own box has, in its chat, what a Personal Pip's chat has for the outside world: its apps through
 DGC (Composio and the user's DGC plugins; keys stay in DGC), web_search, images and video, its own keys, borrowing the
 user's Chrome when allowed; and its level said to it. What crosses the wall follows its level, as for a Personal Pip.

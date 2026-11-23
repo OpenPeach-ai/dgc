@@ -1,4 +1,4 @@
-// The dock's new-message dot (0.52, his words of 15 Nov: "on the tabs we have docked or pinned sessions, if they have
+// The dock's new-message dot (0.52, asked 15 Nov: "on the tabs we have docked or pinned sessions, if they have
 // a new message, should we show like a new message dot on the right of the docked icon box of that session? … just a
 // purple dot?"). A docked session, chat or Pip with a new message you haven't read shows a small purple dot at its
 // tile's TOP-RIGHT corner, where the waiting count sits; never a number. The "waiting for your okay" count wins the

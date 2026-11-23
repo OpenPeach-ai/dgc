@@ -22,7 +22,7 @@
 .md-link[data-link-source="web"]::before         { content: "\eb01"; }  /* globe: the catch-all */
 
 /* Every external link wears the site's own favicon -- one the user typed and one an answer wrote
-   alike, as the maintainers asked. When the image cannot load, the page puts the bundled mark back
+   alike, as decided. When the image cannot load, the page puts the bundled mark back
    (see data-link-fallback); the two are mutually exclusive by construction, because a link that
    carries a favicon has no data-link-source for the rule above to match.
    Sized to the text rather than to a fixed pixel count, so the mark keeps its proportion when the

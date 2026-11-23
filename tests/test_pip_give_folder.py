@@ -1,4 +1,4 @@
-"""Give a Pip a folder later, and Remove its folder (his call 14 Nov, for 0.52: "yes, makes sense, lets do it").
+"""Give a Pip a folder later, and Remove its folder (decided 14 Nov, for 0.52: "yes, makes sense, lets do it").
 
 A Pip made without a folder (a Pip for anything) becomes a folder Pip for the folder you give it; Remove its folder makes
 a folder Pip a Pip for anything again. Either way it keeps its chat, notes, routines, computer (its Files), level, model,

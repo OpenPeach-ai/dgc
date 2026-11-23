@@ -34,7 +34,7 @@ class SimpleStartTests(unittest.TestCase):
         self.assertEqual(blank["goal"], pips.NAMED_GOAL)
 
     def test_a_project_pip_also_needs_only_a_name(self):
-        # Reversed 13 Nov (his call, "we don't want user to define the goal while creating a Pip"): a Pip in a project
+        # Reversed 13 Nov (decided, "we don't want user to define the goal while creating a Pip"): a Pip in a project
         # folder is named, then set up by talking to it, as a Personal Pip is.
         pip = self.store.create(self.workspace["id"], "Reviewer", None, "editor-user", pip_type="rook")
         self.assertEqual(pip["goal"], pips.NAMED_GOAL)
@@ -162,7 +162,7 @@ class SimpleStartTests(unittest.TestCase):
         return (prompt if isinstance(prompt, str) else json.dumps(prompt)), tools
 
     def test_a_folder_pip_chats_the_way_a_personal_pip_does(self):
-        # 13 Nov, his call: "all pips now should chat the same style, as personal pip does".
+        # decided 13 Nov: "all pips now should chat the same style, as personal pip does".
         self.commit()
         pip = self.store.create(self.workspace["id"], "Reviewer", "Review the code", "editor-user", pip_type="rook")
         prompt, tools = self.folder_chat(pip)

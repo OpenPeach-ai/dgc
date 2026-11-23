@@ -33,7 +33,7 @@ after(async () => { await browser?.close(); });
 
 /** The first width that shows words; one pixel less shows icons. */
 const WORDS_FROM = 280;      // (240 with four tabs; 280 with Library, the fifth; 292 while Library wore his books before its word; 280 again now it does not. Measured: the names fit from 258.)
-// (His call of 15 Nov, later the same day: "the header tabs don't need to show icon for library, only Pips tab shows
+// (Decided 15 Nov, later the same day: "the header tabs don't need to show icon for library, only Pips tab shows
 // Core's face, not any other tab." Library is a word like Home, Work and Chat, and in icon mode a plain line icon of
 // their family, the codicon "library": never his coloured Iris books, which stay on Home's Library button and the
 // editor Library panel's tab: library-iris-browser.test.mjs.)

@@ -254,7 +254,7 @@ export function waitingCardMarkup(w, {esc = escape, now = Date.now(), off = fals
     + `<button type="button" class="dgc-btn text" data-flow-waiting-answer="not_a_problem" data-flow-waiting-id="${id}"${hold}>Not a problem</button></div></section>`;
 }
 
-// ---- The reports page as a table (his words, 13 Nov: "a proper table there ... columns for date maybe, clickable
+// ---- The reports page as a table (asked 13 Nov: "a proper table there ... columns for date maybe, clickable
 // file ... which model ran that") ----
 // When · What (the run's title) · Files (each opens in an editor tab at its line) · Model · Time and tokens · Findings.
 // Sortable by When. In a narrow view it stacks into rows: what and when on the first line, files and model under it

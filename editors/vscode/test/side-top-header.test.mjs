@@ -48,7 +48,7 @@ for (const width of [240, 300, 700]) {
       const h = await headNow(x.page);
       assert.equal(h.shown, true, "the side bar has its header row");
       assert.ok(h.box.top < 1, "it is the first thing in the side bar");
-      assert.equal(h.word, "DGCVIBE", "the wordmark, then the product's name (VIBE, his call 18 Nov)");
+      assert.equal(h.word, "DGCVIBE", "the wordmark, then the product's name (VIBE, decided 18 Nov)");
       assert.ok(h.mark.left >= 11.5, `it starts at the side bar's 12 px gutter (${h.mark.left})`);
       assert.equal(h.markColour, h.accent, "the mark is in DGC's accent");
       assert.deepEqual(h.slashes.map(([name]) => name), ["brand-slash-pulse", "brand-slash-pulse", "brand-slash-pulse"], "its three slashes breathe");

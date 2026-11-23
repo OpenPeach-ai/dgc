@@ -358,7 +358,7 @@ for (const motion of ["reduce", "no-preference"]) {
       assert.deepEqual([m.expanded, m.focus, m.menu.role, m.popup], ["true", GARDEN, "menu", "menu"], "Down opens it with the keyboard on the chosen row");
       await x.page.keyboard.press("ArrowDown"); assert.equal((await lookNow(x.page, "library")).focus, "/home/me/clients/northwind-traders/2026/storefront-redesign/packages/checkout-service");
       await x.page.keyboard.press("ArrowUp"); await x.page.keyboard.press("ArrowUp"); assert.equal((await lookNow(x.page, "library")).focus, "/home/me/code/shop");
-      // (For a few hours on 14 Nov the menu's first line was "Pin <folder> to the dock"; he asked for it out the same
+      // (For a few hours on 14 Nov the menu's first line was "Pin <folder> to the dock"; it was asked out the same
       // day: All projects is the first row again, and no line pins the chosen folder.)
       assert.equal(await x.page.locator(".dgc-folder-menu [data-folder-pin-line]").count(), 0, "no line that pins the chosen folder");
       await x.page.keyboard.press("Home"); assert.equal((await lookNow(x.page, "library")).focus, "", "Home: the first row, All projects");

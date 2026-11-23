@@ -134,7 +134,7 @@ class Card(AgentCase):
         self.assertEqual(self.fake.requests, [])
 
     def test_auto_videos_start_without_a_card(self):
-        # His call (17 Nov): auto mode never shows an approval card; images and videos have no limits there.
+        # Decided 17 Nov: auto mode never shows an approval card; images and videos have no limits there.
         from dgc import auto_holds                       # DGC's own editor on the wire (auto_holds.py)
         auto_holds.set_editor(True)
         self.addCleanup(auto_holds.set_editor, False)

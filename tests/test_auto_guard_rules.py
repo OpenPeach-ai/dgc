@@ -1,4 +1,4 @@
-"""Auto mode's safety check, the rules (dgc/auto_guard.py; his call, 17 Nov: risky steps stopped before they run, ONE
+"""Auto mode's safety check, the rules (dgc/auto_guard.py; decided 17 Nov: risky steps stopped before they run, ONE
 card after 3 in a row).
 
 In Work's auto mode a routine step runs with no card and no question. A risky one is stopped before it runs: writing
@@ -248,7 +248,7 @@ class SystemChanges(Base):
 
 
 class FromClaudeCodesList(Base):
-    """More risky kinds, from Claude Code's auto mode list (his call, 20 Nov)."""
+    """More risky kinds, from Claude Code's auto mode list (decided 20 Nov)."""
 
     def test_they_are_stopped(self):
         for command, kind in (("terraform destroy -auto-approve", DESTRUCTIVE), ("pulumi destroy --yes", DESTRUCTIVE),
@@ -277,7 +277,7 @@ class FromClaudeCodesList(Base):
 
 
 class ProtectedFiles(Base):
-    """Files in the project that run code or hold settings and keys are checked even inside it (his call, 20 Nov, as
+    """Files in the project that run code or hold settings and keys are checked even inside it (decided 20 Nov, as
     Claude Code does): git's own folder, the editor's and the dev container's settings, hooks, plugin servers, npm's
     keys, DGC's and Claude Code's project settings."""
 

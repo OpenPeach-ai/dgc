@@ -208,7 +208,7 @@ test("Remove asks first, says it goes to DGC's trash and can be recovered, and o
   assert.equal(await removing, true);
 });
 
-// His ask (18 Nov): Download saves on the computer the editor runs on, in any window. The process makes the file and its
+// Asked 18 Nov: Download saves on the computer the editor runs on, in any window. The process makes the file and its
 // bytes go to the page that asked, which saves it there (src/download.ts, media/shared/download.js): never a save dialog,
 // which in a remote window browses the remote machine. Asked with no page (a command), the artifact's own panel saves it.
 test("Download, in any window: no save dialog; the process makes it and its bytes go to the page that asked", async () => {

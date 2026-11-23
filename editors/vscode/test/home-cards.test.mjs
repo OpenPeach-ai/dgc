@@ -106,7 +106,7 @@ test("a Small card opens to its full form over Home, and Back or Escape returns 
     assert.ok(near(g.open.width, 300 - 24, 2), "the full form has the side bar's width");
     assert.equal(await p.locator("#side-tabs").isVisible(), true, "the tabs stay"); assert.equal(await p.locator("#dgc-dock").isVisible(), true, "and the dock");
     const full = await p.evaluate(() => { const c = document.querySelector(".hc-open .hc-card"); return { cols: c.querySelectorAll(".hc-plot .hc-col").length, tabs: [...c.querySelectorAll('[role="tab"]')].map((b) => b.dataset.metric), ranges: [...c.querySelectorAll(".hc-seg button")].map((b) => b.textContent), models: [...c.querySelectorAll(".hc-by .hc-mn")].map((n) => n.textContent) }; });
-    assert.deepEqual(full, { cols: 7, tabs: ["tokens", "requests", "cache"], ranges: [], models: ["deepseek-v4.1-flash:cloud · Ollama", "claude-opus-4.1 · Claude Code", "qwen3.5-coder:32b · Ollama", "qwen3:8b · Ollama", "gpt-5.1-codex · Codex"] }, "everything the card does is here at 300 px: the last 7 days, every tab, no range to choose (his call, 17 Nov), and the models with their providers");
+    assert.deepEqual(full, { cols: 7, tabs: ["tokens", "requests", "cache"], ranges: [], models: ["deepseek-v4.1-flash:cloud · Ollama", "claude-opus-4.1 · Claude Code", "qwen3.5-coder:32b · Ollama", "qwen3:8b · Ollama", "gpt-5.1-codex · Codex"] }, "everything the card does is here at 300 px: the last 7 days, every tab, no range to choose (decided 17 Nov), and the models with their providers");
     await p.click("#home-hub .hc-back"); await x.rest(300);
     g = await x.grid();
     assert.equal(g.open, null); assert.equal(g.shown, true); assert.equal(g.focus, "token", "the keyboard is back on the card that was opened");
@@ -154,7 +154,7 @@ for (const width of [300, 700]) {
         assert.equal(i.on, DEFAULT.includes(i.id), `${i.id}: On Home or not`);
         assert.equal(i.add, !DEFAULT.includes(i.id)); assert.equal(i.remove, DEFAULT.includes(i.id));
       }
-      // (Until 13 Nov evening each card wore a mosaic of its own here; his call: twelve cards need no icon each.)
+      // (Until 13 Nov evening each card wore a mosaic of its own here; decided: twelve cards need no icon each.)
       assert.deepEqual(g.library.items.map((i) => i.mosaics), Array(14).fill(0), "a card in the library has no icon of its own: its preview, its name and one line");
       assert.ok(g.library.title.length === 1 && g.library.title[0].includes("mosaic--ember"), "the Ember mosaic is the Cards button's and the pop-up's title's only");
       assert.deepEqual(g.library.foot, ["Arrange Home", "Reset Home"]);
@@ -293,7 +293,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
     const x = await openGrid(browser, { width, theme, layout: EVERY, settings: SETTINGS, notes: NOTES, news: NEWS, height: 1400 });
     try {
       const g = await x.grid(), text = (id) => card(g, id).text, form = (id) => card(g, id).form;
-      // Token usage: the last 7 days at every size, never compared with another week (his call, 17 Nov). Small: the week's
+      // Token usage: the last 7 days at every size, never compared with another week (decided 17 Nov). Small: the week's
       // tokens and them in two; Medium and Large: the three counts, each with what it is made of.
       const week = usageDays().slice(-7), sum = (f) => week.reduce((a, d) => a + d[f], 0), M = (n) => `${(n / 1e6).toFixed(2)}M`;
       const split = `In ${M(sum("input_tokens"))} · Out ${M(sum("output_tokens"))}`;

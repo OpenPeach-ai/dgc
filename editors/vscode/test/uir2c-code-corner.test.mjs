@@ -1,4 +1,4 @@
-// Inline code's corner (his call, 16 Nov: 4 px): one token, --r-code, on every inline code chip on every surface. A
+// Inline code's corner (decided 16 Nov: 4 px): one token, --r-code, on every inline code chip on every surface. A
 // fenced block keeps its own corner. In real Chromium on Work, ChatDGC and a Pip's chat, and over every stylesheet.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";

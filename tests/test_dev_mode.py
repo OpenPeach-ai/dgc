@@ -258,7 +258,7 @@ class ConfigEventTests(unittest.TestCase):
 
 
 class DevModeToolsSwitchTests(unittest.TestCase):
-    """"Let DGC change Dev Mode settings" (his call, 14 Nov): only the user sets it, from Settings › Dev Mode; the
+    """"Let DGC change Dev Mode settings" (decided 14 Nov): only the user sets it, from Settings › Dev Mode; the
     settings tool reads it (dgc/settings_tool.dev_limit). The editor shows the switch only to a DGC that offers it."""
 
     def test_settings_take_the_switch_as_a_true_or_false(self):

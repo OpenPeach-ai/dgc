@@ -1,6 +1,6 @@
 """Every Pip gets everything, in its own box: step 1, a folder Pip's chat gets its box and a copy of its folder (0.52).
 
-His words (13 Nov): "is there an issue if every pip gets everything? and decides itself what all to use? ... it gets
+Asked (13 Nov): "is there an issue if every pip gets everything? and decides itself what all to use? ... it gets
 folder access, read and write, web and apps, and personal computer, it gets all"; then "web apps and plugins and
 personal computer of each pip, works inside a separate sandbox environment".
 

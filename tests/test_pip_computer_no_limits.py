@@ -1,4 +1,4 @@
-"""A Pip's computer has no time or size limits by default (his call, 15 Nov: "there should be no limit, if you remember
+"""A Pip's computer has no time or size limits by default (decided 15 Nov: "there should be no limit, if you remember
 we have also removed any time limit for background jobs on work sessions too").
 
 Before: a Terminal command was stopped after 60 s of CPU or wall time, a file could be at most 512 MB, a background

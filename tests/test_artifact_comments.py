@@ -566,3 +566,103 @@ class AFramedPage(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from unittest.mock import patch                  # noqa: E402
+
+
+class TheChatThatMadeIt(Base):
+    """Ask DGC on a comment also reads, briefly, what was said in the chat that made the artifact (a Work session, a
+    ChatDGC chat or a Pip's chat): the last few things said, words only, trimmed. Never a whole transcript, never tool
+    output, nothing where the chat isn't there any more."""
+
+    def body(self, aid, tid):
+        from dgc import artifact_comment_turn as turn
+        return turn.prompt(aid, tid)[1]["content"]
+
+    def test_a_chatdgc_chat_that_made_it_is_read_in_brief(self):
+        from dgc.chatdgc.store import ChatStore
+        store = ChatStore()
+        chat = store.create(title="Pune trip")
+        chat["messages"] = [{"id": "msg_" + "1" * 32, "role": "user", "text": "Plan a Pune trip; we picked the Lotus Inn, 3500 a night."},
+                            {"id": "msg_" + "2" * 32, "role": "assistant", "text": "Done: the budget sheet has the Lotus Inn."}]
+        store.save(chat)
+        book = service.make("sheet", "Budget", BOOK, origin={"surface": "chat", "chat": chat["id"]})
+        tid = self.c.add(book["id"], {"kind": "cells", "sheet": "Budget", "range": "B3", "values": [[4000]]},
+                         "Use the hotel we picked")["id"]
+        body = self.body(book["id"], tid)
+        self.assertIn("The chat that made it", body)
+        self.assertIn("Pune trip", body)
+        self.assertIn("we picked the Lotus Inn, 3500 a night", body)
+        self.assertLess(body.index("The chat that made it"), body.index("The thread so far"))
+
+    def test_a_work_session_that_made_it_is_read_without_its_tool_output(self):
+        from dgc import sessions
+        project = self.tmp / "proj"
+        project.mkdir()
+        with patch.object(sessions, "SESSIONS_DIR", self.tmp / "sessions"):
+            path = sessions.new_path(project)
+            sessions.save(path, [{"role": "system", "content": "SYSTEM PROMPT"},
+                                 {"role": "user", "content": "Write the launch doc; keep it under a page."},
+                                 {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function",
+                                  "function": {"name": "bash", "arguments": "{}"}}]},
+                                 {"role": "tool", "tool_call_id": "c1", "content": "SECRET TOOL OUTPUT"},
+                                 {"role": "assistant", "content": "The launch doc is in the Library."}],
+                          project, name="Launch doc")
+            doc = service.make("doc", "Launch", DOC, origin={"surface": "work", "session": path.stem, "project": str(project)})
+            tid = self.c.add(doc["id"], {"kind": "text", "quote": "early train to Pune"}, "Shorter?")["id"]
+            body = self.body(doc["id"], tid)
+        self.assertIn("Launch doc", body)
+        self.assertIn("keep it under a page", body)
+        self.assertIn("The launch doc is in the Library.", body)
+        self.assertNotIn("SECRET TOOL OUTPUT", body)
+        self.assertNotIn("SYSTEM PROMPT", body)
+
+    def test_only_the_last_few_and_each_trimmed(self):
+        from dgc import artifact_origin
+        from dgc.chatdgc.store import ChatStore
+        store = ChatStore()
+        chat = store.create(title="Long one")
+        chat["messages"] = [{"id": f"msg_{i:032x}", "role": "user" if i % 2 else "assistant", "text": f"message {i} " + "x" * 3000}
+                            for i in range(1, 41)]
+        store.save(chat)
+        said = artifact_origin.conversation({"surface": "chat", "chat": chat["id"]})
+        self.assertIn("message 40", said)
+        self.assertNotIn("message 20 ", said, "only the last few")
+        self.assertLessEqual(len(said), artifact_origin.MAX_TOTAL + 200)
+
+    def test_nothing_where_the_chat_is_gone_or_unknown(self):
+        from dgc import artifact_origin
+        self.assertEqual(artifact_origin.conversation({"surface": "chat", "chat": "chat_gone"}), "")
+        self.assertEqual(artifact_origin.conversation({"surface": "work", "session": "../../etc", "project": "/"}), "")
+        self.assertEqual(artifact_origin.conversation({"surface": "sdk"}), "")
+        doc = self.make("doc", "Trip plan", DOC)          # its chat (chat_x) was never saved
+        tid = self.c.add(doc["id"], {"kind": "text", "quote": "early train to Pune"}, "Is there a later one?")["id"]
+        self.assertNotIn("The chat that made it", self.body(doc["id"], tid))
+
+    def test_a_pips_chat_that_made_it_is_read_in_brief(self):
+        """A Pip's own chat (pip_chat_messages, the columns the real table has): its last few things said."""
+        import sqlite3
+        from dgc import artifact_origin
+
+        class Registry:
+            def __init__(self, *a):
+                self.db = sqlite3.connect(":memory:")
+                self.db.execute("CREATE TABLE pip_chat_messages(seq INTEGER PRIMARY KEY, pip_id TEXT, role TEXT, text TEXT)")
+                for i, (role, text) in enumerate([("user", "Find us a hotel in Pune under 4000."),
+                                                  ("assistant", "The Lotus Inn, 3500 a night; I put it in the sheet.")]):
+                    self.db.execute("INSERT INTO pip_chat_messages VALUES(?,?,?,?)", (i + 1, "pip_ava", role, text))
+                    self.db.execute("INSERT INTO pip_chat_messages VALUES(?,?,?,?)", (i + 10, "pip_other", role, "NOT HERS"))
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        with patch("dgc.workspace_registry.WorkspaceRegistry", Registry), \
+                patch("dgc.your_browser._pip_names", lambda registry, ids: {"pip_ava": "Ava"}):
+            said = artifact_origin.conversation({"surface": "pip", "pip": "pip_ava"})
+        self.assertTrue(said.startswith("Ava's chat"), said)
+        self.assertIn("The Lotus Inn, 3500 a night", said)
+        self.assertNotIn("NOT HERS", said)

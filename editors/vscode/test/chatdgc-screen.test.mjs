@@ -3419,6 +3419,13 @@ test("canvas: a card where the reply made or changed one (Open), a message from 
     await s.frame();
     assert.equal((await s.posted("send")).length, 1, "not while a reply is being written");
     assert.match(await s.page.locator("#cd-notice").textContent(), /Let the reply finish first/);
+    // Ask in chat, from a design's canvas: its reference is added to what is in the box, unsent.
+    const ref = "[Artboard “Phone” of the design “Coffee landing” (ar_0123456789abcdef, b2)] ";
+    await s.page.locator("#cd-input").fill("Before");
+    await s.send({ type: "composeRef", text: ref });
+    await s.frame();
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), `Before ${ref}`);
+    assert.equal((await s.posted("send")).length, 1, "and nothing more was sent");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

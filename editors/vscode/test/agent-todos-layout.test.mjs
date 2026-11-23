@@ -1,5 +1,5 @@
 // Work's plan, measured in real Chromium on Work's real page (agent-todos.test.mjs holds the behaviour in jsdom). The plan
-// copies the reference's shapes, sizes, spacing and motion exactly (his rule for a copied part): a 16 px mark beside 13/20
+// copies the reference's shapes, sizes, spacing and motion exactly (the rule for a copied part): a 16 px mark beside 13/20
 // px words, 12 px apart and 6 px above and below, a 24 px header, a 4 px bar 8 px under it, 12.8 px row corners, the
 // ring turning once a second, the check drawing in 200 ms, the chevron turning on the spring. Its colours are DGC's own,
 // in both themes: nothing on it is blue. Reduced motion leaves every mark at its end. 300 px scrolls nothing sideways.

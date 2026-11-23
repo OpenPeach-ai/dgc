@@ -7,9 +7,9 @@ const HOME_CARD_SCALE = "0.53 (the unification of controls, which the brief leav
 export const ALLOW = [
   // ---- rules the maintainer already made ----------------------------------------------------------------------------
   { check: "unreachable", surface: "^(a Pip's chat and page|a Pip's chat \\(long words\\)|the Pips list)$", what: " › .*, on or off$",
-    reason: "His rule, in src/pips.css (@container max-width 240px): at the narrowest side bar a Pip's on/off switch gives way to its name, in its chat's head and (at 170px) on its row in the list; the switch is on the Pip's page." },
+    reason: "The rule, in src/pips.css (@container max-width 240px): at the narrowest side bar a Pip's on/off switch gives way to its name, in its chat's head and (at 170px) on its row in the list; the switch is on the Pip's page." },
   { check: "unreachable", surface: "^(a Pip's chat and page|a Pip's chat \\(long words\\))$", what: "pip-composer.* › (Routines|Dictate)$",
-    reason: "His call of 14 Nov, in src/pips.css (@container max-width 200px): the prompt box's row of controls never wraps, and at VS Code's narrowest side bar (170px) seven buttons do not fit it; the routines chip (they are on the Pip's page) and dictation (voice mode is beside it) give way." },
+    reason: "Decided 14 Nov, in src/pips.css (@container max-width 200px): the prompt box's row of controls never wraps, and at VS Code's narrowest side bar (170px) seven buttons do not fit it; the routines chip (they are on the Pip's page) and dictation (voice mode is beside it) give way." },
   { check: "unreachable", surface: "^(a Work session|chats with awkward words)$", what: "bar footer › (Context used|This model)",
     reason: "The footer's own rule, in media/main.css (@media max-width 320px and 290px, measured live 10 Nov): information gives way before a control. The context meter and the cache clock are read-outs; /context and the cache dialog still say them." },
   { check: "unreachable", surface: "^Settings$", what: "nav-head › Collapse navigation$",

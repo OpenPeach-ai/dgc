@@ -1,4 +1,4 @@
-// Your Browser on the side bar (Pips API 107; his calls, 17 Nov), measured in real Chromium on the side bar's real page
+// Your Browser on the side bar (Pips API 107; decided 17 Nov), measured in real Chromium on the side bar's real page
 // (support/dock-scene.mjs and support/home-scene.mjs):
 //   - the dock: Your Browser is always there, just before "+", on the right of the "|" divider with it. It can't be
 //     unpinned or moved, nothing is dropped past it, and a click opens Your Browser to the right of the editor (the page
@@ -170,7 +170,7 @@ test("Home's Browser card: a search field and the last links; typing or a link o
   } finally { await x.close(); }
 });
 
-// (His 22 Nov ask: each recent link wears its site's own icon, not the globe.)
+// (Asked 22 Nov: each recent link wears its site's own icon, not the globe.)
 const RED = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGN4ZqPxnxLMMGrAqAGjBgwXAwB2LEkfOWMJxAAAAABJRU5ErkJggg==";
 const BLACK = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGMQERH5TwlmGDVg1IBRA4aLAQCg8jsQtJPZ9wAAAABJRU5ErkJggg==";
 for (const theme of ["dark-modern", "light-modern"]) {

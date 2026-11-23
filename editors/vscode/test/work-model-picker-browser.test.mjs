@@ -52,7 +52,7 @@ test("the model button opens the one picker, centred over a dim page: the connec
       const list = await page.evaluate(() => [...document.querySelector(".dgc-mp-list").children].map((n) => (n.classList.contains("dgc-mp-sec") ? `# ${n.textContent}` : n.querySelector(".dgc-mp-name").textContent)));
       assert.deepEqual(list, ["# On this computer", "codellama:13b", "gpt-oss:120b-32k", "qwen2.5:14b", "qwen3.8:27b", "a-model-with-a-very-long-name-that-goes-on:120b-instruct-q8_0", "# Cloud", "deepseek-v4-pro:cloud", "glm-5.3:cloud"]);
       assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.dgc-mp-row[aria-selected="true"] .dgc-mp-name')].map((n) => n.textContent)), ["deepseek-v4-pro:cloud"]);
-      // His reference (17 Nov): the tabs, then the frame: the rail with Add provider at its foot, and the card with the
+      // The reference (17 Nov): the tabs, then the frame: the rail with Add provider at its foot, and the card with the
       // models and, under them, Thinking.
       const [tabsBox, mainBox, railBox, footBox, listBox, thinkBox] = [await rect(page, ".dgc-mp-tabs"), await rect(page, ".dgc-mp-main"),
         await rect(page, ".dgc-mp-rail"), await rect(page, ".dgc-mp-foot"), await rect(page, ".dgc-mp-list"), await rect(page, ".dgc-mp-think")];

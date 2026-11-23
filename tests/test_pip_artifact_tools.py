@@ -1,4 +1,4 @@
-"""A Pip makes pages, sheets, documents, decks and dashboards (0.52, his call 15 Nov: "pips should have these all
+"""A Pip makes pages, sheets, documents, decks and dashboards (0.52, decided 15 Nov: "pips should have these all
 tools"; no cap, better instructions instead).
 
 The worker never writes DGC's artifact store: its make_artifact / edit_artifact go through the run's socket to the

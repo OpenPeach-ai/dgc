@@ -252,7 +252,7 @@ test("a Work artifact is the shared card: a sheet of its kind with its name on a
     for (const [i, [type]] of made.entries()) await s.send({ type: "artifact_changed", artifact: { ...DECK, id: "ar_" + String(i + 5).repeat(16), type, title: `A ${type}` }, op: "made", surface: "work" });
     const tabs = await s.page.locator(".artifact-card .dgc-sheet").evaluateAll((ns) => ns.slice(1).map((n) => [n.dataset.kind, n.querySelector(".dgc-sheet-tag").textContent, getComputedStyle(n.querySelector(".dgc-sheet-tag")).backgroundColor]));
     assert.deepEqual(tabs, made);
-    // A page downloads as a PDF too (his call, 11 Nov): the backend's own list for a page (artifact_service.EXPORTS).
+    // A page downloads as a PDF too (decided 11 Nov): the backend's own list for a page (artifact_service.EXPORTS).
     const page = s.page.locator(".artifact-card").filter({ has: s.page.locator('.dgc-sheet[data-kind="page"]') }).first();
     await page.locator(".dgc-doc-dl").click();
     const offered = await page.locator(".amenu-item").allTextContents();

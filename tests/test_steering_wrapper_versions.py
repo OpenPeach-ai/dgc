@@ -1,5 +1,5 @@
 """A message sent mid-turn is replayed as the person's own words whatever version of DGC's wrapper it was saved with
-(his 21 Nov session: the wrapper gained a sentence on 20 Nov, and every message saved before showed as
+(the 21 Nov session: the wrapper gained a sentence on 20 Nov, and every message saved before showed as
 "<user-interjection> The user sent this WHILE you were working…" in its bubble)."""
 from __future__ import annotations
 

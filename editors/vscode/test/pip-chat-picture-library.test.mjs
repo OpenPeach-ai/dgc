@@ -1,4 +1,4 @@
-// A picture in a Pip's chat (his asks, 18 Nov): a click opens it large in a pop-up inside the chat (not an editor tab),
+// A picture in a Pip's chat (asked 18 Nov): a click opens it large in a pop-up inside the chat (not an editor tab),
 // with Download, Save to Library and Open in editor; Download on its row saves on the person's own computer (the host
 // hands the page the original, media/shared/download.js); Save to Library keeps it in the Library (Pips API 108,
 // library_pip_message_image), "In Library" (off) for one already there, so nothing is kept twice; an older DGC (before

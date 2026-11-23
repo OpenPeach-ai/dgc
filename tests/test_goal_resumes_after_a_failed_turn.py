@@ -1,6 +1,6 @@
 """A goal carries on after a turn that failed, as its rule says (found by the goal soak, 16 Nov).
 
-The rule (his call, 16 Nov: "keep it"): a standing goal whose turn stops on its own is continued automatically, twice in
+The rule (decided 16 Nov: "keep it"): a standing goal whose turn stops on its own is continued automatically, twice in
 a row at most, then waits for the user. The soak (kimi-k3.1-pro, a 3-minute model outage) found it never ran: a turn
 that failed (the model answered 503) PAUSED the goal at once (goals: finish("paused")), and the automatic resume acts
 only on an active goal, so nothing was ever retried: "Paused goal" until a person pressed Resume.

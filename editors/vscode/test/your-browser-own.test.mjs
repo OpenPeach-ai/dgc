@@ -1,4 +1,4 @@
-// Your Browser, phase 3b (Pips API 107; his calls, 18 Nov), measured in real Chromium:
+// Your Browser, phase 3b (Pips API 107; decided 18 Nov), measured in real Chromium:
 //   - Install Google Chrome: where Google Chrome is needed, Home's Browser card and the dock's tile offer ONE button.
 //     A small dialog first says what it does ("Installs Google Chrome from Google's own package source, as you would
 //     yourself. Your computer asks for your password.") with Install and Cancel; Install asks DGC (the computer's own
@@ -151,7 +151,7 @@ test("your own tab: it streams frame after frame, at the editor tab's size, with
     assert.deepEqual(seen.tabs, [["Sign in to your account", "true"], ["Inbox (3)", "false"]]);
     assert.equal(seen.closes, 2);
     assert.equal(seen.newTab, true);
-    // Like Chrome's: each wears its site's icon, a globe until DGC has one (his 20 Nov ask).
+    // Like Chrome's: each wears its site's icon, a globe until DGC has one (asked 20 Nov).
     const marks = await x.page.evaluate(() => [...document.querySelectorAll(".yb-own .yb-tab")].map((b) => b.querySelector("img.yb-fav") ? "icon" : b.querySelector(".yb-fav-none") ? "globe" : "none"));
     assert.deepEqual(marks, ["globe", "icon"]);
     if (process.env.DGC_SHOTS_DIR) await x.page.locator(".yb-bar").screenshot({ path: `${process.env.DGC_SHOTS_DIR}/yb-tabs.png` });

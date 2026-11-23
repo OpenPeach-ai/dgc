@@ -1,4 +1,4 @@
-// A picture in a chat opens in a pop-up inside the chat (his ask, 18 Nov: "clicking it opens up in the editor, maybe chat
+// A picture in a chat opens in a pop-up inside the chat (asked 18 Nov: "clicking it opens up in the editor, maybe chat
 // can open that image as a image pop up inside chat itself? where user can download from there too"). The ONE module,
 // media/shared/picturepop.js, in real Chromium: the picture large over a dim backdrop, its name and size, its actions as
 // icons (Download, Save to Library, Open in editor, Close: one action, one icon, the 6px corner, never a pill); Escape,

@@ -1,4 +1,4 @@
-// A Pip's tab in Your Browser, streamed into an editor tab beside the chat (Pips API 107; his call, 17 Nov):
+// A Pip's tab in Your Browser, streamed into an editor tab beside the chat (Pips API 107; decided 17 Nov):
 //   - the host pins the tab to its own Pip's lane: use_your_browser_view and open_your_browser for that Pip, nothing
 //     else (never another Pip's lane, never the person's own tabs, no other command), and an older DGC is refused;
 //   - the page (src/yourBrowserTab.js, real Chromium): the Pip's tab live with DGC's own address bar and the Pips' tabs

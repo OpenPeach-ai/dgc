@@ -1,5 +1,5 @@
 // A permission rule in a person's words (window.DgcRuleWords), the same on the Allow card's receipt, the line a new rule
-// leaves in a session, Work's Permission rules list and Settings -> Security (user test W8, his call of 15 Nov: "Always
+// leaves in a session, Work's Permission rules list and Settings -> Security (user test W8, decided 15 Nov: "Always
 // allow on an edit = edits in this project, said in plain words, removable in Settings").
 //
 // "Always allow edits in this project" is four of DGC's rules, one per edit tool, each over every file under the

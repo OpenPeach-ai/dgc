@@ -8,7 +8,8 @@ An artifact is a typed, versioned thing on this computer:
 - ``sheet``: a spreadsheet (sheets of typed columns and rows);
 - ``dashboard``: charts, each one read-only query over a source the user allowed once;
 - ``checklist``: the items of a job, each with what done means, a status, a note and proof (its pictures are files
-  of the version).
+  of the version);
+- ``design``: a canvas of artboards (its index, and each artboard's page as a file of the version).
 
 Each lives in ``~/.dgc/artifacts/<id>/``:
 
@@ -46,7 +47,7 @@ from pathlib import Path, PurePosixPath
 
 from . import workspace
 
-TYPES = ("page", "doc", "slides", "sheet", "dashboard", "checklist")
+TYPES = ("page", "doc", "slides", "sheet", "dashboard", "checklist", "design")
 SURFACES = ("chat", "work", "pip", "sdk", "cli")
 ARTIFACT_ID = re.compile(r"ar_[a-f0-9]{16}\Z")
 SHA = re.compile(r"[a-f0-9]{64}\Z")
@@ -59,10 +60,12 @@ WARN_STORE_BYTES = 2 * 1024 * 1024 * 1024     # the Library says the store is ge
 
 # The single file a typed artifact keeps (a page keeps its site's files under their own names).
 SOURCE_FILE = {"doc": "doc.md", "slides": "deck.json", "sheet": "sheet.json", "dashboard": "dashboard.json",
-               "checklist": "checklist.json"}
+               "checklist": "checklist.json", "design": "design.json"}
 # A checklist's content may carry its proof pictures under this key, as {file name: bytes}: they become files of the
-# version beside its data (never part of the data), so every version keeps the pictures it showed.
+# version beside its data (never part of the data), so every version keeps the pictures it showed. A design's content
+# carries its artboards' pages the same way.
 CHECKLIST_FILES = "_files"
+WITH_FILES = {"checklist": "picture", "design": "artboard"}
 
 _thread_lock = threading.RLock()
 
@@ -395,15 +398,16 @@ class Store:
             return {SOURCE_FILE["doc"]: content.encode("utf-8")}
         if not isinstance(content, dict):
             raise ArtifactError(f"A {type_} is data (an object), not text.")
-        if type_ == "checklist" and CHECKLIST_FILES in content:
+        if type_ in WITH_FILES and CHECKLIST_FILES in content:
+            what = WITH_FILES[type_]
             pictures = content[CHECKLIST_FILES]
             content = {key: value for key, value in content.items() if key != CHECKLIST_FILES}
             if not isinstance(pictures, dict) or not all(
                     isinstance(name, str) and isinstance(raw, (bytes, bytearray)) for name, raw in pictures.items()):
-                raise ArtifactError("A checklist's pictures map file names to bytes.")
+                raise ArtifactError(f"A {type_}'s {what}s map file names to bytes.")
             files = {safe_rel(name): bytes(raw) for name, raw in pictures.items()}
             if SOURCE_FILE[type_] in files:
-                raise ArtifactError("A checklist's picture can't take its data's name.")
+                raise ArtifactError(f"A {type_}'s {what} can't take its data's name.")
             return {**files, SOURCE_FILE[type_]: (json.dumps(content, indent=1, ensure_ascii=False) + "\n").encode("utf-8")}
         return {SOURCE_FILE[type_]: (json.dumps(content, indent=1, ensure_ascii=False) + "\n").encode("utf-8")}
 

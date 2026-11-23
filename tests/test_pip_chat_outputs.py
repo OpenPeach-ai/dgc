@@ -1,4 +1,4 @@
-"""@ outputs in a Pip's chat, as in Work (his ask, 14 Nov: "does @plugin and @ page come the same way as in work chat?";
+"""@ outputs in a Pip's chat, as in Work (asked 14 Nov: "does @plugin and @ page come the same way as in work chat?";
 "I meant the same way in Pip chat"; finding 56).
 
 Work's prompt box offers Document, Slides, Spreadsheet, Page and Dashboard: the reply is asked for that kind with one

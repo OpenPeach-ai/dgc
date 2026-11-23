@@ -51,7 +51,7 @@ def _local(actor):
 def require_can_always(payload, *, card=False) -> None:
     """Refuse Always allow for one of a plugin the user set to Always ask (an allow never beats an ask rule of the
     user's own), before anything runs. A payment plugin's action: refused when an app asks for it in a template;
-    allowed from its card (his call 15 Nov: Always allow on every card), and then it runs only inside the Pip's daily
+    allowed from its card (decided 15 Nov: Always allow on every card), and then it runs only inside the Pip's daily
     dollar limit (dispatch_for_run)."""
     money = _asks_every_time(payload)
     if money and not card:
@@ -211,7 +211,7 @@ def check(store, actor, payload):
 
 def _inside_dollar_limit(registry, payload) -> bool:
     """An action that moves money runs on an Always allow only when DGC reads its amount and it fits the Pip's daily
-    dollar limit and rules (his call 15 Nov); anything else waits for the user."""
+    dollar limit and rules (decided 15 Nov); anything else waits for the user."""
     from .pip_levels import _connector_payment, may_pay
     try:
         return may_pay(registry, payload["source"]["pip_id"], _connector_payment(payload))
@@ -544,7 +544,7 @@ def paying(summary) -> bool:
 
 
 def computer_pins(pip_id, summary, *, exact=False) -> dict:
-    """What an Always allow on a computer card is pinned to. His call 15 Nov: every card offers one. A careful card
+    """What an Always allow on a computer card is pinned to. Decided 15 Nov: every card offers one. A careful card
     (carrying what it read from your apps) is pinned to that one destination; the wipe-everything floor to its Terminal;
     a submit to its site, method and the address's shape, a payment's apart from the rest."""
     connection = _hash("dgc.pip.computer\0" + pip_id)

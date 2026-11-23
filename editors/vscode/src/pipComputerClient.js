@@ -964,7 +964,7 @@ document.addEventListener('submit',event=>{
 document.addEventListener('input',event=>{const box=event.target;if(!box?.dataset?.codeField)return;tidyCodeField(box);
  const state=S.codes.get(box.dataset.codeField);if(state?.error){state.error='';render();}});
 document.addEventListener('paste',event=>{const box=event.target;if(box?.dataset?.codeField&&!box.readOnly)pasteCode(box,event);});
-// Copy and paste straight through its screen (his 20 Nov ask; the clipboard panel stays for the rest). Ctrl+C or Ctrl+X
+// Copy and paste straight through its screen (asked 20 Nov; the clipboard panel stays for the rest). Ctrl+C or Ctrl+X
 // there: its copy comes to your clipboard (the 'clipboard' listener). Ctrl+V there: the key waits for the paste with your
 // text, which goes onto its clipboard first, then Ctrl+V reaches it.
 const clip=clipboardThrough(document,{viewer:()=>viewer,onScreen:node=>!!node?.closest?.('#pc-vnc'),mayType:()=>mayType(),maxBytes:CLIP_BYTES});

@@ -49,7 +49,7 @@
     return `<path d="M${(12 + x * from).toFixed(2)} ${(12 + y * from).toFixed(2)}L${(12 + x * to).toFixed(2)} ${(12 + y * to).toFixed(2)}"${more}/>`;
   }).join("");
   const turned = (n, shape) => Array.from({ length: n }, (_, i) => `<g transform="rotate(${i * 360 / n} 12 12)">${shape}</g>`).join("");
-  // Each company's own website icon (his call, 17 Nov: "use the favicons they use on their website"): fetched from its
+  // Each company's own website icon (decided 17 Nov: "use the favicons they use on their website"): fetched from its
   // site, made a 48 px picture (an SVG where the site has one), carried here so nothing is asked of anyone when the
   // picker opens. Three are black on the site and are drawn instead, in the text's colour, so they read on a dark theme:
   // Anthropic (its site's mark), OpenAI (its blossom, as chatgpt.com shows it) and GitHub Copilot (GitHub's own Copilot
@@ -488,7 +488,7 @@ void main() {
       list.innerHTML = html;
       under.innerHTML = (conn.note || data.note ? `<p class="dgc-mp-note">${esc([data.note, conn.note].filter(Boolean).join(" "))}</p>` : "") + (conn.disabled ? "" : footHtml(conn.footer, conn));
     }
-    // Thinking: one slider from Faster to Smarter (his reference, 18 Nov). Built once for its levels and then moved in
+    // Thinking: one slider from Faster to Smarter (the reference, 18 Nov). Built once for its levels and then moved in
     // place: its fill is a moving picture, which a rebuild on every paint would start again.
     let effort = null;
     function stopEffort() { if (effort && effort.fill) effort.fill.stop(); effort = null; }

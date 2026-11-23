@@ -1,6 +1,6 @@
 // Notes: the notes app on Home (approved 14 Nov: "a full notes app"). The Notes card of media/shared/homecards.js is this
 // file's. On Home, at every size, the card is only a field that saves as it is typed, a new-note icon (a fresh note:
-// the typed one stays in Notes) and "Open Notes" (his call, 14 Nov night); opened, it is the whole app: one thing at a
+// the typed one stays in Notes) and "Open Notes" (decided 14 Nov night); opened, it is the whole app: one thing at a
 // time in a narrow side bar (the list, then the note with Back), three columns from 560 px (folders, the list, the
 // note). Nothing here says Save or Done: typing saves.
 //

@@ -144,7 +144,7 @@ class PipFlowTests(unittest.TestCase):
                          ['scope', 'name', 'pip_ids', 'pip_names', 'tasks', 'mode', 'expected_pins'])
         for mode in ('default', 'acceptEdits'):
             self.assertEqual(PermissionEngine(mode, {}, self.root).decide('pips_workflow', {})[0], ASK)
-        # Auto mode never asks (his call, 17 Nov: "if it does it all, we do it all").
+        # Auto mode never asks (decided 17 Nov: "if it does it all, we do it all").
         self.assertEqual(PermissionEngine('auto', {}, self.root).decide('pips_workflow', {})[0], ALLOW)
         self.assertEqual(PermissionEngine('plan', {}, self.root).decide('pips_workflow', {})[0], DENY)
         pins = [{'pip_id': p['id'], 'job_version': p['current_version'],

@@ -1,4 +1,4 @@
-"""Every widget kept in the Library (0.52; his call 15 Nov: "every widget, automatically").
+"""Every widget kept in the Library (0.52; decided 15 Nov: "every widget, automatically").
 
 A ``dgc-ui`` card a Work session's or a Pip's reply draws (genui_prompt) becomes a Page of its own in the artifact store,
 as ChatDGC's widgets already do (artifact_index): drawn from the card's JSON in DGC's look, its origin the session or

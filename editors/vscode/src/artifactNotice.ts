@@ -1,4 +1,4 @@
-// The "Open" pop-up (0.52; his ask, 14 Nov): whenever a Work, Chat or Pip turn makes or updates a page, a document,
+// The "Open" pop-up (0.52; asked 14 Nov): whenever a Work, Chat or Pip turn makes or updates a page, a document,
 // slides, a sheet or a dashboard, one editor notification says so with Open:
 //
 //   DGC made “Q3 plan”                                                                   [Open]

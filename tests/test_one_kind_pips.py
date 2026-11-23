@@ -1,4 +1,4 @@
-"""One kind of Pip (his decision 13 Nov; finishing it 15 Nov): every Pip gets everything, a folder if it was given one,
+"""One kind of Pip (decided 13 Nov; finishing it 15 Nov): every Pip gets everything, a folder if it was given one,
 and the safety is the wall of its box, its level and Allow cards. What was left of "Personal" vs "Project" Pips that
 kept something from a Pip with a folder goes, gate by gate."""
 import unittest
@@ -71,7 +71,7 @@ class OneKind(unittest.TestCase):
 
 
 # ------------------------------------------------------------------------------------- the backend half (16 Nov)
-# "Nothing related ships half" (his rule, 16 Nov): what the backend still kept from a Pip with a folder goes, and a
+# "Nothing related ships half" (the rule, 16 Nov): what the backend still kept from a Pip with a folder goes, and a
 # folder Pip's chat is the Personal chat plus its folder. The real worker with its model stood in, the real runner
 # stopped at the hand-off, the real controls.
 

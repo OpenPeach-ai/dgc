@@ -1,4 +1,4 @@
-"""A model per helper, by the user's own words (his call, 17 Nov: "For the UI work, use the GLM 5 flash model on my
+"""A model per helper, by the user's own words (decided 17 Nov: "For the UI work, use the GLM 5 flash model on my
 ollama cloud"). The helper the main agent starts for it runs on that saved connection and model, whatever the Sub-agents
 setting is.
 

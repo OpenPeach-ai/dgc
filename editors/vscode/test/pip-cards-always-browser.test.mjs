@@ -1,4 +1,4 @@
-// Always allow on every Pip card (his call, 15 Nov; live round 1, findings 39 and 40), and the site card at the
+// Always allow on every Pip card (decided 15 Nov; live round 1, findings 39 and 40), and the site card at the
 // narrowest side bar (finding 45), on a Pip's real chat in real Chromium:
 //   - a payment's card, an order's, the card that carries what it read from your apps to a site or into its Terminal,
 //     and the "could delete everything" card have the Always allow button where the other cards have it (after the

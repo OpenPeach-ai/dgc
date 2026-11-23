@@ -210,7 +210,7 @@ class Update(ToolsCase):
         self.assertFalse([f for f in harness.stream.frames() if f["type"] == "permission_request"])
 
     def test_in_auto_mode_it_changes_without_a_card(self):
-        # His call, 13 Nov 2026: Router follows the same rule as every setting; no card in auto mode.
+        # Decided 13 Nov 2026: Router follows the same rule as every setting; no card in auto mode.
         harness = self.harness({"enabled": False, "systems": []})
         self.assertEqual(harness.config.get("mode"), "auto")
         out = harness.agent._handle_call(ToolCall("u1", "router_update", {"action": "turn_on"}))

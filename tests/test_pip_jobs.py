@@ -218,7 +218,7 @@ class TheAnswerComesBackToBoth(JobWorld, unittest.TestCase):
         self.assertIsNone(self.view(job)["change"], "an answer only")
 
     def test_it_lands_in_the_chat_used_last_not_its_first(self):
-        # (His 20 Nov test: the answer went to the Pip's first chat, untouched for a week, while the chat he opens is the
+        # (The 20 Nov test: the answer went to the Pip's first chat, untouched for a week, while the chat he opens is the
         # one he used last: its list said unread and the chat he opened didn't have it.)
         self.level(self.helper, pip_levels.APPROVE)
         later = self.control("create_pip_conversation", pip_id=self.helper["id"], title="Visit the shop's site")

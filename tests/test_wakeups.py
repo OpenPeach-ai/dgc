@@ -57,7 +57,7 @@ class BookTests(unittest.TestCase):
         self.assertTrue(self.changes, "each change is said, for the chat's row")
 
     def test_a_goals_wake_ups_go_when_it_completes(self):
-        # (His 21 Nov session: the Wakes pill stayed for a 07:36 health check the finished goal no longer needed.)
+        # (The 21 Nov session: the Wakes pill stayed for a 07:36 health check the finished goal no longer needed.)
         goal = {"id": "g1"}
         self.book.goal_of = lambda: goal["id"]
         self.book.add(30, "Health check", "Check the servers.")

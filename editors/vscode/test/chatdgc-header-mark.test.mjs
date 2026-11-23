@@ -46,10 +46,10 @@ test("ChatDGC's header opens on DGC's wordmark with its own mark: the tab icon's
   const head = d.querySelector(".cd-head"), pm = head.firstElementChild;
   assert.ok(pm?.matches(".pm"), "the wordmark comes first in the header, where Work's does");
   const work = new JSDOM(bare(workPage)).window.document.querySelector("#phead .pm");
-  // (18 Nov: then the product's name, VIBE, in Geist: his call, each DGC product named and coloured.)
+  // (18 Nov: then the product's name, VIBE, in Geist: decided, each DGC product named and coloured.)
   assert.deepEqual(parts(work), ["svg.mk", "DGC", "span.cur", "span.pm-product"], "Work's: the mark, DGC, the cursor, the product");
   assert.deepEqual(parts(pm), ["svg.mk mk-chat", "DGC", "span.cur", "span.pm-product"], "ChatDGC's: the same, with its own mark");
-  // (19 Nov, his call: a Chat session names itself CHAT; Work stays VIBE.)
+  // (decided 19 Nov: a Chat session names itself CHAT; Work stays VIBE.)
   assert.deepEqual([work.querySelector(".pm-product").textContent, pm.querySelector(".pm-product").textContent], ["VIBE", "CHAT"]);
   assert.equal(pm.querySelector(".cur").getAttribute("aria-hidden"), "true");
 

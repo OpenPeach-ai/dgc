@@ -1,4 +1,4 @@
-// A Pip's tab in Your Browser, streamed into an editor tab beside the chat (Pips API 107; his call, 17 Nov). Your Browser
+// A Pip's tab in Your Browser, streamed into an editor tab beside the chat (Pips API 107; decided 17 Nov). Your Browser
 // is Google Chrome with DGC's own profile, a real window to the right of the editor; each Pip works in its own tab of it
 // (its lane). This page shows ONE Pip's lane live, with DGC's own address bar and a row of the Pips' tabs, and it stands
 // in where the window can't be seen. The person's own tabs are never shown here: DGC streams only a Pip's lane.
@@ -9,7 +9,7 @@
 // picture is the person's own hand in that Pip's tab, and Back, Forward, Reload and the address bar drive it. An address
 // off the sites the person let that Pip use is refused by DGC, in words.
 //
-// Your own tab (his call, 18 Nov; `yourBrowserInit {own: true}`): where the computer DGC runs on has no screen
+// Your own tab (decided 18 Nov; `yourBrowserInit {own: true}`): where the computer DGC runs on has no screen
 // (Remote-SSH), Google Chrome runs headless there and this tab IS Your Browser: your own current tab, streamed at every
 // frame (one asked for as soon as the last came, up to thirty a second; none while the tab is hidden), and usable: clicks,
 // typing (passwords included), keys, the wheel and a paste of the editor's clipboard go to it, in order. Our own address

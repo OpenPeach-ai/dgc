@@ -93,7 +93,7 @@ class TheTool(unittest.TestCase):
 
     def test_a_rule_in_claude_codes_form(self):
         from dgc import settings_tool as T
-        said = T.rule(self.config, "allow", "Bash(npm test:*)", reason="he asked")
+        said = T.rule(self.config, "allow", "Bash(npm test:*)", reason="the user asked")
         self.assertIn("Added Bash(npm test:*) to allow", said)
         self.assertIn("Bash(npm test:*)", self.config.permissions["allow"])
         T.undo(self.config, said.rsplit("Undo: ", 1)[1])
@@ -116,7 +116,7 @@ class TheTool(unittest.TestCase):
         # Live test 14 Nov: "Let my Pips run up to 8 at once" was refused as Dev Mode only, while its own answer said the
         # most without Dev Mode is 32. Under the ceiling it is an ordinary setting, with Undo.
         from dgc import pips, settings_tool as T
-        said = T.dev_limit(self.config, "pips_parallel_runs", 8, reason="he asked")
+        said = T.dev_limit(self.config, "pips_parallel_runs", 8, reason="the user asked")
         self.assertIn("→ 8", said)
         self.assertEqual(pips.parallel_runs(self.config), 8)
         self.assertFalse(self.config.get("dev_limits"), "Dev Mode's own limits untouched")
@@ -142,7 +142,7 @@ class TheTool(unittest.TestCase):
 
 
 class TheAgentUsesThem(unittest.TestCase):
-    """Through a real agent: offered to the session the user talks to; auto mode changes without a card (his call);
+    """Through a real agent: offered to the session the user talks to; auto mode changes without a card;
     another mode asks; the docs answer."""
 
     def setUp(self):
@@ -172,7 +172,7 @@ class TheAgentUsesThem(unittest.TestCase):
         # Live test 14 Nov: "Let my Pips run up to 8 at once" asked with a raw card, "Run dgc_settings {json}". The card
         # is given the setting's own words and what it is now; the editor shows "Pip runs at once: 4 → 8".
         shown = self.harness.agent._with_task_agent("dgc_settings", {"action": "dev_limit", "key": "pips_parallel_runs",
-                                                                      "value": 8, "reason": "he asked"})
+                                                                      "value": 8, "reason": "the user asked"})
         self.assertEqual((shown["setting_label"], shown["before"], shown["value"]), ("Pip runs at once (all Pips)", 4, 8))
         shown = self.harness.agent._with_task_agent("dgc_settings", {"action": "setting", "key": "bash_timeout", "value": 300})
         self.assertEqual(shown["before"], 120)
@@ -260,7 +260,7 @@ class TheEditorUndoes(unittest.TestCase):
 
     def test_undo_from_the_editor_puts_it_back_and_says_so(self):
         from dgc import editor_protocol as ep, settings_tool as T
-        said = T.change(self.config, "compact_threshold", 0.7, reason="he asked")
+        said = T.change(self.config, "compact_threshold", 0.7, reason="the user asked")
         change_id = said.rsplit("Undo: ", 1)[1]
         backend = self.backend()
         self.assertEqual(backend._ready_payload()["capabilities"]["settings_undo"], 1)

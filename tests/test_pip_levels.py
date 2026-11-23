@@ -513,7 +513,7 @@ class SharedGateTests(Store):
                       "and its plugins")
 
     def test_at_do_it_all_the_fuse_asks_in_the_chat_not_on_a_card(self):
-        # His rule, 17 Nov: Do it all never shows a card. The fuse still stops it after 25 things in an hour: the next
+        # The rule, 17 Nov: Do it all never shows a card. The fuse still stops it after 25 things in an hour: the next
         # one is asked in the chat, with the fuse's own reason (dgc/pip_holds.py).
         pip, host = self.host("full")
         levels.set_level(self.registry, pip["id"], "full", "editor-user")
@@ -570,7 +570,7 @@ class SharedGateTests(Store):
         pay = dict(url="https://shop.example/checkout/pay", fields=[("card_token", "tok_1"), ("amount", "20.00"), ("currency", "USD")])
 
         def asks(request_id, **kw):
-            # At Do it all "it asks" is in the chat, never a card (his rule, 17 Nov; dgc/pip_holds.py): nothing made,
+            # At Do it all "it asks" is in the chat, never a card (the rule, 17 Nov; dgc/pip_holds.py): nothing made,
             # the request dropped, and the Pip told WAITING FOR THE USER.
             host._queued.append(host.browser.hold(request_id, **kw))
             made = host._record_held()
@@ -721,7 +721,7 @@ class RealBrowserTests(Store):
             self.reset(host)
             with self.subTest(name=name):
                 said = self.press(host, name)
-                # A payment still asks at Do it all: in the chat, never a card (his rule, 17 Nov; dgc/pip_holds.py).
+                # A payment still asks at Do it all: in the chat, never a card (the rule, 17 Nov; dgc/pip_holds.py).
                 self.assertTrue(said.startswith("WAITING FOR THE USER:"), f"{name} is a payment: it asks in the chat: {said}")
         self.assertEqual([p for p, _ in self.received], ["/comments", "/step"])
         self.assertEqual([a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"], [],
@@ -772,7 +772,7 @@ class RealBrowserTests(Store):
         pip_computer.tick(self.registry, self.cfg)
         self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*"}))
         self.assertFalse((files / "keep.txt").exists(), "allowed once, it ran")
-        # His call 15 Nov: Always allow on every card, this one too. Once given, such a command runs without asking.
+        # Decided 15 Nov: Always allow on every card, this one too. Once given, such a command runs without asking.
         (files / "keep.txt").write_text("mine")
         host.waiting = []
         said = host.call("run", {"command": "rm -rf ~/*"})
@@ -784,12 +784,12 @@ class RealBrowserTests(Store):
         self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*"}), "always allowed: it runs")
         self.assertFalse((files / "keep2.txt").exists())
         host.waiting = []
-        # (Until 18 Nov this said "once means once", from before his 15 Nov call; skipped in runs without Chromium's path,
+        # (Until 18 Nov this said "once means once", from before the 15 Nov call; skipped in runs without Chromium's path,
         # it was never seen failing.) Always allow means every time.
         self.assertIn("exit 0", host.call("run", {"command": "rm -rf ~/*"}), "always allowed: it keeps running")
 
     def test_at_do_it_all_the_floor_is_asked_in_the_chat_with_no_card(self):
-        # His rule, 17 Nov: Do it all never shows a card; DGC still holds the command until the user answers in the chat
+        # The rule, 17 Nov: Do it all never shows a card; DGC still holds the command until the user answers in the chat
         # (dgc/pip_holds.py). The user's next own message lets exactly that command run once.
         from dgc import pip_computer_files as desk, pip_holds
         pip, host, _ = self.host("full")

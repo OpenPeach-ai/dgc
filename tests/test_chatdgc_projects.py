@@ -431,7 +431,7 @@ class ToolModel(Model):
 
 
 class ProjectFilesThatDontFit(unittest.TestCase):
-    """His call (12 Nov, after Claude's Projects): a project's files that don't fit a chat's window can still be
+    """Decided (12 Nov, after Claude's Projects): a project's files that don't fit a chat's window can still be
     searched and read; until now they were only named."""
 
     def setUp(self):

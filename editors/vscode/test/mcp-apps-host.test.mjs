@@ -96,7 +96,7 @@ test("a declared site opens at once; another asks first, and a plain no opens no
   assert.equal(p.got.at(-1).ok, false);
 });
 
-// His ask (18 Nov): a download saves on the computer the editor runs on. What a card made goes to the page the card is
+// Asked 18 Nov: a download saves on the computer the editor runs on. What a card made goes to the page the card is
 // on, which saves it there (media/shared/download.js): never the host's save dialog, which over a remote connection
 // browses the remote machine.
 test("a card's download goes to the page it is on, with a safe name, to save on this computer; no save dialog", async () => {

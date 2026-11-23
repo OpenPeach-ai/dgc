@@ -15,7 +15,7 @@ This module is the model and the API (phase 1) and its window (phase 3):
 - ``your_browser_sites`` / ``your_browser_site_pips``: the sites the person is signed in to there (noticed from their
   own sign-ins, never added by a Pip) and which Pips may use each. A site is ``all`` (every Pip) or ``chosen`` (only the
   Pips listed; none listed means "Ask me which Pips"). A newly noticed bank or payment site starts at ``chosen`` with
-  no Pips, every other site at ``all`` (his answer 3, 17 Nov); ``money_site`` is that one decision.
+  no Pips, every other site at ``all`` (decision 3, 17 Nov); ``money_site`` is that one decision.
 - ``get_your_browser`` and ``get_your_browser_recent`` (reads), ``set_your_browser_site``, ``sign_out_your_browser_site``,
   ``open_your_browser`` and ``use_your_browser_view`` (changes). Every one is local only.
 - The window (phase 3, Pips API 107): the supervisor owns the one Chrome (YourBrowserHost, one per profile): it opens it
@@ -23,8 +23,8 @@ This module is the model and the API (phase 1) and its window (phase 3):
   for Home's card, streams one Pip's lane at a time, clears sites signed out of, and closes it after 15 idle minutes.
   On Linux it never starts Chrome without Chrome's own sandbox (``sandbox_ok``).
 - ``grants_for``: what a Pip's lane may open, for the lane gate.
-- ``profile_prefs``: third-party cookies off in Your Browser's profile (his answer 2).
-- ``LaneSent``: what each Pip's lane sent, per site, in the "Sent to the web" log (his answer 8).
+- ``profile_prefs``: third-party cookies off in Your Browser's profile (decision 2).
+- ``LaneSent``: what each Pip's lane sent, per site, in the "Sent to the web" log (decision 8).
 - A Pip's runs (phase 4): its run drives its own lane with the ``your_browser`` tool (your_browser_lane), and while it
   drives, HostBrowser refuses any command to a tab that isn't that Pip's (``driving``); ``allow_pip_site`` is the
   person's Allow on its chat card for a site.
@@ -125,7 +125,7 @@ def site_key(host) -> str:
     return site_of(host) if host else ""
 
 
-# The one bank-or-payment decision (his answer 3): a newly noticed site here starts at "Ask me which Pips" (mode chosen,
+# The one bank-or-payment decision (decision 3): a newly noticed site here starts at "Ask me which Pips" (mode chosen,
 # no Pips); every other site starts at All Pips. Matching more than it should only asks the person once; that is the
 # safe side. Sites where people keep money, pay, borrow or trade:
 MONEY_SITES = frozenset("""
@@ -480,7 +480,7 @@ def sandbox_ok(chrome, *, knobs=None, apparmor: Path = APPARMOR, platform: str |
     return bool(restricted and not clone_off and _apparmor_allows(real, apparmor))
 
 
-# What Your Browser says where it can't run yet (his calls, 18 Nov: no pasted commands, one button on apt systems).
+# What Your Browser says where it can't run yet (decided 18 Nov: no pasted commands, one button on apt systems).
 NEEDS_CHROME = "Your Browser runs in Google Chrome, which isn't on this computer yet."
 GET_CHROME = "Install Google Chrome from google.com/chrome, then open Your Browser again."
 NO_SANDBOX = "Google Chrome's own sandbox can't run on this computer, and Your Browser never starts Chrome without it."
@@ -520,7 +520,7 @@ def _availability() -> tuple[bool, str, str]:
     return False, NEEDS_CHROME, ""
 
 
-# --------------------------------------------------------------------------- Install Google Chrome (his call, 18 Nov)
+# --------------------------------------------------------------------------- Install Google Chrome (decided 18 Nov)
 
 INSTALL_FILE = "install.json"       # in Your Browser's folder: how the last install went {state, pid, error, at}
 INSTALL_LOG = "install.log"         # what the root step printed (apt's lines), for the words when it fails
@@ -821,7 +821,7 @@ def editor_bounds(value) -> dict | None:
 
 
 def place_window(bounds) -> dict | None:
-    """Where Your Browser's window goes, to the RIGHT of the editor (his call, 17 Nov): the room between the editor and
+    """Where Your Browser's window goes, to the RIGHT of the editor (decided 17 Nov): the room between the editor and
     the screen's right edge when there is enough; over a full-screen editor, the right part of the screen. Top and
     height follow the editor's. {left, top, width, height}, or None to let Chrome place itself."""
     if not bounds:
@@ -845,7 +845,7 @@ def place_window(bounds) -> dict | None:
 # --------------------------------------------------------------------------- the commands (editor side)
 
 VIEW_OPS = ("frame", "click", "move", "type", "key", "scroll", "go", "back", "forward", "reload", "close")
-# Your own tabs, streamed into an editor tab where this computer has no screen (API 107, his call 18 Nov): its frames,
+# Your own tabs, streamed into an editor tab where this computer has no screen (API 107, decided 18 Nov): its frames,
 # your own hand in it (input: mouse, keys, text in order), the address bar, your tabs, and the editor tab's size.
 OWN_OPS = ("frame", "input", "go", "back", "forward", "reload", "new_tab", "tab", "close_tab", "size", "close",
            "selection")          # the text selected on your page, for your editor's clipboard (Copy, Cut)
@@ -1173,7 +1173,7 @@ COMMAND_ARGS = {
 # --------------------------------------------------------------------------- the profile
 
 def profile_prefs(profile: Path) -> bool:
-    """Third-party cookies off in Your Browser's profile (his answer 2: safer between sites), set before every start, as
+    """Third-party cookies off in Your Browser's profile (decision 2: safer between sites), set before every start, as
     a person would in Chrome's settings. Everything else in the profile stays the person's own: their saved passwords,
     sync and extensions are untouched. Never fails a start; a link in place of the file is never followed. Returns
     whether the file says so now."""
@@ -1204,7 +1204,7 @@ from .your_browser_clear import CLEAR_KINDS, chrome_account, clear_profile, _pro
 # --------------------------------------------------------------------------- what each lane sent
 
 class LaneSent:
-    """What each Pip's lane sent, per site (his answer 8): from the lane's own Network events, never the person's tabs.
+    """What each Pip's lane sent, per site (decision 8): from the lane's own Network events, never the person's tabs.
     Requests to one host are added up and written as one line ({at, host, kind "request", up, down, requests, pip_id,
     site}) when the lane opens another page, after FLUSH_SECONDS, or on flush(); a refused page or write is written at
     once as kind "refused". The "Sent to the web" log (list_pip_sent) reads a Pip's lines from here beside its own
@@ -2816,7 +2816,7 @@ class YourBrowserHost:
                 "width": int(width), "height": int(height), "image": "data:image/jpeg;base64," + data,
                 "lanes": self.lanes()}
 
-    # -- your own tab, streamed where there is no screen (his call, 18 Nov) ------------------------------------------
+    # -- your own tab, streamed where there is no screen (decided 18 Nov) ------------------------------------------
     # Only the person drives it, through the editor tab's own events (view_call refuses everyone else): DGC itself never
     # drives the person's tabs (HostBrowser.command), and their frames are kept in memory only, never written or logged.
 

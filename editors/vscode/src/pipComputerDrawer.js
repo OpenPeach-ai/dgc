@@ -37,7 +37,7 @@ export function ageWords(created,now=Date.now()){
 
 /** What a waiting approval says on its card: the kind (its tile), where it is from, what it wants in bold, one line of
  *  detail, the rest of what its card always showed (the detail, one press away), and its answers: the ones its card in
- *  the Pip's chat offers, in the same order and words (one list, pipCareful.js heldRequestAnswers; his call of 15 Nov). Each
+ *  the Pip's chat offers, in the same order and words (one list, pipCareful.js heldRequestAnswers; decided 15 Nov). Each
  *  answer: how it is given (login, review, send, always, reject), its label, and the quiet word that takes the buttons'
  *  place once it is given. */
 export function cardWords(a,pipName='The Pip'){

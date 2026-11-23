@@ -17734,7 +17734,8 @@
                 "slides",
                 "sheet",
                 "dashboard",
-                "checklist"
+                "checklist",
+                "design"
               ]
             },
             "surface": {
@@ -17926,6 +17927,9 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "board": {
+              "type": "string"
             }
           },
           "required": [
@@ -17933,6 +17937,38 @@
             "request_id",
             "id",
             "format"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_design_edit"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "edits": {
+              "type": "array"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id",
+            "edits"
           ],
           "additionalProperties": false
         },

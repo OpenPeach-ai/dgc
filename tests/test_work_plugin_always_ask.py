@@ -1,4 +1,4 @@
-"""A plugin set to Always ask asks in Work too (his call, 20 Nov, as Claude Code does for a connector set to ask): every
+"""A plugin set to Always ask asks in Work too (decided 20 Nov, as Claude Code does for a connector set to ask): every
 call of its tools asks, in every mode, as the user's own ask rule does. Default mode: its card, with no Always allow (an
 allow rule never beats it). Auto mode: held in the chat, the user's next message is the yes. The other levels leave Work
 as it was (its mode decides). One setting for Work and every Pip: the plugin's page in Settings and Pips settings →

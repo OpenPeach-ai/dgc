@@ -1,4 +1,4 @@
-"""Your Browser, phase 3 (0.52, Pips API 107; his calls 17 Nov): its window, the streamed tab's frames and Home's last
+"""Your Browser, phase 3 (0.52, Pips API 107; decided 17 Nov): its window, the streamed tab's frames and Home's last
 visited links.
 
 - "Open Your Browser" opens (or brings forward) the installed Google Chrome with DGC's OWN profile, a real window placed
@@ -13,7 +13,7 @@ visited links.
   never a Pip's lane.
 - A site the person signed out of is cleared (its cookies and its sign-in hosts') as soon as Your Browser runs.
 - On Linux, Your Browser runs only where Chrome's own sandbox can run: where it can't (Ubuntu's user-namespace rule over
-  DGC's downloaded copy), it never starts Chrome without its sandbox, and (phase 3b, his call 18 Nov) the answer is the
+  DGC's downloaded copy), it never starts Chrome without its sandbox, and (phase 3b, decided 18 Nov) the answer is the
   one Install Google Chrome button, never a command to paste (tests/test_your_browser_install.py).
 
 Unit tests drive the supervisor's host over a scripted DevTools pipe; the real test opens DGC's downloaded Google
@@ -283,7 +283,7 @@ class RecentLinks(Base):
         self.assertEqual(self.ok("get_your_browser_recent")["links"], [])
 
     def test_a_link_carries_its_sites_icon_only_as_a_small_picture(self):
-        # (His 22 Nov ask: Home's Browser card shows each visited site's own icon, not a globe.)
+        # (Asked 22 Nov: Home's Browser card shows each visited site's own icon, not a globe.)
         png = "data:image/png;base64," + "iVBORw0KGgo" + "A" * 40
         self.write([{"url": "https://a.example.com/", "title": "A", "icon": png},
                     {"url": "https://b.example.com/", "title": "B", "icon": "javascript:alert(1)"},
@@ -725,7 +725,7 @@ class Sandbox(unittest.TestCase):
                 patch.object(your_browser, "has_screen", return_value=False), \
                 patch.object(your_browser.sys, "platform", "linux"):
             available, reason, _ = your_browser._availability()
-        self.assertEqual((available, reason), (True, ""), "over Remote-SSH: your own tab, streamed (his call, 18 Nov)")
+        self.assertEqual((available, reason), (True, ""), "over Remote-SSH: your own tab, streamed (decided 18 Nov)")
 
 
 # --------------------------------------------------------------------------- API 107

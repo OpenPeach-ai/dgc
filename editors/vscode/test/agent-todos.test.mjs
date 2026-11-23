@@ -1,4 +1,4 @@
-// Work's plan (0.52, his call of 18 Nov): the Tasks pill stays where it is, says the step being worked on with its mark
+// Work's plan (0.52, decided 18 Nov): the Tasks pill stays where it is, says the step being worked on with its mark
 // and "n/m"; it opens the plan's section (Tasks · n of m done, the plan's time, a collapse chevron, a progress bar and a
 // row per step with its mark, its words, its time and the step's live sub-step); and inside the conversation a plan is
 // ONE card per turn that updates in place as the plan changes, with the same marks and motion. Added steps are marked,

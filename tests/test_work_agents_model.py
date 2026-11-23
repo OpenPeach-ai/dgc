@@ -1,4 +1,4 @@
-"""A Work session's own agents model (0.52, his call 14 Nov: "user sets a unified setting for sub agents in the settings,
+"""A Work session's own agents model (0.52, decided 14 Nov: "user sets a unified setting for sub agents in the settings,
 but each session needs to have this in its own settings too, which bypasses the main settings only for that session").
 
 Settings > Sub-agents keeps the one agents model every chat follows. A Work session may choose its own in its model menu

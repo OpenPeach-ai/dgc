@@ -1170,6 +1170,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const pages = noteHomePage(this.context, message);
         if (pages && this.home && this.webviewReady) this.post({ type: "homePages", pages });
       }
+      // Ask in chat, from a design's canvas: a reference to that artboard goes in the prompt box of the chat it was made in.
+      if (message.type === "artifactAsk" && home) this.askAboutArtifact(message as Record<string, unknown>);
       // Opened anywhere (a session's card, a chat's, the Library): its "made" card on Home goes, as if opened there. It
       // stayed, and Home's number counted it, until it was dismissed on Home itself (H1, user test 15 Nov).
       if (message.type === "artifactOpened" && home && typeof message.id === "string" && homePages(this.context).some((page) => page.id === message.id)) {
@@ -1274,6 +1276,27 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     tab.composeBrief(work.brief);
     tab.attachFileAs(vscode.Uri.file(file), work.file);
     return true;
+  }
+
+  /** A reference added to what is in this chat's prompt box, unsent (Ask in chat, from a design's canvas). */
+  composeRef(text: string): void {
+    this.inVisiblePanel(() => this.post({ type: "composer_ref", text }));
+  }
+
+  /** Ask in chat about part of an artifact (src/artifacts.ts askInChat): the reference goes to the chat that made it,
+   *  a ChatDGC chat in its tab, a Pip's own chat, or a Work session that is open here; else to the chat the side bar
+   *  shows. */
+  private askAboutArtifact(ask: Record<string, unknown>): void {
+    const text = typeof ask.text === "string" ? ask.text.slice(0, 700) : "";
+    if (!text) { return; }
+    const chat = String(ask.chat || ""), pip = String(ask.pip || ""), session = String(ask.session || "");
+    if (ask.surface === "chat" && chat && this.chatdgc?.composeRef(chat, text)) { return; }
+    if (ask.surface === "pip" && /^[A-Za-z0-9_-]{1,128}$/.test(pip)) { this.openPipsEditor({ pip, section: "chat", compose: text }); return; }
+    if (session && session !== this.sessionId() && /^[A-Za-z0-9_-]{1,128}$/.test(session) && this.places?.openSessions().has(session)) {
+      this.places.open(session, "Work session").composeRef(text);
+      return;
+    }
+    this.composeRef(text);
   }
 
   /** Text placed in this chat's prompt box, unsent: Continue in Work's brief. */
@@ -9886,7 +9909,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** A Work tab opens Pips alongside it. The side bar keeps its own Pips bridge. */
-  private openPipsEditor(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string } | { overview: true }): void {
+  private openPipsEditor(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string; compose?: string } | { overview: true }): void {
     this.ensurePipsTab().open(navigation);
   }
   /** Open in editor on a Pip's chat (15 Nov, as a Work session and a ChatDGC chat have it): that Pip, that

@@ -184,7 +184,7 @@ export const inlineRead = (page, scope = "") => page.evaluate(([sel, deep]) => {
     commits: pick(".dgc-il-commit").map((n) => ({ hash: n.dataset.hash, tag: n.tagName, text: n.textContent })),
     issues: pick(".dgc-il-issue").map((n) => ({ text: n.textContent.trim(), href: n.getAttribute("href") || n.dataset.href || "" })),
     apis: pick(".dgc-il-copy").map((n) => n.dataset.copy), copied: pick(".dgc-il-copied").length }; }, [scope, IL_DEEP]);
-/** Anything the inline touches drew in or over a prompt box (his call, 16 Nov: the box is never decorated). */
+/** Anything the inline touches drew in or over a prompt box (decided 16 Nov: the box is never decorated). */
 export const boxDecorations = (page, boxSel) => page.evaluate(([sel, deep]) => { const all = new Function(`${deep} return all;`)(), box = all(document, sel)[0], b = box.getBoundingClientRect();
   return all(document, "[class*='dgc-il']").filter((n) => n.getClientRects().length).filter((n) => { const r = n.getBoundingClientRect();
     return box.contains(n) || (r.right > b.left && r.left < b.right && r.bottom > b.top && r.top < b.bottom); }).map((n) => n.className); }, [boxSel, IL_DEEP]);

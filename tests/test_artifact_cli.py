@@ -44,7 +44,7 @@ class ArtifactCli(unittest.TestCase):
         code, text = self.run_cli("show", self.doc["id"])
         self.assertIn("Made", text)
         self.assertIn("exports: docx, pdf, md", text)
-        self.assertEqual(self.run_cli("list", "--type", "design")[0], 2)
+        self.assertEqual(self.run_cli("list", "--type", "sculpture")[0], 2)
 
     def test_export_to_a_folder_and_restore(self):
         out = self.tmp / "out"

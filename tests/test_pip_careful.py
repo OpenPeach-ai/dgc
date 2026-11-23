@@ -171,7 +171,7 @@ class CarefulStoreTests(unittest.TestCase):
         self.assertIsNone(host._careful("type", {"text": "my own words"}), "its own words never ask")
 
     def test_always_allow_a_site_is_refused_but_carrying_app_data_is_pinned(self):
-        """His call 15 Nov: Always allow on every card. A new site still has no Always (Allow adds it for good); a careful
+        """Decided 15 Nov: Always allow on every card. A new site still has no Always (Allow adds it for good); a careful
         card (carrying what it read to one destination) pins that destination only."""
         pip = self.make()
         for kind in ("site", "text"):

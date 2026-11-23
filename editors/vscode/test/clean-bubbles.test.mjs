@@ -1,4 +1,4 @@
-// Sent and goal bubbles are clean on every surface: no stripe down a side (his call, 19 Nov: a goal's prompt bubble
+// Sent and goal bubbles are clean on every surface: no stripe down a side (decided 19 Nov: a goal's prompt bubble
 // had a 2px grey inset on its left).
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -1,4 +1,4 @@
-"""A Pip makes pages, sheets, documents, decks and dashboards (0.52; his call 15 Nov: "pips should have these all tools",
+"""A Pip makes pages, sheets, documents, decks and dashboards (0.52; decided 15 Nov: "pips should have these all tools",
 with no cap: better instructions instead).
 
 The worker never writes DGC's artifact store (it runs in its own home): its ``make_artifact`` and ``edit_artifact`` go
@@ -14,7 +14,7 @@ import re
 
 TOOLS = ("make_artifact", "edit_artifact", "find_artifacts")
 
-# What the Pip is told, on each tool: one item per purpose, kept current, never a flood (his call: instructions, no cap).
+# What the Pip is told, on each tool: one item per purpose, kept current, never a flood (instructions, no cap).
 KEEP_ONE = (" As a Pip: keep ONE page, sheet, document or dashboard per purpose. When one you made already covers it, "
             "update that one with edit_artifact (each update is a new version the user can go back to) instead of "
             "making another. Make one only when the user asked for it or your job needs it to be kept; never several "
@@ -91,7 +91,7 @@ class Session:
 
 MAX_REPLY_ARTIFACTS = 8
 _ARTIFACT_ID = re.compile(r"ar_[0-9a-f]{16}\Z")
-_ARTIFACT_TYPES = ("doc", "slides", "sheet", "page", "dashboard", "checklist")
+_ARTIFACT_TYPES = ("doc", "slides", "sheet", "page", "dashboard", "checklist", "design")
 
 
 def reply_artifacts(items) -> list:

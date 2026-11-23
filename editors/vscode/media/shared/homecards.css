@@ -48,7 +48,7 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
   .hc-cards-btn .hc-btn-word, .hc-library-btn .hc-btn-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 .hc-cards-btn:hover, .hc-cards-btn:focus-visible { --mosaic-play: running; }
-/* GitHub, Docs, DGC-SDK and Settings: always one ⋯ after Library and Cards (his call, 18 Nov), whose menu lists them, each
+/* GitHub, Docs, DGC-SDK and Settings: always one ⋯ after Library and Cards (decided 18 Nov), whose menu lists them, each
    with its own 16 px mark and its name. */
 .hc-mark { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; }
 .hc-mark-svg { display: block; width: 16px; height: 16px; overflow: visible; }
@@ -304,7 +304,7 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 /* Where nothing hovers (a touch screen) a folder's New session and its pin are always in sight (14 Nov). */
 @media (hover: none) { .hc-tile .hc-here, .hc-tile .hc-pin { opacity: 1; } }
 /* A narrow side bar (under 400px): the same, with a pointer too. Its two small buttons sit on the tile's own corners, so
-   they fit at any width, and nothing there needs the pointer on the tile first (his rule for every list, 16 Nov). */
+   they fit at any width, and nothing there needs the pointer on the tile first (the rule for every list, 16 Nov). */
 @media (max-width: 399px) { .hc-tile .hc-here, .hc-tile .hc-pin { opacity: 1; } }
 /* The Clock (14 Nov): Here and up to three more. Two to a row (one where a row has no room for two; four across in the
    card opened in a wide side bar), so four are two rows of two. A city's name is never cut: its offset and its day go to
@@ -529,7 +529,7 @@ dialog.hc-library:not([open]) { display: none; }
   .hc-lib-act > *, dialog.hc-library .hc-btn { max-width: 100%; min-width: 0; }
 }
 
-/* Browser (his call, 17 Nov): the search field across the card (a field at every size, as Notes is), then the last two
+/* Browser (decided 17 Nov): the search field across the card (a field at every size, as Notes is), then the last two
    or three links visited in Your Browser. Its mark is his Halo (media/icons/browser-halo/halo.css), still unless the
    card is pointed at. One design language: the field and Go are the cards' own field and button. */
 .halo.hc-halo { --size: 14px; --halo-play: paused; flex: none; }
@@ -561,7 +561,7 @@ dialog.hc-library:not([open]) { display: none; }
 .hc-grid > .hc-card[data-card="browser"]:not([data-form="s"]) .hc-browse-why { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
 .hc-grid[data-form="l"] > .hc-card[data-card="browser"] { gap: 4px; }
 .hc-grid[data-form="l"] > .hc-card[data-card="browser"] .hc-link { min-height: 28px; padding: 2px 6px; }
-/* Install Google Chrome (his call, 18 Nov): why, then the one button (or, where no password prompt can open, the line to run
+/* Install Google Chrome (decided 18 Nov): why, then the one button (or, where no password prompt can open, the line to run
    in a terminal with Copy). The cards' own button; the line one row, scrolled sideways rather than cut, never past the card. */
 .hc-install-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .hc-install-row:empty { display: none; }

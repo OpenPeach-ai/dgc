@@ -1,4 +1,4 @@
-"""A Pip fetches a good tool when it would do the job better (his ask, 15 Nov: "for any task if it thinks a well built
+"""A Pip fetches a good tool when it would do the job better (asked 15 Nov: "for any task if it thinks a well built
 github repo can be downloaded on the personal computer, a program, an application etc, it should download and use it").
 
 Its Terminal reaches public websites and its box is the wall, so installing is inside it and asks nothing. What it is
@@ -20,10 +20,10 @@ class BetterTools(unittest.TestCase):
                       # His addition (15 Nov): applications and programs too, judged by stars and community feedback on
                       # GitHub, or downloads and likes on Hugging Face; and (mine) its size and whether it runs here.
                       "application", "stars", "Hugging Face", "size",
-                      # His call (15 Nov): something big is a conversation, never a permission card, at every level
+                      # Decided 15 Nov: something big is a conversation, never a permission card, at every level
                       # (Do it all too): it says the size and asks in the chat; small things it just fetches and uses.
                       "about 1 GB", "ask the user in the chat", "Download it", "smaller ones just",
-                      # His call (15 Nov): no list DGC keeps; it searches each time (awesome lists, GitHub by stars,
+                      # Decided 15 Nov: no list DGC keeps; it searches each time (awesome lists, GitHub by stars,
                       # Hugging Face by downloads). System tools pip and npm can't give come from micromamba
                       # (conda-forge) into its Files: its system is shared read-only, so apt can't run there.
                       "sindresorhus/awesome", "sorted by stars", "sorted by downloads", "micromamba", "conda-forge"):

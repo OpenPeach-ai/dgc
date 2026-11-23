@@ -116,7 +116,7 @@ test("the tab you are on has its name in the accent and nothing behind it (18 No
       let bar = await x.tabs();
       assert.equal(names(bar).length, 5, `${theme}: five tabs`);
       assert.equal(tab(bar, "home").color, accent, `${theme}: the tab you are on is in the accent's text tone`);
-      assert.deepEqual([tab(bar, "home").glow, tab(bar, "home").ground], [0, "rgba(0, 0, 0, 0)"], `${theme}: and nothing behind it (his call, 18 Nov: the purple glow went; the name alone turns purple)`);
+      assert.deepEqual([tab(bar, "home").glow, tab(bar, "home").ground], [0, "rgba(0, 0, 0, 0)"], `${theme}: and nothing behind it (decided 18 Nov: the purple glow went; the name alone turns purple)`);
       for (const id of ["work", "chat", "pips"]) {
         assert.equal(tab(bar, id).color, quiet, `${theme}: ${id} is quiet at rest`);
         assert.equal(tab(bar, id).glow, 0, `${theme}: ${id} has no glow at rest`);
@@ -564,7 +564,7 @@ test("the tabs and the hub take every colour from the tokens, and say nothing th
   }
   assert.match(read("media/main.css"), /@import url\("\.\/shared\/tabs\.css"\);\s*@import url\("\.\/shared\/hub\.css"\);/, "the side bar's page loads both");
   assert.match(read("src/panel.ts"), /"shared", "hub\.js"/, "and the hub's script");
-  // No glow behind the tab you are on (his call, 18 Nov): its name alone takes the accent.
+  // No glow behind the tab you are on (decided 18 Nov): its name alone takes the accent.
   assert.doesNotMatch(read("media/shared/tokens.css"), /--tabs-glow/);
   assert.doesNotMatch(read("src/panel.ts"), /dgc-tab-glow/);
   assert.doesNotMatch(read("media/shared/tabs.css"), /dgc-tab-glow/);

@@ -1,6 +1,6 @@
 """Real artifacts for the artifact panel's tests and captures (test/support/artifact-scene.mjs): a deck, a workbook and a
-dashboard as dgc/artifact_slides.py, artifact_sheet.py and artifact_dashboard.py normalize them (and a checklist, as
-dgc/artifact_checklist.py keeps one), and DGC's own page of
+dashboard as dgc/artifact_slides.py, artifact_sheet.py and artifact_dashboard.py normalize them (a checklist, as
+dgc/artifact_checklist.py keeps one, and a design, as dgc/artifact_design.py does), and DGC's own page of
 each as the artifact server would serve it. Prints one JSON object. Writes only into the folder it is given (the
 dashboard's SQLite database, which it then refreshes from); the caller removes that folder. Not a test file.
 
@@ -94,6 +94,79 @@ def checklist_fixture() -> dict:
             "html": checklist.render_html(data, title="Ship the parser", pictures=pictures)}
 
 
+DESKTOP_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Bean There</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #fbf6ef; color: #2b1d14; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 28px 72px; }
+  nav { display: flex; gap: 28px; }
+  .hero { display: flex; flex-direction: column; gap: 24px; padding: 96px 72px; max-width: 760px; }
+  h1 { margin: 0; font-size: 72px; line-height: 1.02; }
+  p.lead { margin: 0; font-size: 22px; line-height: 1.5; }
+  .cta { align-self: flex-start; background: var(--accent, #b5651d); color: #fff; border: 0; padding: 16px 26px; border-radius: 8px; font-size: 18px; }
+  html[data-tweak-badge="off"] .badge { display: none; }
+  .badge { align-self: flex-start; background: #2b1d14; color: #fbf6ef; padding: 6px 12px; border-radius: 4px; font-size: 13px; }
+</style></head>
+<body>
+<header><strong>Bean There</strong><nav><a href="#menu">Menu</a><a href="#visit">Visit</a></nav></header>
+<section class="hero"><span class="badge">New: single-origin Ethiopia</span><h1 id="headline">Coffee worth waking up for</h1>
+<p class="lead">Roasted on Mill Street every morning, poured until six.</p><button class="cta">See the menu</button></section>
+</body></html>"""
+
+SIGN_IN_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #fff; color: #1d1c21; padding: 96px 28px; }
+  h1 { font-size: 30px; margin: 0 0 24px; } label { display: block; margin: 0 0 6px; font-size: 14px; }
+  input { box-sizing: border-box; width: 100%; height: 44px; margin: 0 0 18px; padding: 0 12px; border: 1px solid #c9c6d1; border-radius: 8px; font-size: 16px; }
+  button { width: 100%; height: 48px; border: 0; border-radius: 8px; background: #6747df; color: #fff; font-size: 17px; }
+  #said { margin-top: 14px; color: #6d6a75; font-size: 14px; }
+</style></head><body>
+<h1>Sign in</h1>
+<label for="email">Email</label><input id="email" type="email" value="asha@example.com">
+<label for="pass">Password</label><input id="pass" type="password" value="secret">
+<button id="go" data-goto="Welcome">Sign in</button>
+<p id="said">Not signed in yet.</p>
+<script>
+  document.getElementById("email").addEventListener("input", function () { document.getElementById("said").textContent = "Typing…"; });
+  window.parent.postMessage({ type: "artboard-script-ran" }, "*");
+</script>
+</body></html>"""
+
+WELCOME_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f2f0ff; color: #1d1c21; padding: 120px 28px; text-align: center; }
+  h1 { font-size: 34px; } a { color: #6747df; }
+</style></head><body><h1>Welcome back, Asha</h1><p>Your usual is ready to order.</p><p><a href="#b2">Sign out</a></p></body></html>"""
+
+
+def design_fixture() -> dict:
+    """A design part-way through, as DGC keeps one: a desktop page with two tweaks, a sign-in screen whose button goes to
+    a welcome screen (the first with a script of its own), a tablet not drawn yet, a title and a sticky note, and a second
+    page with one more frame waiting."""
+    from dgc import artifact_design as design
+    index, _pending = design.start({"artboards": [{"title": "Desktop", "size": "desktop"}, {"title": "Sign in", "size": "phone"},
+                                                   {"title": "Welcome", "size": "phone"}, {"title": "Tablet", "size": "tablet"}]})
+    files: dict = {}
+    for op in ({"op": "change", "board": "b1", "html": DESKTOP_PAGE, "tweaks": [
+                    {"name": "accent", "label": "Accent colour", "type": "color", "value": "#b5651d"},
+                    {"name": "badge", "label": "Show the badge", "type": "switch", "value": True}]},
+               {"op": "change", "board": "b2", "html": SIGN_IN_PAGE},
+               {"op": "change", "board": "b3", "html": WELCOME_PAGE},
+               {"op": "note_add", "kind": "title", "text": "Bean There", "over": "b1"},
+               {"op": "note_add", "kind": "sticky", "text": "Check the hero copy with Asha", "color": "pink", "near": "b2"},
+               {"op": "page_add", "name": "Checkout"},
+               {"op": "add", "title": "Cart", "size": "phone", "page": "Checkout"}):
+        index, files, _said, _told = design.apply(index, files, op)
+    index = design.normalize(index)
+    boards = {b["id"]: files[design.board_file(b["id"])].decode("utf-8") for b in index["boards"]
+              if design.board_file(b["id"]) in files}
+    made = view("ar_" + "7" * 16, "design", "Coffee landing", 5, "work", design=design.counts(index))
+    made["exports"] = ["pdf", "html", "zip"]
+    made["updated"] = "2026-10-28T08:40:00Z"
+    return {"view": made, "content": index, "state": {"boards": boards},
+            "html": design.render_html(index, files, title="Coffee landing")}
+
+
 def view(aid: str, type_: str, title: str, versions: int, surface: str, **extra) -> dict:
     out = {"id": aid, "type": type_, "label": service.LABELS[type_], "title": title, "version": versions,
            "created": "2026-10-27T09:12:00Z", "updated": "2026-10-28T08:40:00Z", "origin": {"surface": surface},
@@ -129,6 +202,7 @@ def main(folder: str) -> None:
         "doc": {"view": view("ar_" + "5" * 16, "doc", "Launch notes", 2, "work", file=str(root / "ar_5555555555555555" / "work" / "Launch notes.md"))},
     }
     out["checklist"] = checklist_fixture()
+    out["design"] = design_fixture()
     out["dashboard"]["three_column_html"] = dashboard.render_html(
         {**dash, "layout": {"columns": 3}}, results, title="Store sales")
     # Capture a real comparison from saved versions, alongside the pages the browser scenes use.

@@ -2,7 +2,7 @@
 // code wears a small square of that exact colour, a keyboard shortcut is drawn as keys, a commit and an issue are links
 // where the project's Git says so, a time with a zone tells this computer's time, and a code worth copying (a colour, a
 // commit, an API path) copies on a click. One module: the reading half (scan, no page needed) and the drawing half
-// (decorate what a chat shows). The prompt box is never decorated: what you type stays your plain words (his call, 16 Nov).
+// (decorate what a chat shows). The prompt box is never decorated: what you type stays your plain words (decided 16 Nov).
 //
 //   DgcInline.scan(text, { code, colours, keys, times, commits, issues, now }) -> [{ kind, start, end, text, ... }]
 //   DgcInline.watch(root, { rules: [{ sel, colours, keys, times, refs }], copy(text), refs })

@@ -1,4 +1,4 @@
-"""The Project Folder dropdown (his calls, 12 Nov, for 0.52): one shared choice, "All projects" or one folder, over the
+"""The Project Folder dropdown (decided 12 Nov, for 0.52): one shared choice, "All projects" or one folder, over the
 Work sessions, Home's recent sessions, the Pips view's Project tab and Needs Attention for Project Pips; New Session and
 Create Project Pip pick a folder, with "Add a folder…". Pips API 93 gives the editor what it needs:
 

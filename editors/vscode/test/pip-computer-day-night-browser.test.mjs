@@ -1,4 +1,4 @@
-// The computer tab's own desktop wears the one wallpaper the full desktop does (his calls, 16 Nov): the teal version
+// The computer tab's own desktop wears the one wallpaper the full desktop does (decided 16 Nov): the teal version
 // from 07:00 to 19:00 and the dark grey one at night, by this computer's clock, and the dock's glass follows it (light
 // by day, dark by night), whatever the editor's theme. It changes while the tab is open (each minute, and at once when
 // the tab is looked at again). In real Chromium with the real client and its CSS (test/support/pip-computer-scene.mjs).
@@ -71,7 +71,7 @@ test("it changes while the tab is open, at once when the tab is looked at again"
   } finally { await x.close(); }
 });
 
-// One app, one picture (his rule, 16 Nov: "we need to keep things same"): the tab's own dock and its windows' title bars
+// One app, one picture (the rule, 16 Nov: "we need to keep things same"): the tab's own dock and its windows' title bars
 // show Browser, Files and Terminal with the very pictures the full desktop's dock wears (dgc/desktop_assets), never
 // drawings of their own.
 test("the tab's dock wears the full desktop's own app pictures, byte for byte", async (t) => {

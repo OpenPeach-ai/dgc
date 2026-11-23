@@ -121,7 +121,7 @@ try {
       console.log("library", theme);
     }
   }
-  // The header's tabs (his call of 15 Nov): Library is a word, and a plain line icon when the tabs are icons; only
+  // The header's tabs (decided 15 Nov): Library is a word, and a plain line icon when the tabs are icons; only
   // Pips has a picture. Words from 280 px.
   if (!only || only === "tabs") {
     const { openDock } = await import("./dock-scene.mjs");

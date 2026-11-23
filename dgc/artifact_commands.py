@@ -15,9 +15,11 @@ from .editor_protocol import command_error
 # present: artifact_open takes mode "present" (a deck's present mode at its own address).
 # comments: artifact_comment_* and artifact_suggestion_* are understood, answered by artifact_comments
 # (dgc/artifact_comments; Ask DGC runs dgc/artifact_comment_turn).
+# designs: the "design" type (a canvas of artboards, dgc/artifact_design): artifact_design_edit is understood,
+# artifact_export takes `board`, and artifact_detail's `state` carries a design's drawn artboards.
 CAPABILITY = {"artifacts": {"version": 1, "types": list(TYPES), "outputs": list(service.OUTPUTS),
                             "exports": {t: list(f) for t, f in service.EXPORTS.items()}, "present": 1, "compare": 1,
-                            "source_consent_version": 1, "comments": 1}}
+                            "source_consent_version": 1, "comments": 1, "designs": 1}}
 
 
 def _reads_a_plugin(aid: str) -> bool:
@@ -111,11 +113,31 @@ class ArtifactCommands:
         if view["type"] == "checklist":
             # Its proof pictures, for the panel that draws it (the data names each by its file in the version).
             fields["state"] = {"pictures": service.checklist_pictures(aid, cmd.get("version", view["version"]))}
+        if view["type"] == "design" and cmd.get("content"):
+            # Its drawn artboards' pages, for the canvas that shows them (the index names each by its id).
+            fields["state"] = {"boards": service.design_boards(aid, cmd.get("version", view["version"]))}
         self._reply(cmd, "artifact_detail", **fields)
 
     def _artifact_update(self, cmd):
         view = service.edit(cmd["id"], content=cmd["content"], author="you", note=cmd.get("note") or "Your edits",
                             base_version=cmd["base_version"], title=cmd.get("title"))
+        self.changed(view, "changed", surface="editor", request_id=cmd["request_id"])
+
+    def _artifact_design_edit(self, cmd):
+        """The person's own change to a design in its canvas: ops, as the model's edits are, a version by "you". A
+        whole-page artboard's measured height is remembered beside the versions and is no version."""
+        edits = [e for e in cmd["edits"] if isinstance(e, dict)]
+        measured = [e for e in edits if e.get("op") == "measured"]
+        for e in measured:
+            service.design_measured(cmd["id"], str(e.get("board") or ""), e.get("h"))
+        edits = [e for e in edits if e.get("op") != "measured"]
+        if not edits:
+            return self._reply(cmd, "artifact_detail", artifact=service.view(cmd["id"]))
+        if len(edits) == 1 and edits[0].get("op") == "title":
+            # (Its name alone, from the Library: a version that differs only in its title.)
+            view = service.edit(cmd["id"], title=str(edits[0].get("title") or ""), author="you")
+        else:
+            view = service.edit(cmd["id"], edits=edits, author="you", note=cmd.get("note") or "")
         self.changed(view, "changed", surface="editor", request_id=cmd["request_id"])
 
     def _artifact_restore(self, cmd):
@@ -133,7 +155,8 @@ class ArtifactCommands:
 
     def _artifact_export(self, cmd):
         def work():
-            path = service.export(cmd["id"], cmd["format"], n=cmd.get("version"), config=self.config)
+            path = service.export(cmd["id"], cmd["format"], n=cmd.get("version"), config=self.config,
+                                  board=cmd.get("board"))
             self._reply(cmd, "artifact_exported", id=cmd["id"], format=path.suffix.lstrip("."), path=str(path))
         self._later(cmd, work)
 

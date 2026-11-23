@@ -1,4 +1,4 @@
-"""A fallback model for sub-agents (0.52, his ask 14 Nov: "we need fallback model selector for sub agents too").
+"""A fallback model for sub-agents (0.52, asked 14 Nov: "we need fallback model selector for sub agents too").
 
 Main's fallback (fallback_*) is what a chat carries on with when its own model fails. Sub-agents get their own:
 subagent_fallback_model, _base_url, _api_mode and _api_key, set in Settings > Sub-agents for every chat, or by a Work

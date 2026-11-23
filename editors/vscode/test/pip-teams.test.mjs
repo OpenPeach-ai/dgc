@@ -140,7 +140,7 @@ test('the allow-list: skills go from the Pips page at API 88, each named as DGC 
 
 const TEAM={format:'dgc-team',version:1,name:'Launch crew',pips:[{format:'dgc-pip',version:1,pip:{name:'Researcher'},left_out:['Memory, history, findings and results stay with the original Pip.']},
  {format:'dgc-pip',version:1,pip:{name:'Writer'},left_out:['Memory, history, findings and results stay with the original Pip.','Reads from connected apps: they name your accounts.']}]};
-// His rule (18 Nov): the save dialog stays only where the place is the project. A team file is a copy for the person: the
+// The rule (18 Nov): the save dialog stays only where the place is the project. A team file is a copy for the person: the
 // page that asked downloads it on their own computer (media/shared/download.js, src/download.ts).
 test('Export team: the host asks DGC for the file and hands it to the page as a download under the team’s name; no save dialog, nothing written here',async()=>{
  const calls=[];

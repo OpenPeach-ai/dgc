@@ -1,9 +1,9 @@
 /* The tabs at the top of DGC's side bar: Home, Work, Chat, Library, Pips, as names only (Pips alone with a picture: the
-   Core Pip's small face after its name; his call of 15 Nov: "the header tabs don't need to show icon for library, only
+   Core Pip's small face after its name; decided 15 Nov: "the header tabs don't need to show icon for library, only
    Pips tab shows Core's face, not any other tab"), in one centred bar. A bar with the
    button family's corner (--btn-r, as New and the search field under it; asked 13 Nov: it was a pill) on a soft gradient
    of the side bar's own grey, with a hairline and a low shadow. The tab you are on has its name in DGC's purple, the
-   accent's text tone, with nothing behind it (his call, 18 Nov: the soft purple glow it had went). Pointing at another tab only changes its name
+   accent's text tone, with nothing behind it (decided 18 Nov: the soft purple glow it had went). Pointing at another tab only changes its name
    from the quiet grey to the text colour (asked 13 Nov: it lit up, glowed and turned its name over): nothing glows,
    turns, grows or slides.
    Home shows how many things wait or are new. The five names, with the Pip's face, fit a 280 px side bar. Under 280 px each tab is an icon
@@ -47,7 +47,7 @@
   font: var(--w-semi) 10px/16px var(--sans); font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: center;
 }
 .dgc-tab-count[hidden] { display: none; }
-/* Only new things, nothing waiting for you: a quiet dot, no number (his call, 16 Nov: the number is what needs you). */
+/* Only new things, nothing waiting for you: a quiet dot, no number (decided 16 Nov: the number is what needs you). */
 .dgc-tab-count[data-news-only] { min-width: 0; width: 6px; height: 6px; padding: 0; border-radius: 50%; background: color-mix(in srgb, var(--text) 55%, transparent); font-size: 0; }
 /* Each tab's icon (Home, Work, Chat, Library) is in the page beside its word, and is not drawn while the words fit. */
 .dgc-tab .dgc-tab-icon.codicon { display: none; }

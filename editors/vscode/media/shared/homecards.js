@@ -21,7 +21,7 @@
 // card in a wide side bar. Adding Weather always asks for the place (the saved one is in the field); Change place is on
 // every size (a card with no room for the field opens whole at it); a weather that could not be read offers Try again
 // and is asked again after a minute.
-// Browser (his call, 17 Nov): a search field, and under it the last two or three links visited in Your Browser (the
+// Browser (decided 17 Nov): a search field, and under it the last two or three links visited in Your Browser (the
 // person's own tabs, never a Pip's); what is typed (a search or an address) opens Your Browser with it. Only where DGC has
 // Your Browser (Pips API 107): an older DGC lists no such card and Home leaves it out. Where Google Chrome is needed (his
 // call, 18 Nov) the card offers ONE button, Install Google Chrome (a small dialog first, then the computer's own password
@@ -100,7 +100,7 @@
   const PLUS = shared("add", 12), CROSS = shared("close", 12), BACK = shared("back", 14), TICK = svg('<path d="M5 12l5 5L20 7"/>', 11, 3);
   // The Library's mark: his Iris books (media/icons/library-iris/library.css), exactly as he made them, beside the word.
   const LIBRARY_ICON = '<span class="library-iris" aria-hidden="true"><i></i><i></i><i></i></span>';
-  // GitHub, Docs, DGC-SDK and Settings after Library and Cards (his call, 17 Nov), each its own coloured mark at the same
+  // GitHub, Docs, DGC-SDK and Settings after Library and Cards (decided 17 Nov), each its own coloured mark at the same
   // visible size as theirs (the sheet he approved): GitHub's own mark; Docs a page stack with a bookmark; DGC-SDK the
   // website's tilted tile with DGC's three strokes (its SDK page's own); Settings a graphite gear. Drawn here, so a
   // gradient's id is the mark's own.
@@ -121,7 +121,7 @@
       + `<g stroke="#fff" stroke-linecap="round" stroke-width="2.3"><line x1="12.5" y1="22" x2="27" y2="22" stroke-opacity=".95"/><line x1="12.5" y1="27.5" x2="27" y2="27.5" stroke-opacity=".88"/><line x1="12.5" y1="33" x2="27" y2="33" stroke-opacity=".8"/><line x1="12.5" y1="38.5" x2="21" y2="38.5" stroke-opacity=".72"/></g>`
       + `<path d="M13.5 4.5 h4.6 v13 l-2.3 -2.1 l-2.3 2.1 Z" fill="url(#${id}e)"/></g></svg>`;
   }
-  // The SDK's mark: DGC's three strokes in the SDK's own olive (his call, 18 Nov: each DGC product its colour, the SDK
+  // The SDK's mark: DGC's three strokes in the SDK's own olive (decided 18 Nov: each DGC product its colour, the SDK
   // olive), at 1, .83 and .62.
   const SDK_MARK = '<svg class="hc-mark-svg hc-mark-sdk" viewBox="10 14 72 62" aria-hidden="true" focusable="false"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>';
   function gearMark() {
@@ -172,7 +172,7 @@
     return days < 1 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? `${days} days ago` : SHORT_DAY(new Date(at));
   }
   const SHORT_DAY = (d) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", ...(d.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }) }).format(d);
-  const A_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", page: "Page", dashboard: "Dashboard", checklist: "Checklist" };
+  const A_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", page: "Page", dashboard: "Dashboard", checklist: "Checklist", design: "Design" };
   const A_MADE = { chat: "made in Chat", work: "made in Work", pip: "made by a Pip", sdk: "made by an app", cli: "made in the terminal" };
 
   // ---- numbers and days ------------------------------------------------------------------------------------------------
@@ -191,7 +191,7 @@
   const splitWords = (ds) => `In ${compact(ds.reduce((a, d) => a + d.input, 0))} · Out ${compact(ds.reduce((a, d) => a + d.output, 0))}`;
   // (In a tile: two parts, so a narrow tile puts Out under In instead of cutting it short.)
   const splitParts = (ds) => `<span>In ${compact(ds.reduce((a, d) => a + d.input, 0))}</span><span>Out ${compact(ds.reduce((a, d) => a + d.output, 0))}</span>`;
-  // The card counts one span, the last 7 days, at every size (his call, 17 Nov: "lets just show there for 7 Days Range").
+  // The card counts one span, the last 7 days, at every size (decided 17 Nov: "lets just show there for 7 Days Range").
   const TOKEN_DAYS = 7;
   const METRICS = {
     tokens: { name: "Tokens", unit: "tokens", of: (d) => d.input + d.output, total: (ds) => ds.reduce((a, d) => a + d.input + d.output, 0), say: compact,
@@ -593,10 +593,10 @@
       if (ui.arranging && !order.length) ui.arranging = false;
       // The head: Cards at the top right; while Home is arranged, what to do and Done.
       const headHtml = `${ui.arranging ? `<span class="hc-arr-title">Arrange Home</span><span class="hc-cap hc-arr-cap">drag to move · × to remove</span><span class="hc-sp"></span><button type="button" class="hc-btn hc-solid hc-done">Done</button>` : ui.open ? `<button type="button" class="hc-btn hc-back" title="Back to Home (Escape)" aria-label="Back to Home">${BACK}<span class="hc-btn-word">Home</span></button><span class="hc-sp"></span>` : '<span class="hc-sp"></span>'}`
-        // Library, beside Cards and of its shape (his call, 15 Nov): it opens the side bar's Library tab. Not while Home is arranged.
+        // Library, beside Cards and of its shape (decided 15 Nov): it opens the side bar's Library tab. Not while Home is arranged.
         + (ui.arranging ? "" : `<button type="button" class="hc-btn hc-library-btn" title="Library: everything DGC made for you, and who made it" aria-label="Library">${LIBRARY_ICON}<span class="hc-btn-word">Library</span></button>`)
         + `<button type="button" class="hc-btn hc-cards-btn" aria-haspopup="dialog" title="Cards: add, remove and arrange what is on Home" aria-label="Cards">${mosaic("ember", 16)}<span class="hc-btn-word">Cards</span></button>`
-        // GitHub, Docs, DGC-SDK and Settings: always the ⋯ and its menu, at every width (his call, 18 Nov); only Library
+        // GitHub, Docs, DGC-SDK and Settings: always the ⋯ and its menu, at every width (decided 18 Nov); only Library
         // and Cards are buttons of their own. Not while Home is arranged.
         + (ui.arranging ? "" : `<button type="button" class="hc-btn hc-links-more" aria-haspopup="menu" aria-expanded="${ui.links ? "true" : "false"}" title="GitHub, Docs, DGC-SDK and Settings" aria-label="More: GitHub, Docs, DGC-SDK and Settings">${shared("more", 16)}</button>`
           + (ui.links ? `<div class="hc-links-menu dgc-menu" role="menu" aria-label="More">${HEAD_LINKS.map((l) => `<button type="button" role="menuitem" class="dgc-menu-row hc-links-row" data-head-link="${l.id}" tabindex="-1"><span class="hc-mark">${markOf(l, "menu")}</span><span class="dgc-menu-label">${esc(l.word)}</span></button>`).join("")}</div>` : ""));

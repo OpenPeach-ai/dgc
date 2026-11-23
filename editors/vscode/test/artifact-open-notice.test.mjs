@@ -1,4 +1,4 @@
-// The "Open" pop-up (src/artifactNotice.ts; his ask, 14 Nov): whenever a Work, Chat or Pip turn makes or updates a
+// The "Open" pop-up (src/artifactNotice.ts; asked 14 Nov): whenever a Work, Chat or Pip turn makes or updates a
 // page, a document, slides, a sheet or a dashboard (or a chat makes a widget nobody is looking at), ONE editor
 // notification says DGC made “<title>” (or updated) with Open, which opens it where DGC opens it: a document in its
 // editor tab, everything else in its artifact tab. Once per artifact and version, also after a reload; never a stack

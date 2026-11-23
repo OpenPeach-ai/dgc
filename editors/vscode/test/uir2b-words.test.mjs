@@ -1,4 +1,4 @@
-// His words calls (15 Nov, 21:00), on the real pages in Chromium: Work is sessions, ChatDGC is chats, ChatDGC's groups
+// Decided 15 Nov, 21:00, on the real pages in Chromium: Work is sessions, ChatDGC is chats, ChatDGC's groups
 // of chats are Spaces, and "project" only ever means a code folder. A tab that is a new session says "New session";
 // "Open a second chat" says what opens (a session). Protocol names and stored keys are as they were: words only.
 import { after, before, test } from "node:test";

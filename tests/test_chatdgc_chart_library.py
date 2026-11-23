@@ -1,4 +1,4 @@
-"""The charts ChatDGC replies drew, in the Library (his call, 16 Nov: "ChatDGC charts in the Library" into 0.52).
+"""The charts ChatDGC replies drew, in the Library (decided 16 Nov: "ChatDGC charts in the Library" into 0.52).
 
 A reply's chart is a ```chart JSON block in its words, drawn by the screen; the Library's Widgets listed ChatDGC's
 widgets (show_widget) and never a chart, so it said "A chart in a chat stays in its chat". Now chatdgc_widgets

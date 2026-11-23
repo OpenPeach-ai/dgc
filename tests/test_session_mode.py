@@ -643,8 +643,9 @@ class SessionModeTest(unittest.TestCase):
                 self.assertEqual(backend.agent.mode, "default", f"an untrusted folder reopened in {saved}")
                 notes = [e["message"] for e in events if e["type"] == "info"]
                 self.assertEqual(len(notes), 1, events)
-                self.assertEqual(notes[0], f"This chat ran in {label}. This folder is not trusted now, so it "
-                                           "reopened in Default, which asks before each change.")
+                self.assertEqual(notes[0], f"Reopened in Default, so DGC asks before each change. {label} runs only in "
+                                           f"folders you've chosen to trust; switch to {label} to use it here.")
+                self.assertNotIn("not trusted", notes[0], "a calm note, not a warning")
                 kinds = [e["type"] for e in events]
                 self.assertGreater(kinds.index("info"), kinds.index("history"), "said where the chat shows it")
                 self.assertEqual(backend.agent.take_mode_restore_note(), "", "said once")

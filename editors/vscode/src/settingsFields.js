@@ -666,7 +666,7 @@ export function renderFields(section, main, config, providers, ui) {
             + '<div class="dev-warning-body"><strong class="dev-warning-title">Dev Mode lifts DGC\'s capacity limits</strong>'
             + '<span class="dev-warning-words">It is for a big machine: more at once, and more kept. Each limit you raise costs memory, disk or model load, and its line says which. '
             + 'Safety limits never move: the sandbox, redaction, approvals and what a Pip may do stay as they are. Nothing changes until you save.</span>'
-            // The same choice as the switch below, while the warning is up (his call, 14 Nov): off unless ticked.
+            // The same choice as the switch below, while the warning is up (decided 14 Nov): off unless ticked.
             + (toolsOffered ? `<label class="dev-warning-tools"><input type="checkbox" id="dev-warning-tools"${c.dev_mode_tools === true ? " checked" : ""}> <span>${DEV_TOOLS_NAME} when you ask</span></label>` : "")
             + '</div>'
             + '<button type="button" class="secondary" id="dev-warning-ok">Got it</button></section>';

@@ -478,7 +478,7 @@ export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', mark
 export function computerDocument(scriptUri = '', styleUri = '', cspSource = '', title = 'Computer'): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>${attr(title)}</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><script type="module" src="${attr(scriptUri)}"></script></body></html>`;
 }
-/** A Pip's tab in Your Browser, streamed into an editor tab (Pips API 107; his call, 17 Nov: a VS Code tab beside the
+/** A Pip's tab in Your Browser, streamed into an editor tab (Pips API 107; decided 17 Nov: a VS Code tab beside the
  *  chat shows a Pip's tab live, with DGC's own address bar). Its page may ask for its own Pip's lane and nothing else: a
  *  frame, the person's own hand in it, and bringing that tab forward in the window. Never the person's own tabs. */
 export const YOUR_BROWSER_API = 107;
@@ -492,7 +492,7 @@ export function yourBrowserTabRefusal(request: any, pipId: string): string {
   return refused;
 }
 /** Your own tabs in Your Browser, streamed into an editor tab where the computer DGC runs on has no screen (Remote-SSH;
- *  his call, 18 Nov). Its page may ask for your own tab and nothing else (a frame, your own hand in it, the address bar,
+ *  decided 18 Nov). Its page may ask for your own tab and nothing else (a frame, your own hand in it, the address bar,
  *  your tabs, its size), and no other page may ask for your own tab at all. */
 const YOUR_OWN_OPS = new Set(['frame', 'input', 'go', 'back', 'forward', 'reload', 'new_tab', 'tab', 'close_tab', 'size', 'close', 'selection']);
 const YOUR_OWN_FIELDS = new Set(['type', 'own', 'op', 'seq', 'events', 'tab', 'width', 'height', 'url']);
@@ -1233,7 +1233,8 @@ export class PipsEditor implements vscode.Disposable {
       this.post({ type: 'pipComputerSaved', ok: false, error: error instanceof Error ? error.message : 'Not saved.' }, surface);
     }
   }
-  open(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string } | { overview: true }): void {
+  /** `compose`: words added to that Pip's prompt box, unsent (Ask in chat, from a design's canvas). */
+  open(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string; compose?: string } | { overview: true }): void {
     this.embeddedPost = undefined;
     this.panelNavigation = navigation;
     if (this.panel) {
@@ -1558,7 +1559,7 @@ export class PipsEditor implements vscode.Disposable {
       if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text, 'utf8') > TEAM_FILE_BYTES || team?.format !== 'dgc-team' || typeof team.name !== 'string'
         || !Array.isArray(team.pips) || !team.pips.length || team.pips.length > TEAM_PIPS) throw Error('The team file is invalid.');
       // A download to the person's own computer, from the page that asked (src/download.ts): the dialog stays only where
-      // the place is the project (his call, 18 Nov).
+      // the place is the project (decided 18 Nov).
       const file = teamFileName(team.name);
       if (!await downloadBytes((m) => this.post(m, surface), file, Buffer.from(text, 'utf8'), 'application/json')) throw Error('The team file could not be handed to this page.');
       const leftOut: string[] = [];
@@ -1965,7 +1966,7 @@ export class PipsEditor implements vscode.Disposable {
       // A Pip's report document or sheet, or a dashboard it refreshes: in the artifact panel (a document in the editor).
       const id = String(message.id || ''), kind = String(message.artifactType || '');
       // (Pips API 102: what a reply made opens the same way, a page or a deck too.)
-      if (this.apiVersion >= 67 && ARTIFACT_ID.test(id) && ['doc', 'sheet', 'dashboard', 'page', 'slides', 'checklist'].includes(kind)) this.artifacts?.()?.open(id, { type: kind });
+      if (this.apiVersion >= 67 && ARTIFACT_ID.test(id) && ['doc', 'sheet', 'dashboard', 'page', 'slides', 'checklist', 'design'].includes(kind)) this.artifacts?.()?.open(id, { type: kind });
       return;
     }
     if (message?.type === 'pipsFiles' && !computer) {

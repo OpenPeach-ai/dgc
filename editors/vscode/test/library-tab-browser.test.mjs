@@ -1,4 +1,4 @@
-// The Library everywhere (0.52, his calls of 15 Nov; live round 1, findings 37 and 38): Library is one of the side
+// The Library everywhere (0.52, decided 15 Nov; live round 1, findings 37 and 38): Library is one of the side
 // bar's five tabs (Home · Work · Chat · Library · Pips since Library v2: Pips stays last; icons when narrow, as the
 // others), Home's top row has a Library button beside Cards, and the Library page is in the side bar. What the page
 // holds (the header row, the search field, its own five tabs, each tab's filters and rows) is library-v2-browser.test.mjs,
@@ -33,7 +33,7 @@ for (const width of [300, 440, 700]) {
     try {
       const bar = await x.tabs();
       assert.deepEqual(bar.tabs.filter((b) => b.shown).map((b) => b.name), ["Home", "Work", "Chat", "Library", "Pips"]);
-      for (const b of bar.tabs) { assert.equal(b.clipped, false, `${b.name} is whole`); assert.equal(b.icons, b.id === "pips" ? 1 : 0, `${b.name} is its word${b.id === "pips" ? " and the Core Pip's face" : " alone (only Pips has a picture: his call of 15 Nov)"}`); }
+      for (const b of bar.tabs) { assert.equal(b.clipped, false, `${b.name} is whole`); assert.equal(b.icons, b.id === "pips" ? 1 : 0, `${b.name} is its word${b.id === "pips" ? " and the Core Pip's face" : " alone (only Pips has a picture: decided 15 Nov)"}`); }
       const cut = await x.page.evaluate(() => [...document.querySelectorAll("#side-tabs .dgc-tab-word")].filter((w) => w.scrollWidth > w.clientWidth + 1 || w.getClientRects().length > 1).map((w) => w.textContent));
       assert.deepEqual(cut, [], "no name is cut or broken");
       assert.equal(bar.overflowX, false);

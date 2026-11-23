@@ -19,6 +19,17 @@
   card opens the site in your own tab (Open Your Browser, I've signed in, Not now). Watch a Pip's tab from Your
   Browser's dock menu.
 
+- **Designs**: a design DGC makes opens as a canvas you pan (drag, two fingers, Space and drag) and zoom (Ctrl and
+  scroll, pinch, + and -, Fit all, 100%), with its pages as tabs. Each artboard shows as DGC draws it; a frame not
+  drawn yet says so. Select an artboard to move it (its edges snap to the others, and to the 80 and 120 px gaps),
+  resize, rename, duplicate, delete, play, download or comment on it. Double-click one to open it: pick a part and
+  change its text colour, background, font size and weight, padding, gap and corner radius in the panel beside, or
+  double-click its words to change them in place. An artboard's declared tweaks are in the same panel. Add sticky
+  notes, titles and pages. Each change is saved at once as your version. Play runs an interactive artboard and
+  follows the links between artboards, as a prototype. Ask in chat puts a reference to the artboard (or the part
+  picked in it) in the prompt box of the chat that made it. Every artboard is in a frame of its own with no origin
+  and no way to reach the web, and its own scripts run only while it plays. The Library lists designs with their own
+  icon and a Designs kind.
 - **Checklists**: a checklist DGC makes for a job opens in a panel that looks like one: how far along it is, then each
   item with its tick box, its status as a chip, what done means, its note and its proof (test results, and pictures
   that open larger). Tick or reopen an item, pick a status, change what done means, add or remove an item, pin or

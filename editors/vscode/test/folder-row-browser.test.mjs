@@ -1,4 +1,4 @@
-// The Project Folder dropdown on a row that is already there (0.52, his calls on 12 Nov night), in real Chromium with
+// The Project Folder dropdown on a row that is already there (0.52, decided 12 Nov night), in real Chromium with
 // the real pages (test/support/home-scene.mjs, test/support/project-folder-pips-scene.mjs), at 700 and 300 px, dark and
 // light. Over the Work sessions it has a line of its own under the search row, at the LEFT, as on the Pips tab (the
 // Library button whose row it shared left Work on 14 Nov; View all lists in place, with no dropdown of its own).

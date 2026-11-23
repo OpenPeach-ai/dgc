@@ -46,7 +46,7 @@ test("it is Google's icon service, keyed on the origin alone", () => {
 });
 
 test("an address no public site has gets DGC's own sharp mark, never Google's blurry stand-in", () => {
-  // (His 21 Nov note: a link to http://100.71.117.72:4173 wore a soft default globe. Google can't reach a private
+  // (Noted 21 Nov: a link to http://100.71.117.72:4173 wore a soft default globe. Google can't reach a private
   // address, so it sends its stand-in; and the address never needs to leave the machine.)
   for (const local of ["http://localhost:3000/app", "http://127.0.0.1:5173/", "http://100.71.117.72:4173/", "http://192.168.1.148:46200/",
                        "http://[::1]:8080/", "https://gb10.tail1234.ts.net/x", "http://printer.local/", "https://jira.internal.corp/a",
@@ -164,7 +164,7 @@ test("an icon that fails to load falls back to the bundled mark", () => {
 });
 
 test("a link in the MODEL's answer wears the favicon too", () => {
-  // The line DGC used to draw, and no longer does: the maintainers asked for that.
+  // The line DGC used to draw, and no longer does: that was decided.
   const dom = makeDom();
   // Backend events reach the panel wrapped, the way panel.ts forwards them.
   const event = (data) => dom.send({ type: "event", event: data });

@@ -1,4 +1,4 @@
-"""The fix by level, in the Pip's own chat (0.52, Pips API 96; pips-flow-design §1, Q3, Q6, his answers 14 Nov).
+"""The fix by level, in the Pip's own chat (0.52, Pips API 96; pips-flow-design §1, Q3, Q6, decided 14 Nov).
 
 A folder Pip with a box finishes a check that found something. Its level decides: Ask me first waits at the ordinary
 Allow card; Approve for me fixes new findings by itself and the change waits at Apply; Do it all fixes and applies by
@@ -144,7 +144,7 @@ class TheFixTurn(FixWorld, unittest.TestCase):
         run = self.fix_turn_ends()
         fix = self.one()
         self.assertEqual((fix["state"], fix["fix_run_id"], fix["tests"]), ("ready", run, "passed"))
-        self.assertEqual(fix["tokens"], 1540, "what the fix cost (his answer 1: cost shown)")
+        self.assertEqual(fix["tokens"], 1540, "what the fix cost (decision 1: cost shown)")
         self.assertEqual((fix["findings"][0]["verdict"], fix["findings"][0]["why"]),
                          ("fixed", "total now subtracts the discount"))
         self.assertTrue(fixes.CHANGE.match(fix["change_id"]))
@@ -204,7 +204,7 @@ class TheFixTurn(FixWorld, unittest.TestCase):
         self.fix_turn_ends()
         self.assertEqual(self.one()["state"], "applied")
         self.check([TOTAL])                               # the same issue, found again
-        # At Do it all it is asked in its chat, never a card (his rule, 17 Nov; 18 Nov: every card at Do it all).
+        # At Do it all it is asked in its chat, never a card (the rule, 17 Nov; 18 Nov: every card at Do it all).
         from dgc import pip_chat, pip_holds
         [asked] = pip_holds.asks(self.registry, self.helper["id"])
         self.assertEqual(asked["kind"], "fix")
@@ -256,7 +256,7 @@ class ByLevel(FixWorld, unittest.TestCase):
         self.assertEqual(change["result"]["by"], "pip-level:full")
 
     def test_do_it_all_applies_all_even_when_its_tests_failed(self):
-        # His answer of 14 Nov ~02:10: "Do it all applies all" (with Undo, never over a file you changed): no size,
+        # Decided 14 Nov ~02:10: "Do it all applies all" (with Undo, never over a file you changed): no size,
         # delete or test fuse. The card says the tests failed in its copy; Undo is there.
         self.choose(levels.FULL)
         self.check([TOTAL])

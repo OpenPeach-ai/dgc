@@ -1,6 +1,6 @@
 """`dgc artifacts`: everything DGC made that you keep, from the terminal.
 
-    dgc artifacts [list] [--type doc|slides|sheet|dashboard|page|checklist] [--from chat|work|pip] [--json]
+    dgc artifacts [list] [--type doc|slides|sheet|dashboard|page|checklist|design] [--from chat|work|pip] [--json]
     dgc artifacts show ID                 its versions: who made each, when, and what changed
     dgc artifacts open ID                 in your browser
     dgc artifacts export ID FORMAT [--to PATH]

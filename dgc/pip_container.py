@@ -51,7 +51,7 @@ def _mac_memory() -> int:
 
 def vm_size() -> tuple[str, str]:
     """(memory, CPUs) for a Pip's computer: half this Mac's memory and half its cores, never less than MEMORY and CPUS
-    (his call, 15 Nov: no limits by default; the VM takes memory from macOS only as it uses it, so a high ceiling costs
+    (decided 15 Nov: no limits by default; the VM takes memory from macOS only as it uses it, so a high ceiling costs
     little while the Pip is idle). Read at each start: a new size applies when the computer next starts."""
     gb = _mac_memory() // 1024 ** 3 // 2
     cores = (os.cpu_count() or 0) // 2

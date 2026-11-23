@@ -1,4 +1,4 @@
-// The question card (propose_options): one card for Work and a Pip's chat (0.52, his call 18 Nov: "propose questions
+// The question card (propose_options): one card for Work and a Pip's chat (0.52, decided 18 Nov: "propose questions
 // which user can just select and submit"). One to four questions of two to six options, the recommended one badged and
 // preselected in a single choice, multi-select, the free-text "Something else", Next / Skip / Submit, the pager, and
 // the keys; then, once settled, the answered panel with every option still listed and the picks marked.

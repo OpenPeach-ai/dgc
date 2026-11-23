@@ -199,7 +199,7 @@ for (const theme of ["dark", "light"]) for (const [width, count] of [[300, 3], [
     assert.equal(v.inbox, 0, "the section above the list is gone");
     assert.doesNotMatch(v.text, /new Pips? waiting for you|New Pips ·/, "and so are its words");
     assert.equal(v.count, String(count + 1), "Needs attention counts each new Pip once, with what else waits");
-    // Open when something is in it (his call, 11 Nov); the keyboard folds it and opens it again.
+    // Open when something is in it (decided 11 Nov); the keyboard folds it and opens it again.
     const open = () => x.p.evaluate(() => (window.__pipsRoot || document).querySelector(".attention-toggle").getAttribute("aria-expanded"));
     assert.equal(await open(), "true", "open when something is in it");
     await x.p.focus(".attention-toggle"); await x.p.keyboard.press("Enter");

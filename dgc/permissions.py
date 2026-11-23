@@ -144,7 +144,7 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    "list_video_generators"}
 # A change to the DGC Router's settings, and a look for model servers on the user's network: the user's call in
 # every mode, auto included, with the exact change on the card. A deny rule still wins; an allow rule never skips it.
-# (router_update left this list on 13 Nov 2026, his call: Router follows the same rule as every setting, so auto mode
+# (router_update left this list on 13 Nov 2026: Router follows the same rule as every setting, so auto mode
 # changes it without a card and the other modes ask; its card still has no Always.)
 ALWAYS_ASK_TOOLS = frozenset({"router_find", "pips_workflow"})
 # A card with no Always: these and every video (an Always for videos is the user's own switch in Settings, per
@@ -156,7 +156,7 @@ SETTINGS_REDIRECT = ("DGC's own settings file is changed with dgc_settings, neve
 
 
 def _own_settings_file(tool: str, args: dict) -> bool:
-    """A file tool aimed at DGC's own settings (~/.dgc/config.json, secrets.json): every mode refuses it (his calls,
+    """A file tool aimed at DGC's own settings (~/.dgc/config.json, secrets.json): every mode refuses it (decided
     13 Nov: changes go through dgc_settings). The shell isn't policed: auto mode is full access."""
     if tool not in EDIT_TOOLS or not isinstance(args, dict):
         return False
@@ -267,7 +267,7 @@ class Rule:
         return self._match_one(value)
 
 
-# A user's allow rule this broad doesn't skip auto mode's safety check (his call, 20 Nov, as Claude Code drops such rules
+# A user's allow rule this broad doesn't skip auto mode's safety check (decided 20 Nov, as Claude Code drops such rules
 # in auto mode): every command, any script of an interpreter, any timed or package-manager run, every sub-agent or monitor.
 _BROAD_PATTERNS = re.compile(r"^(\*|(python\d*(\.\d+)?|node|bash|sh|zsh|fish|ruby|perl|php|deno|bun|pwsh|powershell|timeout|"
                              r"npx|bunx|npm run|npm exec|pnpm|pnpm run|pnpm exec|yarn|yarn run|uv run|poetry run|pipx run|"
@@ -747,7 +747,7 @@ class PermissionEngine:
                 return ALLOW, "plan mode (read-only)"
             return DENY, "plan mode is active — no changes allowed; present a plan and get it approved first"
 
-        # Auto mode never asks (his call, 17 Nov: "if it does it all, we do it all"); the other modes still do.
+        # Auto mode never asks (decided 17 Nov: "if it does it all, we do it all"); the other modes still do.
         # (DGC's own editor on the wire: auto_holds.py. A program on the SDK still answers these itself.)
         from . import auto_holds
         if policy_tool in ALWAYS_ASK_TOOLS and not (self.mode == "auto" and auto_holds.wanted()):

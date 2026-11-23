@@ -2026,7 +2026,7 @@ class Config:
         self._permissions_stamp = _file_stamp(USER_CONFIG)
 
     def refresh_permissions(self, *, force: bool = False) -> bool:
-        """Adopt the user's rules as saved now: another window may have added or removed one (his call, 16 Nov: rules
+        """Adopt the user's rules as saved now: another window may have added or removed one (decided 16 Nov: rules
         shared across windows). A stat while the file is unchanged. A trusted project's rules stay live as they were,
         and the live dict is updated in place (sub-agents hold it). Returns whether the rules were read again."""
         if not getattr(self, "_persist", False):

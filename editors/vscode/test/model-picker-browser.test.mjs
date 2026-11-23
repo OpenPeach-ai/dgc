@@ -104,7 +104,7 @@ test("a connection's models: name, one quiet line, capability marks that say wha
   assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-sec")].map((s) => s.textContent)), ["Fixed versions"]);
   // The marks are small and quiet: 13 px, the menu's quiet grey, never the accent.
   const cap = await page.evaluate(() => { const c = document.querySelector(".dgc-mp-cap svg"), r = c.getBoundingClientRect(); return { w: r.width, h: r.height, same: getComputedStyle(c).color === getComputedStyle(document.querySelector(".dgc-mp-desc")).color }; });
-  assert.deepEqual(cap, { w: 14, h: 14, same: false }, "his reference: each capability in its own colour, not the quiet line's");
+  assert.deepEqual(cap, { w: 14, h: 14, same: false }, "the reference: each capability in its own colour, not the quiet line's");
 });
 
 test("Ollama is one connection in two sections, On this computer and Cloud, and a cloud row has a small cloud", async (t) => {
@@ -257,7 +257,7 @@ test("nothing in it is a pill: every control has the buttons' 6 px corner", asyn
     assert.ok(radius < height / 2 - 1, `${selector} is no pill (${radius}px on ${height}px)`);
   }
   for (const s of [".dgc-mp-search", ".dgc-mp-conn", ".dgc-mp-tabs", ".dgc-mp-select"]) assert.equal(corners.find((c) => c[0] === s)[1], 6, s);
-  // The Thinking slider is the one exception, his call (18 Nov): the reference's own shapes, exactly.
+  // The Thinking slider is the one exception, decided (18 Nov): the reference's own shapes, exactly.
   assert.deepEqual(await page.evaluate(() => [".dgc-mp-effort", ".dgc-mp-effort-thumb"].map((s) => { const n = document.querySelector(s); return [parseFloat(getComputedStyle(n).borderTopLeftRadius), n.offsetWidth > 0 ? n.offsetHeight : 0]; })),
     [[12.8, 28], [10.24, 24]], "a 28px track with 12.8px corners, a 24px handle with 10.24px corners");
   assert.deepEqual([(await box(page, ".dgc-mp-search")).h, (await box(page, ".dgc-mp-select")).h], [28, 28], "the buttons' height");

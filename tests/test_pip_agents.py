@@ -395,7 +395,7 @@ class BuildLeftoversNeverBecomeAChange(AgentWorld, unittest.TestCase):
 
 
 class AFixsOwnWorkRunsInItsBoxWithoutCarefulHolds(AgentWorld, unittest.TestCase):
-    """His call 15 Nov (A): the Allow on a fix covers the work inside its own computer. Live test: careful mode held 9 to
+    """Decided 15 Nov (A): the Allow on a fix covers the work inside its own computer. Live test: careful mode held 9 to
     15 of a sub-agent's Terminal commands per fix, and the Pip's check of its work too ("It's held again…"). Its own
     sub-agent's try and the Pip's check run Terminal commands in its box without a hold; any other run still asks."""
 
@@ -467,7 +467,7 @@ class ASubAgentsHeldStepCarriesOnInItsOwnRun(AgentWorld, unittest.TestCase):
 
 
 class AlwaysAllowOnACarefulCard(AgentWorld, unittest.TestCase):
-    """His call 15 Nov: Always allow on every Pip card. A careful card (carrying what it read from your apps) gets one,
+    """Decided 15 Nov: Always allow on every Pip card. A careful card (carrying what it read from your apps) gets one,
     pinned to that one destination: its own Terminal, or one website; another website still asks."""
 
     def card(self, host):

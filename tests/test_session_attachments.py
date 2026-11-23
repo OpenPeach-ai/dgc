@@ -1,4 +1,4 @@
-"""What you attached in Work sessions, in the Library (his call, 16 Nov: "Work attachments in the Library" into 0.52).
+"""What you attached in Work sessions, in the Library (decided 16 Nov: "Work attachments in the Library" into 0.52).
 
 The Library's Files listed ChatDGC's files only; a picture or a file you attached in a Work session was in that
 session's transcript and nowhere else ("What you attach in a Work session stays in that session"). Now

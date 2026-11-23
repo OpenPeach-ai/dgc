@@ -1344,7 +1344,7 @@
   /** A session's or a chat's "...": Open in editor, Pin to the dock, Archive (where it can be: `archive`), and its
    *  twelve colours. */
   // `remove`: the row's own Delete button, when it has one. In a narrow side bar the row's icon buttons are in this menu
-  // (the ⋯ is the one button a narrow row keeps, his call of 16 Nov), so Delete is here too, in the icons' order; where
+  // (the ⋯ is the one button a narrow row keeps, decided 16 Nov), so Delete is here too, in the icons' order; where
   // the row's Delete is off (a session open in a tab) the menu's is off and says why.
   function rowMenu(button, kind, id, title, open, item, keyboard, archive, remove) {
     const pinned = isDocked(kind, id);
@@ -1372,7 +1372,7 @@
     const sheets = window.DgcFileSheet, plush = window.PipConcepts?.plush;
     const renamed = [], gone = [];
     const items = dockState.pins.map((pin) => {
-      // (fresh: a new message nobody has read: the small purple dot at the tile's top-right corner; his ask of 15 Nov.
+      // (fresh: a new message nobody has read: the small purple dot at the tile's top-right corner; asked 15 Nov.
       // It is what the lists already know: a Work session's reply nobody saw and a chat's answer that came unseen
       // (hubNews), a Pip's unread messages (list_pip_unread). The number waiting for your okay wins the corner.)
       const item = { key: pin.key, kind: pin.kind, title: pin.title, state: "", icon: "", dot: "", badge: 0, fresh: false };
@@ -1494,11 +1494,11 @@
     if (page) page.scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? page.clientHeight : 1);
   }
   if (chatPlace === "home") $("side-tabs")?.addEventListener("wheel", glassWheel, { passive: true });
-  // ---- Your Browser (Pips API 107; his calls, 17 Nov): pinned to the dock for good, just before "+", and Home's Browser
+  // ---- Your Browser (Pips API 107; decided 17 Nov): pinned to the dock for good, just before "+", and Home's Browser
   // card (a search field and the last links visited there). Either opens Your Browser's window, Google Chrome with
   // DGC's own profile, to the right of this editor: the page measures where the editor's window is and the screen it is
   // on, and DGC places the window from that. An older DGC (or Pips off) shows neither. ----
-  // Where Google Chrome is needed (his call, 18 Nov): ONE button, Install Google Chrome, on Home's card and the dock's
+  // Where Google Chrome is needed (decided 18 Nov): ONE button, Install Google Chrome, on Home's card and the dock's
   // tile; a small dialog says what it does first, then the computer's own password prompt does the one root step (DGC
   // never sees the password). Where no prompt can open (Remote-SSH, a server) or it was closed, the one terminal line, with
   // Copy. While it installs the card asks again every couple of seconds, and becomes the field and the links by itself.
@@ -1759,7 +1759,7 @@
   const HALO = '<span class="halo dgc-dock-halo" aria-hidden="true"><i></i><i></i><i></i></span>';
   // (While a Pip works in it, its halo moves as a busy session's mark does: dock.css .is-live.)
   const HALO_LIVE = '<span class="halo dgc-dock-halo is-live" aria-hidden="true"><i></i><i></i><i></i></span>';
-  /** The dock's one item that is always there (his call, 17 Nov): Your Browser, just before "+". */
+  /** The dock's one item that is always there (decided 17 Nov): Your Browser, just before "+". */
   function dockFixed() {
     if (!ybOffered()) return [];
     const here = yb.view === "tab" ? "in a tab here" : "to the right of the editor";
@@ -2103,7 +2103,7 @@
   });
   // The Work and Chat tabs' header row (live round 1, 14 Nov): the tab's name, and ⋯ with what was scattered: the
   // archived ones and the settings (and, for Chat, an incognito chat and what DGC remembers). No Library here: it gets
-  // a header tab of its own in a later pass (his call).
+  // a header tab of its own in a later pass.
   function showArchivedList(kind) {
     const W = ARCHIVE_WORDS[kind], toggle = $(`${W.prefix}-archived-toggle`);
     if (!toggle || toggle.hidden) {
@@ -2142,7 +2142,7 @@
   // sessions and Chat your ChatDGC chats, each with its own search and New; Pips is the Pips view, as it is. The tab is
   // kept in the page's state, so a reload comes back to it. A DGC with no ChatDGC has no Chat tab, and one with no Pips
   // no Pips tab. Left and Right move between the tabs and choose as they go; Home and End jump to the first and last.
-  // (Library before Pips, so Pips stays last: his call, 15 Nov.)
+  // (Library before Pips, so Pips stays last: decided 15 Nov.)
   const SIDE_TABS = ["home", "work", "chat", "library", "pips"];
   // The tabs that are a page of this home (Pips is its own view): where Pips' own "back" may return to.
   const LIST_TABS = ["home", "work", "chat", "library"];
@@ -2481,7 +2481,7 @@
     else if (what === "browse") ybOpen(arg);                // Home's Browser card: a search, an address or a last link
     else if (what === "install") ybInstall();               // Install Google Chrome: its small dialog first
     else if (what === "copy-line") ybCopyLine();            // the terminal line, where no password prompt can open
-    // Home's Widgets and Artifacts cards: the side bar's Library, on that tab (his call, 15 Nov; it was the editor's page).
+    // Home's Widgets and Artifacts cards: the side bar's Library, on that tab (decided 15 Nov; it was the editor's page).
     else if (what === "library") { showSideTab("library"); libraryMount()?.view(arg === "widgets" ? "widgets" : "artifacts"); }
     else if (what === "widget") vscode.postMessage({ type: "homeWidgetOpen", id: String(arg?.id || ""), chat_id: String(arg?.chat_id || "") });
     else if (what === "artifact") vscode.postMessage({ type: "artifactOpen", id: String(arg?.id || ""), artifactType: String(arg?.type || ""), title: String(arg?.title || "") });
@@ -2519,7 +2519,7 @@
     paintHub();
   }
   /** Home's number: only what needs you (a card, a question, a held step). Things that are only new are never in the
-   *  number (his call, 16 Nov): alone they are a quiet dot. Its spoken name and its tooltip say both counts. */
+   *  number (decided 16 Nov): alone they are a quiet dot. Its spoken name and its tooltip say both counts. */
   function paintHomeCount(total, needs = 0) {
     const badge = $("side-tab-home-count"), tab = $("side-tab-home");
     if (!badge || !tab) return;
@@ -4654,7 +4654,7 @@
     queued: "\u21b3 queued for the next turn",
   };
   // "Steering · 12:56 PM", pulsing, while the model hasn't read it yet; "Steered · 12:56 PM" once it has: the same place
-  // under the bubble (his call, 21 Nov: the pending words sat on a line of their own).
+  // under the bubble (decided 21 Nov: the pending words sat on a line of their own).
   function syncSteerTime(node) {
     const time = node?.querySelector(":scope > .msg-time");
     if (!time) return;
@@ -7133,7 +7133,7 @@
     // list replaces it instead of sitting at "All 4 tasks done" above the composer.
     if (paintedTodos.length) renderTodos(paintedTodos);
   }
-  // ---- Work's plan (0.52, his call of 18 Nov) --------------------------------------------------------------------------
+  // ---- Work's plan (0.52, decided 18 Nov) --------------------------------------------------------------------------
   // The session's checklist is a pill on the bar above the box, saying the step being worked on with its mark and "n/m"
   // (railChipSpec). The pill opens its section (#tasksbar, in the popover): "Tasks · n of m done", the plan's time, the
   // chevron that folds it, a progress bar, and a row per step with its mark, its words, its time and, under the step in
@@ -7593,8 +7593,10 @@
   // (a document in the editor over its file); Download makes a copy in one of its own formats, to the person's own computer. Every card of the same
   // artifact shows it as it is now: a later change names the same id (artifact_changed, or artifactNews from another
   // chat, a Pip or the editor).
-  const ARTIFACT_MARK = { doc: "file-text", slides: "presentation", sheet: "sheet", dashboard: "layout-dashboard", page: "app-window", checklist: "file-text" };
-  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist" };
+  const ARTIFACT_MARK = { doc: "file-text", slides: "presentation", sheet: "sheet", dashboard: "layout-dashboard", page: "app-window", checklist: "file-text", design: "app-window" };
+  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist", design: "Design" };
+  // (A design's own words for its formats: its zip holds a picture of each artboard, its PDF a page for each.)
+  const DESIGN_FORMAT = { zip: "Every artboard as pictures (.zip)", pdf: "PDF, an artboard a page", html: "The canvas as a web page (.html)" };
   const ARTIFACT_FORMAT = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
                             xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
   const ARTIFACT_OP = { made: "made", changed: "changed", restored: "restored", refreshed: "refreshed", removed: "removed" };
@@ -7653,7 +7655,7 @@
       const menu = el("div", "amenu dgc-popover"); menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;
       for (const format of formats) {
         const item = el("button", "amenu-item"); item.type = "button"; item.setAttribute("role", "menuitem");
-        item.textContent = ARTIFACT_FORMAT[format] || format.toUpperCase();
+        item.textContent = (a.type === "design" && DESIGN_FORMAT[format]) || ARTIFACT_FORMAT[format] || format.toUpperCase();
         item.dataset.format = format;
         item.onclick = () => {
           closeArtifactMenu(true);
@@ -7687,7 +7689,7 @@
   // What make_artifact and edit_artifact tell the model (dgc/artifact_tools._summary): `Made Slides “Q3 plan”
   // (ar_…, version 3). …`, read back into the card's artifact.
   function artifactFromResult(text) {
-    const m = /^(Made|Changed|Restored) (Document|Slides|Spreadsheet|Dashboard|Page|Checklist) \u201c([\s\S]{0,240}?)\u201d \((ar_[0-9a-f]{16}), version (\d{1,6})\)/.exec(text);
+    const m = /^(Made|Changed|Restored) (Document|Slides|Spreadsheet|Dashboard|Page|Checklist|Design) \u201c([\s\S]{0,240}?)\u201d \((ar_[0-9a-f]{16}), version (\d{1,6})\)/.exec(text);
     if (!m) return null;
     const type = Object.keys(ARTIFACT_KIND).find((t) => ARTIFACT_KIND[t] === m[2]);
     return type ? { id: m[4], type, title: m[3], version: Number(m[5]), op: m[1].toLowerCase() } : null;
@@ -8899,7 +8901,7 @@ function permissionChoices(ev) {
     const n = helpers.length;
     const items = helpers.map((h) => `<li><b>${esc(h.label)}</b>${h.facts ? ` <span class="muted">· ${esc(h.facts)}</span>` : ""}`
       + (h.brief ? `<details class="perm-brief"><summary>What it's asked</summary><p>${esc(h.brief)}</p></details>` : "") + "</li>").join("");
-    // (Sub-agents everywhere, his call: the card and its receipt said "helper" until live round 1, 14 Nov.)
+    // (Sub-agents everywhere: the card and its receipt said "helper" until live round 1, 14 Nov.)
     return { name: n === 1 ? `Sub-agent · ${helpers[0].label}` : `${n} sub-agents`,
       title: n === 1 ? "Start a sub-agent?" : `Start ${n} sub-agents?`,
       detail: `<ul class="perm-helpers">${items}</ul>`
@@ -9066,7 +9068,7 @@ function permissionChoices(ev) {
     const background = ev.kind === "background_exit";
     const ended = ev.kind === "ended" || background;
     const lines = (Array.isArray(ev.lines) ? ev.lines : []).map((line) => String(line)).slice(0, 40);
-    // Folded like a tool's step (his call, 20 Nov: a monitor's check-ins stood open, line after line): its head is the
+    // Folded like a tool's step (decided 20 Nov: a monitor's check-ins stood open, line after line): its head is the
     // button that opens it, with the tools' chevron; its lines show only when open.
     const head = el("button", "monitor-event-head");
     head.type = "button";
@@ -10921,7 +10923,7 @@ function permissionChoices(ev) {
         // (router_update) and a look on the network (router_find) send ["once", "deny"], asked every time, so they get
         // no Always allow. An older CLI sends no list (or all three): every button, as before.
         const offered = permissionChoices(ev);
-        // An edit inside the project: Always allow means edits in this project (W8, his call of 15 Nov), and says so.
+        // An edit inside the project: Always allow means edits in this project (W8, decided 15 Nov), and says so.
         const projectRules = fixAsk ? [] : projectEditRules(ev);
         // The same order on every card (ui-04, U5): Always allow, Deny, then Allow once, the only filled button, at the
         // right end, where the eye ends and the hand already is.
@@ -14483,7 +14485,7 @@ function permissionChoices(ev) {
     // to wipe that just-sent prompt while the turn kept streaming.
     log.querySelectorAll(".hist").forEach((e) => e.remove());
     const history = el("div", "hist history-pages");
-    // Earlier messages load by themselves when you scroll to the top (his call, 21 Nov, as Codex does): no button on
+    // Earlier messages load by themselves when you scroll to the top (decided 21 Nov, as Codex does): no button on
     // screen. This one is for the keyboard and screen readers only (shown when focused), and says "Loading earlier
     // messages…" while the archive loads.
     const older = el("button", "act history-older history-auto", "Show earlier messages");
@@ -14934,6 +14936,11 @@ function permissionChoices(ev) {
       setComposerText(String(msg.text || "")); setComposerRange(composerText().length);
       input.focus(); onInput();
     }
+    else if (msg.type === "composer_ref") {
+      // Ask in chat, from a design's canvas: a reference to an artboard added to what is in the box, unsent.
+      const now = composerText(), ref = String(msg.text || "").slice(0, 700);
+      if (ref.trim()) { setComposerText((now && !/\s$/.test(now) ? `${now} ` : now) + ref); setComposerRange(composerText().length); input.focus(); onInput(); }
+    }
     else if (msg.type === "composer_skill") {
       // The skill and its text arrive as one step, and one Cmd+Z takes both away.
       const added = recordComposerEdit(() => {
@@ -15297,7 +15304,7 @@ function permissionChoices(ev) {
   // The backend's own notices for a spawn (dgc/agent.py; a test pins the wording to them).
   const AGENT_SPAWN_NOTICE = /^(?:⟳ sub-task: |↳ isolated checkout: |↳ this project has no Git HEAD|↯ running \d+ isolated sub-tasks in parallel\b)/;
   // A project with no Git HEAD runs its sub-agents in the shared checkout: said on each agent's page, not as a line under
-  // every sub-agent in the chat (his call, 20 Nov).
+  // every sub-agent in the chat (decided 20 Nov).
   var agentsShareCheckout = false;              // `var`: the info handler, earlier in this file, sets it
   // A clause separator: " · " for the eye, a comma for a screen reader (reasonAgentPrefix's pause).
   const AGENT_SEP = { sep: true };
@@ -15829,7 +15836,7 @@ function permissionChoices(ev) {
       into.append(...report);
       return;
     }
-    // Its page reads like a Work session (his call, 20 Nov): the prompt it was given as the session draws a prompt,
+    // Its page reads like a Work session (decided 20 Nov): the prompt it was given as the session draws a prompt,
     // then its turn: its steps grouped as the session groups them, the activity row under them while it works, and
     // once it ended the work folded under "Worked for …" at the top, with its answer and files below.
     into.appendChild(agentPromptMessage(record));

@@ -1,4 +1,4 @@
-// One header row everywhere (0.52, his words of 15 Nov on build 4960f96a: "Pip's page top section, which i asked you to
+// One header row everywhere (0.52, asked 15 Nov on build 4960f96a: "Pip's page top section, which i asked you to
 // build for work and chat too, does not match, there is size difference … make the work, chat and library match the
 // Pip's style or vice versa"). Work, Chat, Library and Pips draw their header row with ONE shared component
 // (media/shared/pagehead.js + pagehead.css, window.DgcPageHead): the title at the left, ⋯ at the right, the line under
@@ -126,7 +126,7 @@ test("the ⋯ of each still opens its own menu", async (t) => {
   } finally { await x.close(); }
 });
 
-// His 17 Nov note: "below the main header tab, we have “Pips” then a green dot, and on the right three dots … the green
+// Noted 17 Nov: "below the main header tab, we have “Pips” then a green dot, and on the right three dots … the green
 // dot and three dots don't align to the centre of the “Pips” text." The row centred each part's box, and the title's
 // box runs from above its capitals to below its descenders ("p"), so the dot and ⋯ sat 1.5 px under the middle of the
 // letters. The title's box is now its capitals (text-box: cap to the baseline), so the row centres on them; the

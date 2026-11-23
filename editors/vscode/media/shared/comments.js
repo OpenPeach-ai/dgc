@@ -18,6 +18,7 @@
     if (a.kind === "cells") return `${/:/.test(a.range || "") ? "Cells" : "Cell"} ${a.range || ""} on “${a.sheet || ""}”`;
     if (a.kind === "slide") return `Slide ${a.slide || "?"}${a.field && a.field !== "slide" ? ` · ${a.field === "bullets" ? "points" : a.field}` : ""}${q ? ` · ${q}` : ""}`;
     if (a.kind === "item") return `${a.item || ""}${a.title ? ` “${a.title}”` : ""}${q ? ` · ${q}` : ""}`;
+    if (a.kind === "artboard") return `Artboard “${a.title || a.board || ""}”${q ? ` · ${q}` : ""}`;
     if (a.kind === "element") return q || (a.near ? `The page, under “${a.near}”` : "Part of the page");
     if (a.kind === "text") return q;
     return "The whole of it";

@@ -228,7 +228,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
       await x.page.click("#side-tab-pips"); await x.page.mouse.move(width / 2, 400); await x.page.waitForTimeout(450);
       const chosen = await pipsTab(x.page);
       held(chosen, "chosen");
-      assert.deepEqual([chosen.selected, chosen.glow, chosen.ground, chosen.colour !== rest.colour], ["true", 0, "rgba(0, 0, 0, 0)", true], "chosen: its name in the accent, nothing behind it (his call, 18 Nov)");
+      assert.deepEqual([chosen.selected, chosen.glow, chosen.ground, chosen.colour !== rest.colour], ["true", 0, "rgba(0, 0, 0, 0)", true], "chosen: its name in the accent, nothing behind it (decided 18 Nov)");
       assert.ok(Math.abs(chosen.face.left - rest.face.left) <= 0.5 && Math.abs(chosen.tab.width - rest.tab.width) <= 0.5, "choosing it moves nothing");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }

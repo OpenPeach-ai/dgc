@@ -74,7 +74,7 @@ for (const [name, open] of Object.entries(SURFACES)) {
   });
 
   test(`${name}: the box is never decorated: a colour, keys or an issue typed there stay plain words`, async (t) => {
-    // His call (16 Nov): a square hanging under a code in the box read as a glitch. What is typed is shown as typed; the
+    // Decided 16 Nov: a square hanging under a code in the box read as a glitch. What is typed is shown as typed; the
     // touches are for what a chat shows.
     if (skipOrFail(t)) return;
     const x = await open({ width: 440, reply: "Done." });

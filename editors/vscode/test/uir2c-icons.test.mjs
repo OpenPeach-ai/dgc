@@ -1,4 +1,4 @@
-// One action, one icon, on every surface (his call, 16 Nov): Open in editor, More, Back, Settings, New/Add, Close, Copy,
+// One action, one icon, on every surface (decided 16 Nov): Open in editor, More, Back, Settings, New/Add, Close, Copy,
 // Delete, Pin, Unpin, Archive, Stop and Save each draw one glyph wherever they are (media/shared/icons.js,
 // window.DgcIcons): Work's rows, header and menus, ChatDGC, a Pip's list, chat and page, Home, the Library, the dock.
 // In real Chromium on the real pages: every control is read with the action its name says and the glyph it draws.

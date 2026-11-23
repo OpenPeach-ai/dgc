@@ -1,4 +1,4 @@
-"""What you attached in Work sessions, for the Library (his call, 16 Nov: "Work attachments in the Library" into 0.52).
+"""What you attached in Work sessions, for the Library (decided 16 Nov: "Work attachments in the Library" into 0.52).
 
 A Work session keeps a picture you attached in its transcript (the user message's image part, a data URI) and a file you
 named with @ where it is, in its project (the message's `_dgc_display_mentions`, kind "file"). The Library listed

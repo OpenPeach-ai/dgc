@@ -228,7 +228,7 @@ def view(db, row) -> dict:
     if run is not None:
         used = sum(v for v in (run["input_tokens"], run["output_tokens"]) if type(v) is int and v >= 0)
         if used:
-            out["tokens"] = used                 # what the fix cost (his answer 1, 14 Nov: cost shown)
+            out["tokens"] = used                 # what the fix cost (decision 1, 14 Nov: cost shown)
     if job is not None:
         from . import pip_agents
         out["agent"] = pip_agents.view(db, job)              # its sub-agent: try n of 3, what it is doing, its model
@@ -422,7 +422,7 @@ def after_check(store, run, result) -> str | None:
         registry.event(run["workspace_id"], "pip_fix_" + ("queued" if by_level else "asked"), pip_id=run["pip_id"],
                        run_id=run["id"], payload={"fix_id": fix_id, "count": len(chosen)})
         if not by_level and level == pip_levels.FULL:
-            # At Do it all, asked in its chat instead of a card (his rule, 17 Nov): what came back after a fix is never
+            # At Do it all, asked in its chat instead of a card (the rule, 17 Nov): what came back after a fix is never
             # fixed again by itself. The supervisor's next pass sends the turn that asks (pip_holds.announce_due).
             from . import pip_holds
             title = " ".join(str(chosen[0].get("title") or "").split())[:120] if chosen else ""

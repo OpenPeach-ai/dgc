@@ -1,4 +1,4 @@
-// The Pips view's Project tab (0.52, his calls on 13 Nov): the Project Folder dropdown has a line of its own, at the
+// The Pips view's Project tab (0.52, decided 13 Nov): the Project Folder dropdown has a line of its own, at the
 // left, straight under the Personal | Project tabs and above Needs attention, whether or not anything waits. It is the
 // tab's one control: Needs attention, its count, the tab's number and the list of Project Pips follow it, and a folder
 // with no Pips workspace yet has no project cards at all. The Needs attention heading (both tabs) is words and a count,

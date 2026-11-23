@@ -1,4 +1,4 @@
-"""Permission rules are one set across every DGC window (his call, 16 Nov: "Rules shared across windows" into 0.52).
+"""Permission rules are one set across every DGC window (decided 16 Nov: "Rules shared across windows" into 0.52).
 
 Each `dgc serve` kept its own copy of the user's rules and only adopted the file's when it saved something itself. So
 a rule added in one window wasn't listed in another, Remove on a rule this window had never loaded changed nothing on

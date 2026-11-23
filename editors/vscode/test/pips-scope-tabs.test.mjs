@@ -206,3 +206,15 @@ test('the host tells the view whether a folder is open; an editor that does not 
   assert.equal('folder' in connection,expected!==undefined);
  }
 });
+
+test('Ask in chat from a design: its reference is added to that Pip\'s prompt box, unsent',async()=>{
+ const x=setup();await x.drain();
+ const ref='[Artboard “Phone” of the design “Coffee landing” (ar_0123456789abcdef, b2)] ';
+ const going=x.app.navigate({pip:AUDIT,section:'chat',compose:ref});await x.drain();await going;await x.drain();
+ assert.equal(x.$('.pip-topbar .pip-pill>span:not(.avatar)')?.textContent,'ERP daily audit','that Pip\'s chat is open');
+ assert.equal(x.$('#chatText').value,ref.trim()+' ','the reference is in its box');
+ assert.equal(x.$('.conversation-log .bubble.user, .conversation-log .message.user'),null,'nothing was sent');
+ // Asked again with words already there: added after them, never in their place.
+ const again=x.app.navigate({pip:AUDIT,section:'chat',compose:'[Artboard “Desktop” of the design “Coffee landing” (ar_0123456789abcdef, b1)] '});await x.drain();await again;await x.drain();
+ assert.match(x.$('#chatText').value,/b2\)\] +\[Artboard “Desktop”/);
+});

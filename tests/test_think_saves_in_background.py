@@ -1,4 +1,4 @@
-"""The thinking slider answers at once (his call, 16 Nov: "Thinking slider saves faster" into 0.52).
+"""The thinking slider answers at once (decided 16 Nov: "Thinking slider saves faster" into 0.52).
 
 A change of the thinking level for this session saved the whole session before answering: about 2 s a step on a long
 session, while the editor's slider waited, and its line said the code word ("Thinking → xhigh"). Now the level applies and

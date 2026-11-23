@@ -542,7 +542,7 @@ def commit(store, run, result) -> None:
         waiting += 1
         from .pip_levels import at_full
         if at_full(registry, run["pip_id"]):
-            # At Do it all, asked in its chat instead of a card (his call, 18 Nov).
+            # At Do it all, asked in its chat instead of a card (decided 18 Nov).
             from .pip_holds import ask
             ask(registry, run["pip_id"], "routine", routine["id"], run_id=run["id"],
                 what=f"add the routine \u201c{candidate['title'][:120]}\u201d, {label(candidate['trigger'])}",

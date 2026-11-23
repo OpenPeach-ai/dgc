@@ -363,7 +363,7 @@ class PaymentTests(unittest.TestCase):
                  pip_computer._digest(summary), None, "2026-10-01T10:00:00.000Z", "2099-01-01T00:00:00.000Z"))
         pip_computer.approve_always(self.registry, "compact_" + "1" * 32, pip_computer._digest(summary), "editor-user")
         [granted] = grants.list_grants(self.registry, pip["id"])
-        self.assertIn("payment", granted["label"])          # (his call 15 Nov; card details carry no amount: it asks)
+        self.assertIn("payment", granted["label"])          # (decided 15 Nov; card details carry no amount: it asks)
         # Even a grant for the same site and path never sends a payment by itself.
         plain = {**summary, "payment": False}
         with self.registry.transaction():

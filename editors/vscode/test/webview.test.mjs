@@ -4153,7 +4153,7 @@ test("a reply streamed in pieces with thinking or a closed stream between them s
   assert.deepEqual(after, ["The live history changes are in place.", "Next part."]);
 });
 
-test("a monitor's card starts folded like a tool's step, and opens to its lines (his call, 20 Nov)", () => {
+test("a monitor's card starts folded like a tool's step, and opens to its lines (decided 20 Nov)", () => {
   const { doc, send } = makeDom();
   const event = (data) => send({ type: "event", event: data });
   event({ type: "turn_start", turn_id: "t1", prompt: "watch the dev server", kind: "prompt" });
@@ -4924,7 +4924,7 @@ test("the model picker's thinking note sits behind its ?, which opens it in plac
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud" });
   const p = pickerDom(doc);
-  // (Since 18 Nov the levels are a slider, Faster to Smarter, and the note is behind its ?, as in his reference.)
+  // (Since 18 Nov the levels are a slider, Faster to Smarter, and the note is behind its ?, as in the reference.)
   const note = () => doc.querySelector(".dgc-mp-think-note"), help = () => doc.querySelector(".dgc-mp-think-help");
   const shown = () => !note().closest(".dgc-mp-think-more").hidden;
   assert.equal(p.open(), true);

@@ -1,4 +1,4 @@
-// A held request offers the same answers in the Pip's chat and in its computer's notifications (his call of 15 Nov; what
+// A held request offers the same answers in the Pip's chat and in its computer's notifications (decided 15 Nov; what
 // it does: test/pip-held-answers.test.mjs). Here, in real Chromium: the two real pages side by side for each kind of
 // request, button for button; and the notification's own dialog ("Save login…", "Review…") at 440 and 1100 px, dark and
 // light: inside the page, in the shared button's shape, and DGC's own (nothing typed in it reaches the computer).

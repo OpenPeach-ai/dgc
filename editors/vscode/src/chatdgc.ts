@@ -11,7 +11,7 @@ import { keepRunningAfterClose } from "./closingTab";
 import { holderFacts, holderLine, type HolderLine } from "./holderWords";
 import type { Dictation, DictationOwner, ReadAloud } from "./voice";
 import { mcpAppsHost } from "./mcpApps";
-import { ARTIFACT_ID, FORMAT_LABELS, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
+import { ARTIFACT_ID, formatLabel, forwardedArtifactPage, outputChoice, type Artifacts } from "./artifacts";
 import { allowFromJobs, handleVideoMessage, videoPathAllowed, VIDEO_MESSAGES } from "./videoHost";
 import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPictureFold } from "./pictureFolds";
 import { sessionIcon, dockOf, type DockPin } from "./dock";
@@ -987,6 +987,20 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     return { path, editor: this.canvasDocs?.active() ? undefined : editor, ...found };
   }
 
+  /** A reference added to a chat's prompt box, unsent (Ask in chat, from a design's canvas): its tab opens or shows.
+   *  False when that isn't a chat. */
+  composeRef(conversation: string, text: string): boolean {
+    if (!CONVERSATION_ID.test(conversation) || !text) return false;
+    const message = { type: "composeRef", text: text.slice(0, 700) };
+    const tab = [...this.tabs].find((t) => t.conversation === conversation);
+    if (tab?.opened) { tab.panel.reveal(undefined, true); this.post(tab, message); return true; }
+    const before = new Set(this.tabs);
+    this.open(conversation);
+    const fresh = [...this.tabs].find((t) => !before.has(t)) ?? [...this.tabs].find((t) => t.conversation === conversation);
+    if (fresh) (fresh.waitingSend ??= []).push(message);
+    return !!fresh;
+  }
+
   /** A message to the canvas's chat, as if typed there: its tab opens (or shows), and the page sends it. */
   private sendFromCanvas(conversation: string, text: string, selection?: Record<string, unknown>): void {
     const message = { type: "sendFromEditor", text, ...(selection ? { canvasSelection: selection } : {}) };
@@ -1377,7 +1391,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           // The formats the editor offers for its kind (a page as .html), then its own save dialog.
           if (!formats.length) return;
           const format = formats.length === 1 ? formats[0]
-            : (await vscode.window.showQuickPick(formats.map((f) => ({ label: FORMAT_LABELS[f] || f.toUpperCase(), format: f })), { placeHolder: `Save a copy of “${title}” as` }) as any)?.format;
+            : (await vscode.window.showQuickPick(formats.map((f) => ({ label: formatLabel(type, f) || f.toUpperCase(), format: f })), { placeHolder: `Save a copy of “${title}” as` }) as any)?.format;
           if (typeof format === "string") await this.artifacts.exportArtifact({ id, title, type, exports: formats }, format, undefined, panel.webview);
           return;
         }
@@ -2185,7 +2199,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
             .map((w: any) => ({ id: String(w.id), title: widgetName(w.title), chat_id: String(w.chat_id), chat_title: String(w.chat_title || "").slice(0, 200), project_name: String(w.project_name || "").slice(0, 120), created_at: String(w.created_at || "") }));
           const more = ev.next_offset !== null && ev.next_offset !== undefined;
           // (The charts its replies drew are the Library's, under Widgets with its Kind filter; Home's card is the
-          // widgets you use again, never a chart: his call, 16 Nov.)
+          // widgets you use again, never a chart: decided 16 Nov.)
           this.host?.postHome({ type: "homeWidgets", offered: true, widgets: [...widgets, ...this.homeCards], more });
           return;
         }

@@ -1,4 +1,4 @@
-// A picture in a Work session (his asks, 18 Nov): Download in its viewer saves it on the computer the editor runs on, from
+// A picture in a Work session (asked 18 Nov): Download in its viewer saves it on the computer the editor runs on, from
 // the page itself (media/shared/download.js), and Save to Library keeps it in DGC's Library (ready.capabilities
 // .library_picture: Work's `library_picture` by the picture's ref), "In Library" (off) once it is there, so nothing is kept
 // twice: a picture DGC made says so from the start. Beside a made picture's Save to project… and in its viewer. Real

@@ -46,7 +46,7 @@ DISPLAY = ":1"
 ASSETS = Path(__file__).with_name("desktop_assets")
 
 
-# One wallpaper in two versions (his call, 16 Nov): the teal one by day, the dark grey one by night, by this computer's
+# One wallpaper in two versions (decided 16 Nov): the teal one by day, the dark grey one by night, by this computer's
 # clock. Every computer of every Pip wears it.
 WALLPAPERS = {"light": "undertow-light.jpg", "dark": "undertow-dark.jpg"}
 DAY = (7, 19)                     # the light version from 07:00 until 19:00, local time
@@ -350,7 +350,7 @@ def _write_top_bar(conf: Path) -> None:
 def _openbox_bindings() -> str:
     """What a window's frame does with the pointer and a few keys. Openbox runs with DGC's config file alone
     (--config-file), so none of its usual bindings exist unless they are here: without them a window's ×, – and □ did
-    nothing and its title bar didn't move it (his report, 17 Nov, on the image editor). These are Openbox's own usual
+    nothing and its title bar didn't move it (reported 17 Nov, on the image editor). These are Openbox's own usual
     ones: a press brings a window forward, the title bar drags it (a double click maximises), the edges and corners
     resize it, Alt and a drag moves it from anywhere, the buttons close, minimise (the top bar's taskbar brings it back)
     and maximise it; on the desktop a right-click shows the apps."""

@@ -97,7 +97,7 @@ class RoutinesAndGoalsForEveryPip(FolderPipChat, unittest.TestCase):
 
 
 class ItsScheduledRunsHaveWhatItsChatHas(FolderPipChat, unittest.TestCase):
-    """His call, 18 Nov: a folder Pip's scheduled runs (its audit, its draft) get everything its chat has: its box, its
+    """Decided 18 Nov: a folder Pip's scheduled runs (its audit, its draft) get everything its chat has: its box, its
     apps and plugins, the Library, images and videos. A handoff's run and a reviewed execution keep their own tools."""
 
     def handed_run(self):

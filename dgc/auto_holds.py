@@ -1,6 +1,6 @@
 """Whether DGC's own editor is on the wire: auto mode's chat-first rules are that window's (17 Nov).
 
-His call for Work's auto mode: no approval card; what needs the user is asked in the chat, and the user's own words
+The rule for Work's auto mode: no approval card; what needs the user is asked in the chat, and the user's own words
 answer it. That is how a person working in DGC's editor talks to it. A program on DGC's SDK in auto mode answers each
 permission request itself, in code (its on_permission), and the terminal shows its own prompts: for them auto mode
 stays as it was. So the rules that turn a card into a question in the chat (agent._auto_ask), make a paid picture or

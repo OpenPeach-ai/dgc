@@ -1,7 +1,7 @@
 // The Work and Chat tabs start with the Pips tab's header row (live round 1, finding 20): the tab's name at the left
 // ("Work", "Chat"), ⋯ at the right, a line, then the search bar. Work's ⋯: Archived sessions, Sub-agent settings, Work
 // settings. Chat's ⋯: New incognito chat, What DGC remembers, Archived chats, Chat settings. Library is in neither
-// (his call, 14 Nov night: it gets a header tab of its own in a later pass). On the real side bar, in real Chromium.
+// (decided 14 Nov night: it gets a header tab of its own in a later pass). On the real side bar, in real Chromium.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openDock } from "./support/dock-scene.mjs";

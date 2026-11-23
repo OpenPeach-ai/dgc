@@ -987,7 +987,7 @@ def _route(registry, config, pip_id, toolkit, label=None):
 
 
 def _ask_account(store, config, pip_id, run_id, draft_id, draft_kind, content) -> bool:
-    """At Do it all, which of several accounts sends is asked in the Pip's chat, not a card (his call, 18 Nov). True when
+    """At Do it all, which of several accounts sends is asked in the Pip's chat, not a card (decided 18 Nov). True when
     asked; a draft that can't be asked stays a card."""
     from . import pip_app_links, pip_holds
     from .pip_chat import ask_in_chat

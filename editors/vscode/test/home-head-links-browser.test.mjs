@@ -1,4 +1,4 @@
-// Home's head row: Library and Cards, then one ⋯ that holds GitHub, Docs, DGC-SDK and Settings at every width (his call,
+// Home's head row: Library and Cards, then one ⋯ that holds GitHub, Docs, DGC-SDK and Settings at every width (decided,
 // 18 Nov: "only Library and Cards button stay as is, rest 4 buttons always come under the 3 dotted menu"). Each row of
 // the menu has its own coloured mark (Docs a page stack, DGC-SDK DGC's three strokes in the SDK's olive, Settings a
 // graphite gear, GitHub its own mark). GitHub opens DGC's repository, Docs docs.vibedgc.com, DGC-SDK vibedgc.com/sdk,

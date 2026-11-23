@@ -556,7 +556,7 @@ const errorMarkup = value => {
 };
 function setError(error) { S.error=errorText(error); render(); }
 // The page's own lines (what went wrong, what was done) each have a × to close them: a line pinned on the page until
-// something else happens reads as stuck (his call, 19 Nov). Closing one forgets it; the next one shows again.
+// something else happens reads as stuck (decided 19 Nov). Closing one forgets it; the next one shows again.
 function pageNotesMarkup(where){
  const close=which=>window.DgcDismiss.html({cls:'page-note-close',attrs:`data-dismiss-note="${which}"`});
  return `${S.error?`<div class="page-note ${where}">${errorMarkup(S.error)}${close('error')}</div>`:''}${S.notice?`<div class="page-note ${where}"><p class="notice" role="status">${esc(S.notice)}</p>${close('notice')}</div>`:''}`;
@@ -1995,7 +1995,7 @@ function chatQueueSendText(text,marks){
 // ---- the bar for what is going on (the tray, media/shared/tray.js: the same bar as Work's and ChatDGC's). One line
 // on the box, in a soft shell round both: the messages queued for this Pip, a routine of its running, its computer
 // busy with another request and what a paste was cleaned of are each a pill; a pill opens its detail just above. A fix
-// DGC is making is no pill (his call, 14 Nov night): it is the sub-agent's row in the chat and the count under the box.
+// DGC is making is no pill (decided 14 Nov night): it is the sub-agent's row in the chat and the count under the box.
 // Nothing going on: no bar. What its computer holds for your okay stays a card above the bar: it asks you something.
 const TRAY_ICONS={queue:'<path d="M2.5 4h1M2.5 8h1M2.5 12h1M6 4h7.5M6 8h7.5M6 12h7.5"/>',routine:'<circle cx="8" cy="8" r="6"/><path d="M6.7 5.6v4.8L10.6 8Z"/>',
  computer:'<rect x="2" y="3" width="12" height="8" rx="1.2"/><path d="M6 13.5h4M8 11v2.5"/>',
@@ -2773,7 +2773,7 @@ function waitingCard(a,count){
 }
 // A submit its computer holds, as the Soft card (approved 2026-11-05): what it is, what Always allow would cover, Send once /
 // Always allow / Reject, and the rest under Details. A payment is never sent once in one tap: Review… shows it first. Since
-// 15 Nov its card has Always allow too (his call: on every card), with one quiet line, "Inside its daily limit": a payment
+// 15 Nov its card has Always allow too (on every card), with one quiet line, "Inside its daily limit": a payment
 // on that grant is made only within the Pip's daily dollar limit.
 function computerSubmitCard(a,name,off,count=''){
  const s=a.summary,id=esc(a.id),pay=isPayment(s),every=asksEveryTime(s),title=pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
@@ -3983,7 +3983,7 @@ function chatStyle(){return S.apiVersion>=43&&!remoteHost;}
 // open, the Project tab says so in one line. A remote view, and a CLI with no Personal Pips, have no tabs, as before.
 function personalSpace(){return S.workspaces.find(w=>w?.kind==='personal')||null;}
 function windowSpace(){return S.folderOpen&&S.currentWorkspaceId?S.workspaces.find(w=>w?.id===S.currentWorkspaceId&&w.kind!=='personal')||null:null;}
-// The Project Folder dropdown (0.52, 12 Nov; Pips API 93; media/shared/folderpick.js): his call reverses "Project is this
+// The Project Folder dropdown (0.52, 12 Nov; Pips API 93; media/shared/folderpick.js): the call reverses "Project is this
 // window's folder and nothing else". The Project tab has the dropdown the Work sessions have, on the same choice, which
 // the extension keeps for every window (S.projectFolder: '' is All projects, the default; null where there is no
 // dropdown: an older DGC, a remote view). All projects lists every project's Pips, each with its folder; a folder shows
@@ -4121,7 +4121,7 @@ function projectSpace(){
  const row=chosenFolder();return row?.workspace_id?S.workspaces.find(w=>w?.id===row.workspace_id&&w.kind!=='personal')||null:null;
 }
 function scopeTabs(){return !remoteHost&&!!personalSpace()&&!onePips();}
-// ---- One Pips (0.52, his calls of 13 Nov; Pips API 94; src/pipsOne.js) ----
+// ---- One Pips (0.52, decided 13 Nov; Pips API 94; src/pipsOne.js) ----
 // One list for every Pip, where this page had Personal | Project tabs: Core pinned first, then the Pip with the latest
 // message or report, as DGC lists them (list_pips {scope: "all"}); each row says where its Pip works. The line under
 // the search chooses which show (All Pips · Personal · each folder), and Needs attention, its count and its page of
@@ -4300,7 +4300,7 @@ function mergePage(first,value){
 }
 // Needs attention (#8): every card your Personal Pips wait on you for, across all of them, on the home.
 S.attention=null;let attentionSeq=0,attentionExpanded=false,attentionRead=false;
-// Needs attention opens when something is in it; folded by you, it stays folded until something new arrives (his call,
+// Needs attention opens when something is in it; folded by you, it stays folded until something new arrives (decided,
 // 11 Nov). What was in it when you folded it is kept, here and in the saved view.
 // With the Project Folder dropdown the list holds Project Pips' cards too: Personal's on the Personal tab, the chosen
 // projects' on the Project tab. Without it a project's home shows none of the list, as before.
@@ -4345,7 +4345,7 @@ function attentionGo(key,index,{focus=false}={}){
 }
 // One card along, by a key or a swipe: way is -1 or 1. At an end, nothing.
 function attentionStep(way,how){const b=$(way<0?'attention-prev':'attention-next');if(b&&!b.disabled)attentionGo(b.dataset.attentionGo,Number(b.dataset.attentionIndex),how);}
-// Reject on a new Pip's card turns it down at once everywhere (his call, 11 Nov), held for a moment so a slip can be
+// Reject on a new Pip's card turns it down at once everywhere (decided 11 Nov), held for a moment so a slip can be
 // undone: the card goes, "Rejected · Undo" shows, and the reject is sent when the moment passes. A window closed
 // meanwhile sends nothing, so the new Pip just waits again.
 function rejectSoon(id,fire){
@@ -4965,14 +4965,14 @@ function jobOpen(p){
   return `<button type="button" class="dgc-pin job-open" data-open-pip-chat="${esc(p.id)}" title="Open in editor" aria-label="Open in editor: ${esc(p.name)}">${simpleIcon('openEditor')}</button>`;
 }
 // A narrow list (under 400px) has no room for the row's icon buttons beside its name: there the row keeps one "…", on
-// every row and reached by Tab, and Open in editor and the pin are in its menu, in the icons' order (his rule for every
+// every row and reached by Tab, and Open in editor and the pin are in its menu, in the icons' order (the rule for every
 // list, 16 Nov; src/pips.css shows the "…" only there). Its rows are the very buttons' own asks (data-open-pip-chat,
 // data-pin-pip), so each does what its icon does.
 let rowMenuFor='';
 function jobMore(p,pin,tab){
   if(!pin&&!tab)return '';
   const open=rowMenuFor===p.id,pinned=dockPins.has(`pip:${p.id}`);
-  // (Each row wears Work's row menu's glyph for the same action: one action, one icon, his rule of 16 Nov.)
+  // (Each row wears Work's row menu's glyph for the same action: one action, one icon, the rule of 16 Nov.)
   const glyph=(a)=>window.DgcIcons?.html(a,{size:15})||'';     // (a menu row's glyph is 15 px, as on Work's)
   const rows=[...(tab?[{id:'open',label:'Open in editor',svg:glyph('open-in-editor'),attrs:`data-open-pip-chat="${esc(p.id)}"`}]:[]),...(pin?[{id:'pin',label:pinned?'Unpin from the dock':'Pin to the dock',svg:glyph(pinned?'unpin':'pin'),attrs:`data-pin-pip="${esc(p.id)}"`}]:[])];
   return `<button type="button" class="dgc-pin job-more" data-pip-more="${esc(p.id)}" aria-haspopup="menu" aria-expanded="${open}" title="More" aria-label="More for ${esc(p.name)}">${window.DgcIcons.html('more')}</button>`
@@ -5655,7 +5655,7 @@ function folderPartsMarkup(p){
   +`<button type="button" class="pip-page-row" data-tab="runs"><span class="row-words"><strong>Reports</strong><small class="row-preview">What each check found, as a table</small></span>${chev}</button>`
   +`<button type="button" class="pip-page-row" data-tab="revisions"><span class="row-words"><strong>Version history and approvals</strong><small class="row-preview">Every change to it, and who approved it</small></span>${chev}</button></section>`;
 }
-// Choosing Do it all says what it means first (his call, like Work's auto mode). Continue sets it; Cancel leaves it.
+// Choosing Do it all says what it means first (decided, like Work's auto mode). Continue sets it; Cancel leaves it.
 const FULL_WARNING='A Pip on Do it all acts without asking. It can send anything it sees, including your code, to the web. It applies its fixes to your folder, and it can start a sub-agent with full Work tools on your real files, including ones Git ignores such as .env. Payments follow the limit you set.';
 function chooseLevel(level,how={}){
  if(levelState.pip===S.selected&&levelState.value?.level===level)return;
@@ -5919,10 +5919,10 @@ function convListMarkup(place){
   newStep:ui.newStep&&computers?newConversationMarkup({esc,computers:computers.have,limit:computers.limit,choice:ui.newChoice,busy:ui.busy,error:ui.error}):''});
 }
 // The Pip's name in its chat's top bar: with conversations, a button that opens them.
-// The thread selector, in the middle of a Pip's chat header (his call of 14 Nov): the conversation shown, by its name,
+// The thread selector, in the middle of a Pip's chat header (decided 14 Nov): the conversation shown, by its name,
 // with the chevron that opens the list. The Pip's face and name stay at the left whatever is shown here, so nothing in
 // the header moves when the thread changes. A long name ends in "…" (the stylesheet caps its width).
-// Under 560 px the stylesheet draws the chevron alone, right beside the Pip's name (his call of 15 Nov: the name never
+// Under 560 px the stylesheet draws the chevron alone, right beside the Pip's name (decided 15 Nov: the name never
 // goes, the selector gives way); its label and tooltip still say the conversation shown.
 function convThreadMarkup(p){
  const list=convList();if(!list)return '';
@@ -6150,7 +6150,7 @@ function simplePipHeader(){
  // its name where there is room.
  if(onChat){
   // (Pointed at, its face says who it is: a Project Pip's character and role as before, any other Pip's name. Its
-  // name is always drawn, his call of 15 Nov; where it ends in "…" the name itself says all of it when pointed at.)
+  // name is always drawn, decided 15 Nov; where it ends in "…" the name itself says all of it when pointed at.)
   const thread=convThreadMarkup(p),pillTitle=project&&pipType(p,S.types)?`${type.name} · ${type.role}`:p.name;
   // (A conversation's own editor tab has no list behind it: no Back.)
   return `<header class="pip-topbar pip-topbar-chat${thread?(convSeveral()?' has-threads':' one-thread'):''}">${chatTab?'':`<button type="button" id="simple-back" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button>`}<div class="pip-pill${pipOff(p)?' is-off':''}" title="${esc(pillTitle)}">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span class="pip-name" title="${esc(p.name)}">${esc(p.name)}</span>${project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:folderPip?folderWhereMarkup(p):''}</div>${thread}${actions}${convMenuMarkup()}${computerMenuMarkup()}</header>`;
@@ -7455,7 +7455,10 @@ async function initialize() {
 }
 // (While it goes somewhere, the Project tab is not put back on the Project Folder choice: settleProjectTab waits.)
 let navigating=0;
-async function navigateFromHost(value){navigating++;try{return await navigateFromHostNow(value);}finally{navigating--;if(!navigating&&foldersOn())render();}}
+async function navigateFromHost(value){navigating++;try{const done=await navigateFromHostNow(value);
+  // (Ask in chat, from a design's canvas: a reference added to that Pip's box, unsent.)
+  if(typeof value?.compose==='string'&&value.compose.trim()&&S.selected===value.pip&&$('chatText')){micCaret=null;dictatedToPip(value.compose.slice(0,700),false);}
+  return done;}finally{navigating--;if(!navigating&&foldersOn())render();}}
 async function navigateFromHostNow(value) {
   if(!record(value))return;
   if(value.overview===true){if(S.selected)chatDrafts.set(S.selected,draft.chatText);S.overview=true;S.tab='chat';rememberView();render();return;}

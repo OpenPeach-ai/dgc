@@ -1,4 +1,4 @@
-"""One Pips (his calls, 13 Nov): one list of every Pip, and a Pip in a project folder made with only a name.
+"""One Pips (decided 13 Nov): one list of every Pip, and a Pip in a project folder made with only a name.
 
 "Single Pips section becomes much cleaner": the editor shows one list, no Personal | Project tabs. `list_pips
 {scope: "all"}` (Pips API 94) gives the Personal Pips and every project's together: Core first, then the Pip with the

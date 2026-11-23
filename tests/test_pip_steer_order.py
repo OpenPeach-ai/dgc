@@ -1,4 +1,4 @@
-"""A message sent while a Pip works sits where it was read, as in Work (his ask, 15 Nov: "user message, pips mid turn
+"""A message sent while a Pip works sits where it was read, as in Work (asked 15 Nov: "user message, pips mid turn
 response, and model still working, the user sends a mid turn prompt, it should come below the current response, and
 then below it the model responses continue").
 

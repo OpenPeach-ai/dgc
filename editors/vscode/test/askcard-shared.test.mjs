@@ -1,4 +1,4 @@
-// The question card is one module (0.52, his rule 15 Nov: one capability, one module): media/shared/askcard.js and
+// The question card is one module (0.52, the rule, 15 Nov: one capability, one module): media/shared/askcard.js and
 // askcard.css are the card Work docks in its composer and a Pip's chat draws under a reply (Pips API 106). Work's page
 // loads the script before media/main.js and its stylesheet imports the look; the Pips bundle imports both. Neither page
 // keeps a copy of its own: the rows, the keys and the answered panel are written once.

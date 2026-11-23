@@ -1,4 +1,4 @@
-// Give it a folder, and Remove its folder (Pips API 110, dgc/pip_folder.py; his call of 14 Nov, for 0.52).
+// Give it a folder, and Remove its folder (Pips API 110, dgc/pip_folder.py; decided 14 Nov, for 0.52).
 // A Pip for anything becomes a folder Pip for a folder you give it, and a folder Pip becomes a Pip for anything again;
 // either way it keeps its chat, notes, routines, computer, level and model. Two rows wherever its other choices are:
 // on its page (beside where it works) and in its ⋯ menu. The folder is chosen with the same picker New Pip uses; DGC

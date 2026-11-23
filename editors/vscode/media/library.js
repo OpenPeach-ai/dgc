@@ -1,4 +1,4 @@
-// The Library: ONE module for both places it shows (Library v2, 0.52; his words of 15 Nov: "the library tab UX should
+// The Library: ONE module for both places it shows (Library v2, 0.52; asked 15 Nov: "the library tab UX should
 // match the Editor Library page"). It draws the whole Library into one element: the header row every page has
 // (media/shared/pagehead.js), the search field, the tabs Artifacts · Widgets · Images · Videos · Files, the chosen
 // tab's own filter line, and its rows. The side bar's Library tab mounts it narrow (media/main.js); the Library's
@@ -38,7 +38,7 @@
   const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
   // The tabs, in his order: id, name, what one of them is called, its icon (a codicon) and its line for a label.
   const TABS = [
-    ["artifacts", "Artifacts", "artifact", "browser", "Artifacts: the pages, sheets, docs, decks, dashboards and checklists DGC made"],
+    ["artifacts", "Artifacts", "artifact", "browser", "Artifacts: the pages, sheets, docs, decks, dashboards, checklists and designs DGC made"],
     ["widgets", "Widgets", "widget", "symbol-misc", "Widgets: ChatDGC's widgets, and the cards a reply drew in Work or a Pip's chat"],
     ["images", "Images", "image", "file-media", "Images: every image DGC made or kept for you"],
     ["videos", "Videos", "video", "device-camera-video", "Videos: every video DGC made for you"],
@@ -46,10 +46,10 @@
   ];
   const TAB_IDS = TABS.map((t) => t[0]);
   // Artifacts' kinds: the filter's word, and the word of an empty list.
-  const A_KINDS = [["", "All", "artifacts"], ["page", "Pages", "pages"], ["sheet", "Sheets", "sheets"], ["doc", "Docs", "docs"], ["slides", "Decks", "decks"], ["dashboard", "Dashboards", "dashboards"], ["checklist", "Checklists", "checklists"]];
-  // The Widgets tab's kinds (his call, 16 Nov): the widgets you use again, or the charts a chat's replies drew.
+  const A_KINDS = [["", "All", "artifacts"], ["page", "Pages", "pages"], ["sheet", "Sheets", "sheets"], ["doc", "Docs", "docs"], ["slides", "Decks", "decks"], ["dashboard", "Dashboards", "dashboards"], ["checklist", "Checklists", "checklists"], ["design", "Designs", "designs"]];
+  // The Widgets tab's kinds (decided 16 Nov): the widgets you use again, or the charts a chat's replies drew.
   const W_KINDS = [["", "All", "widgets or charts"], ["widget", "Widgets", "widgets"], ["chart", "Charts", "charts"]];
-  const A_KIND = { doc: "Doc", slides: "Deck", sheet: "Sheet", page: "Page", dashboard: "Dashboard", checklist: "Checklist" };
+  const A_KIND = { doc: "Doc", slides: "Deck", sheet: "Sheet", page: "Page", dashboard: "Dashboard", checklist: "Checklist", design: "Design" };
   // Files' kinds (ChatDGC's own), and where a file came from.
   const F_KINDS = [["", "All", "files"], ["image", "Images", "images"], ["pdf", "PDFs", "PDFs"], ["document", "Documents", "documents"], ["spreadsheet", "Spreadsheets", "spreadsheets"],
     ["presentation", "Presentations", "presentations"], ["code", "Code", "code files"], ["text", "Pasted text", "pasted text"]];
@@ -76,7 +76,7 @@
   const ITEM_ACTS = [...window.DgcFileMenu.ACTS, ["rename", "Rename…"], ["remove", "Remove…"]];
   // What only a kind has, kept under the eight (by the ids of actions() below).
   const ITEM_MORE = ["chat", "player", "use", "project", "add", "pin"];
-  const A_WORD = { doc: "doc", slides: "deck", sheet: "sheet", page: "page", dashboard: "dashboard", checklist: "checklist" };
+  const A_WORD = { doc: "doc", slides: "deck", sheet: "sheet", page: "page", dashboard: "dashboard", checklist: "checklist", design: "design" };
   const SAID_MS = 2600;     // how long "Path copied" stays
 
   /** Why an item cannot do one of the eight ("" when it can). The host decides again for itself (src/chatdgc.ts
@@ -238,7 +238,7 @@
   }
 
   /** A chart's mark: a small tile with the chart's own kind drawn in it (bars, a line, a pie), in the text's colour. */
-  /** A chart's mark (media/shared/graph.css, his call of 16 Nov): one Azure, a mark for each kind DGC draws; anything
+  /** A chart's mark (media/shared/graph.css, decided 16 Nov): one Azure, a mark for each kind DGC draws; anything
    *  else wears the bar's. */
   const CHART_KINDS = ["bar", "line", "area", "pie", "scatter"];
   function chartMark(kind) {
@@ -473,7 +473,7 @@
       const button = (id, key, value, tip) => `<button type="button" id="library-filter-${id}" class="dgc-folder lib-filter" data-filter="${id}"${id !== "maker" && value === "All" ? ' data-all="1"' : ""} aria-haspopup="menu" aria-expanded="false" aria-label="${esc(`${key}: ${value}`)}" title="${esc(tip)}">`
         + `<span class="dgc-folder-k">${esc(key)}</span><span class="dgc-folder-v">${esc(value)}</span>${CHEVRON}</button>`;
       let html = "";
-      if (tab === "artifacts") html += button("kind", "Kind", (A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[1], "Show one kind: pages, sheets, docs, decks, dashboards or checklists");
+      if (tab === "artifacts") html += button("kind", "Kind", (A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[1], "Show one kind: pages, sheets, docs, decks, dashboards, checklists or designs");
       // (Kind on Widgets only where this DGC lists charts: with none, every row is a widget.)
       if (tab === "widgets" && state.charts.live) html += button("kind", "Kind", (W_KINDS.find((k) => k[0] === f.kind) || W_KINDS[0])[1], "Show the widgets you use again, or the charts a chat drew");
       if (tab === "files") html += button("kind", "Kind", (F_KINDS.find((k) => k[0] === f.kind) || F_KINDS[0])[1], "Show one kind of file")
@@ -667,7 +667,7 @@
       }
       const who = tab === "files" ? "" : whoWords(tab);
       if (tab === "artifacts") return q ? `No artifact named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || f.maker ? `No ${(A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.`
-        : "Pages, sheets, docs, decks, dashboards and checklists DGC makes for you show here.";
+        : "Pages, sheets, docs, decks, dashboards, checklists and designs DGC makes for you show here.";
       if (tab === "widgets") return q ? `No ${f.kind === "chart" ? "chart" : "widget"} named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || who ? `No ${(W_KINDS.find((k) => k[0] === f.kind) || W_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.` : state.charts.live ? "Widgets ChatDGC makes for you, the charts its replies draw, and the cards a reply draws in Work or a Pip’s chat, show here."
         : "Widgets ChatDGC makes for you, and the cards a reply draws in Work or a Pip’s chat, show here. A chart in a chat stays in its chat.";
       if (tab === "images") return q ? `No image made from words like “${q}”.` : who ? `No images ${who} yet.` : "Images DGC makes or keeps for you show here.";

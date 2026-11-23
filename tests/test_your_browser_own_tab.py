@@ -1,4 +1,4 @@
-"""Your Browser, phase 3b (0.52, Pips API 107; his call 18 Nov): over Remote-SSH, the streamed tab of YOUR OWN tabs.
+"""Your Browser, phase 3b (0.52, Pips API 107; decided 18 Nov): over Remote-SSH, the streamed tab of YOUR OWN tabs.
 
 - Where the machine DGC runs on has no screen (Remote-SSH, a server), Google Chrome runs headless (--headless=new, full
   Chrome) with DGC's own profile, its sandbox on, and "Open Your Browser" answers `view: "tab"`: the editor opens a tab
@@ -83,7 +83,7 @@ class Headless(OwnHost):
         self.addCleanup(store.stop)
 
     def test_your_tabs_wear_their_sites_icons(self):
-        # (His 20 Nov ask: tabs like Chrome's, with each site's icon.)
+        # (Asked 20 Nov: tabs like Chrome's, with each site's icon.)
         self.host.open("https://example.com/", None, headless=True)
         original = self.pipe.send
 
@@ -124,7 +124,7 @@ class Headless(OwnHost):
         self.assertTrue(your_browser.icon_data(b"\x00\x00\x01\x00" + b"0" * 30, "image/x-icon").startswith("data:image/x-icon"))
 
     def test_copy_in_your_tab_lands_on_the_editors_clipboard(self):
-        # (His 20 Nov test: Ctrl+C in the streamed tab copied into Chrome's clipboard on the other computer.)
+        # (The 20 Nov test: Ctrl+C in the streamed tab copied into Chrome's clipboard on the other computer.)
         self.host.open("https://example.com/", None, headless=True)
         original = self.pipe.send
 
@@ -144,7 +144,7 @@ class Headless(OwnHost):
         self.assertIn("selection", your_browser.OWN_OPS)
 
     def test_with_no_screen_but_xvfb_it_is_real_chrome_on_a_screen_of_its_own(self):
-        # (His 20 Nov test over Remote-SSH: headless Chrome says "HeadlessChrome", and Google's sign-in and reCAPTCHA
+        # (The 20 Nov test over Remote-SSH: headless Chrome says "HeadlessChrome", and Google's sign-in and reCAPTCHA
         # turned it away; its pictures were soft on a Retina screen.) A Pip's computer runs Chrome on a display of its
         # own: so does Your Browser where the computer has no screen, at twice the pixels.
         screens = []

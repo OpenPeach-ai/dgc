@@ -38,7 +38,7 @@ for (const [place, width] of [["side", 300], ["side", 440], ["tab", 700]]) {
       assert.ok(lib.rows.findIndex((r) => r.title === "Trip budget calculator") < lib.rows.findIndex((r) => r.title === "Rent against buying, year by year"), "a widget of five hours ago is before a chart of two days ago");
       assert.match(charts[0].meta, /^A chart in A week in Goa in March · 20m/, "it says where it is");
       assert.equal(charts[0].maker, "A week in Goa in March"); assert.equal(charts[0].makerIs, "BUTTON", "and its chat's name leads back to the chat");
-      // Each chart wears its kind's mark (graph.css, his call of 16 Nov): one Azure, 36 px as a widget's mark is.
+      // Each chart wears its kind's mark (graph.css, decided 16 Nov): one Azure, 36 px as a widget's mark is.
       const marks = await x.page.evaluate(() => [...document.querySelectorAll('.lib-row[data-type="chart"] .lib-row-thumb .graph')].map((m) => {
         const r = m.getBoundingClientRect(), shown = [...m.children].filter((i) => getComputedStyle(i).display !== "none").length;
         return { kind: m.dataset.chart, w: Math.round(r.width), h: Math.round(r.height), shown, hue: getComputedStyle(m).getPropertyValue("--h").trim() }; }));
@@ -177,7 +177,7 @@ test("with Work's attachments listed, an empty Files says they show here; the ta
   } finally { await closeIt(x); }
 });
 
-// His call (16 Nov): charts stay in the Library's Widgets, with a Kind filter, and are never on Home's Widgets card.
+// Decided 16 Nov: charts stay in the Library's Widgets, with a Kind filter, and are never on Home's Widgets card.
 test("Widgets' Kind: All shows the widgets and the charts, Widgets the widgets alone, Charts the charts alone; with no charts listed there is no Kind", async (t) => {
   if (skipOrFail(t)) return;
   const x = await open("side", { width: 300, charts: LIB_CHARTS });

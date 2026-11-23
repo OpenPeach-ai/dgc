@@ -19,6 +19,9 @@ The types and what each is made from:
 - ``checklist``: the items of a job, each with what done means, a status, a note and proof (``dgc.artifact_checklist``).
   DGC changes one item per edit, so the history shows each step; the user ticks in its panel. Exported as Markdown,
   HTML or PDF. Its proof pictures are files of the version.
+- ``design``: a canvas of artboards, each one self-contained HTML page (``dgc.artifact_design``). DGC makes the index
+  first and draws one artboard per edit, so the canvas fills while the user watches; the user moves, resizes and edits
+  them in its panel. Exported as pictures (PNG), PDF (an artboard a page) or HTML.
 
 The model hands over data, never a file's bytes; DGC lays every artifact out the same way every time.
 """
@@ -40,9 +43,11 @@ from .artifact_store import ArtifactError, Store
 OUTPUTS = {"auto": None, "document": "doc", "slides": "slides", "spreadsheet": "sheet", "page": "page",
            "dashboard": "dashboard"}
 EXPORTS = {"doc": ("docx", "pdf", "md"), "slides": ("pptx", "pdf", "html"), "sheet": ("xlsx", "csv"),
-           "dashboard": ("pdf", "html"), "page": ("docx", "pdf", "html", "zip"), "checklist": ("md", "html", "pdf")}
+           "dashboard": ("pdf", "html"), "page": ("docx", "pdf", "html", "zip"), "checklist": ("md", "html", "pdf"),
+           # A design: png is one artboard's picture (the export names the board); zip is every artboard's picture.
+           "design": ("png", "pdf", "html", "zip")}
 LABELS = {"doc": "Document", "slides": "Slides", "sheet": "Spreadsheet", "dashboard": "Dashboard", "page": "Page",
-          "checklist": "Checklist"}
+          "checklist": "Checklist", "design": "Design"}
 # A document holds about a megabyte of text (it was 200,000 characters): a Pip's reply past 256 KB is kept whole as its
 # document (pips.keep_long_reply, Limits for everyone, 10 Nov).
 MAX_DOC_CHARS = 1_048_576
@@ -122,6 +127,8 @@ def _kind(type_: str):
         from . import artifact_dashboard as module
     elif type_ == "checklist":
         from . import artifact_checklist as module
+    elif type_ == "design":
+        from . import artifact_design as module
     else:
         raise ArtifactUseError(f"{type_} has no data module")
     return module
@@ -131,9 +138,10 @@ def _type(value) -> str:
     text = str(value or "").strip().lower()
     text = {"document": "doc", "docs": "doc", "deck": "slides", "presentation": "slides", "spreadsheet": "sheet",
             "sheets": "sheet", "table": "sheet", "html": "page", "web page": "page",
-            "checklists": "checklist", "check list": "checklist"}.get(text, text)
+            "checklists": "checklist", "check list": "checklist", "designs": "design", "canvas": "design",
+            "artboards": "design", "mockup": "design"}.get(text, text)
     if text not in artifact_store.TYPES:
-        raise ArtifactUseError("An artifact is a doc, slides, sheet, dashboard, page or checklist.")
+        raise ArtifactUseError("An artifact is a doc, slides, sheet, dashboard, page, checklist or design.")
     return text
 
 
@@ -314,6 +322,97 @@ def checklist_pictures(aid: str, n: int | None = None, *, store: Store | None = 
             for name, raw in _checklist_files(_store(store), aid, n).items()}
 
 
+# A design's artboards are files of the version beside its index (boards/<id>.html), kept by the store like a page's.
+def _design_files(st: Store, aid: str, n: int | None = None) -> dict:
+    """The artboard pages a version of a design holds: {file name: bytes}."""
+    own = artifact_store.SOURCE_FILE["design"]
+    return {name: raw for name, raw in st.files(aid, n).items() if name != own}
+
+
+def design_boards(aid: str, n: int | None = None, *, store: Store | None = None) -> dict:
+    """A design version's drawn artboards, for the panel that shows them: {board id: its HTML}."""
+    from . import artifact_design as design
+    st = _store(store)
+    files = _design_files(st, aid, n)
+    out = {}
+    for board in st.source(aid, n).get("boards") or []:
+        raw = files.get(design.board_file(board["id"]))
+        if raw is not None:
+            out[board["id"]] = raw.decode("utf-8", "replace")
+    return out
+
+
+def _design_heights(st: Store, aid: str) -> dict:
+    """How tall each whole-page artboard was measured to be, by the panel that drew it (kept beside the versions)."""
+    try:
+        value = json.loads((st._dir(aid) / "design-state.json").read_text(encoding="utf-8"))
+        heights = value.get("heights") if isinstance(value, dict) else None
+        return {k: v for k, v in (heights or {}).items() if isinstance(k, str) and isinstance(v, int)}
+    except (OSError, ValueError):
+        return {}
+
+
+def design_measured(aid: str, board: str, height, *, store: Store | None = None) -> None:
+    """The panel measured a whole-page artboard at its width: remembered beside the versions (never a version), so a
+    frame DGC adds later is placed below all of it."""
+    from . import artifact_design as design
+    st = _store(store)
+    if isinstance(height, bool) or not isinstance(height, (int, float)) or not design.MIN_SIDE <= height <= design.MAX_H:
+        raise ArtifactUseError("A measured height is a number of px.")
+    with st.lock():
+        art = st.get(aid)
+        if art.type != "design":
+            raise ArtifactUseError("Only a design's artboards are measured.")
+        ids = {b["id"] for b in st.source(aid, art.version).get("boards") or []}
+        if board not in ids:
+            raise ArtifactUseError("That artboard isn't in the design.")
+        heights = {k: v for k, v in _design_heights(st, aid).items() if k in ids}
+        heights[board] = int(height)
+        st._write_json(st._dir(aid) / "design-state.json", {"heights": heights})
+
+
+def _design_edit(st: Store, art, *, edits, content, author: str, note: str) -> tuple[dict, str]:
+    """A design's next version and the line the history says of it: the ops given, applied in order. Never the whole
+    design rewritten."""
+    from . import artifact_design as design
+    if content is not None or not isinstance(edits, list) or not edits:
+        raise ArtifactUseError(
+            "A design is changed one artboard at a time, never rewritten: use edits, like [{\"op\": \"change\", "
+            "\"board\": \"b1\", \"html\": \"<!doctype html>…\"}] to draw or redraw one artboard, or {\"op\": \"add\", "
+            "\"title\": …, \"size\": …} for a new one.")
+    index, files = st.source(art.id, art.version), _design_files(st, art.id, art.version)
+    heights = _design_heights(st, art.id)
+    by_user, said = str(author or "").casefold() == "you", []
+    try:
+        index = design.normalize(index)
+        for op in edits:
+            if by_user and note and isinstance(op, dict) and op.get("op") == "change" and not op.get("note"):
+                op = {**op, "note": note}                     # (what the person did there: "Edited text")
+            index, files, line, _told = design.apply(index, files, op, author=author, heights=heights)
+            said.append(line)
+        index = design.normalize(index)
+    except design.DesignError as exc:
+        raise ArtifactUseError(str(exc)) from None
+    line = "; ".join(said)
+    if note.startswith("From a comment"):
+        line = f"From a comment: {line}"
+    return {**index, artifact_store.CHECKLIST_FILES: files}, (line[:artifact_store.MAX_SUMMARY] or note or "Changed")
+
+
+def design_told(aid: str, op, *, author: str = "DGC", store: Store | None = None) -> str:
+    """What one op would tell the model besides its summary (where a frame landed, a link that names no artboard),
+    read from the design as it is: asked before the op is made."""
+    from . import artifact_design as design
+    st = _store(store)
+    try:
+        art = st.get(aid)
+        index = design.normalize(st.source(aid, art.version))
+        return design.apply(index, _design_files(st, aid, art.version), op, author=author,
+                            heights=_design_heights(st, aid))[3]
+    except (design.DesignError, ArtifactError, KeyError):
+        return ""
+
+
 def make(type_, title, spec, *, origin: dict, author: str = "DGC", summary: str = "Made", store: Store | None = None,
          base=None, resolve=None) -> dict:
     """A new artifact. ``origin`` names where (``{"surface": "chat", "chat": …}``, ``{"surface": "work", …}``, …)."""
@@ -333,12 +432,23 @@ def make(type_, title, spec, *, origin: dict, author: str = "DGC", summary: str 
                 checklist.normalize(given_spec, picture=_checklist_picture(base, resolve, pictures)), pictures)
         except checklist.ChecklistError as exc:
             raise ArtifactUseError(str(exc)) from None
+    elif type_ == "design":
+        # The index first: every artboard a named frame waiting to be drawn (each is then drawn as its own version).
+        from . import artifact_design as design
+        given_spec = spec.get("data", spec) if isinstance(spec, dict) and set(spec) == {"data"} else spec
+        try:
+            content = {**design.start(given_spec)[0], artifact_store.CHECKLIST_FILES: {}}
+        except design.DesignError as exc:
+            raise ArtifactUseError(str(exc)) from None
     else:
         content = _content(type_, spec, base=base, resolve=resolve)
     entry = _page_files(spec)[1] if type_ == "page" else ""
     st = _store(store)
     # Names are unique per kind: a name that's taken is refused (the caller changes that one, or names this one apart);
     # with no name at all, it gets the kind's own, numbered past the ones there are.
+    if type_ == "design":
+        from . import artifact_design as design
+        title = design.plain(title)                        # (a model's “&amp;” in a name is “&”)
     given, place = " ".join(str(title or "").split()), place_of(origin)
     if given:
         clash = taken(type_, given, place=place, store=store)
@@ -366,6 +476,9 @@ def edit(aid: str, *, edits=None, content=None, author: str = "DGC", note: str =
             art = st.get(aid)
         except ArtifactError as exc:
             raise ArtifactUseError(str(exc)) from None
+        if title is not None and art.type == "design":
+            from . import artifact_design as design
+            title = design.plain(title)
         renaming = title is not None and same_name(title) != same_name(art.title)
         if title is not None and not same_name(title):
             raise ArtifactUseError("A name can't be empty.")
@@ -389,10 +502,14 @@ def edit(aid: str, *, edits=None, content=None, author: str = "DGC", note: str =
             new = st.files(aid, art.version) if art.type == "page" else st.source(aid, art.version)
             if art.type == "checklist":
                 new = {**new, artifact_store.CHECKLIST_FILES: _checklist_files(st, aid, art.version)}
+            if art.type == "design":
+                new = {**new, artifact_store.CHECKLIST_FILES: _design_files(st, aid, art.version)}
             note = note or "Renamed"
         elif art.type == "checklist":
             new, note = _checklist_edit(st, art, edits=edits, content=content, author=author, note=note, base=base,
                                         resolve=resolve)
+        elif art.type == "design":
+            new, note = _design_edit(st, art, edits=edits, content=content, author=author, note=note)
         elif content is not None:
             new = _content(art.type, content, base=base, resolve=resolve)
         elif art.type == "doc":
@@ -504,13 +621,15 @@ def _page_has_table(art, st) -> bool:
 def _exports(art, st) -> list[str]:
     """What this artifact downloads as, its most useful first. A page with a table of data is a workbook too."""
     out = list(EXPORTS[art.type])
+    if art.type == "design":
+        out.remove("png")                        # (one artboard's picture: asked from the artboard, never the whole)
     if art.type == "page" and _page_has_table(art, st):
         out.insert(2, "xlsx")
     return out
 
 
 def made_by(origin: dict, resolve=None) -> dict:
-    """Who made it, by name (his call 15 Nov: the Library says exactly who made each item, one click back to it): a
+    """Who made it, by name (decided 15 Nov: the Library says exactly who made each item, one click back to it): a
     Pip, a Work session, a chat, an app, the terminal. ``resolve(kind, id)`` gives the name ("" when unknown)."""
     o = origin if isinstance(origin, dict) else {}
     surface = str(o.get("surface") or "")
@@ -585,6 +704,12 @@ def view(aid: str, *, store: Store | None = None, versions: bool = True) -> dict
             out["progress"] = _kind("checklist").progress(st.source(aid, art.version))
         except Exception:                                  # noqa: BLE001 -- unreadable data: shown without it
             pass
+    if art.type == "design":
+        # How many artboards it has and how many are still to draw ({boards, drawing, pages}): its card says it.
+        try:
+            out["design"] = _kind("design").counts(st.source(aid, art.version))
+        except Exception:                                  # noqa: BLE001 -- unreadable data: shown without it
+            pass
     # Its comment threads, counted ({open, all}; dgc/artifact_comments): the Library row and the panel say how many.
     from .artifact_comments import counts
     said = counts(aid, store=st)
@@ -616,6 +741,9 @@ def outline(aid: str, *, store: Store | None = None, limit: int = 12_000) -> str
             body = st.read_file(aid, art.entry or "index.html").decode("utf-8", "replace")
         except FileNotFoundError:
             body = ""
+    elif art.type == "design":
+        sizes = {bid: len(page) for bid, page in design_boards(aid, store=st).items()}
+        body = _kind("design").outline(st.source(aid), sizes)
     else:
         module = _kind(art.type)
         data = st.source(aid)
@@ -691,6 +819,8 @@ def render(aid: str, n: int | None = None, *, mode: str = "view", store: Store |
     elif art.type == "checklist":
         html = _kind("checklist").render_html(st.source(aid, n), title=art.title,
                                               pictures=checklist_pictures(aid, n, store=st))
+    elif art.type == "design":
+        html = _kind("design").render_html(st.source(aid, n), _design_files(st, aid, n), title=art.title)
     else:
         saved = state(aid, store=store, version=n)
         source = st.source(aid, n)
@@ -722,8 +852,10 @@ def _sweep_exports(folder: Path) -> None:
             continue
 
 
-def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=None, store: Store | None = None) -> Path:
-    """The artifact as a file, written to its exports folder; returns the path."""
+def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=None, store: Store | None = None,
+           board: str | None = None) -> Path:
+    """The artifact as a file, written to its exports folder; returns the path. ``board``: one artboard of a design
+    (its picture, its PDF, its page) rather than the whole canvas."""
     from .chatdgc import made
     st = _store(store)
     art = st.get(aid)
@@ -739,7 +871,11 @@ def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=Non
     folder = Path(tempfile.mkdtemp(prefix="export-", dir=st.export_dir(aid)))
     target = folder / made.file_name(art.title, fmt)
     try:
-        if art.type == "doc":
+        if board and art.type != "design":
+            raise ArtifactUseError("Only a design has artboards to download one by one.")
+        if art.type == "design":
+            target = _design_export(st, art, fmt, n, board, folder, config, browser)
+        elif art.type == "doc":
             out = made.make({"name": art.title, "format": fmt, "content": st.source(aid, n)}, config, browser=browser)
             target.write_bytes(out.raw)
         elif art.type == "slides":
@@ -797,6 +933,49 @@ def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=Non
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
         raise
+
+
+def _design_export(st: Store, art, fmt: str, n: int, board, folder: Path, config, browser) -> Path:
+    """A design as a file in ``folder``: one artboard (its page, its picture, its PDF) or the canvas (DGC's page of it,
+    every artboard's picture in a zip, a PDF with an artboard a page). Pictures and PDFs are made by a browser."""
+    from . import artifact_design as design
+    from .chatdgc import made
+    index, files = st.source(art.id, n), _design_files(st, art.id, n)
+    try:
+        one = design.find_board(index, board) if board else None
+        name = f"{art.title} - {one['title']}" if one else art.title
+        target = folder / made.file_name(name, fmt)
+        if fmt == "html":
+            target.write_text(design.standalone(index, files, one["id"])[1] if one
+                              else design.render_html(index, files, title=art.title), encoding="utf-8")
+            return target
+        if fmt == "png" and one is None:
+            raise ArtifactUseError("A picture is of one artboard: choose it on the canvas, or download every artboard "
+                                   "as pictures (the zip).")
+        if fmt == "zip" and one is not None:
+            raise ArtifactUseError("The zip holds every artboard's picture; for one artboard download its PNG.")
+        try:
+            if fmt == "pdf":
+                target.write_bytes(design.pdf(index, files, one and one["id"], config=config, browser=browser))
+                return target
+            shots = design.pictures(index, files, one and one["id"], config=config, browser=browser)
+        except design.DesignError:
+            raise
+        except Exception as exc:                           # noqa: BLE001 -- no browser, or it wouldn't draw it
+            raise ArtifactUseError(f"The design's {'PDF' if fmt == 'pdf' else 'pictures'} couldn't be made: "
+                                   f"{made._why_plain(exc)} Set up Chrome or Edge with `dgc doctor`, or download it "
+                                   "as a web page.") from None
+        if fmt == "png":
+            target.write_bytes(shots[0][1])
+            return target
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for i, (shown, raw) in enumerate(shots, 1):
+                zf.writestr(made.file_name(f"{i} {shown['title']}", "png"), raw)
+        target.write_bytes(buffer.getvalue())
+        return target
+    except design.DesignError as exc:
+        raise ArtifactUseError(str(exc)) from None
 
 
 def _page_file(title: str, fmt: str, files: dict, entry: str, config, browser) -> bytes:

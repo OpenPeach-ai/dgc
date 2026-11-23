@@ -81,7 +81,7 @@
 .dgc-lib .lib-row:hover { background: var(--row-hover); }
 .dgc-lib .lib-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 /* (Flex, not grid: a sheet a little taller than its place stays centred on the row's words.) */
-/* (One row height at every width, 54px, his call of 16 Nov: the narrow side bar's rows were 48 and lost height
+/* (One row height at every width, 54px, decided 16 Nov: the narrow side bar's rows were 48 and lost height
    beside the wide ones. The picture and the sheet are the same size everywhere too.) */
 .dgc-lib .lib-row-thumb { flex: none; display: flex; align-items: center; justify-content: center; width: 36px; height: 44px; line-height: 0; color: var(--muted); }
 .dgc-lib .lib-row-thumb > * { flex: none; }

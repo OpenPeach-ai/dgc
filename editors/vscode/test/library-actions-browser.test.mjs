@@ -1,4 +1,4 @@
-// The Library's item menu (0.52, 15 Nov; his words: "when i right click on anything, it should allow us multiple
+// The Library's item menu (0.52, 15 Nov; asked: "when i right click on anything, it should allow us multiple
 // things, like copy path etc, the current copy does nothing"). A right-click on a Library row used to open the editor's
 // own Cut · Copy · Paste (nothing in the Library took the right-click), whose Copy copies the selected text: a row has
 // none, so it did nothing. Now every item has ONE menu, the same on a right-click, on the row's ⋯ and from the

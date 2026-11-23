@@ -524,7 +524,7 @@ class EachArtifactItsOwnOrigin(unittest.TestCase):
         self.assertIn("frame-src http://127.0.0.1:*", shell_headers["content-security-policy"])
 
     def test_reached_over_tailscale_or_the_lan_the_shell_may_still_frame_it(self):
-        # (His 21 Nov test: opened at http://100.71.117.72:45001 the shell showed its header and Chrome blocked the page:
+        # (The 21 Nov test: opened at http://100.71.117.72:45001 the shell showed its header and Chrome blocked the page:
         # "This content is blocked". The address it was reached on wasn't among those allowed to frame it.)
         csp = A._page_csp(self.srv, A._FILE_CSP, also="100.71.117.72")
         ancestors = next(p.strip() for p in csp.split(";") if p.strip().startswith("frame-ancestors")).split()[1:]

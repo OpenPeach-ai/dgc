@@ -2142,8 +2142,10 @@
   // ---- artifacts a reply made or changed (message.artifacts: a deck, a sheet, a dashboard, a page): a card each, which
   // opens it in its panel or exports it. They're kept with the reply, so they come back with the chat; what each one
   // is now (a later version, a new title, removed) comes from artifactChanged and, after a reload, artifactViews.
-  const ARTIFACT_ICON = { doc: "file-text", slides: "preview", sheet: "table", dashboard: "dashboard", page: "browser", checklist: "checklist" };
-  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist" };
+  const ARTIFACT_ICON = { doc: "file-text", slides: "preview", sheet: "table", dashboard: "dashboard", page: "browser", checklist: "checklist", design: "symbol-color" };
+  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist", design: "Design" };
+  // (A design's own words for its formats: its zip holds a picture of each artboard, its PDF a page for each.)
+  const DESIGN_FORMAT = { zip: "Every artboard as pictures (.zip)", pdf: "PDF, an artboard a page", html: "The canvas as a web page (.html)" };
   const ARTIFACT_FORMAT = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
                             xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
   const artifactsNow = new Map();          // id -> the artifact as last heard (null: removed)
@@ -2209,7 +2211,7 @@
         const menu = el("span", "cd-artifact-menu dgc-popover");
         menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Download as"); menu.hidden = true;
         for (const format of formats) {
-          const item = el("button", "cd-artifact-menu-item", ARTIFACT_FORMAT[format] || format.toUpperCase());
+          const item = el("button", "cd-artifact-menu-item", (card.type === "design" && DESIGN_FORMAT[format]) || ARTIFACT_FORMAT[format] || format.toUpperCase());
           item.type = "button"; item.setAttribute("role", "menuitem"); item.dataset.format = format;
           item.addEventListener("click", () => {
             closeArtifactMenu(true);
@@ -4855,6 +4857,14 @@
         message.canvases = cards;
         if (state.searching[message.id]?.kind === "canvas") delete state.searching[message.id];
         update(message.id);
+        return;
+      }
+      case "composeRef": {
+        // Ask in chat, from a design's canvas: a reference to an artboard added to what is in the box, unsent.
+        if (typeof msg.text !== "string" || !msg.text.trim() || readOnly()) return;
+        edit(() => { const now = input.value; input.value = (now && !/\s$/.test(now) ? `${now} ` : now) + msg.text.slice(0, 700); });
+        grow(); saveDraft(); input.focus();
+        try { input.setSelectionRange(input.value.length, input.value.length); } catch { /* a box without a caret yet */ }
         return;
       }
       case "sendFromEditor": {

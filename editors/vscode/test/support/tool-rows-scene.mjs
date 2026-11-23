@@ -9,7 +9,7 @@ export const THOUGHTS = ["Start with the export for yesterday.", "The export dro
   "When did the split change?", "Compare with Tally's numbers.", "Run the whole GST suite once more."];
 
 // `id` prefixes the turn's ids, so a replay can carry h-prefixed ones.
-export function founderTurn(id = "t1", { answer = true } = {}) {
+export function ownerTurn(id = "t1", { answer = true } = {}) {
   const frames = [
     { type: "turn_start", turn_id: id, prompt: "The GST export doesn't match Tally for yesterday. Find out why.", kind: "prompt" },
     { type: "text_delta", text: "I'll check the GST export against Tally one step at a time before I touch any code." },

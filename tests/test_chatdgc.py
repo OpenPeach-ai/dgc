@@ -426,7 +426,7 @@ class ChatDGCTests(unittest.TestCase):
                 if (model is None or client.model == model) and call["messages"][0]["content"] != LOOK_SYSTEM]
 
     def test_a_model_that_cant_see_asks_once_and_the_model_it_found_looks(self):
-        # His call (18 Nov): a chat whose model can't see finds one that can on the user's connections and asks, with
+        # Decided 18 Nov: a chat whose model can't see finds one that can on the user's connections and asks, with
         # three choices; the answer is the chat's from then on.
         self._seeing_setup()
         chat = self.engine.open()

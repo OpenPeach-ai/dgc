@@ -1,4 +1,4 @@
-// A sub-agent's own page reads like a Work session (his call, 20 Nov: "completely match the UI of sessions"): the prompt
+// A sub-agent's own page reads like a Work session (decided 20 Nov: "completely match the UI of sessions"): the prompt
 // it was given as the session draws a prompt; its steps grouped as the session groups them ("Read 1 file, ran 1
 // command"); while it works, the session's activity row ("Working (12s · isolated checkout)") under its steps; once it
 // ends, its steps fold under "Worked for 41s · isolated checkout ›" at the top, with its answer and files below. Where it

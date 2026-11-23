@@ -34,7 +34,7 @@ test("a tool's image opens the viewer, which is where it already went", () => {
   assert.deepEqual(h.errors, []);
 });
 
-// His ask (18 Nov): Download saves on the computer the editor runs on. The page saves the picture it shows itself (a
+// Asked 18 Nov: Download saves on the computer the editor runs on. The page saves the picture it shows itself (a
 // Blob and a hidden <a download>, media/shared/download.js): never the host's save dialog, which over a remote
 // connection browses the remote machine.
 test("Download saves the picture from the page itself, on this computer: the bytes it shows, under its name", () => {

@@ -1,4 +1,4 @@
-"""pc-desktop (0.52, his list of 9 Nov): "A taskbar with the open windows, a clock
+"""pc-desktop (0.52, the list of 9 Nov): "A taskbar with the open windows, a clock
 and the tray, labelled icons on the desktop for each app, and an app menu. Today a Pip's desktop is a dark wallpaper
 and a dock, and a maximised browser covers it."
 
@@ -52,7 +52,7 @@ class DesktopLook(unittest.TestCase):
         self.assertIn("quick_exec=1", (self.conf / "libfm.conf").read_text(), "one click opens an app, no question")
 
     def test_a_windows_title_bar_closes_minimises_maximises_and_moves_it(self):
-        """His 17 Nov report: on a Pip's computer the image editor's minimise and close did nothing, and dragging its
+        """The 17 Nov report: on a Pip's computer the image editor's minimise and close did nothing, and dragging its
         title bar didn't move it. Openbox runs with DGC's own config file only (--config-file), so the bindings a
         window's frame needs are DGC's to give: none were (only the desktop's right-click menu)."""
         import xml.etree.ElementTree as ET

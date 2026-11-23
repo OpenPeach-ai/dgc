@@ -2,7 +2,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { pickerPage, sampleView } from "./support/model-picker-scene.mjs";
 
-// The model picker's second page (17 Nov, his words: "when user selects a sub agent model, then we further take user to
+// The model picker's second page (17 Nov, asked: "when user selects a sub agent model, then we further take user to
 // a next page to select the context window and thinking effort, and context size only shows options of what that model
 // is capable of"), in real Chromium: media/shared/modelpicker.js + .css. Its head (Back, the model, its connection),
 // Their thinking, Their context window (Same, only the sizes the model takes, Custom…), Done; Back and Escape; the

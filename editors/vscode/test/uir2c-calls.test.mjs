@@ -1,4 +1,4 @@
-// His 16 Nov calls after the second pass, in real Chromium on the real pages:
+// Decided 16 Nov after the second pass, in real Chromium on the real pages:
 // Home's number counts only what needs you (things that are only new are a quiet dot, never in the number); a Pip's
 // reply bubble has the sent bubble's 10 px on every corner, with no tail; Home says "New work", not "New session".
 import { after, before, test } from "node:test";

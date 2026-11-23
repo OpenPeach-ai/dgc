@@ -1,7 +1,7 @@
-"""pc-vscode-terminal, the VSCodium half (his list of 9 Nov): "VSCodium on every Pip's computer, on the dock and
+"""pc-vscode-terminal, the VSCodium half (the list of 9 Nov): "VSCodium on every Pip's computer, on the dock and
 openable by the Pip ... installed pinned, the way Chrome is".
 
-VSCodium (the open-source build of VS Code, his choice of 9 Nov) is a code editor among the computer's apps. Its
+VSCodium (the open-source build of VS Code, chosen 9 Nov) is a code editor among the computer's apps. Its
 package is about 143 MB, so it is one of the apps DGC offers to download (as LibreOffice is), never part of the
 desktop: from VSCodium's own apt repository, trusted only through its signing key, whose fingerprint is pinned here,
 and checked by apt like every package. It runs in an app's box like the others: the system read-only, Files and its

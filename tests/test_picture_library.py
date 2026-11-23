@@ -1,4 +1,4 @@
-"""Save to Library for a picture in a chat (0.52; his asks, 18 Nov: "if the pip chat gave me the image card and showed me
+"""Save to Library for a picture in a chat (0.52; asked 18 Nov: "if the pip chat gave me the image card and showed me
 image, shouldn't that have also be saved and stored in the library ... or that will just flood the library ... maybe for
 these images, on the card we give an option for 'Save', and that saves the image in library? or give pip tool to do so
 as well, so user can ask, save this image in library?").

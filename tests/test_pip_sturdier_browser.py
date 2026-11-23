@@ -189,15 +189,15 @@ class WordingTests(unittest.TestCase):
         # (text-only tool and notice; measured +335 prompt tokens a request, against 4 to 10 fewer requests an errand)
         # for the new steps. Growing them further needs a reason. 2026-11-12: +159 for background commands
         # (pc-background-commands: run's background, jobs, stop_job; about 40 tokens a request), the wording cut to fit.
-        # 2026-11-15: +948 (about 240 tokens a request) for his asks that day: "Better tools" (a Pip finds, judges and
+        # 2026-11-15: +948 (about 240 tokens a request) for that day's asks: "Better tools" (a Pip finds, judges and
         # installs open-source programs and models itself, asks in the chat before a big one; cut from 1524 to fit)
         # and the Terminal's no-limit wording (a long command carries on in the background).
         # 2026-11-16: +192 (about 50 tokens a request) for send_to_chat: a Pip sends what it made in its chat, as a
-        # person does (his ask, 15 Nov; Pips API 101), and is told to, so it never only says where a file is.
+        # person does (asked 15 Nov; Pips API 101), and is told to, so it never only says where a file is.
         # 2026-11-18: +82 (about 20 tokens a request) for `confirm`: at Do it all a step that needs the user (a payment past
-        # its limit, a command that could wipe its Files) is held and asked in the chat, never a card (his rule, 17 Nov),
+        # its limit, a command that could wipe its Files) is held and asked in the chat, never a card (the rule, 17 Nov),
         # and runs once on their yes in the next turn (dgc/pip_holds.py). The description cut to fit.
-        # 2026-11-18 (later): expect_minutes for check-ins (his call: DGC checks in on a long command past its time or
+        # 2026-11-18 (later): expect_minutes for check-ins (DGC checks in on a long command past its time or
         # when it goes quiet, and its end is told in the chat) fit in at no growth: the description's lines the notice
         # already says (approval, close_browser) cut.
         size = len(json.dumps(pip_computer.schema(None))) + len(pip_computer.NOTICE)

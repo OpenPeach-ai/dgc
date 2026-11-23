@@ -75,7 +75,7 @@ def _row(db, job_id):
 
 # ---- slots --------------------------------------------------------------------------------------------------------
 def slots(registry, pip_id) -> int:
-    """How many of its sub-agents a Pip runs at once: 1, 4 with Ultra (his call), any number Dev Mode allows."""
+    """How many of its sub-agents a Pip runs at once: 1, 4 with Ultra, any number Dev Mode allows."""
     row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (SLOTS_KEY + pip_id,)).fetchone()
     try:
         value = int(json.loads(row[0])) if row else SLOTS_DEFAULT
@@ -87,7 +87,7 @@ def slots(registry, pip_id) -> int:
 def _valid_slots(value) -> int:
     try:
         from .dev_mode import chosen
-        most = chosen("pip_agent_slots") or SLOTS_ULTRA     # Dev Mode lifts the most (his call)
+        most = chosen("pip_agent_slots") or SLOTS_ULTRA     # Dev Mode lifts the most
     except KeyError:
         most = SLOTS_ULTRA
     if type(value) is not int or not 1 <= value <= most:
@@ -414,7 +414,7 @@ def _run(store, config, job_id, text, *, counted=True):
 # ---- its run ended: the Pip checks ----------------------------------------------------------------------------------
 def is_fix_run(state_directory, run_id) -> bool:
     """Whether a run is a fix's own work: its sub-agent's try or the Pip's check of that work (careful mode lets it work
-    in its box without holds: his call 15 Nov, A). False when it can't be told."""
+    in its box without holds: decided 15 Nov, A). False when it can't be told."""
     if not run_id or not state_directory:
         return False
     try:
@@ -836,7 +836,7 @@ def stop(store, pip_id, job_id, actor) -> dict:
     return view(db, _row(db, job_id))
 
 
-# ---- its helpers' model, by the user's words (his call, 18 Nov) ------------------------------------------------------
+# ---- its helpers' model, by the user's words (decided 18 Nov) ------------------------------------------------------
 # "Fix it with GLM 5 flash on my Ollama Cloud": the Pip's chat sets what its helpers run on (the same setting as its
 # Sub-agents tab: its fixes and the helpers inside its runs), from the user's own message only, and only on one of the
 # user's saved connections (never a subscription CLI or DGC Router). "Back to your own model" undoes it.

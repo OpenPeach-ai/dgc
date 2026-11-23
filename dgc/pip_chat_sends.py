@@ -1,4 +1,4 @@
-"""What a Pip sends in its chat: a picture, a video or any file from its computer (Pips API 101; his ask, 15 Nov: "Pip
+"""What a Pip sends in its chat: a picture, a video or any file from its computer (Pips API 101; asked 15 Nov: "Pip
 should have capability to show images, or videos or such files in the chat itself, like it happens in regular chat
 between 2 people").
 

@@ -11,7 +11,7 @@
 
    Pips embedded in Work's side bar sit in a shadow root, where :root and body rules here do not match; they inherit
    every token from Work's page, which loads this file through main.css. */
-/* Scrollbars, on every DGC page (17 Nov live check; his call: one look everywhere). VS Code gives every webview
+/* Scrollbars, on every DGC page (17 Nov live check: one look everywhere). VS Code gives every webview
    `html { scrollbar-color: … }` in its own default layer, and Chromium then ignores every ::-webkit-scrollbar rule and
    draws its standard bar: arrow buttons and a wide pill on Linux and Windows, a hiding overlay on a Mac. This rule sits
    outside any layer, so it wins, and every page draws the slim bars below, as the tests and the layout audit see them.
@@ -74,7 +74,7 @@ html { scrollbar-color: auto; }
   --home-count-ink: var(--text);
   --home-quiet: var(--text-2);
   --accent:#7C5CFF; --accent-text:#A78BFA; --accent-fill:#7654F6;
-  /* DGC's products, each its own colour (his call, 18 Nov): Vibe (this one) DGC's purple, the SDK olive. One shade each, in
+  /* DGC's products, each its own colour (decided 18 Nov): Vibe (this one) DGC's purple, the SDK olive. One shade each, in
      both themes. */
   --brand-vibe:#7C5CFF; --brand-sdk:#7B8C24;
   /* The Thinking slider's fill where a page has no WebGL: its colours a level at a time, from the reference's own
@@ -124,9 +124,9 @@ html { scrollbar-color: auto; }
   --sp: 4px;                     /* the unit: every gap and pad is a multiple of it */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;  --sp-5: 20px;  --sp-6: 24px;
   /* Corners on one scale, a quarter rounder than the 6 / 8 / 10 / 12 / 16 it replaces; a prompt box takes 22. */
-  /* --r-bubble: a sent message's bubble, on every surface (Work, ChatDGC, a Pip's chat): 10px, his call of 16 Nov. It was
+  /* --r-bubble: a sent message's bubble, on every surface (Work, ChatDGC, a Pip's chat): 10px, decided 16 Nov. It was
      20px in Work and ChatDGC and 20px with a 7.5px tail in a Pip's chat. Bubbles only: controls keep --btn-r.
-     --r-code: an inline code chip (a path, a command in a line of words), on every surface: 4px, his call of 16 Nov. */
+     --r-code: an inline code chip (a path, a command in a line of words), on every surface: 4px, decided 16 Nov. */
   --r-sm: 7.5px;  --r-md: 10px;  --r-lg: 12.5px;  --r-xl: 15px;  --r-2xl: 20px;  --r-box: 6px;  --r-full: 9999px;  --r-bubble: 10px;  --r-code: 4px;      /* the prompt box: the button family's corner (--btn-r) since 14 Nov, it was 22px */
   /* Five sizes (11 · 12 · 14 · 16 · 18) and four weights. The panel had
      grown 13 sizes including half-pixels and seven weights; the eye reads that as noise even

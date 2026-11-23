@@ -382,14 +382,14 @@ def resolve_path(project_root, path, *, must_exist: bool = False) -> Path:
     return p
 
 
-# ---- archive (his call, 13 Nov) ------------------------------------------------------------------------------------
+# ---- archive (decided 13 Nov) ------------------------------------------------------------------------------------
 # Codex moves an archived thread's file into an archived folder and back (codex-rs thread-store archive_thread.rs,
 # unarchive_thread.rs). A Work session is its file and the files beside it that are its own; archiving moves them all
 # into <project>/archived/, where nothing resumes, wakes or runs it, and Restore moves them back as they were. The
 # archived folder keeps its own index (session_index), so its list is searched the way the Work list is.
 ARCHIVED_DIR = "archived"
 _SESSION_STEM = re.compile(r"[A-Za-z0-9_-]{1,128}")
-# Beside an archived session only: the Project Pips that were archived with it (his call: "archive the project pips
+# Beside an archived session only: the Project Pips that were archived with it ("archive the project pips
 # also"), which Restore brings back with it.
 _ARCHIVED_PIPS = ".pips"
 _PIP_ID = re.compile(r"pip_[0-9a-f]{32}")
@@ -1760,7 +1760,7 @@ def _read_bucket_project(bucket: Path) -> str | None:
 
 def listing_everywhere(here_root, *, limit=None, offset=0, query="", redact_secrets=(), folder=None,
                        archived: bool = False) -> list[dict]:
-    """Every project's sessions, newest first (list_sessions {scope: "all"}, his call 12 Nov): each with its folder, so
+    """Every project's sessions, newest first (list_sessions {scope: "all"}, decided 12 Nov): each with its folder, so
     the editor shows where it belongs and opens it running there. From each project's index (session_index), searched
     the same way. DGC's own folders (a helper's worktree, a fix's copy, all under ~/.dgc) are never a user's project.
     ``folder``: only that folder's sessions (the Project Folder dropdown's one folder, 12 Nov). ``archived``: each

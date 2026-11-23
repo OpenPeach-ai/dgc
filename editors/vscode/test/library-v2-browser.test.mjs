@@ -1,4 +1,4 @@
-// Library v2 (0.52, his words of 15 Nov on build 4960f96a): ONE Library module (media/library.js) draws the Library in
+// Library v2 (0.52, asked 15 Nov on build 4960f96a): ONE Library module (media/library.js) draws the Library in
 // the side bar's tab AND in its editor tab: narrow in the side bar, wide in the tab, the same code and the same host
 // messages. In both: the header row, the search field, the tabs Artifacts · Widgets · Images · Videos · Files (icons
 // when narrow), then that tab's own filter line, with real gaps between them ("the dropdowns for Type and By literally
@@ -154,7 +154,7 @@ for (const place of ["side", "tab"]) {
     try {
       const filters = async () => (await x.lib()).filters.map((f) => [f.id, f.key, f.value]);
       assert.deepEqual(await filters(), [["kind", "Kind", "All"], ["maker", "By", "Anyone"]]);
-      assert.deepEqual((await x.menu("kind")).map((r) => r.label), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards", "Checklists"]);
+      assert.deepEqual((await x.menu("kind")).map((r) => r.label), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards", "Checklists", "Designs"]);
       await x.page.keyboard.press("Escape"); await x.rest(200);
       const makers = await x.menu("maker");
       assert.deepEqual(makers.slice(0, 4).map((r) => r.label), ["Anyone", "Work", "Chat", "Pips"]);

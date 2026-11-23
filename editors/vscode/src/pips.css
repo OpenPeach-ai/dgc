@@ -227,7 +227,7 @@ aside>button:not(.job){margin:6px 6px 0 0}
 :host,:root{--pip-bubble:color-mix(in srgb,var(--vscode-foreground) 8%,transparent);--bubble:color-mix(in srgb,var(--vscode-foreground,#d7d7da) 9%,var(--vscode-editor-background,#1f1f1f));--box:color-mix(in srgb,var(--vscode-foreground,#d7d7da) 4%,var(--vscode-editor-background,#1f1f1f))}
 .simple-pips #app{display:flex;flex-direction:column;min-height:100%}
 /* The Pips view's header row is the one every page of the side bar wears (media/shared/pagehead.css, drawn by
-   DgcPageHead: the same title, ⋯, height, padding and line as Work, Chat and Library; his words of 15 Nov). Here is only
+   DgcPageHead: the same title, ⋯, height, padding and line as Work, Chat and Library; asked 15 Nov). Here is only
    where it sits (the page's 12 px margin, 4 px under the tab bar, as theirs) and what is Pips' own in it: the status
    dot beside the title, Start/Resume when Pips are stopped, and the runner's error on a row of its own. */
 .dgc-pagehead.simple-bar{flex-wrap:wrap;margin:var(--sp-1,4px) var(--sp-3,12px) 0}
@@ -1378,7 +1378,7 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 @media(prefers-reduced-motion:reduce){.job-open{transition:none}}
 /* A narrow list (under 400px): the row's icon buttons (Open in editor, the pin) don't fit beside its name, so they are
    in the row's "…" menu, and the "…" is on every row, where the pin stood: nothing needs the pointer on the row first,
-   and Tab reaches it (his rule for every list, 16 Nov). The name always keeps room for it. */
+   and Tab reaches it (the rule for every list, 16 Nov). The name always keeps room for it. */
 .pip-row-slot>.job-more,.pip-row-menu{display:none}
 @container(max-width:399px){
  .pip-row-slot.has-more>.job-open,.pip-row-slot.has-more>.job-pin{display:none}
@@ -1414,7 +1414,7 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
    keys, the corner and the greys are the shared menu's (media/shared/menu.css); the buttons are the shared button at its
    dense size. The only accent here is the unread dot. ==== */
 .pip-topbar{position:relative}
-/* A Pip's chat header (his calls of 14 and 15 Nov): back, its face and its name at the left, fixed; the thread selector
+/* A Pip's chat header (decided 14 and 15 Nov): back, its face and its name at the left, fixed; the thread selector
    in the middle, always centred, in a capped width, a long name ending in "…"; the switch, its computer and the menu at
    the right. The two sides are the same width (the selector's box carries Back's width on its right as the left side
    carries Back itself), and the selector's width comes from the page's width, never from the name it shows: so nothing
@@ -1870,7 +1870,7 @@ body.motion-paused .pip-found-spin,.motion-paused .pip-found-spin{animation-play
 .dgc-card .dgc-card-actions>button.pip-project-quiet,.dgc-card .dgc-card-actions>button.pip-project-commit{border-color:transparent;background:transparent;color:var(--link);font-weight:var(--w-reg)}
 .pip-project-self{color:var(--text-2)}
 
-/* ---- The reports page as a table (his words, 13 Nov) ----
+/* ---- The reports page as a table (asked 13 Nov) ----
    When · What · Files · Model · Time and tokens · Findings; When sorts. Where the page is narrow a table can't fit:
    each run stacks into a row of its own, what and when on the first line, files and model under it. */
 .pip-reports-section{container-type:inline-size}
@@ -2059,7 +2059,7 @@ body.vscode-light .error,body.vscode-high-contrast-light .error,:host-context(bo
  .pip-page-body .link,.pip-page-group>button.link{white-space:normal;height:auto;text-align:left}
 }
 @container(max-width:200px){
- /* The box's row of controls stays one line (his call of 14 Nov: nothing wraps there). At VS Code's narrowest side
+ /* The box's row of controls stays one line (decided 14 Nov: nothing wraps there). At VS Code's narrowest side
     bar seven buttons do not fit it: the routines chip (they are on its page) and dictation (voice mode is beside
     it) give way, so the last button is never cut. */
  .pip-composer .composer-controls,.pip-composer .composer-left,.pip-composer .composer-right{gap:0}

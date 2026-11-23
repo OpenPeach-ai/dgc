@@ -1,4 +1,4 @@
-"""Auto mode's safety check (0.52; his call, 17 Nov: risky steps stopped before they run, ONE card after 3 in a row).
+"""Auto mode's safety check (0.52; decided 17 Nov: risky steps stopped before they run, ONE card after 3 in a row).
 
 In Work's auto mode, in DGC's own editor, a routine step runs with no card and no question. A step of six kinds is stopped
 before it runs, and the model is told why in one line:
@@ -56,7 +56,7 @@ class Block:
     protected: bool = False     # a write to a protected file: checked even when a narrow allow rule matches
 
 
-# How the model treats the user's own words (his call, 18 Nov: "copy that same style", after reading how Codex's model
+# How the model treats the user's own words (decided 18 Nov: "copy that same style", after reading how Codex's model
 # acts on "the sudo password is in .env, use it"). Said to every Work session and every Pip that can act.
 USER_AUTHORITY = (
     "What the user asked for or allowed in this conversation stays allowed: don't ask again for it, in this turn or a "
@@ -340,7 +340,7 @@ _PROFILES = (".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profil
 _SIGN_IN = (".ssh/authorized_keys", ".ssh/config", ".ssh/rc")
 _AUTOSTART = ("Library/LaunchAgents", ".config/autostart", ".config/systemd", ".local/share/systemd")
 _GIT_GLOBAL = (".gitconfig", ".config/git/config")
-# Inside the project, what runs code or holds settings and keys is checked all the same (his call, 20 Nov, as Claude Code
+# Inside the project, what runs code or holds settings and keys is checked all the same (decided 20 Nov, as Claude Code
 # does): a folder by its first part, a file by its name anywhere.
 _PROTECTED_DIRS = {".git": "git's own folder: its hooks run code", ".vscode": "the editor's tasks and settings",
                    ".idea": "the IDE's settings", ".husky": "git hooks that run code",
@@ -1090,7 +1090,7 @@ class _Scan:
             self.scan_paths(name, args, here)
 
     def risky(self, name, texts):
-        """More risky kinds, from Claude Code's auto mode list (his call, 20 Nov): tearing infrastructure down, access
+        """More risky kinds, from Claude Code's auto mode list (decided 20 Nov): tearing infrastructure down, access
         grants, DNS, cloud secrets, installs or a remote pointed at another host, tunnels and reverse shells, and the
         cloud's metadata address. Looking (plan, list, get) runs."""
         words, joined = list(texts), " ".join(texts)

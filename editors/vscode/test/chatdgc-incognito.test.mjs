@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { openChat, conversation } from "./support/chat-scene.mjs";
 
-// Temporary becomes Incognito, with a ghost (his pick, option D, 9 Nov): "Let's rename temporary to incognito, and change
+// Temporary becomes Incognito, with a ghost (picked 9 Nov, option D): "Let's rename temporary to incognito, and change
 // the box to a ghost style icon." The wide box drew a bare native checkbox (a white square in a dark theme) beside the
 // word; now it is a ghost and its word at every width, lit when on, the word dropped when the box is narrow. The chat
 // itself is the same: never written down, never listed, never remembered. Its wire field stays `temporary`.
@@ -33,7 +33,7 @@ test("the words say Incognito everywhere a person reads them; the wire keeps `te
   assert.match(toggle, /title="Incognito: this chat isn't saved, listed or remembered"/);
   assert.match(toggle, /aria-label="Incognito chat"/);
   assert.match(toggle, /<span class="cd-tool-label">Incognito<\/span>/);
-  assert.ok(toggle.includes(GHOST), "the ghost he picked (D)");
+  assert.ok(toggle.includes(GHOST), "the ghost chosen (D)");
   assert.doesNotMatch(toggle, /codicon/, "no stand-in icon beside it");
   assert.match(page, /id="cd-temp-badge"[^>]*>[\s\S]{0,700}Incognito<\/span>/, "the header's badge");
   assert.doesNotMatch(page.replace(/<!--[\s\S]*?-->/g, ""), />[^<]*\bTemporary\b[^<]*</, "no Temporary left in the page's words");

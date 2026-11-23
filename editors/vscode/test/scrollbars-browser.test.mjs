@@ -1,4 +1,4 @@
-// Scrollbars on every DGC page (17 Nov live check on Linux; his call: "Slim bars everywhere"). VS Code gives each
+// Scrollbars on every DGC page (17 Nov live check on Linux; decided: "Slim bars everywhere"). VS Code gives each
 // webview `html { scrollbar-color: … }` in its own default layer; Chromium then ignores every ::-webkit-scrollbar rule and
 // draws its standard bar (arrow buttons and a wide pill on Linux and Windows, a hiding overlay on a Mac). DGC's pages undo
 // that one property, so the slim bars (media/shared/tokens.css) are what draws, the Pips' shadow root included, as the

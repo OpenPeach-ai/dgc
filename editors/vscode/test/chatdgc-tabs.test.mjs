@@ -2752,7 +2752,7 @@ test("uir2c: Widgets' charts are asked of a ChatDGC that lists them, checked, an
   assert.equal(sent.filter((c) => c.type === "chatdgc_widgets" && c.op === "charts").at(-1).offset, 60);
 });
 
-// His call (16 Nov): Home's Widgets card is the widgets you use again; a chart is the Library's (Widgets, Kind: Charts).
+// Decided 16 Nov: Home's Widgets card is the widgets you use again; a chart is the Library's (Widgets, Kind: Charts).
 test("Home's Widgets card is the widgets alone: where ChatDGC lists charts it never asks for them or counts one, and no chart opens from Home", async () => {
   const WG = "wg_" + "5".repeat(16);
   host.offers = { version: 1, widget_library: 1, chart_library: 1 };

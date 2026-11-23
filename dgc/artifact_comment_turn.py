@@ -25,7 +25,7 @@ TIMEOUT = 600
 
 SYSTEM = (
     "You answer one comment thread on an artifact the user is looking at in DGC (a document, a page, a deck, a "
-    "spreadsheet, a checklist or a dashboard). The user picked part of it and commented. Read the artifact, the part "
+    "spreadsheet, a checklist, a dashboard or a design). The user picked part of it and commented. Read the artifact, the part "
     "the comment points at and the thread, then do what the thread's last message asks.\n"
     "- A question: answer it with reply.\n"
     "- Words to change in a document or a page (shorter, clearer, friendlier, a fix): offer them with suggest, each as "
@@ -129,6 +129,12 @@ HOW = {
                   '"what you did, or what you need"}] (status: Not started, Building, Testing, Checked live, Needs you, '
                   'Done; Done needs a note and proof, Needs you a note). A new item: {"op": "add", "title": "…", '
                   '"done_when": "…"}.'),
+    "design": ('Change it with edit_artifact and edits, one artboard per call. Exact text in an artboard: [{"op": '
+               '"change", "board": "b1", "edits": [{"find": "the exact text in its HTML now", "replace": "the new '
+               'text"}]}] (read its HTML first with [{"op": "read", "board": "b1"}]). A bigger change to it: {"op": '
+               '"change", "board": "b1", "html": "<!doctype html>… its whole page, the same but for what the comment '
+               'asks"}. Also {"op": "resize", "board", "w", "h"}, {"op": "rename", "board", "title"}, {"op": "tweak", '
+               '"board", "name", "value"}. A comment on one artboard changes that artboard and no other.'),
     "page": ('Words to change: offer them with suggest, [{"old": "the exact words in its HTML now", "new": "the new '
              'words"}]. Anything else, or when the comment says to make the change yourself: edit_artifact with content, '
              'the whole page\'s HTML, the same page with only what the comment asks changed.'),
@@ -148,6 +154,10 @@ def _pointed(thread: dict, view: dict) -> str:
         lines.append(f"What cells {anchor['range']} held then: {json.dumps(anchor['values'], ensure_ascii=False)}")
     if anchor.get("kind") == "item":
         lines.append(f"The checklist item: {anchor['item']}" + (f" “{anchor['title']}”" if anchor.get("title") else ""))
+    if anchor.get("kind") == "artboard":
+        lines.append(f"The artboard: {anchor['board']}" + (f" “{anchor['title']}”" if anchor.get("title") else "")
+                     + (f", its <{anchor['tag']}> element at {anchor['path']}" if anchor.get("tag") and anchor.get("path") else "")
+                     + ". Change only this artboard.")
     if thread.get("part"):
         lines.append("What is there now:\n" + thread["part"])
     return "\n".join(lines)
@@ -170,7 +180,10 @@ def prompt(aid: str, tid: str, *, store=None) -> list[dict]:
     thread = next((t for t in comments.threads(aid, store=store) if t["id"] == tid), None)
     if thread is None:
         raise comments.CommentError("That comment isn't there any more.")
-    body = (f"The artifact:\n{service.outline(aid, store=store)}\n\n{_pointed(thread, view)}\n\n"
+    from .artifact_origin import conversation
+    said = conversation(view.get("origin"))      # the chat that made it, in brief: what "the one we picked" means
+    made = (f"The chat that made it (for context; answer the thread, not this):\n{said}\n\n" if said else "")
+    body = (f"The artifact:\n{service.outline(aid, store=store)}\n\n{_pointed(thread, view)}\n\n{made}"
             f"The thread so far:\n{_said(thread)}\n\n{HOW.get(view['type'], '')}\nAnswer the thread's last message.")
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body}]
 
@@ -265,6 +278,16 @@ def _run(aid: str, tid: str, name: str, args: dict, changed: dict, *, on_change=
             if args.get("data") is not None or (args.get("content") is not None and kind != "page"):
                 return ("error: nothing changed. From a comment, change only what it is about: give edits (the "
                         "smallest exact change), not the whole artifact.")
+            if kind == "design" and not reading:
+                # A comment on one artboard changes exactly that artboard (the user pointed at it; the rest stays).
+                on = comments.get(aid, tid, store=store)["anchor"]
+                if on.get("kind") == "artboard":
+                    for e in args.get("edits") or []:
+                        named = str(e.get("board") or "") if isinstance(e, dict) else ""
+                        if named not in (on["board"], on.get("title", on["board"])):
+                            return (f"error: nothing changed. This comment is on the artboard {on['board']}"
+                                    + (f" “{on['title']}”" if on.get("title") else "") + ": every edit names "
+                                    f"\"board\": \"{on['board']}\" and changes only it.")
             before = service.view(aid, versions=False, store=store)["version"]
             note = " ".join(str(args.get("note") or "").split())[:120]
             call = {**{k: v for k, v in args.items() if k != "title"}, "id": aid,
@@ -281,7 +304,9 @@ def _run(aid: str, tid: str, name: str, args: dict, changed: dict, *, on_change=
                      if isinstance(e, dict) and isinstance(e.get("find"), str)]
             comments.reanchor(aid, tid, replaced=pairs, store=store)   # (the thread points at its place as it is now)
             summary = str((view.get("versions") or [{}])[-1].get("summary") or "").replace("From a comment: ", "", 1)
-            comments.reply(aid, tid, f"Changed it: {summary or 'a change'} (version {view['version']}).", by="DGC",
+            # (A design's history line already says what changed: “Changed “Desktop””.)
+            said = summary if kind == "design" and summary else f"Changed it: {summary or 'a change'}"
+            comments.reply(aid, tid, f"{said} (version {view['version']}).", by="DGC",
                            kind="change", store=store, version=view["version"])
             return out + " Now reply in the thread saying what you changed."
         return f"error: {name} isn't a tool here. Use reply, edit_artifact or suggest."

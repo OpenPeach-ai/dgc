@@ -1,4 +1,4 @@
-"""Work sessions from every project (his call, 12 Nov, after Codex): the Sessions list opens on this project's sessions, as
+"""Work sessions from every project (decided 12 Nov, after Codex): the Sessions list opens on this project's sessions, as
 before, and list_sessions {scope: "all"} gives every project's, each with its folder, so the editor can show where a
 session belongs and open it here, running in its own folder. DGC's own folders (a helper's worktree, a fix's copy)
 are never a project of the user's. Behind ready.capabilities.session_scopes.

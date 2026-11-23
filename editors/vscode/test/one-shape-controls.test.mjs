@@ -37,7 +37,7 @@ export const ROUND = [
   [".dgc-dock-item, .dgc-dock-item *", "the dock's tiles: squircles with a mark in each, the dock's own shape"],
   [".dgc-blob-button, [data-mark], .session-blob, .dgc-swatch, .dgc-swatch *", "a session's or a chat's coloured mark (a Voxel, a Mote) and the twelve colours it is chosen from: marks, not a button's box"],
   ["[role='switch'], .switch, button.switch, input[type='checkbox'], input[type='radio'], input[type='range']", "a toggle switch (its track and its knob), a tick box, a radio dot and a slider: their own shapes"],
-  [".csend, #send, #stop, .cd-send, .chat-send, .vb-btn, .vb-send", "Send, Stop and the microphone inside a prompt box: the round button of a prompt box (kept; his call whether these go square too)"],
+  [".csend, #send, #stop, .cd-send, .chat-send, .vb-btn, .vb-send", "Send, Stop and the microphone inside a prompt box: the round button of a prompt box (kept; the call whether these go square too)"],
   [".info, .pip-tip-btn", "the small round “i” beside a title: an info mark"],
   [".msg-choice-key", "a key cap's number on a choice: a badge"],
 ];

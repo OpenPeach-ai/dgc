@@ -1,4 +1,4 @@
-// User test W8, his call of 15 Nov: "Always allow" on an edit means edits in this project, said in plain words on the
+// User test W8, decided 15 Nov: "Always allow" on an edit means edits in this project, said in plain words on the
 // Allow card (a line of the card, and the button's own name: the button stays the family's box), the rule it made
 // shown in words where rules are listed, removable in Settings. In real Chromium on the
 // real pages (media/main.js, src/settingsClient.js), and the host's side with the real src/panel.ts.

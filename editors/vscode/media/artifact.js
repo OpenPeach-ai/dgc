@@ -1,6 +1,6 @@
 // An artifact's panel (src/artifacts.ts hosts it): its header (title, type, version, Versions, Download, Open in browser)
-// and, by type, what edits or shows it. A deck, a sheet and a checklist have editors of their own (artifactSlides.js,
-// artifactSheet.js, artifactChecklist.js); a dashboard shows DGC's page of it with its sources to allow; a page is framed at its own address.
+// and, by type, what edits or shows it. A deck, a sheet, a checklist and a design have editors of their own
+// (artifactSlides.js, artifactSheet.js, artifactChecklist.js, artifactDesign.js); a dashboard shows DGC's page of it with its sources to allow; a page is framed at its own address.
 // Everything a model or a person wrote is put in as text, never as markup. DGC's own page of an artifact is shown in a
 // frame with no script and an origin of its own (srcdoc + sandbox).
 (() => {
@@ -9,10 +9,10 @@
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
   const icon = (name, cls = "") => { const g = el("span", `codicon codicon-${name}${cls ? " " + cls : ""}`); g.setAttribute("aria-hidden", "true"); return g; };
-  const TYPE_ICON = { doc: "file-text", slides: "preview", sheet: "table", dashboard: "dashboard", page: "browser", checklist: "checklist" };
-  const TYPE_LABEL = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist" };
+  const TYPE_ICON = { doc: "file-text", slides: "preview", sheet: "table", dashboard: "dashboard", page: "browser", checklist: "checklist", design: "symbol-color" };
+  const TYPE_LABEL = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist", design: "Design" };
   const FORMATS = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
-                    xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
+                    xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)", png: "Picture (.png)" };
   const SURFACE = { chat: "Chat", work: "Work", pip: "a Pip", sdk: "an app", cli: "the terminal", editor: "the editor" };
   const state = { id: "", view: null, content: null, contentVersion: null, dstate: null, offer: null, editor: null, removed: false, conflict: false };
 
@@ -113,6 +113,12 @@
   // Download: the host makes the file and hands it to this page, which saves it on the person's computer
   // (media/shared/download.js), "Downloaded" beside the button it was asked from.
   function exportItems(version, from = $("art-export")) {
+    // (A design names its own: one artboard, or the whole canvas.)
+    if (!version && state.editor?.exportItems) return state.editor.exportItems(from);
+    if (state.view?.type === "design") {
+      const words = { zip: "Every artboard as pictures (.zip)", pdf: "PDF, an artboard a page", html: "The canvas as a web page (.html)" };
+      return formats().map((f) => [words[f] || f.toUpperCase(), () => { window.DgcDownload?.ask(from); vscode.postMessage({ type: "export", format: f, version }); }]);
+    }
     return formats().map((f) => [FORMATS[f] || f.toUpperCase(), () => { window.DgcDownload?.ask(from); vscode.postMessage({ type: "export", format: f, ...(version ? { version } : {}) }); }]);
   }
 
@@ -263,7 +269,8 @@
   let comments = null, railChoice = null, railCount = { open: 0, all: 0 };
   const HINT = { sheet: "Pick cells to comment on them, or comment on the whole sheet.", slides: "Pick words in a slide, or use Comment on this slide.",
                  checklist: "Comment on an item with its comment button, or pick words in it.", page: "Pick words on the page to comment on them.",
-                 dashboard: "Comment on the whole dashboard.", doc: "Pick words to comment on them." };
+                 dashboard: "Comment on the whole dashboard.", doc: "Pick words to comment on them.",
+                 design: "Select an artboard, or open it and pick a part, then comment on it." };
   function startComments() {
     if (comments || !state.offer?.comments || !window.DgcComments || !state.view) return;
     const kind = (TYPE_LABEL[state.view.type] || "artifact").toLowerCase();

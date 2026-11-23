@@ -459,7 +459,7 @@ class ComputerTakesTurns(unittest.TestCase):
 
 
 class SeveralComputers(unittest.TestCase):
-    """A Pip can have several computers (his calls, 10 Nov): up to 3 (a Dev Mode limit can raise it), shared by all its
+    """A Pip can have several computers (decided 10 Nov): up to 3 (a Dev Mode limit can raise it), shared by all its
     conversations. A reply takes a free one; when all are busy it waits for the first to come free. A new computer
     starts as a copy of the first one's browser (its sign-ins) and uses the same Files."""
     setUp = fixtures.LocalPipsTests.setUp

@@ -203,7 +203,7 @@ export function projectCardMarkup(change, { esc, open = new Set(), diffs = new M
       + `<button type="button" class="dgc-card-btn" data-project-keep="${id}"${hold}>Keep</button></div>`
     : `<p class="dgc-card-note pip-project-check">${esc(CHECK_FIRST)}</p>${note ? `<p class="dgc-card-note pip-project-moved" role="status">${esc(note)}</p>` : ''}<div class="dgc-card-actions">`
       + `<button type="button" class="dgc-card-btn primary" data-project-apply="${id}"${hold} title="Write these changes to ${esc(name)}">${busy === 'apply' ? 'Applying…' : 'Apply'}</button>`
-      // (One Pips: Apply · Review · Discard. No way into a Work session from a Pip's card: his call, 14 Nov.)
+      // (One Pips: Apply · Review · Discard. No way into a Work session from a Pip's card: decided 14 Nov.)
       + (one ? `<button type="button" class="dgc-card-btn" data-project-review="${id}"${hold} title="See what changed in each file">Review</button><span class="pip-project-gap"></span><button type="button" class="dgc-card-btn pip-project-quiet" data-project-discard="${id}"${hold} title="Throw away what the Pip changed in its copy">Discard</button></div>`
         : `<button type="button" class="dgc-card-btn" data-project-discard="${id}"${hold} title="Throw away what the Pip changed in its copy">Discard</button>`
       + `<button type="button" class="dgc-card-btn pip-project-work" data-project-work="${id}"${hold} title="A new Work session in ${esc(name)} with these changes as a patch file">${busy === 'work' ? 'Opening…' : 'Continue in Work'}</button></div>`);

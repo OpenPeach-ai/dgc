@@ -1,4 +1,4 @@
-"""Work's auto mode never shows an approval card (his call, 17 Nov: "for work session in auto, just copy what codex
+"""Work's auto mode never shows an approval card (decided 17 Nov: "for work session in auto, just copy what codex
 does, if it does it all, we do it all"); the model asks in the chat when it needs the user.
 
 - A paid picture or video is made without a card; what it cost is in the result.
@@ -152,7 +152,7 @@ class Held(Case):
 
 
 class TheirWords(Case):
-    """His call (17 Nov): what the user says counts ("its ok, don't ask, keep generating", "use my browser for things").
+    """Decided 17 Nov: what the user says counts ("its ok, don't ask, keep generating", "use my browser for things").
     The model says so with "user_said_yes" on the call; DGC takes it only in a turn the user's own message started."""
 
     def test_their_own_words_this_turn_release_a_hold_at_once(self):

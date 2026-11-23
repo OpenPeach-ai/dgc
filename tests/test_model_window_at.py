@@ -1,6 +1,6 @@
 """The largest context window a model at a host takes (`model_window_at`, answered by `model_window`; 0.52, 17 Nov).
 
-His call for the model picker's Sub-agents page: "context size only shows options of what that model is capable of, so
+The rule for the model picker's Sub-agents page: "context size only shows options of what that model is capable of, so
 for a model whose max is 256k, we do not show 1M option". The editor asks for the model it shows, at that connection's
 address, and DGC says the window as its own model client knows it (Ollama's /api/show, Anthropic's Models API, a vLLM
 or llama.cpp server's own word, or what an earlier overflow taught it), or 0 when nothing says (the picker then offers

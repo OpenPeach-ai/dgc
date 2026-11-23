@@ -1,4 +1,4 @@
-"""Your Browser, phase 2 (0.52; his answers 17 Nov): each Pip's own lane in the one shared browser.
+"""Your Browser, phase 2 (0.52; decided 17 Nov): each Pip's own lane in the one shared browser.
 
 The browser's write gate kept one state for the whole browser (the last action, a sign-in's one pass, careful mode's
 site gate, an open dialog), so two Pips in one browser would bleed into each other. Now it is per tab: owner_of(tab) is
@@ -498,7 +498,7 @@ def serve_https(folder: Path):
 @unittest.skipUnless((box.capability().get("available") or os.environ.get("DGC_REQUIRE_CHROMIUM"))
                      and __import__("shutil").which("openssl"), "needs Linux, bubblewrap, a Chromium build and openssl")
 class RealThirdPartyCookies(unittest.TestCase):
-    """His answer 2, in a real Chromium over HTTPS: a cookie a site set when visited itself never goes with its frame in
+    """Decision 2, in a real Chromium over HTTPS: a cookie a site set when visited itself never goes with its frame in
     another site's page, in a Pip's lane (Chrome's own control on that tab) and with Your Browser's profile setting."""
 
     def setUp(self):

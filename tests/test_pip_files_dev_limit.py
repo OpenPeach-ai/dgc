@@ -1,4 +1,4 @@
-"""A Pip computer's Files have no quota of their own (his call, 15 Nov: "there should be no limit"); the disk floor keeps
+"""A Pip computer's Files have no quota of their own (decided 15 Nov: "there should be no limit"); the disk floor keeps
 the user's disk from filling. Dev Mode can still set one (asked 12 Nov): one row in its Limits table, in whole GB."""
 import os
 import tempfile

@@ -100,8 +100,8 @@ export async function openPanel(browser, { width = 1100, height = 760, theme = "
   if (one) {
     await send({ type: "init", id: one.view.id });
     await send({ type: "detail", ...detail, artifact: one.view, content: one.content ?? null, state: one.state ?? null,
-                 offer: { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard", "checklist"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
-                          exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["pdf", "html"], page: ["docx", "pdf", "html", "zip"], checklist: ["md", "html", "pdf"] }, ...offer } });
+                 offer: { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard", "checklist", "design"], designs: true, outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
+                          exports: { doc: ["docx", "pdf", "md"], slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"], dashboard: ["pdf", "html"], page: ["docx", "pdf", "html", "zip"], checklist: ["md", "html", "pdf"], design: ["png", "pdf", "html", "zip"] }, ...offer } });
     if (one.html) await send({ type: "render", html: one.html, version: one.view.version });
     if (kind === "page" && frameUrl) await send({ type: "frame", url: frameUrl, version: one.view.version });
   }

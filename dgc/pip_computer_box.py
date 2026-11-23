@@ -1205,7 +1205,7 @@ class BoxedBrowser(BrowserSession):
         """A Pip's lane in Your Browser, on its own tab (and each frame and worker in it): what the gate can't see is
         off (a WebSocket, WebTransport or WebRTC connection carries whatever the page puts in it, and Your Browser has
         the computer's own network), no service worker answers for it around the gate, and third-party cookies are off
-        there whatever the profile says (his answer 2)."""
+        there whatever the profile says (decision 2)."""
         from .pip_borrow import _OFF_JS
         self._fire("Page.addScriptToEvaluateOnNewDocument", {"source": _OFF_JS, "runImmediately": True}, session)
         self._fire("Runtime.evaluate", {"expression": _OFF_JS}, session)      # a worker, which has no Page
@@ -1243,7 +1243,7 @@ class BoxedBrowser(BrowserSession):
         return True
 
     def _lane_traffic(self, method: str, params: dict, session: str) -> None:
-        """What a Pip's lane sent, per site, from its own tab's Network events (his answer 8); a request counts once it
+        """What a Pip's lane sent, per site, from its own tab's Network events (decision 8); a request counts once it
         finished. Never the person's tabs."""
         key = (session, str(params.get("requestId", "")))
         if method == "Network.requestWillBeSent":

@@ -1,4 +1,4 @@
-// Give it a folder, and Remove its folder (Pips API 110, dgc/pip_folder.py; his call of 14 Nov, for 0.52): a Pip for
+// Give it a folder, and Remove its folder (Pips API 110, dgc/pip_folder.py; decided 14 Nov, for 0.52): a Pip for
 // anything becomes a folder Pip for a folder you give it, and a folder Pip becomes a Pip for anything again, keeping its
 // chat, notes, routines, computer, level and model. On its page the row that says where it works has the action at its
 // end; its ⋯ menu has it too, with the action's own glyph. The folder comes from New Pip's own picker; DGC says what

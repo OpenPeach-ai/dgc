@@ -5,7 +5,7 @@
 // role="img" + aria-label="Library" where it stands alone. Places: Home's Library button beside Cards, and the editor
 // Library panel's tab icon (its PNG, light and dark). Sizes from its --size (16, 20, 24). Under forced colours it falls
 // back to CanvasText, so it never vanishes.
-// NOT on the side bar's header tab (his call of 15 Nov, after seeing it there: "the header tabs don't need to show icon
+// NOT on the side bar's header tab (decided 15 Nov, after seeing it there: "the header tabs don't need to show icon
 // for library, only Pips tab shows Core's face, not any other tab"): with words showing, the Library tab is the word
 // alone; in the narrow icon mode it is a plain line icon of Home's, Work's and Chat's family, size and colour (the
 // codicon "library"), never the coloured books.

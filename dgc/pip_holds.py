@@ -1,6 +1,6 @@
 """A Pip at Do it all never shows an approval card: what still needs the user is held and asked in its chat (0.52).
 
-His rule (17 Nov): "The whole point of do it all in pips and auto in work, is that it never shows any approval card or
+The rule (17 Nov): "The whole point of do it all in pips and auto in work, is that it never shows any approval card or
 anything, but it could still ask user things in chat", and "DGC itself should still hold the action until you answer —
 yes, so it asks, rather than an allow card."
 
@@ -168,7 +168,7 @@ def runtime(registry, run, manifest: dict) -> dict:
     return {**manifest, **({"pip_holds_note": note} if note else {}), **({"pip_asks": asked} if asked else {})}
 
 
-# ---- Asked in the chat (his call, 18 Nov) ----------------------------------------------------------------------------
+# ---- Asked in the chat (decided 18 Nov) ----------------------------------------------------------------------------
 # What a Pip at Do it all would have shown as a card that it never makes again by itself: a job another Pip handed it, a
 # change to its own setup, a routine it suggested in a turn DGC started, and which of the user's accounts sends an email
 # or adds an event. Its record stays (the handoff, the approval, the routine, the draft), but while it is asked no list

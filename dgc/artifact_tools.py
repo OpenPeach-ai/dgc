@@ -15,15 +15,18 @@ import json
 
 from . import artifact_service as service
 
-_TYPES = ["doc", "slides", "sheet", "dashboard", "page", "checklist"]
+_TYPES = ["doc", "slides", "sheet", "dashboard", "page", "checklist", "design"]
 
 MAKE_ARTIFACT = {"type": "function", "function": {
     "name": "make_artifact",
     "description": (
         "Make an artifact the user keeps and opens beside the conversation, with every version kept: a doc "
         "(a document in Markdown), slides (a deck), a sheet (a spreadsheet), a dashboard (charts over data the user "
-        "allows), a page (one HTML page) or a checklist (the items of a job, each with what done means and a status, "
-        "which you keep current as you work and the user ticks too). Use it when they ask for one of these, or when "
+        "allows), a page (one HTML page), a checklist (the items of a job, each with what done means and a status, "
+        "which you keep current as you work and the user ticks too) or a design (a canvas of artboards: screens, a "
+        "landing page at desktop and phone sizes, a poster, a clickable prototype; you name the artboards first, then "
+        "draw them one at a time while the user watches; asked to design something, make a design rather than files "
+        "in the project). Use it when they ask for one of these, or when "
         "what they want is plainly one (a report to keep editing, a deck to present, a budget, a small tool; \"make a "
         "checklist for X and work through it\"). DGC keeps it in its own store: it "
         "needs no file, and nothing is written to the project, so it is the way to make a page that isn't part of the "
@@ -52,7 +55,11 @@ MAKE_ARTIFACT = {"type": "function", "function": {
             "queries are read-only SELECTs, and the user allows each source once. "
             "checklist: {\"items\": [{\"title\": \"a short name for the step\", \"done_when\": \"what must be true, "
             "and checkable, for it to be done\"}]} (every item starts Not started; it is pinned to this project, so a "
-            "later chat carries on from it).")}},
+            "later chat carries on from it). "
+            "design: {\"artboards\": [{\"title\": \"Desktop\", \"size\": \"desktop\"}, {\"title\": \"Phone\", \"size\": "
+            "\"phone\"}]} with size one of phone (390x844), tablet, desktop (1440x900), wide, square, story, poster, or "
+            "page (a whole web page, as tall as it is); or w and h in px. Give no HTML here: this makes the named, empty "
+            "frames, and DGC places them. Then draw each with edit_artifact, one artboard per call.")}},
         "required": ["type", "title"]}}}
 
 EDIT_ARTIFACT = {"type": "function", "function": {
@@ -72,7 +79,24 @@ EDIT_ARTIFACT = {"type": "function", "function": {
             "started|Building|Testing|Checked live|Needs you|Done\", \"note\": \"what you did, or what you need\", "
             "\"proof\": [\"test results as text\", {\"image\": \"path/to/screenshot.png\", \"caption\"}]}]; Done needs "
             "note and proof, Needs you needs note; also {\"op\": \"add\", \"title\", \"done_when\"}, {\"op\": "
-            "\"remove|move|pin\", …}.")},
+            "\"remove|move|pin\", …}. "
+            "design (always by edits, one artboard per call): [{\"op\": \"change\", \"board\": \"b1\", \"html\": \"<!doctype "
+            "html>…\"}] draws or redraws one artboard; {\"op\": \"change\", \"board\", \"edits\": [{\"find\", \"replace\"}]} "
+            "changes exact text in it; {\"op\": \"read\", \"board\"} returns its HTML. An artboard is one self-contained "
+            "HTML page that fills its frame: styles in a <style> tag, pictures as inline SVG, CSS or data: addresses, "
+            "nothing loaded from the web; real copy for the user's subject, never filler text; real buttons, links and "
+            "labelled fields; at phone widths columns stack and text stays readable. To make an element open another "
+            "artboard give it data-goto=\"<that artboard's title>\" (no script needed); behaviour of its own goes in a "
+            "<script> tag with addEventListener and runs when the user plays it. Values the user may want to change "
+            "can be declared with \"tweaks\": [{\"name\": \"accent\", \"label\": \"Accent colour\", \"type\": \"color|size|"
+            "switch|choice\", \"value\": \"#b5651d\"}] and read in its CSS as var(--accent). Also {\"op\": \"add\", \"title\", "
+            "\"size\"} (DGC places it in a free spot), {\"op\": \"move\", \"board\", \"x\", \"y\"}, {\"op\": \"resize\", "
+            "\"board\", \"w\", \"h\"}, {\"op\": \"rename|duplicate|remove\", \"board\", …}, {\"op\": \"tweak\", \"board\", "
+            "\"name\", \"value\"}, {\"op\": \"note_add\", \"kind\": \"title|sticky\", \"text\", \"over\": \"b1\"}, {\"op\": "
+            "\"note_change|note_remove\", \"note\"}, {\"op\": \"page_add|page_rename\", …}. The user moves and edits "
+            "artboards too: read the design (only its id) before placing or changing anything they may have touched. The "
+            "user watches the canvas as you draw: don't render, screenshot or open the design in a browser to check "
+            "it unless they ask.")},
         "content": {"type": "string", "description": "doc or page: the whole new text or HTML."},
         "data": {"type": "object", "description": "slides, sheet or dashboard: the whole new data."},
         "note": {"type": "string", "description": "What changed, in a few words (shown in the version history)."},
@@ -83,7 +107,7 @@ EDIT_ARTIFACT = {"type": "function", "function": {
 FIND_ARTIFACTS = {"type": "function", "function": {
     "name": "find_artifacts",
     "description": (
-        "Find the user's artifacts (docs, decks, sheets, dashboards, pages, checklists) by words from their names, newest first, "
+        "Find the user's artifacts (docs, decks, sheets, dashboards, pages, checklists, designs) by words from their names, newest first, "
         "each with its id: before making one they may already have, and to change one made in another conversation "
         "with edit_artifact. With no words, the most recent ones. Changes nothing."),
     "parameters": {"type": "object", "properties": {
@@ -131,6 +155,8 @@ def _summary(view: dict, op: str) -> str:
     verb = {"made": "Made", "changed": "Changed"}.get(op, op.title())
     if view.get("type") == "checklist":
         return _checklist_summary(view, verb)
+    if view.get("type") == "design":
+        return _design_summary(view, verb)
     return (f"{verb} {view['label']} “{view['title']}” ({view['id']}, version {view['version']}). It shows as a card "
             "the user opens; don't repeat its content in your reply.")
 
@@ -151,6 +177,66 @@ def _checklist_summary(view: dict, verb: str) -> str:
             "mark an item Building when you start it, and Done (with a note and its proof) when what its “done when” "
             "says is true, one item per edit_artifact call." if verb == "Made" else "")
     return f"{head}{said}. {checklist.standing(data)}{tail}"
+
+
+def _design_summary(view: dict, verb: str, told: str = "") -> str:
+    """What the model reads after making or changing a design: what the history now says and what is still to draw,
+    so it draws the next artboard without reading the canvas again."""
+    from . import artifact_design as design
+    from .artifact_store import store
+    head = f"{verb} Design “{view['title']}” ({view['id']}, version {view['version']})"
+    try:
+        index = store().source(view["id"], view["version"])
+    except Exception:                                     # noqa: BLE001 -- made, even if it can't be read back here
+        return head + "."
+    last = (view.get("versions") or [{}])[-1].get("summary") or ""
+    said = f": {last}" if verb == "Changed" and last else ""
+    tail = (" It shows as a card; opened, it is a canvas the user watches fill as you draw, and they can move, edit "
+            "and comment on every artboard." if verb == "Made" else "")
+    return f"{head}{said}.{f' {told}' if told else ''} {design.standing(index)}{tail}"
+
+
+def _design_edit(aid: str, args: dict, *, author: str, on_change, title) -> str:
+    """edit_artifact on a design: each op is its own version, said to the screens as it is made, so the canvas fills
+    while the turn runs. A read op changes nothing."""
+    from . import artifact_design as design
+    from .artifact_store import store
+    edits = args.get("edits")
+    if args.get("data") is not None or args.get("content") is not None or not isinstance(edits, list) or not edits:
+        # (Refused by the service, in the words that say how.)
+        service.edit(aid, edits=None, content=args.get("data") if args.get("data") is not None else args.get("content") or {},
+                     author=author)
+    reads = [e for e in edits if isinstance(e, dict) and str(e.get("op") or "").strip().lower() == "read"]
+    if reads:
+        index = store().source(aid)
+        files = service._design_files(store(), aid)
+        out = "\n\n".join(design.read_board(index, files, e.get("board")) for e in reads)
+        if len(reads) == len(edits):
+            return out + "\n\n(You only read it: nothing has changed.)"
+        edits = [e for e in edits if e not in reads]
+    note = str(args.get("note") or "")
+    view, told = None, []
+    for i, op in enumerate(edits):
+        try:
+            more = service.design_told(aid, op, author=author)
+            view = service.edit(aid, edits=[op], author=author, note=note,
+                                title=title if i == len(edits) - 1 else None)
+        except service.ArtifactUseError as exc:
+            if view is None:
+                raise
+            # (What was made before it stays made; the model is told which op failed and why.)
+            return (_design_summary(view, "Changed", " ".join(told)) + f"\nerror in edit {i + 1}: {exc} "
+                    "The edits before it were made; the rest were not.")
+        if more and not design.BOARD_ID.fullmatch(more):
+            told.append(more)
+        elif more and str(op.get("op") or "").strip().lower() in ("add", "duplicate"):
+            told.append(f"The new artboard is {more}.")
+        if callable(on_change):
+            try:
+                on_change(view, "changed")
+            except Exception:                                 # noqa: BLE001 -- a screen never fails the call
+                pass
+    return _design_summary(view, "Changed", " ".join(told))
 
 
 def _checklist_guard(aid: str, args: dict, reader: str) -> tuple[str, str]:
@@ -274,11 +360,28 @@ def run(name: str, args, *, origin: dict, author: str = "DGC", on_change=None, b
                     else {"content": args.get("content")})
             if type_ == "page":
                 spec = {"html": args.get("content")}
+            pending = []
+            if type_ == "design":
+                # The index first; any artboard given with its HTML is then drawn as its own version, one at a time.
+                from . import artifact_design as design
+                spec = args.get("data") if args.get("data") is not None else {"artboards": args.get("artboards")}
+                try:
+                    pending = design.start(spec)[1]
+                except design.DesignError as exc:
+                    return f"error: {exc}"
             if spec is None:
                 return f"error: a {type_ or 'deck, sheet, dashboard or checklist'} needs its data."
             view = service.make(type_, args.get("title"), spec, origin=origin, author=author, base=base,
                                 resolve=resolve)
             op = "made"
+            if pending:
+                if callable(on_change):
+                    try:
+                        on_change(view, op)
+                    except Exception:                         # noqa: BLE001 -- a screen never fails the call
+                        pass
+                drawn = _design_edit(view["id"], {"edits": pending}, author=author, on_change=on_change, title=None)
+                return drawn.replace("Changed Design", "Made Design", 1) if not drawn.startswith("error") else drawn
         elif name == "edit_artifact":
             aid = str(args.get("id") or "")
             content = args.get("data") if args.get("data") is not None else args.get("content")
@@ -297,6 +400,8 @@ def run(name: str, args, *, origin: dict, author: str = "DGC", on_change=None, b
                 refusal, told = _checklist_guard(aid, args, checklists.reader_of(origin))
                 if refusal:
                     return refusal
+            if kind == "design" and not (content is None and not args.get("edits")):
+                return _design_edit(aid, args, author=author, on_change=on_change, title=title)
             if isinstance(content, str) and service.view(aid, versions=False)["type"] == "page":
                 content = {"html": content}
             view = service.edit(aid, edits=args.get("edits") or None, content=content, author=author,

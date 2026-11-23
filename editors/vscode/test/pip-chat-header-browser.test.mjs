@@ -1,4 +1,4 @@
-// A Pip's chat header (live round 1, finding 19; his calls of 14 and 15 Nov). LEFT, fixed: back, the Pip's face and its
+// A Pip's chat header (live round 1, finding 19; decided 14 and 15 Nov). LEFT, fixed: back, the Pip's face and its
 // name. The Pip's NAME NEVER DISAPPEARS: at every width it is there, and where the line is tight it ends in "…" (the
 // whole name is its tooltip, and what a screen reader hears). The thread selector gives way instead: under 560 px it is
 // its chevron (with the unread dot on it, if any) right beside the name, the look of a Pip with one conversation
@@ -104,7 +104,7 @@ for (const theme of ["dark", "light"]) for (const [where, width] of PLACES) {
   });
 }
 
-// His call of 15 Nov. One page, made narrower and wider: the header is read at each width.
+// Decided 15 Nov. One page, made narrower and wider: the header is read at each width.
 const WIDTHS = [170, 200, 220, 240, 241, 260, 300, 340, 380, 440, 559, 560, 620, 700];
 for (const [pipName, long] of [["Mornings", false], [LONG_PIP, true]]) for (const one of [false, true]) {
   test(`the Pip's name never disappears: ${long ? "an 80-letter name ends in “…”" : "a short name"}, ${one ? "one conversation" : "several conversations"}, from 170 px to 700 px`, async (t) => {

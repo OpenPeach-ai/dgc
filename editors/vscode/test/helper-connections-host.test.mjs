@@ -1,4 +1,4 @@
-// A helper on one of the user's saved connections, by their own words (his call, 17 Nov: "For the UI work, use the GLM 5
+// A helper on one of the user's saved connections, by their own words (decided 17 Nov: "For the UI work, use the GLM 5
 // flash model on my ollama cloud"), on the real src/panel.ts (bundled against a stub vscode). The extension tells DGC
 // the names of the user's saved connections, never a key (set_helper_connections), and answers DGC's
 // connection_route_request for one of them as a helper starts on it: with no card, only for a provider saved here,

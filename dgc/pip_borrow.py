@@ -61,7 +61,7 @@ KEEP = 20                              # cards kept per Pip, newest first
 CARD_SECONDS = 24 * 3600               # a card nobody answered stops asking after a day
 CLAIM_SECONDS = 30 * 60                # an Allow is used by the turn it starts, within this
 BORROW_SECONDS = 10 * 60               # the longest one borrow lasts
-# At Do it all the user says yes once, in the chat, for the session (his call, 17 Nov: "once for a session ... 'use my
+# At Do it all the user says yes once, in the chat, for the session (decided 17 Nov: "once for a session ... 'use my
 # browser for things'"); this long, then it asks again.
 CONSENT_KEY = "pip_borrow_ok:"
 CONSENT_SECONDS = 12 * 3600

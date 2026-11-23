@@ -1,5 +1,5 @@
 """A page downloads as Word and PDF, and as Excel when it holds a table: what people pass around, not only a web page.
-He asked for it on 2026-11-07, about a mail summary made as a page."""
+Asked for on 2026-11-07, about a mail summary made as a page."""
 from __future__ import annotations
 
 import base64

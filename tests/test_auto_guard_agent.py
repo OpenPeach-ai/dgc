@@ -1,4 +1,4 @@
-"""Auto mode's safety check in the session (dgc/auto_guard.py, Agent._auto_guard; his call, 17 Nov: risky steps stopped
+"""Auto mode's safety check in the session (dgc/auto_guard.py, Agent._auto_guard; decided 17 Nov: risky steps stopped
 before they run, ONE card after 3 in a row).
 
 - A risky step is stopped before it runs, with no card: the model gets one line (the kind, the reason) and carries on.
@@ -129,7 +129,7 @@ class Stops(Case):
 
 class AllowRulesInAuto(Case):
     """In auto mode a broad allow rule ("every command", any script, any run) doesn't skip the safety check; a narrow
-    one still lets its steps run, except a write to a protected file (his call, 20 Nov, as Claude Code does)."""
+    one still lets its steps run, except a write to a protected file (decided 20 Nov, as Claude Code does)."""
 
     def rules(self, harness, *allow):
         harness.agent.config.permissions = {"allow": list(allow), "ask": [], "deny": []}
@@ -520,7 +520,7 @@ class RunTurnKeepsTheWords(Case):
 
 
 class TheUsersOwnWords(Case):
-    """His call, 18 Nov ("copy that same style"): what the user allowed stays allowed, no warnings for hypothetical
+    """Decided 18 Nov ("copy that same style"): what the user allowed stays allowed, no warnings for hypothetical
     risks, and a secret never shows. Every Work session's own prompt says so."""
 
     def test_the_session_prompt_says_the_three_rules(self):
@@ -532,7 +532,7 @@ class TheUsersOwnWords(Case):
 
 
 class YourSudoPasswordInEnv(Case):
-    """His call, 18 Nov: "the sudo password is in .env, use it" is his to decide; the model must be able to do it. DGC
+    """Decided 18 Nov: "the sudo password is in .env, use it" is his to decide; the model must be able to do it. DGC
     still hides the value from the model (it never reaches the model's provider), and says once how to use it by name.
     A stand-in sudo checks the password it is given: nothing here runs as root."""
 

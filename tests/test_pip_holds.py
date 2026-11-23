@@ -1,5 +1,5 @@
 """A Pip at Do it all never shows an approval card: what still needs the user is held and asked in its chat
-(dgc/pip_holds.py; his rule, 17 Nov: "it never shows any approval card or anything, but it could still ask user things
+(dgc/pip_holds.py; the rule, 17 Nov: "it never shows any approval card or anything, but it could still ask user things
 in chat"; "DGC itself should still hold the action until you answer — yes, so it asks, rather than an allow card").
 
 - A held step runs nothing and draws no card; the Pip is told to ask in one plain sentence and carry on.
@@ -154,7 +154,7 @@ class PluginThatMovesMoney(Holds):
         self.assertIn(WAITING, said)
 
     def test_careful_mode_on_a_plugin_that_never_asks_is_asked_in_the_chat(self):
-        # His call, 18 Nov: careful mode's check is asked in the chat at Do it all too, never a card.
+        # Decided 18 Nov: careful mode's check is asked in the chat at Do it all too, never a card.
         plugins.set_permission("airtable", "never_ask", money=False)
         session = self.session_for()
         session.carries = lambda text: "4829137755" in text
@@ -224,7 +224,7 @@ class TheNextTurnSaysWhatWaits(unittest.TestCase):
 
 
 class CarefulModeAtDoItAll(unittest.TestCase):
-    """His call, 18 Nov: careful mode's check (text the Pip read from your apps going to a site it hasn't used) is asked
+    """Decided 18 Nov: careful mode's check (text the Pip read from your apps going to a site it hasn't used) is asked
     in the chat at Do it all too, held until your next own message says yes."""
 
     def setUp(self):
@@ -260,7 +260,7 @@ class CarefulModeAtDoItAll(unittest.TestCase):
 
 
 class TheSafetyCheckOnItsTerminal(unittest.TestCase):
-    """His call, 18 Nov: at Do it all, a Pip's own Terminal gets Work's safety check, all six kinds, asked in the chat.
+    """Decided 18 Nov: at Do it all, a Pip's own Terminal gets Work's safety check, all six kinds, asked in the chat.
     Its box is online, so sending data out and publishing matter most; the rules read the box's own paths."""
 
     def setUp(self):
@@ -327,7 +327,7 @@ class TheSafetyCheckOnItsTerminal(unittest.TestCase):
 
 
 class TheTerminalCheckReadsYourOwnWords(TheSafetyCheckOnItsTerminal):
-    """His call, 18 Nov: "push it" in your own message is the yes, as in Work: one short question to the run's model
+    """Decided 18 Nov: "push it" in your own message is the yes, as in Work: one short question to the run's model
     about your own words, then it runs with no second question in the chat."""
 
     def said(self, words, answer, *, unattended=False):
@@ -390,7 +390,7 @@ def pip_computer_cards(test):
 
 
 class YourOwnChromeAtDoItAll(Borrow):
-    """His call (17 Nov): at Do it all the user's own signed-in Chrome is asked about ONCE, in the chat, for the session
+    """Decided 17 Nov: at Do it all the user's own signed-in Chrome is asked about ONCE, in the chat, for the session
     ("use my browser for things"); then it is lent in the same reply, with no card. Below Do it all the card stays."""
 
     def setUp(self):
@@ -476,7 +476,7 @@ class YourOwnChromeAtDoItAll(Borrow):
 
 
 class UndoInTheChat(ProjectWorld, unittest.TestCase):
-    """At Do it all a project Pip applies its change by itself; the user asks it in the chat to put it back (his call,
+    """At Do it all a project Pip applies its change by itself; the user asks it in the chat to put it back (decided,
     17 Nov, (a)). Only their own turn undoes; a routine's never does."""
 
     def applied(self):

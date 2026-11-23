@@ -1,4 +1,4 @@
-// A picture in a ChatDGC chat (his asks, 18 Nov): a click opens it large in a pop-up inside the chat (it used to grow in
+// A picture in a ChatDGC chat (asked 18 Nov): a click opens it large in a pop-up inside the chat (it used to grow in
 // place), with Download (saved by the page on the person's own computer), Save to Library (kept by you, "In Library"
 // once it is there: capabilities.chatdgc.library_picture) and Open in editor (the old way, now second). A made file's
 // Save a copy is a download too. The document src/chatdgc.ts serves, with its own scripts, in real Chromium; what it

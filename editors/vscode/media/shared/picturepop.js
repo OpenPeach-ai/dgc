@@ -1,4 +1,4 @@
-// A picture in a chat, opened large in a pop-up inside the chat (his ask, 18 Nov: "clicking it opens up in the editor,
+// A picture in a chat, opened large in a pop-up inside the chat (asked 18 Nov: "clicking it opens up in the editor,
 // maybe chat can open that image as a image pop up inside chat itself? where user can download from there too"). ONE
 // module: ChatDGC's pictures and a Pip's chat's open it; Work's own viewer (media/main.js)
 // wears the same actions. The picture large, centred over a dim backdrop, its name and size, and its actions as icons:

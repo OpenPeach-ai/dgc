@@ -600,7 +600,8 @@ class NewDirTest(unittest.TestCase):
             resume("ran in auto")
             self.assertEqual(sess.agent.mode, "default", "a folder no longer trusted reopened in auto")
             shown = " ".join(self.plain_text(block) for block in ui.blocks if isinstance(block, str))
-            self.assertIn("This chat ran in Auto. This folder is not trusted now, so it reopened in Default", shown)
+            self.assertIn("Reopened in Default, so DGC asks before each change. Auto runs only in folders you've chosen to trust",
+                          shown)
         self.assertEqual(json.loads(self.user_config.read_text())["mode"], "default", "the default was rewritten")
 
     # ---- peers -----------------------------------------------------------------------------------
