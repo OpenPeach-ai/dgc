@@ -2737,7 +2737,7 @@ function computerWaitingCards(){
 // A held request's buttons, from the one list of its answers (src/pipCareful.js heldRequestAnswers; the computer view's
 // notification draws the same list): the first is the solid one, and each is sent its own way.
 function heldButtons(a,s,name,off){
- const id=esc(a.id),how={login:`data-login-card="${id}"`,review:`data-computer-action="${id}"`,send:`data-computer-decide="${id}" data-approve="1"`,
+ const id=esc(a.id),how={yb_open:`data-yb-open="${id}"`,login:`data-login-card="${id}"`,review:`data-computer-action="${id}"`,send:`data-computer-decide="${id}" data-approve="1"`,
   always:`data-computer-always="${id}"${off} title="${esc(coversDetail(s,name))}"`,reject:`data-computer-decide="${id}" data-approve="0"`};
  return heldRequestAnswers(s,name).map((b,i)=>`<button type="button" class="${i===0?'primary':'quiet'}" ${how[b.how]}${b.how==='always'?'':off}>${esc(b.label)}</button>`).join('');
 }
@@ -2874,6 +2874,17 @@ document.addEventListener('paste',event=>{const box=event.target;if(box?.dataset
 document.addEventListener('click',event=>{const id=event.target?.closest?.('[data-code-dismiss]')?.dataset.codeDismiss;if(!id)return;forgetCode(id);render();(chatBox?.el||$('chatText'))?.focus?.({preventScroll:true});});
 // From anywhere else on the Pip's page: its chat, at the card, with the keyboard in its field.
 async function showCodeCard(id){S.tab='chat';S.overview=false;rememberView();render();void loadMessages();await revealCard(cardSelector('code',id,v=>CSS.escape(v)));}
+// A sign-in card from a Pip's tab in Your Browser: the site opens in YOUR OWN tab there (its window, or with no screen here,
+// your own tab in an editor tab), where you sign in yourself. Never the Pip's tab.
+async function ybOpenFromCard(id){
+ const a=computerState.pip===S.selected?computerState.value?.actions?.find(x=>x.id===id):null;
+ const page=String(a?.summary?.page||'');
+ if(!a||a.summary?.kind!=='yb_sign_in'||!/^https?:\/\//.test(page)||S.busy||!usable())return;
+ try{
+  const said=await send('open_your_browser',{url:page.slice(0,2000)});
+  if(said?.view==='tab')vscode.postMessage({type:'pipsOpenYourBrowser',own:true});
+ }catch(error){setError(error);render();}
+}
 async function decideInChat(id,approve){
  const pip=S.selected,a=computerState.pip===pip?computerState.value?.actions?.find(x=>x.id===id):null;if(!a||S.busy||!usable())return;
  // (Not now on a code card: whatever was typed is gone before anything else happens.)
@@ -7851,6 +7862,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.loginKeep!==undefined){loginsState.confirm='';render();return;}
   if(target.dataset.loginRemove){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginRemove);void loginCall('remove_pip_login',{login_id:target.dataset.loginRemove},`Removed. No Pip signs in to ${l?.site||'that site'} with it now.`);return;}
   if(target.dataset.loginShare){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginShare);if(l&&l.pips!=='all')void loginCall('grant_pip_login',{login_id:l.id,pips:[...l.pips,S.selected]},`${S.pip?.name||'It'} can use the login for ${l.site} now.`);return;}
+  if(target.dataset.ybOpen){void ybOpenFromCard(target.dataset.ybOpen);return;}
   if(target.dataset.computerDecide){void decideInChat(target.dataset.computerDecide,target.dataset.approve==='1');return;}
   if(target.dataset.computerAlways){void alwaysInChat(target.dataset.computerAlways);return;}
   if(target.dataset.cardOpen){cardRefused='';if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();render();return;}

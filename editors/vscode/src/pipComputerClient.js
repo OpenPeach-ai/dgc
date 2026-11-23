@@ -2,7 +2,7 @@
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
 import {DRAWER,cardWords,cardTitle,drawerMarkup,bellMarkup} from './pipComputerDrawer.js';
-import {reviewWords,isCode,codeWords,codeProblem,takeCode,tidyCodeField,pasteCode,keepCodeFields} from './pipCareful.js';
+import {reviewWords,isYourBrowser,isCode,codeWords,codeProblem,takeCode,tidyCodeField,pasteCode,keepCodeFields} from './pipCareful.js';
 import {loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {computerPortal} from './pipComputerNames.js';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
@@ -83,7 +83,8 @@ const settledCard=id=>S.settled.find(c=>c.a.id===id);
 // (A code to type, the code card of Pips API 98: an older DGC has none; and past its ten minutes it no longer waits.)
 const CODE_API=98,CODE_WAIT=100000,CODE_NOTE_STAYS=9000;
 const codeGone=a=>isCode(a.summary)&&(S.apiVersion<CODE_API||Date.parse(a.expires_at)<=Date.now());
-const pending=()=>(S.computer?.actions||[]).filter(a=>a.status==='pending'&&!settledCard(a.id)&&!codeGone(a));
+// (What a Pip's tab in Your Browser waits for is shown in its chat, never as its own computer's.)
+const pending=()=>(S.computer?.actions||[]).filter(a=>a.status==='pending'&&!settledCard(a.id)&&!codeGone(a)&&!isYourBrowser(a.summary));
 const CLIP_BYTES=1000000,TYPE_CHARS=5000;
 const tabTitle=()=>`${S.pip?.name||'Pip'} · ${computerName()}`;
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));

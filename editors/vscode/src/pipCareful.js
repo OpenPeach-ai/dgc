@@ -60,8 +60,17 @@ export function carefulWords(summary, pipName = 'The Pip') {
     `This command ${summary.floor || 'could delete everything in its Files'}: ${(summary.fields?.[0]?.value || '').slice(0, 160)}. Nothing has run yet; Allow lets it run this once.`, 'Allow once'];
   if (summary?.kind === 'text') return [`Let ${pipName} put this on ${summary.host || 'a page'}?`,
     'It read this from your apps (careful mode). Nothing has been typed or sent yet; Allow lets it do this once.', 'Allow once'];
+  // Your Browser (dgc/your_browser_lane.py): a Pip's own tab in your browser, a site only you let it use there,
+  // and a sign-in only you make, in your own tab.
+  if (summary?.kind === 'yb_site') return [`Let ${pipName} use ${summary.site || summary.host} in Your Browser?`,
+    `${pipName} works in its own tab of Your Browser, where you are signed in. Allow lets it use ${summary.shown || summary.site || summary.host} there from now on.`, 'Allow'];
+  if (summary?.kind === 'yb_sign_in') return [`Sign in to ${summary.site || summary.host} in Your Browser?`,
+    `${pipName} needs you signed in there. Sign in yourself, in your own tab: ${pipName} never sees or types your password. Then tell it you have.`, 'I’ve signed in'];
   return null;
 }
+
+/** A card that is Your Browser's (a Pip's tab in your browser), never its own computer's: shown in its chat only. */
+export const isYourBrowser = summary => summary?.your_browser === true || summary?.kind === 'yb_site' || summary?.kind === 'yb_sign_in';
 
 /** What a card leaves where it was, once it is settled: its one quiet line, [outcome, what]. Null while it waits, and for
  *  what never showed a card: the user's own action on its screen, what its level let through, and a submit an Always
@@ -76,7 +85,12 @@ export function settledWords(action) {
     const outcome = {approved: 'Sent', sent: 'Sent', rejected: 'Not now', expired: 'Not answered', lost: 'The page moved on'}[status];
     return outcome ? [outcome, `One-time code for ${s.shown || s.site || s.host || 'a site'}`] : null;
   }
-  const host = s.host || 'a site', careful = ['site', 'login', 'text', 'floor'].includes(s.kind);
+  const host = s.host || 'a site', careful = ['site', 'login', 'text', 'floor', 'yb_site', 'yb_sign_in'].includes(s.kind);
+  if (s.kind === 'yb_site' || s.kind === 'yb_sign_in') {
+    const outcome = {approved: s.kind === 'yb_site' ? 'Allowed' : 'Signed in', sent: s.kind === 'yb_site' ? 'Allowed' : 'Signed in',
+      rejected: 'Not now', expired: 'Not answered', lost: 'Not answered'}[status];
+    return outcome ? [outcome, `${s.kind === 'yb_site' ? 'Use' : 'Sign in to'} ${s.site || host} in Your Browser`] : null;
+  }
   const what = s.kind === 'site' ? `Visit ${s.site || host}` : s.kind === 'login' ? `Save a login for ${s.site || host}`
     : s.kind === 'text' ? `Put what it read from your apps on ${host}` : s.kind === 'floor' ? 'Run a command in its Terminal'
     : isPayment(s) ? `Pay on ${host}` : `Send a form to ${host}`;
@@ -104,6 +118,9 @@ export function asksEveryTime(summary) {
  *  order, what it read from your apps going to one site or into its own Terminal, and the command that could delete
  *  everything in its Files (pip_computer.approve_always). */
 export function offersAlways(summary) {
+  // In Your Browser a payment, an order or anything sent on a bank or payment site asks every time (pip_computer.approve_always).
+  if (summary?.kind === 'yb_site' || summary?.kind === 'yb_sign_in') return false;
+  if (summary?.your_browser === true && (asksEveryTime(summary) || summary?.asks_because === 'money_site')) return false;
   return summary?.kind !== 'site' && summary?.kind !== 'login' && summary?.kind !== 'yours' && summary?.kind !== 'code';
 }
 
@@ -183,10 +200,13 @@ export function heldRequestAnswers(summary, pipName = 'The Pip') {
   const always = {how: 'always', label: 'Always allow', done: 'Always allowed'};
   // A code to type: its field, then Send (the code goes with it) and Not now. Never an Allow: it needs the code.
   if (isCode(s)) return [{how: 'code', label: 'Send', done: 'Sent'}, {how: 'reject', label: 'Not now', done: 'Not now'}];
+  // A sign-in in Your Browser: open the site in your own tab there, sign in, then say so (DGC never sees what you type).
+  if (s.kind === 'yb_sign_in') return [{how: 'yb_open', label: 'Open Your Browser', done: 'Opened'},
+    {how: 'send', label: words[2], done: 'Signed in'}, {how: 'reject', label: 'Not now', done: 'Not now'}];
   if (words) return [s.kind === 'login' ? {how: 'login', label: words[2], done: 'Saved'} : {how: 'send', label: words[2], done: 'Allowed'},
     ...(offersAlways(s) ? [always] : []), {how: 'reject', label: 'Not now', done: 'Not now'}];
   return [isPayment(s) ? {how: 'review', label: 'Review…', done: 'Sent once'} : {how: 'send', label: 'Send once', done: 'Sent once'},
-    always, {how: 'reject', label: 'Reject', done: 'Rejected'}];
+    ...(offersAlways(s) ? [always] : []), {how: 'reject', label: 'Reject', done: 'Rejected'}];
 }
 
 /** What a held submit's review says before it is sent (the chat's dialog and the computer view's): its title, what it is,
@@ -208,6 +228,7 @@ export function limitWords(summary) {
 export function asksWords(summary) {
   const because = summary?.asks_because;
   if (because === 'payment') return 'It looks like a payment, so it asks at every level.';
+  if (because === 'money_site') return 'On a bank or payment site in Your Browser, DGC asks every time.';
   if (because === 'maybe_payment' && summary.asks_word === 'order') return 'It may place an order, so DGC asks.';
   if (because === 'maybe_payment') return `It mentions “${summary.asks_word || 'money'}”, so DGC asks. Nothing shows it’s a payment.`;
   if (because === 'consequential') return 'Its level asks before this.';

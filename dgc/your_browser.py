@@ -25,6 +25,9 @@ This module is the model and the API (phase 1) and its window (phase 3):
 - ``grants_for``: what a Pip's lane may open, for the lane gate.
 - ``profile_prefs``: third-party cookies off in Your Browser's profile (his answer 2).
 - ``LaneSent``: what each Pip's lane sent, per site, in the "Sent to the web" log (his answer 8).
+- A Pip's runs (phase 4): its run drives its own lane with the ``your_browser`` tool (your_browser_lane), and while it
+  drives, HostBrowser refuses any command to a tab that isn't that Pip's (``driving``); ``allow_pip_site`` is the
+  person's Allow on its chat card for a site.
 """
 from __future__ import annotations
 
@@ -294,6 +297,32 @@ def set_site(registry, site, mode, pips, actor) -> dict:
         registry.db.execute("DELETE FROM your_browser_site_pips WHERE site=?", (key,))
         registry.db.executemany("INSERT INTO your_browser_site_pips VALUES(?,?)", ((key, p) for p in chosen))
     return {"site": _site(registry, key)}
+
+
+def allow_pip_site(registry, host, pip_id, by: str) -> dict | None:
+    """The person's Allow on a Pip's "use this site in Your Browser?" card (its chat; pip_computer.tick carries it out):
+    that Pip may use the site's pages in its lane from now on. A site not on the list yet joins it as the person's own
+    choice for this Pip alone ("chosen"); a chosen site gains this Pip; an All Pips site has it already. Only the
+    person's own decision (``by``) grants; nothing on this computer or the local network is ever a site. Returns the
+    site, or None when nothing could be granted."""
+    if by not in LOCAL or not isinstance(pip_id, str):
+        return None
+    site = site_key(host)
+    if not site or registry.db.execute("SELECT 1 FROM pips WHERE id=?", (pip_id,)).fetchone() is None:
+        return None
+    now = registry.clock()
+    with nullcontext() if registry.db.in_transaction else registry.transaction():
+        _ensure(registry.db)
+        row = registry.db.execute("SELECT mode FROM your_browser_sites WHERE site=?", (site,)).fetchone()
+        if row is None:
+            if registry.db.execute("SELECT COUNT(*) FROM your_browser_sites").fetchone()[0] >= MAX_SITES:
+                return None
+            from .pip_careful import shown_host
+            registry.db.execute("INSERT INTO your_browser_sites VALUES(?,?,?,?,?,?,?)",
+                                (site, shown_host(site)[:300], "[]", "chosen", "you", now, now))
+        if row is None or row["mode"] == "chosen":
+            registry.db.execute("INSERT OR IGNORE INTO your_browser_site_pips VALUES(?,?)", (site, pip_id))
+    return _site(registry, site)
 
 
 def _sign_outs(registry) -> list[dict]:
@@ -1295,6 +1324,8 @@ FRESH_SECONDS = 1.0             # a screencast frame this new is the lane as it 
 CAST_SECONDS = 10.0             # a lane nobody has looked at for this long stops being cast
 CAPTURE_SECONDS = 4.0           # a picture that takes longer (a page mid-load) waits for the next ask
 USER_WRITE_SECONDS = 3.0        # a write right after the person's own click in a Pip's tab is theirs
+LANE_IDLE_SECONDS = 10 * 60     # a Pip's lane with no run and nothing waiting for the person closes after this
+LANE_MARK = " \u00b7 "          # a lane's tab title: "<Pip> · <the page's own title>" (lane_title_script)
 OWN_FRAME_SECONDS = 1 / 30      # your own tab, streamed where there is no screen: every frame, up to thirty a second
 OWN_WAIT_SECONDS = 0.5          # a frame asked for waits this long for one newer than the last the tab has
 OWN_QUALITY = 70                # its frames' JPEG quality
@@ -1500,9 +1531,11 @@ def chrome_argv(chrome, profile: Path, url: str = "", place: dict | None = None,
     argv = [str(chrome), "--remote-debugging-pipe", f"--user-data-dir={profile}", "--no-first-run",
             "--no-default-browser-check", "--disable-blink-features=AutomationControlled", "--test-type", *test_flags]
     if headless and virtual:
-        # A real window on its own screen (start_virtual_screen), streamed like a headless one.
+        # A real window on its own screen (start_virtual_screen), streamed like a headless one. A Pip's lane there is a
+        # window of its own off that screen (YourBrowserHost.new_lane_tab), which Chrome would otherwise count as hidden:
+        # no pictures and no clicks for it (checked, Chrome 158). Nothing else shares that screen.
         argv += ["--window-position=0,0", f"--window-size={OWN_SIZE[0]},{OWN_SIZE[1]}",
-                 f"--force-device-scale-factor={scale}"]
+                 f"--force-device-scale-factor={scale}", "--disable-backgrounding-occluded-windows"]
         if own_store:
             argv.append("--password-store=basic")
     elif headless:
@@ -1539,6 +1572,25 @@ def launch_chrome(argv: list[str], env: dict, log_path: Path):
     pipe = _Pipe(reply_read, command_write)
     pipe.fds = (reply_read, command_write)
     return proc, pipe
+
+
+def lane_title_script(name: str) -> str:
+    """A Pip's lane says whose it is in its tab's title ("Ava · Shop"): run in DGC's own world of each page, where the
+    page's scripts can't reach it; the page's own title follows after the Pip's name."""
+    mark = json.dumps(" ".join(str(name or "").split())[:60] + LANE_MARK)
+    return ("(() => { const mark = " + mark + "; const fix = () => { const t = document.title || '';"
+            " if (!t.startsWith(mark)) document.title = mark + t; };"
+            " const watch = () => { fix(); new MutationObserver(fix).observe(document.documentElement || document,"
+            " {subtree: true, childList: true, characterData: true}); };"
+            " if (document.documentElement) watch(); else document.addEventListener('readystatechange', watch, {once: true});"
+            " })()")
+
+
+def lane_title(title: str, name: str) -> str:
+    """A lane's title without the Pip's own name in front: the page's own words."""
+    mark = " ".join(str(name or "").split())[:60] + LANE_MARK
+    title = str(title or "")
+    return title[len(mark):] if name and title.startswith(mark) else title
 
 
 class _Running:
@@ -1596,6 +1648,12 @@ class HostBrowser(BoxedBrowser):
         self.screen_socket: Path | None = None  # its VNC screen's socket, when it draws on one (start_vnc_screen)
         self.infos: dict[str, dict] = {}        # targetId -> {url, title, openerId}: what Chrome says of each tab
         self.born: dict[str, int] = {}          # targetId -> the order DGC first heard of it (the tabs' row, in order)
+        # While a Pip's run drives its lane (your_browser_lane), the Pip it is: every command then goes to that Pip's own
+        # tabs or is refused (the wall between lanes and the person's tabs, on DGC's side of the pipe).
+        self.driving: str | None = None
+        self._own_session_id = ""
+        self.lane_names: dict[str, str] = {}    # pip id -> its name, for its lane's tab title
+        self.frame_owners: dict[str, str] = {}  # a frame inside a lane's page -> that Pip (a download it starts)
 
     def start(self) -> None:
         if self._ws is not None:
@@ -1634,6 +1692,11 @@ class HostBrowser(BoxedBrowser):
             # every new one is held until it is known whose it is: a popup from a Pip's lane is gated before it runs.
             self._browser_call("Target.setDiscoverTargets", {"discover": True})
             self._browser_call("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True})
+            try:
+                # The person's downloads go on as Chrome does them; DGC only hears of each, to cancel a Pip lane's.
+                self._browser_call("Browser.setDownloadBehavior", {"behavior": "default", "eventsEnabled": True})
+            except BrowserError:
+                pass
             deadline = time.monotonic() + 15
             while not self._pages and time.monotonic() < deadline:
                 self._pipe.settimeout(max(0.05, deadline - time.monotonic()))
@@ -1653,11 +1716,67 @@ class HostBrowser(BoxedBrowser):
         return (self._ws is not None and self._box is not None and self._box.proc is not None
                 and self._box.proc.poll() is None)
 
+    @property
+    def _session_id(self) -> str:
+        """While a lane is driven, its tab's own session: a page load the step waits for is that tab's, never another's
+        (BrowserSession._await_load). Else none, as before."""
+        return str(getattr(self._ws, "session_id", "") or "") if getattr(self, "driving", None) else ""
+
+    @_session_id.setter
+    def _session_id(self, value) -> None:
+        self._own_session_id = str(value or "")
+
     def command(self, method: str, params: dict | None = None, *, timeout: float = 30.0) -> dict:
-        """DGC drives a Pip's lane only: the person's own tabs are theirs (their window, their sign-ins)."""
-        if self._front_owner() == PERSON:
+        """DGC drives a Pip's lane only: the person's own tabs are theirs (their window, their sign-ins), and while one
+        Pip's run drives (``driving``), only that Pip's own tabs."""
+        owner = self._front_owner()
+        if owner == PERSON:
             raise BrowserError("DGC never drives your own tabs in Your Browser.")
+        if self.driving is not None and owner != self.driving:
+            raise BrowserError("That tab isn't this Pip's own in Your Browser.")
         return super().command(method, params, timeout=timeout)
+
+    def _session_owner(self, session) -> str:
+        return self.owner_of(self._session_target(session))
+
+    def _session_call(self, session: str, method: str, params: dict | None = None, *, timeout: float = 10) -> dict:
+        if self.driving is not None and self._session_owner(session) != self.driving:
+            raise BrowserError("That tab isn't this Pip's own in Your Browser.")
+        return super()._session_call(session, method, params, timeout=timeout)
+
+    def _session_eval(self, session: str, expression: str):
+        if self.driving is not None and self._session_owner(session) != self.driving:
+            raise BrowserError("That tab isn't this Pip's own in Your Browser.")
+        return super()._session_eval(session, expression)
+
+    # What a Pip's run may ask of the browser itself while it drives its lane: reads of the tabs and windows, a new tab of
+    # its own (made by YourBrowserHost.new_lane_tab), closing one of its own. Nothing of the person's (their cookies,
+    # their windows, closing Chrome) and nothing that names another's tab.
+    DRIVING_BROWSER = frozenset({"Target.getTargets", "Target.getTargetInfo", "Target.createTarget", "Target.closeTarget",
+                                 "Browser.getWindowForTarget", "Browser.getVersion", "Browser.cancelDownload"})
+    _NAMES_A_TAB = frozenset({"Target.getTargetInfo", "Target.closeTarget", "Browser.getWindowForTarget"})
+
+    def _browser_call(self, method: str, params: dict | None = None, *, timeout: float = 20) -> dict:
+        if self.driving is not None:
+            if method not in self.DRIVING_BROWSER:
+                raise BrowserError("A Pip's tab in Your Browser can't do that.")
+            target = str((params or {}).get("targetId") or "")
+            if method in self._NAMES_A_TAB and self.owner_of(target) != self.driving:
+                raise BrowserError("That tab isn't this Pip's own in Your Browser.")
+        return super()._browser_call(method, params, timeout=timeout)
+
+    def _guard_lane(self, session: str) -> None:
+        """A Pip's lane, as BoxedBrowser keeps it, and in Your Browser also: no file picker ever opens on the person's
+        screen from it (Chrome hands it to DGC, which leaves it unanswered), and its page's tab says whose it is."""
+        super()._guard_lane(session)
+        target = self._session_target(session)
+        if self._kinds.get(target) != "page":
+            return
+        self._fire("Page.setInterceptFileChooserDialog", {"enabled": True}, session)
+        name = self.lane_names.get(self.owner_of(target), "")
+        if name:
+            self._fire("Page.addScriptToEvaluateOnNewDocument", {"source": lane_title_script(name), "worldName": "dgc-lane",
+                                                                 "runImmediately": True}, session)
 
     # What the person's own hand does in their own tab, streamed where there is no screen: these and nothing else, and
     # only from YourBrowserHost.view_own (the editor tab's own events). DGC itself never drives the person's tabs.
@@ -1673,6 +1792,10 @@ class HostBrowser(BoxedBrowser):
     def _observe(self, message: dict) -> None:
         method = message.get("method", "")
         params = message.get("params", {}) or {}
+        if method in ("Page.frameAttached", "Page.frameNavigated"):
+            self._frame_seen(params, str(message.get("sessionId", "")))
+        elif method == "Browser.downloadWillBegin" and self._lane_download(params):
+            return                                   # (a Pip's: cancelled, never on the person's computer)
         if method in ("Target.targetCreated", "Target.targetInfoChanged") and isinstance(params.get("targetInfo"), dict):
             self.told(params["targetInfo"])
         elif method == "Target.targetDestroyed":
@@ -1685,6 +1808,44 @@ class HostBrowser(BoxedBrowser):
             # What a tab is when DGC first hears of it (a tab open before DGC listened says nothing more until it moves).
             if str(params["targetInfo"].get("targetId", "")) not in self.infos:
                 self.told(params["targetInfo"])
+
+    def _frame_seen(self, params: dict, session: str) -> None:
+        """A frame inside a Pip's lane page (in the page's own process): its Pip, so a download it starts is known as
+        that Pip's."""
+        frame = params.get("frame") if isinstance(params.get("frame"), dict) else params
+        frame_id = str(frame.get("id") or frame.get("frameId") or "")
+        owner = self._session_owner(session) if session else PERSON
+        if frame_id and owner != PERSON:
+            self.frame_owners[frame_id] = owner
+            while len(self.frame_owners) > 2000:
+                self.frame_owners.pop(next(iter(self.frame_owners)))
+
+    def download_owner(self, frame_id: str) -> str:
+        frame_id = str(frame_id or "")
+        if self._tab_of(frame_id):
+            return self.owner_of(frame_id)
+        return self.frame_owners.get(frame_id, PERSON)
+
+    def _lane_download(self, params: dict) -> bool:
+        """A download a Pip's lane started: cancelled at once (it would land among the person's own files, which no Pip
+        reads), told to its run as refused, and kept as refused in the lane's sent log. The person's own go on as Chrome
+        does them. True when it was a lane's."""
+        owner = self.download_owner(str(params.get("frameId", "")))
+        if owner == PERSON:
+            return False
+        self._fire("Browser.cancelDownload", {"guid": str(params.get("guid", ""))})
+        url = str(params.get("url", ""))[:2000]
+        host = (urlsplit(url).hostname or "a site").lower()
+        lane = self.lane(owner)
+        reason = f"DGC didn't download {str(params.get('suggestedFilename') or 'that file')[:120]} from {host}: a Pip's tab in Your Browser downloads nothing."
+        lane.refused.append(reason)
+        del lane.refused[:-20]
+        self.seq += 1
+        lane.refusals.append((self.seq, host, True, url, reason))
+        del lane.refusals[:-20]
+        if self.lane_sent is not None:
+            self.lane_sent.refused(owner, host)
+        return True
 
     def told(self, info: dict) -> None:
         """What Chrome says of a tab (its address and title): kept, and the person's own visits passed on. Chrome tells
@@ -1769,8 +1930,12 @@ class YourBrowserHost:
         # Its VNC screen, where it has one: how many editor tabs show it now, and the pages a Pip's lane opened, to be
         # moved off it (only the person's own window is ever on it).
         self.screen_viewers = 0
+        self._viewers_lock = threading.Lock()
         self._off_screen_due: set[str] = set()
         self._off_screen: set[str] = set()
+        # The Pips whose runs drive a lane here (your_browser_lane.LaneHost, by pip id): what their lane holds goes to
+        # their run, and a lane nobody's run uses closes after LANE_IDLE_SECONDS.
+        self.lane_users: dict[str, object] = {}
 
     # -- running -------------------------------------------------------------------------------------
 
@@ -1786,13 +1951,14 @@ class YourBrowserHost:
         return getattr(browser, "screen_socket", None)
 
     def screen_opened(self) -> None:
-        """An editor tab shows its screen now: while one does, it is being looked at (never closed for being idle)."""
-        with self.lock:
+        """An editor tab shows its screen now: while one does, it is being looked at (never closed for being idle). Counted
+        under a small lock of its own: the person's screen never waits for a Pip's step that holds the browser."""
+        with self._viewers_lock:
             self.screen_viewers += 1
             self.own_viewed = self.clock()
 
     def screen_closed(self) -> None:
-        with self.lock:
+        with self._viewers_lock:
             self.screen_viewers = max(0, self.screen_viewers - 1)
             self.own_viewed = self.clock()
 
@@ -2066,29 +2232,23 @@ class YourBrowserHost:
             if owner != PERSON and owner not in seen:
                 seen.add(owner)
                 info = browser.infos.get(target, {})
-                out.append({"pip_id": owner, "title": info.get("title", ""), "url": info.get("url", "")})
+                out.append({"pip_id": owner, "title": lane_title(info.get("title", ""), browser.lane_names.get(owner, "")),
+                            "url": info.get("url", "")})
         return out
 
-    def open_lane(self, pip_id: str, url: str, grants) -> str:
+    def open_lane(self, pip_id: str, url: str, grants, name: str = "") -> str:
         """A Pip's own tab (its lane), in the background of the person's window, gated and confined to ``grants`` by
-        the phase-2 lane gate before it loads anything, then sent to ``url``. Its one tab, reused. Returns its id."""
+        the phase-2 lane gate before it loads anything, then sent to ``url``. Its one tab, reused. Returns its id.
+        ``name``: the Pip's, for its tab's title ("Ava · Shop")."""
         with self.lock:
             if not self.running():
                 self.open("", None)
             browser = self.browser
+            if name:
+                browser.lane_names[pip_id] = " ".join(str(name).split())[:60]
             target = self.lane_of(pip_id)
             if target is None:
-                made = {"url": "about:blank", "background": True}
-                if self.screen_socket() is not None:
-                    # On the VNC screen the editor's tab shows, only the person's own window is there: a lane is a
-                    # window of its own left of the screen's edge, never a tab in theirs (the dock's Watch shows it).
-                    width, height = self.own_size
-                    made.update(newWindow=True, left=-(width + LANE_GAP), top=0, width=width, height=height)
-                target = str(browser._browser_call("Target.createTarget", made).get("targetId", ""))
-                self._off_screen.add(target)
-                browser._wait_attached(target)
-                browser._opened.add(target)
-                browser._make_lane(target, pip_id, grants)
+                target = self.new_lane_tab(pip_id, grants)
             elif grants is not None:
                 browser.lane(pip_id).grants = grants
             session = browser._attached[target]
@@ -2096,6 +2256,42 @@ class YourBrowserHost:
             if url:
                 browser._fire("Page.navigate", {"url": url}, session)
             return target
+
+    def new_lane_tab(self, pip_id: str, grants=None) -> str:
+        """One more tab of a Pip's own (its lane, or a tab its run opens there), made blank and gated before it loads
+        anything: in the background of the person's window, never brought to the front; where Chrome draws on a VNC
+        screen, a window of its own left of that screen's edge, never on the screen the person sees. Returns its id."""
+        with self.lock:
+            browser = self.browser
+            made = {"url": "about:blank", "background": True}
+            if self.screen_socket() is not None or self.headless:
+                # On the VNC screen the editor's tab shows, only the person's own window is there: a lane is a
+                # window of its own left of the screen's edge, never a tab in theirs (the dock's Watch shows it). So it
+                # is on any screen of Chrome's own (no screen here): a tab in the background draws no picture of
+                # itself after its first (Chrome 158), so neither the Watch nor the Pip's own steps could show it.
+                width, height = self.own_size
+                made.update(newWindow=True, left=-(width + LANE_GAP), top=0, width=width, height=height)
+            target = str(browser._browser_call("Target.createTarget", made).get("targetId", ""))
+            self._off_screen.add(target)
+            browser._wait_attached(target)
+            browser._opened.add(target)
+            browser._make_lane(target, pip_id, grants)
+            return target
+
+    def close_lane(self, pip_id: str) -> int:
+        """Close every tab of a Pip's lane (none of the person's, none of another Pip's). Returns how many."""
+        with self.lock:
+            browser = self.browser
+            if browser is None or not isinstance(pip_id, str) or not pip_id or pip_id == PERSON:
+                return 0
+            closed = 0
+            for target in [t for t in browser._pages if t in browser._tabs and browser._tabs[t].owner == pip_id]:
+                try:
+                    browser._browser_call("Target.closeTarget", {"targetId": target}, timeout=5)
+                    closed += 1
+                except (BrowserError, socket.timeout, OSError):
+                    pass
+            return closed
 
     def _noticed(self, target: str, visit: bool = True) -> None:
         """Chrome said a tab's address or title: the person's own visits are kept for Home's card, never a lane's."""
@@ -2620,14 +2816,19 @@ class YourBrowserHost:
 
     def write_held(self, held) -> None:
         """A write a Pip's lane wanted to send. Right after the person's own click or key in that Pip's streamed tab it
-        is theirs and goes; otherwise it isn't sent (no Pip's run reaches a lane yet: phase 4 hands these to its run)."""
+        is theirs and goes. While that Pip's run drives its lane, it is handed to the run, which decides it as its own
+        computer would (its level, careful mode, payments, an Allow card). With no run of that Pip, it isn't sent."""
         browser = self.browser
         if browser is None or held.request_id not in browser.held:
             return
         if self.clock() - self.person_acted.get(held.owner, -1e9) <= USER_WRITE_SECONDS:
             browser.release(held.request_id)
-        else:
-            browser.drop(held.request_id)
+            return
+        user = self.lane_users.get(held.owner)
+        if user is not None and getattr(user, "run_id", None) is not None and isinstance(getattr(user, "_queued", None), list):
+            user._queued.append(held)
+            return
+        browser.drop(held.request_id)
 
     # -- Clear browsing data (API 112) -----------------------------------------------------------------
 
@@ -2668,6 +2869,7 @@ class YourBrowserHost:
                 return
             if registry is not None:
                 self._clear_sign_outs(registry)
+            self._close_idle_lanes()
             if self.headless:
                 # Headless, the person's tabs are always there: what keeps it open is the editor tab watching them
                 # (or a Pip's lane). Nobody watching for 15 minutes, it closes (the profile stays).
@@ -2683,6 +2885,20 @@ class YourBrowserHost:
             elif self.clock() - self.empty_since >= IDLE_SECONDS:
                 self.close()
             self._publish(registry)
+
+    def _close_idle_lanes(self) -> None:
+        """A Pip's lane nobody's run has used for LANE_IDLE_SECONDS, with nothing of it waiting for the person, closes
+        (its next run opens it again); so does one whose Pip has no run here at all."""
+        browser = self.browser
+        for lane in self.lanes():
+            owner = lane["pip_id"]
+            user = self.lane_users.get(owner)
+            if any(h.owner == owner for h in browser.held.values()):
+                continue
+            if user is not None and (getattr(user, "run_id", None) is not None
+                                     or time.monotonic() - float(getattr(user, "ended_at", 0.0)) < LANE_IDLE_SECONDS):
+                continue
+            self.close_lane(owner)
 
     def _clear_sign_outs(self, registry) -> None:
         """Sites the person signed out of while Your Browser wasn't running (or since): their cookies, and those of

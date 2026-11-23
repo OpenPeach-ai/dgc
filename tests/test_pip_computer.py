@@ -23,7 +23,7 @@ from dgc.pips import _worker_main
 URL = %r
 def chat(self, messages, tools=None, on_text=None, **kwargs):
     names = [t["function"]["name"] for t in (tools or [])]
-    assert names == ["computer", "connect_app", "web_search", "web_fetch", "read_app", "generate_image", "list_image_generators", "make_artifact", "edit_artifact", "find_artifacts", "dgc_docs", "deep_research", "keep_image", "generate_video", "list_video_generators", "ask_for_key", "fetch_with_key", "skill", "working_notes"], names   # its computer, its apps, the web, its Library and docs, research, its generators, keys, skills, working notes
+    assert names == ["computer", "your_browser", "connect_app", "web_search", "web_fetch", "read_app", "generate_image", "list_image_generators", "make_artifact", "edit_artifact", "find_artifacts", "dgc_docs", "deep_research", "keep_image", "generate_video", "list_video_generators", "ask_for_key", "fetch_with_key", "skill", "working_notes"], names   # its computer, its tab in Your Browser, its apps, the web, its Library and docs, research, its generators, keys, skills, working notes
     tool_results = [m for m in messages if m.get("role") == "tool"]
     if not tool_results:
         return ChatResult(tool_calls=[ToolCall("c1", "computer", {"op": "open", "url": URL})])
@@ -39,7 +39,7 @@ with patch.object(LLMClient, "chat", chat):
 
 
 # The same model in the Pip's chat: it has the computer there too, among the chat's own tools.
-CHAT_WORKER = WORKER.replace('assert names == ["computer", "connect_app", "web_search", "web_fetch", "read_app", "generate_image", "list_image_generators", "make_artifact", "edit_artifact", "find_artifacts", "dgc_docs", "deep_research", "keep_image", "generate_video", "list_video_generators", "ask_for_key", "fetch_with_key", "skill", "working_notes"], names', 'assert "computer" in names, names')
+CHAT_WORKER = WORKER.replace('assert names == ["computer", "your_browser", "connect_app", "web_search", "web_fetch", "read_app", "generate_image", "list_image_generators", "make_artifact", "edit_artifact", "find_artifacts", "dgc_docs", "deep_research", "keep_image", "generate_video", "list_video_generators", "ask_for_key", "fetch_with_key", "skill", "working_notes"], names', 'assert "computer" in names, names')
 
 
 @unittest.skipUnless(REAL_CHROME and box.capability().get("available"), "needs Linux, bubblewrap and a Chromium build")
@@ -58,6 +58,12 @@ class PipComputerTests(unittest.TestCase):
             p.start(); self.addCleanup(p.stop)
         p = patch.object(box, "capability", lambda home=None: {"available": True, "reason": "", "chrome": str(REAL_CHROME)})
         p.start(); self.addCleanup(p.stop)
+        # (Its tab in Your Browser comes beside its computer wherever Your Browser can run: here, always, so the tools
+        # its run is offered are the same on every machine. It isn't used in these tests: no Chrome of Your Browser's starts.)
+        from dgc import your_browser_lane
+        p = patch.object(your_browser_lane, "available", return_value=True)
+        p.start(); self.addCleanup(p.stop)
+        self.addCleanup(your_browser_lane.forget_all)
         self.addCleanup(pip_computer.stop_all)
         self.cfg.data["pips_enabled"] = True
 

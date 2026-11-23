@@ -505,10 +505,10 @@ class SharedGateTests(Store):
         self.assertEqual(len(host._record_held()), 1)
         self.assertEqual(host.browser.released, ["r2"])
 
-    def test_a_run_hands_its_computer_and_its_borrowed_chrome_the_live_level(self):
+    def test_a_run_hands_its_computer_its_tab_in_your_browser_and_its_borrowed_chrome_the_live_level(self):
         import inspect
         source = inspect.getsource(pips._execute_run)
-        self.assertEqual(source.count("level_now=pip_levels.follow(registry.directory, row['pip_id'])"), 2, source[:0])
+        self.assertEqual(source.count("level_now=pip_levels.follow(registry.directory, row['pip_id'])"), 3, source[:0])
         self.assertIn("app_socket.plugins.level_now = pip_levels.follow(registry.directory, row['pip_id'])", source,
                       "and its plugins")
 

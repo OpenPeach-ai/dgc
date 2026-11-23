@@ -207,7 +207,9 @@ class OnTheScreen(OwnHost):
         self.pump()
         self.assertEqual(len(self.pipe.calls("Browser.setWindowBounds")), before)
 
-    def test_a_lane_where_there_is_no_vnc_screen_is_a_background_tab_as_before(self):
+    def test_a_lane_where_there_is_no_vnc_screen_is_a_window_of_its_own_off_chromes_screen_too(self):
+        # (Phase 4: a tab in the background draws no new picture of itself after its first, Chrome 158: neither the
+        # Watch nor the Pip's own steps could show it, so on any screen of Chrome's own a lane is a window of its own.)
         self.program.stop()
         self.vnc.stop()
         with patch.object(your_browser, "vnc_program", return_value=None), \
@@ -216,9 +218,20 @@ class OnTheScreen(OwnHost):
             self.host.open("", None, headless=True)
             self.host.open_lane(A, "https://shop.example.com/", your_browser.Grants(["example.com"]))
         made = self.pipe.calls("Target.createTarget")[-1]["params"]
-        self.assertNotIn("newWindow", made)
+        self.assertTrue(made.get("newWindow"))
+        self.assertTrue(made.get("background"))
+        self.assertLess(made["left"] + made["width"], 0)
         self.program.start()
         self.vnc.start()
+
+    def test_only_on_a_screen_of_chromes_own_does_an_off_screen_window_count_as_shown(self):
+        # Off its screen, Chrome counts a window as hidden: no pictures and no clicks for a Pip's lane there (checked
+        # with Chrome 158 on Xvfb). Where Chrome is the person's own window on their desktop, nothing changes.
+        own = your_browser.chrome_argv("/c", Path("/p"), headless=True, virtual=True)
+        self.assertIn("--disable-backgrounding-occluded-windows", own)
+        for kind in ({}, {"place": {"left": 0, "top": 0, "width": 900, "height": 800}}, {"headless": True}):
+            with self.subTest(**kind):
+                self.assertNotIn("--disable-backgrounding-occluded-windows", your_browser.chrome_argv("/c", Path("/p"), **kind))
 
     def test_while_the_tab_shows_the_screen_it_never_closes_for_being_idle(self):
         self.host.open("", None, headless=True)

@@ -778,13 +778,13 @@ class Host:
             # The fuse (pip_levels.fuse): 25 things done on its own in the last hour, and it asks again, its level and
             # its Always allows both, until the hour has passed. Its card says so.
             fused = Host._fused(self)
-            approval = Host._level_approves(self, held)        # (names a payment's reason even while the fuse holds)
+            approval = _of(self, "_level_approves")(self, held)    # (names a payment's reason even while the fuse holds)
             approval = None if fused else approval
             if approval is not None and Host._release_by_level(self, held, approval):
                 # Its level lets this through (pip_levels): sent now, kept on record, and the run goes on. Not noted
                 # before it went (the registry can't be written): it waits for you on a card like any other.
                 continue
-            summary = Host._held_summary(self, held)
+            summary = _of(self, "_held_summary")(self, held)
             if getattr(held, "asks_because", None):
                 summary["asks_because"] = held.asks_because      # payment, maybe_payment, consequential or unsure (pip_levels)
                 if held.asks_because == "maybe_payment":
@@ -794,7 +794,7 @@ class Host:
             if not fused and self.run_id is not None and held.request_id in self.browser.held:
                 # Always allowed for this Pip (same site, method and route): sent now, as the grant, and the run goes on.
                 # Told to stop and wait, a Pip said it was waiting on a card that never came.
-                grant = Host._grant_for(self, summary, held)
+                grant = _of(self, "_grant_for")(self, summary, held)
                 if grant is not None:
                     Host._release_by_grant(self, held, summary, grant)
                     continue
@@ -1052,7 +1052,7 @@ class Host:
             return False
         if approval.get("site"):
             self.sites.add(approval["site"])
-        summary = Host._held_summary(self, held)
+        summary = _of(self, "_held_summary")(self, held)
         if approval.get("site"):
             summary.update(kind="site", site=approval["site"])
         if approval.get("paid"):
@@ -1960,6 +1960,12 @@ class Host:
             pass
 
 
+def _of(host, name):
+    """One of Host's rules as the host's own class has it: a Pip's lane in Your Browser (your_browser_lane.LaneHost)
+    decides payments and its card's words its own way; a computer, or a stand-in for one, has Host's."""
+    return getattr(type(host), name, None) or getattr(Host, name)
+
+
 HOSTS: dict = {}                    # (pip id, computer number) -> Host
 POOLS: dict = {}                    # pip id -> Pool
 _HOSTS_LOCK = threading.Lock()
@@ -1978,6 +1984,13 @@ def hosts_of(pip_id: str) -> list:
     """The Pip's computers running in this process, the first one first."""
     with _HOSTS_LOCK:
         return [HOSTS[key] for key in sorted(k for k in HOSTS if k[0] == pip_id)]
+
+
+def holders_of(pip_id: str) -> list:
+    """What may hold a Pip's actions for the user: its computers, then its lane in Your Browser (your_browser_lane),
+    whose holds are decided and sent the same way (tick). Never a computer view's choice: a lane is no computer."""
+    from .your_browser_lane import lanes_of
+    return hosts_of(pip_id) + lanes_of(pip_id)
 
 
 def stop_host(pip_id: str) -> bool:
@@ -2496,6 +2509,13 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
         raise RegistryError("asks_once", "Allow adds this site for good: choose Allow.")
     if kind == LOGIN_KIND:
         raise RegistryError("save_login", "Save the login on its card (Save login…), or choose Not now.")
+    from .your_browser_lane import KINDS as YOUR_BROWSER_KINDS, SIGN_IN_KIND
+    if kind in YOUR_BROWSER_KINDS:
+        raise RegistryError("asks_once", "Sign in on its card, or choose Not now." if kind == SIGN_IN_KIND else
+                            "Allow lets it use this site in Your Browser for good: choose Allow.")
+    if summary.get("your_browser") is True and (never_replayed(summary) or summary.get("asks_because") == "money_site"):
+        # In Your Browser a payment, or anything sent on a bank or payment site, waits for the person's yes each time.
+        raise RegistryError("asks_every_time", "In Your Browser this asks every time: send it once, or reject it.")
     with registry.transaction():
         _decide(registry, action_id, expected_digest, True, actor)
         grant = add_computer_grant(registry, action_id, actor)
@@ -2506,7 +2526,8 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
             if _now() >= sibling["expires_at"]:
                 continue
             other = json.loads(sibling["summary"])
-            if other.get("kind") in CAREFUL_KINDS or never_replayed(other):
+            if other.get("kind") in CAREFUL_KINDS or never_replayed(other) or (
+                    other.get("your_browser") is True and other.get("asks_because") == "money_site"):
                 continue
             if computer_pins(sibling["pip_id"], other) != pins:
                 continue
@@ -2595,7 +2616,7 @@ def tick(registry, config) -> dict:
                 registry.db.execute("UPDATE pip_computer_actions SET continuation_run_id=? WHERE id=? AND continuation_run_id IS NULL",
                                     (follow, row["id"]))
     for row in rows:
-        host = next((h for h in hosts_of(row["pip_id"]) if h.id == row["host_id"]), None)   # the computer that held it
+        host = next((h for h in holders_of(row["pip_id"]) if h.id == row["host_id"]), None)  # the computer (or lane) that held it
         live = host is not None
         careful = str(row["request_ref"]).startswith(CAREFUL_REF)     # nothing paused: no computer needed to decide
         if row["status"] == "pending":
@@ -2645,6 +2666,11 @@ def tick(registry, config) -> dict:
         if careful and summary.get("kind") == "floor" and row["status"] == "approved" and summary.get("text_digest"):
             from .pip_levels import allow_floor
             allow_floor(registry, row["pip_id"], summary["text_digest"])      # that exact command, once
+        if summary.get("kind") == "yb_site" and row["status"] == "approved" and careful:
+            # Your Browser (your_browser_lane): the person let this Pip use a site there; its lane may open it from now on.
+            from .your_browser import allow_pip_site
+            allow_pip_site(registry, summary.get("site") or summary.get("host", ""), row["pip_id"], row["resolved_by"])
+            outcome = "sent"
         if summary.get("kind") == "site" and row["status"] == "approved" and outcome in ("sent", "lost"):
             # Allowed for good, also when the page it held is gone: the Pip opens it again.
             from .pip_careful import add_site

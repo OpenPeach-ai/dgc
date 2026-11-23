@@ -1891,9 +1891,11 @@ export class PipsEditor implements vscode.Disposable {
     // (Copy too: a Pip tab's Copy puts its text on the clipboard as the side bar's does.)
     if (!computer && ['openFile', 'openExternal', 'openSettings', 'copy', 'codePreview'].includes(String(message?.type))) { this.pageActions?.(message); return; }
     if (message?.type === 'pipsSignIn' && !computer) { openEngineSignIn(String(message.engine || '')); return; }
-    if (message?.type === 'pipsOpenYourBrowser' && !computer && !chat) {
+    if (message?.type === 'pipsOpenYourBrowser' && !computer && (!chat || message.own === true)) {
       // A Pip's tab in Your Browser, watched in an editor tab beside the chat (Pips API 107; the dock's Browser menu); or
       // (own) your own tab, where the computer DGC runs on has no screen: what open_your_browser answered (view "tab").
+      // Your own tab may be opened from a Pip's chat in its own editor tab too (a sign-in card's Open Your Browser);
+      // a Pip's lane is watched only from the dock.
       if (this.apiVersion < YOUR_BROWSER_API) return;
       if (message.own === true) { this.openYourBrowserTab(null); return; }
       const pip = chatPip(message.pip, false);

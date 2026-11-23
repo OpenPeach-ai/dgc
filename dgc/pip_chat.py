@@ -862,6 +862,22 @@ COMPUTER_USER_PAID = ("This message is from DGC, not the user. The user typed th
                       "bill, another order), get the next one ready the same way now, without asking whether to.")
 COMPUTER_NOT_ALLOWED = ("This message is from DGC, not the user. The user didn't allow {what}, so you must not. Carry on with "
                         "anything else they asked that doesn't need it, and tell them in a short message what you couldn't do.")
+# Your Browser (your_browser_lane, 0.52): what its tab there was waiting for, answered.
+YOUR_BROWSER_ALLOWED = ("This message is from DGC, not the user. The user let you use {site} in Your Browser: {where}, "
+                        "then carry on with what they asked and tell them in a short message.")
+YOUR_BROWSER_SIGNED_IN = ("This message is from DGC, not the user. The user says they signed in to {site} in Your Browser: "
+                          "{where} (reload it if it is already open), then carry on with what they asked. If it still asks "
+                          "for a sign-in, tell them in one sentence; never type a password or a code there.")
+YOUR_BROWSER_NOT_ALLOWED = ("This message is from DGC, not the user. The user didn't let you use {site} in Your Browser, so "
+                            "you must not. Carry on with anything else they asked that doesn't need it (your own computer "
+                            "can visit public pages), and tell them in a short message what you couldn't do.")
+YOUR_BROWSER_NOT_SIGNED_IN = ("This message is from DGC, not the user. The user didn't sign in to {site} in Your Browser. "
+                              "Don't ask again in this reply: carry on with anything else they asked, and tell them in a "
+                              "short message what you couldn't do without their sign-in.")
+YOUR_BROWSER_DONE = ("This message is from DGC, not the user. The user approved what your tab in Your Browser was holding, "
+                     "and DGC sent it exactly as the page made it: {what}. Read your tab there (your_browser read) to see "
+                     "what happened. Then tell the user in a short message, and carry on with what they asked if more is "
+                     "needed. Do not repeat that change.")
 COMPUTER_ALLOWED = ("This message is from DGC, not the user. The user allowed {what}. Nothing was done yet: "
                     "do it now with your computer, exactly as you meant to, then carry on with what they asked and "
                     "tell them in a short message.")
@@ -1069,6 +1085,16 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
         text = (f"The user typed the code {site} sent, and DGC filled it into the page and sent it (you never see it). "
                 "Read the page to see where it went, then carry on with what they asked.")
         return _owed_turn(store, pip_id, text, key, "local-computer", config, conversation)
+    if summary.get("kind") in ("yb_site", "yb_sign_in"):
+        # Your Browser (your_browser_lane): the person let it use a site there, or signed in to one themselves.
+        site = str(summary.get("site") or summary.get("host") or "the site")[:255]
+        page = str(summary.get("page") or "")
+        where = f"open {page[:300]} again with your_browser" if page.startswith(("https://", "http://")) else \
+            f"open the page you need on {site} with your_browser"
+        text = (YOUR_BROWSER_ALLOWED if summary["kind"] == "yb_site" else YOUR_BROWSER_SIGNED_IN).format(site=site, where=where)
+        return _owed_turn(store, pip_id, text, key, "local-computer", config, conversation)
+    if summary.get("your_browser") is True and summary.get("kind") in (None, ""):
+        return _owed_turn(store, pip_id, YOUR_BROWSER_DONE.format(what=what), key, "local-computer", config, conversation)
     if summary.get("kind") == "login":
         page = str(summary.get("sign_in_page") or summary.get("page") or "")
         where = (f"Its sign-in page is {page[:300]}: open it if it isn't open. " if page.startswith(("https://", "http://"))
@@ -1103,6 +1129,10 @@ def continue_after_rejection(store, pip_id, action_id, summary, config):
         return _send_in(store, pip_id, text, key, "local-computer", config, _computer_conversation(store, action_id))
     if summary.get("kind") == "login":
         text = COMPUTER_LOGIN_NOT_NOW.format(site=str(summary.get("site") or summary.get("host") or "that site")[:255])
+        return _send_in(store, pip_id, text, key, "local-computer", config, _computer_conversation(store, action_id))
+    if summary.get("kind") in ("yb_site", "yb_sign_in"):
+        site = str(summary.get("site") or summary.get("host") or "that site")[:255]
+        text = (YOUR_BROWSER_NOT_ALLOWED if summary["kind"] == "yb_site" else YOUR_BROWSER_NOT_SIGNED_IN).format(site=site)
         return _send_in(store, pip_id, text, key, "local-computer", config, _computer_conversation(store, action_id))
     if summary.get("kind") in ("site", "text", "floor"):
         what = (f"you to visit {summary.get('site') or summary.get('host', 'that site')}" if summary["kind"] == "site"

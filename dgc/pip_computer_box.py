@@ -986,6 +986,9 @@ class Lane:
     hold_dialogs: bool = False      # during its run a confirm or prompt waits for its answer (dialog)
     grants: object = None           # Your Browser: the sites its lane may use (your_browser.Grants); None, no confinement
     refused: list = field(default_factory=list)    # why its lane was refused a page or a write, newest last
+    # The same refusals, for its run to act on (Your Browser's tool): (counter, host shown, a write?, address, why), newest
+    # last.
+    refusals: list = field(default_factory=list)
 
 
 class BoxedBrowser(BrowserSession):
@@ -1219,6 +1222,9 @@ class BoxedBrowser(BrowserSession):
                   f"({lane.grants.words()}).")
         lane.refused.append(reason)
         del lane.refused[:-20]
+        self.seq += 1
+        lane.refusals.append((self.seq, shown, write, url[:2000], reason))
+        del lane.refusals[:-20]
         self._note("refused", session, url=url[:300], reason=reason)
         if self.lane_sent is not None:
             self.lane_sent.refused(owner, shown)

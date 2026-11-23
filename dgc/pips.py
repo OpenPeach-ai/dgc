@@ -3325,6 +3325,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                                                          else kind in FOLDER_WORLD_RUNS) else None)
     apps_pin = manifest.get('app_socket') if (kind in ('personal_task', 'conversation') if personal
                                               else kind in FOLDER_WORLD_RUNS) else None
+    # Its own tab in Your Browser (your_browser_lane, 0.52): only beside its computer, a socket and a token, nothing else.
+    lane_pin = manifest.get('your_browser_socket') if computer_pin is not None else None
+    if lane_pin is not None and (not isinstance(lane_pin, dict) or set(lane_pin) != {'socket', 'token'}
+                                 or not all(isinstance(v, str) for v in lane_pin.values())):
+        raise RegistryError('invalid_manifest', 'The Your Browser connection is malformed.')
+    from . import your_browser_lane
     # 'desktop' (optional): its computer shows a whole desktop on this machine, so a Pip that sees gets its steps.
     if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) - {'desktop'} != {'socket', 'token'}
                                      or computer_pin.get('desktop', False) not in (True, False)):
@@ -3731,7 +3737,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             # One kind of Pip (16 Nov): every Pip's chat has the Personal chat's tools; a Pip with a folder has its
             # project reads (the Agent's own, below) besides. A run that isn't a chat (an audit, a draft, a reviewed
             # execution) pins none of these, so it has only its reviewed tools.
-            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.PIP_SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_questions.schema()] if conversation is not None and conversation.get('questions') is True and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_work_agents.schema()] if isinstance(work_pin, dict) else []) + ([pip_jobs.schema()] if jobs_pin else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + ([your_browser_lane.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None)] if lane_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.PIP_SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_questions.schema()] if conversation is not None and conversation.get('questions') is True and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_work_agents.schema()] if isinstance(work_pin, dict) else []) + ([pip_jobs.schema()] if jobs_pin else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             if personal:
                 return own
             schemas = [*super()._tool_schemas(*args, **kwargs), *own]
@@ -3920,6 +3926,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     base_instructions += {'own': '\n' + pip_computer.EYES_NOTICE, 'relay': '\n' + pip_computer.RELAY_NOTICE}.get(self._pip_eyes(), '')
                     if computer_pin.get('desktop') is True and self._pip_eyes() in ('own', 'relay'):
                         base_instructions += '\n' + pip_computer.DESKTOP_NOTICE
+                    if lane_pin is not None:
+                        base_instructions += '\n' + your_browser_lane.NOTICE
                     keys_pin = manifest.get('terminal_keys')
                     if isinstance(keys_pin, list) and keys_pin:
                         from . import pip_keys
@@ -4297,6 +4305,31 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     reply['image'], name='screen.jpg', source='browser',
                     label=(f"your computer's screen (the whole desktop) after {op} (points are {where}, for the desktop steps)"
                            if desk else f"your computer's screen after {op} (points are {where})"))])
+                return reply['text']
+            if lane_pin is not None and call.name == your_browser_lane.TOOL:
+                # Its own tab in Your Browser: the controller's socket for this run and this Pip (it names no other).
+                arguments = call.arguments if isinstance(call.arguments, dict) else {}
+                op = str(arguments.get('op', ''))
+                question = arguments.get('question')
+                args = {k: v for k, v in arguments.items() if k not in ('op', 'question')}
+                mode = self._pip_eyes()
+                if op == 'look' and mode not in ('own', 'relay'):
+                    return self._cannot_see()
+                shown = getattr(self, 'ui', None)
+                reply = pip_computer.worker_step(lane_pin, op, args, on_wait=(
+                    (lambda line: shown.turn_activity('waiting', line.replace('its computer', 'its tab in Your Browser')))
+                    if hasattr(shown, 'turn_activity') else None))
+                if reply.get('card') or 'below your reply' in str(reply.get('text', '')):
+                    cards_shown.append(call.name)
+                if 'image' not in reply:
+                    return reply['text']
+                if mode == 'relay':
+                    return self._relay_look(reply, question, "the agent's tab in the user's browser")
+                from .tools import _image_entry
+                self._forget_old_screens()
+                self._deliver_images(call.id, your_browser_lane.TOOL, [_image_entry(
+                    reply['image'], name='your-browser.jpg', source='browser',
+                    label=f"your tab in Your Browser after {op} ({reply['width']}x{reply['height']} pixels)")])
                 return reply['text']
             if personal:
                 self.ui.tool_denied(call.name, {}, "Personal Pips have no model-callable tools.", call.id)
@@ -5499,7 +5532,7 @@ def _execute_run(registry, row, config):
             manifest = pip_eyes.pin(registry, row, manifest, config)
         except (RegistryError, OSError, ValueError):
             pass                            # it reads text, as before
-    computer_socket = computer_host = taint = None
+    computer_socket = computer_host = taint = lane_socket = None
     # A run with the outside world (apps, plugins, the web, its level said): a Personal Pip's task or chat, or (0.52,
     # pips-sandbox-design step 2b) a folder Pip's chat with its own box.
     world = (manifest.get('run_kind') in ('personal_task', 'conversation') if personal
@@ -5542,6 +5575,21 @@ def _execute_run(registry, row, config):
                             unattended=row['requested_by'] in pip_careful.UNATTENDED,
                             user_turn=manifest.get('user_turn') is True, config=config)
         computer_socket = pip_computer.RunSocket(computer_host, row['id'])
+        # Its own tab in Your Browser (your_browser_lane, 0.52): the same run's settings, its own socket pinned to this
+        # run and this Pip; only where Your Browser can run here.
+        from . import your_browser_lane
+        try:
+            lane_socket = your_browser_lane.run_socket(
+                registry, row, run_dir / 'artifacts' / 'your-browser', careful=careful, said=said, label=doing,
+                sites=pip_careful.known(registry, row['pip_id']) if careful else (),
+                carry=pip_careful.carry_sites(registry, row['pip_id']) if careful else (),
+                level=pip_levels.level(registry, row['pip_id']), level_now=pip_levels.follow(registry.directory, row['pip_id']),
+                unattended=row['requested_by'] in pip_careful.UNATTENDED, user_turn=manifest.get('user_turn') is True,
+                config=config)
+        except (OSError, RegistryError):
+            lane_socket = None                  # (no lane this run: its computer as before)
+        if lane_socket is not None:
+            manifest = {**manifest, 'your_browser_socket': lane_socket.pin()}
         from . import pip_desktop_eyes, pip_screen
         try:
             whole = pip_desktop_eyes.supported() and pip_screen.availability()["available"] is True
@@ -5811,7 +5859,10 @@ def _execute_run(registry, row, config):
                       "usage": result.get("usage") if isinstance(result.get("usage"), dict) else {},
                       "tools_called": 0, "snapshot": snapshot_info}
         if computer_socket is not None:
-            result["computer"] = {"calls": computer_socket.calls, "held": computer_host.waiting_for(row["id"])}
+            # (What its tab in Your Browser left waiting for the user is its computer's to show, the same cards.)
+            lane_held = lane_socket.waiting() if lane_socket is not None else []
+            result["computer"] = {"calls": computer_socket.calls + (lane_socket.calls if lane_socket is not None else 0),
+                                  "held": (computer_host.waiting_for(row["id"]) + lane_held)[:8]}
             # The wall at Do it all (pips-sandbox-design §2): what it changed in its copies goes into the real folders
             # when its turn ends (only a turn that ended well), file by file, never over a file the user changed
             # meanwhile, with Undo. Below Do it all the card waits for the user (pip_project_copies.auto_apply).
@@ -5928,6 +5979,9 @@ def _execute_run(registry, row, config):
         if computer_socket is not None:
             computer_socket.close()
             computer_host.end(row['id'])
+        if lane_socket is not None:
+            from . import your_browser_lane
+            your_browser_lane.end_run(lane_socket)      # its lane idles: closed later, when nothing of it waits
         if app_socket is not None:
             app_socket.close()
         if not proc.stdin.closed:
