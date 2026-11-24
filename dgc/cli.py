@@ -3957,8 +3957,9 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
     cli.ui.permission_mode = str(getattr(cli.agent, "mode", "") or "")
     # A pipe or a file gets the answer and nothing else, as `codex exec` does: thinking, tool steps and notices
     # go to stderr, where a terminal still shows them. The model's reasoning used to land in
-    # `answer=$(dgc -p …)`. A terminal sees the run exactly as before. (A subscription engine prints its own.)
-    answer_only = not json_mode and not engine_key and not _stdout_is_terminal()
+    # `answer=$(dgc -p …)`. A terminal sees the run exactly as before. A subscription engine too: its status line and
+    # its streamed text go to stderr, its answer once to stdout (it printed both on stdout: the answer twice, 24 Nov).
+    answer_only = not json_mode and not _stdout_is_terminal()
     if answer_only:
         cli.ui.console = cli.console = Console(file=sys.stderr, theme=render.markdown_theme(), highlight=False)
         cli.ui._theme_pushed = False

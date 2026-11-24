@@ -72,6 +72,28 @@ class AnswerOnlyTests(unittest.TestCase):
         self.assertIn("bash", err, "and the tool step")
         self.assertIn("tool-ran", err)
 
+    def test_a_subscription_engine_into_a_pipe_gives_the_answer_once(self):
+        # Seen on a real install (24 Nov, Claude Code 2.1.220): `dgc -p … --engine claude` into a pipe printed its status
+        # line, the answer as it streamed, and the answer again, all on stdout: `answer=$(dgc -p …)` held it twice.
+        root = Path(tempfile.mkdtemp(prefix="dgc-answer-only-sub-"))
+        home, bin_dir, work = root / "home", root / "bin", root / "work"
+        for d in (home / ".claude", home / ".dgc", bin_dir, work):
+            d.mkdir(parents=True)
+        (home / ".claude" / ".credentials.json").write_text("{}")
+        (home / ".dgc" / "config.json").write_text(json.dumps({"model": "native", "mode": "default"}))
+        fake = bin_dir / "claude"
+        fake.write_text(f"#!{sys.executable}\n" "import json\n"
+                        "print(json.dumps({'type':'system','subtype':'init','session_id':'one'}), flush=True)\n"
+                        "print(json.dumps({'type':'assistant','message':{'content':[{'type':'text','text':%r}]},'session_id':'one'}), flush=True)\n"
+                        "print(json.dumps({'type':'result','subtype':'success','result':%r,'session_id':'one'}), flush=True)\n" % (ANSWER, ANSWER))
+        fake.chmod(0o755)
+        env = dict(isolated_env(home), PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+        done = subprocess.run([sys.executable, "-m", "dgc", "-p", "What is the answer?", "--engine", "claude", "--mode", "default"],
+                              cwd=work, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        self.assertEqual(done.stdout, ANSWER + "\n", f"stdout must be the answer once; stderr was:\n{done.stderr[-1500:]}")
+        self.assertIn("Claude Code", done.stderr, "the status line is still shown, on stderr")
+
     def test_a_terminal_sees_the_run_as_before(self):
         with MockModel(reasoned_then_answered) as model:
             code, seen, _ = self.run_dgc(model, terminal=True)
