@@ -49,10 +49,13 @@ seen = {"engine": ENGINE, "argv": argv, "cwd": os.getcwd(), "env": sorted(os.env
 stdin = sys.stdin.read()
 
 if ENGINE == "claude":
-    config = json.loads(Path(argv[argv.index("--mcp-config") + 1]).read_text())["mcpServers"]
+    # A delegated turn with no DGC plugin to offer is given no MCP server at all: it then only speaks.
+    config = (json.loads(Path(argv[argv.index("--mcp-config") + 1]).read_text())["mcpServers"]
+              if "--mcp-config" in argv else {})
     seen["servers"] = sorted(config)
-    server = config["dgc"]
-    command, env = [server["command"], *server["args"]], {**server["env"], "PATH": os.environ.get("PATH", "")}
+    server = config.get("dgc")
+    command = [server["command"], *server["args"]] if server else None
+    env = {**(server or {}).get("env", {}), "PATH": os.environ.get("PATH", "")}
     if stdin.strip():
         message = json.loads(stdin)
         seen["prompt"] = message["message"]["content"][0]["text"]
@@ -64,8 +67,9 @@ if ENGINE == "claude":
 else:
     pairs = dict(argv[i + 1].split("=", 1) for i, arg in enumerate(argv) if arg == "-c")
     seen["config"] = pairs
-    command = [json.loads(pairs["mcp_servers.dgc.command"]), *json.loads(pairs["mcp_servers.dgc.args"])]
-    env = {name: os.environ[name] for name in json.loads(pairs["mcp_servers.dgc.env_vars"]) if name in os.environ}
+    command = ([json.loads(pairs["mcp_servers.dgc.command"]), *json.loads(pairs["mcp_servers.dgc.args"])]
+               if "mcp_servers.dgc.command" in pairs else None)
+    env = {name: os.environ[name] for name in json.loads(pairs.get("mcp_servers.dgc.env_vars", "[]")) if name in os.environ}
     env["PATH"] = os.environ.get("PATH", "")
     seen["prompt"] = stdin or (argv[argv.index("--") + 1] if "--" in argv else "")
     if "model_instructions_file" in pairs:
@@ -74,7 +78,7 @@ else:
         seen["catalog"] = json.loads(Path(json.loads(pairs["model_catalog_json"])).read_text())
     seen["photos"] = [arg.split("=", 1)[1] for arg in argv if arg.startswith("--image=")]
 
-relay = subprocess.Popen(command, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+relay = subprocess.Popen(command, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE) if command else None
 ident = [0]
 
 
@@ -91,9 +95,12 @@ def rpc(method, params=None, notify=False):
     return reply.get("result", reply.get("error"))
 
 
-rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": ENGINE, "version": "0"}})
-rpc("notifications/initialized", notify=True)
-seen["tools"] = [tool["name"] for tool in rpc("tools/list", {})["tools"]]
+if relay is not None:
+    rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": ENGINE, "version": "0"}})
+    rpc("notifications/initialized", notify=True)
+    seen["tools"] = [tool["name"] for tool in rpc("tools/list", {})["tools"]]
+else:
+    seen["tools"] = []
 if ENGINE == "claude":
     out({"type": "system", "subtype": "init", "session_id": "s1", "tools": ["mcp__dgc__" + t for t in seen["tools"]]})
 else:
@@ -145,5 +152,6 @@ for number, step in enumerate(script, 1):
 usage = {"input_tokens": 120, "output_tokens": 30}
 out({"type": "result", "subtype": "success", "result": last, "usage": usage, "session_id": "s1"} if ENGINE == "claude"
     else {"type": "turn.completed", "usage": usage})
-relay.stdin.close()
-relay.wait(timeout=5)
+if relay is not None:
+    relay.stdin.close()
+    relay.wait(timeout=5)

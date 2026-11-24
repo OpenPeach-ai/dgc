@@ -321,3 +321,18 @@ class WindowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FollowsWorksWindow(unittest.TestCase):
+    """User tests (round 1 C3, round 2 C1): the same model read 32K in Chat and 128K in Work. While the person hasn't
+    chosen a ChatDGC window, a chat uses Work's (Settings > Models), as the largest preset not above it."""
+
+    def test_unchosen_it_follows_works_window(self):
+        self.assertEqual(fit_window.preset_for(Config(context_size=131072)), "128k")
+        self.assertEqual(fit_window.preset_for(Config(context_size=200000)), "128k", "the largest preset not above it")
+        self.assertEqual(fit_window.preset_for(Config(context_size=32768)), "32k")
+        self.assertEqual(fit_window.preset_for(Config()), fit_window.DEFAULT_WINDOW)
+
+    def test_a_window_chosen_for_chats_wins(self):
+        self.assertEqual(fit_window.preset_for(Config(context_size=131072, chatdgc_window="16k")), "16k")
+        self.assertEqual(fit_window.preset_for(Config(context_size=131072, chatdgc_window="max")), "max")

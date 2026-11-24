@@ -851,9 +851,9 @@ class CheckpointManager:
         integrated file however the helper wrote it, a new file, a deleted one. A file recorded and
         then left exactly as it was is not a change, and is not listed. In the order the files were
         first recorded. Each row is ``{path, additions, deletions, counted, status}``: ``status`` is
-        new, modified or deleted; ``counted`` is False where there is no honest line count (a new or
-        deleted file, a binary or very large one, a symlink, a permissions-only change, or one the
-        time budget did not reach). ``path`` is the recorded (absolute) path; a file outside the
+        new, modified or deleted; ``counted`` is False where there is no honest line count (a binary or
+        very large file, a symlink, a permissions-only change, or one the time budget did not reach); a new text file
+        counts its lines as added, a deleted one as removed, as the bar under the chat does. ``path`` is the recorded (absolute) path; a file outside the
         project also has ``outside: True`` (its before-state lives only in this process: a restart
         leaves Undo unable to put it back). ``total`` counts every changed file, which is exactly how
         many a rewind to ``start`` restores now; at most ``limit`` rows are returned.
@@ -914,6 +914,18 @@ class CheckpointManager:
                 status = "modified"
             additions = deletions = 0
             counted = False
+            # A new text file adds its lines and a deleted one takes them, as the bar under the chat counts them; a binary
+            # or very large one has no honest count.
+            side = (now if status == "new" else before if status == "deleted" else None)
+            if (side is not None and side.kind == "file" and len(side.data) <= MAX_DIFF_BYTES
+                    and time.monotonic() < deadline):
+                try:
+                    side.data.decode("utf-8")
+                    measured = _counts(b"", side.data) if status == "new" else _counts(side.data, b"")
+                except UnicodeDecodeError:
+                    measured = {"binary": True, "counted": False}
+                if measured.get("counted") and not measured.get("binary"):
+                    additions, deletions, counted = measured["additions"], measured["deletions"], True
             if (status == "modified" and now is not None and before.kind == now.kind == "file"
                     and before.data != now.data and time.monotonic() < deadline
                     and len(before.data) <= MAX_DIFF_BYTES and len(now.data) <= MAX_DIFF_BYTES):

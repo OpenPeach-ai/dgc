@@ -501,6 +501,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         for (const tab of this.tabs) this.post(tab, { type: "artifacts", offered: message.offered ?? null });
         if (this.library) void this.library.webview.postMessage({ type: "artifactsOffered", on: !!message.offered });
         this.sidePanel.webview.postMessage({ type: "artifactsOffered", on: !!message.offered });
+        // Home's Artifacts and Widgets cards, told again now: one asked before DGC was ready said "keeps no artifacts"
+        // until its next look, five minutes later (user test 24 Nov).
+        if (message.offered) { void this.homeArtifacts(); void this.homeCardsMessage({ type: "homeWidgetsGet" }); }
         return;
       }
       if (message.type === "artifactChanged") {

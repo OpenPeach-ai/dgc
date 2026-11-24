@@ -555,11 +555,22 @@ class CommandUndoTests(CommandHelpers, HarnessCase):
         self.assertEqual(self.rows(card), {"a.py": ("modified", False), ".gitignore": ("new", False)})
         self.assertEqual(card["total"], 2, "the card's count is the bar's: files Git ignores are not the turn's edits")
 
-    def test_files_a_command_made_that_git_does_not_ignore_stay_on_the_card(self):
+    def test_files_in_the_folders_the_bar_leaves_out_stay_off_the_card_even_where_git_does_not_ignore_them(self):
+        # User test round 2 (W5): a turn that ran pytest showed "Edited 5 files" with two __pycache__/*.pyc while the
+        # bar under the chat said 3; the project's .gitignore named only .env. The card leaves out what the bar does:
+        # what Git ignores, and the folders the bar never counts (.venv, __pycache__, node_modules, .pytest_cache...).
         h = self.repo({"a.py": "a = 1\n"})
         card = self.turn(h, "build", ToolCall("b1", "bash", {"command": self.VENV}))
-        self.assertEqual(card["total"], 620, "nothing ignores them: they are the turn's, listed as before")
-        self.assertTrue(all(path.startswith(".venv/lib/") for path in self.rows(card)))
+        self.assertEqual(card["total"], 0, "a virtual environment is not the turn's edits, ignored by Git or not")
+
+    def test_cache_files_a_test_run_made_stay_off_the_card_and_its_edit_stays_on(self):
+        h = self.repo({"a.py": "a = 1\n"})
+        made = ("python3 -c \"import pathlib; p = pathlib.Path('pkg/__pycache__'); p.mkdir(parents=True, exist_ok=True); "
+                "(p / 'a.cpython-312.pyc').write_bytes(b'\\x00pyc'); pathlib.Path('.pytest_cache/v').mkdir(parents=True, exist_ok=True)\"")
+        card = self.turn(h, "build", ToolCall("b2", "bash", {"command": made}),
+                         ToolCall("e2", "edit_file", {"path": "a.py", "old_string": "a = 1", "new_string": "a = 3"}))
+        self.assertEqual(sorted(self.rows(card)), ["a.py"])
+        self.assertEqual(card["total"], 1)
 
     def test_the_cost_of_the_look_around_a_command_is_recorded(self):
         h = self.repo({"a.py": "a\n"})

@@ -51,3 +51,9 @@ test("what Your Browser asks is known as its own, never its computer's", () => {
   assert.equal(careful.isYourBrowser({ ...PAY, your_browser: undefined }), false);
   assert.equal(careful.isYourBrowser({ kind: "site", site: "news.example" }), false);
 });
+
+test("the site card says what Not now means: kept out of your browser there, the public page still readable on its own computer", () => {
+  const [, detail] = careful.carefulWords(SITE, "Ava");
+  assert.match(detail, /Not now keeps it out of your browser there/);
+  assert.match(detail, /public page on its own computer/);
+});

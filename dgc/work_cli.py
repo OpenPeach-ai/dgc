@@ -56,6 +56,15 @@ def not_offered(engine: str) -> str:
     return NOT_OFFERED.get(str(engine or "").strip().lower(), "")
 
 
+def not_offered_now(config, engine: str) -> str:
+    """With Dev Mode's switch on, why this session's CLI still runs with its own tools ("" when the switch is off or the
+    CLI is offered): every frontend says it once, so nothing differs from the editor in silence."""
+    get = getattr(config, "get", None)
+    if not (callable(get) and dev_mode.on(config) and get("dev_subscription_tools", False) is True):
+        return ""
+    return not_offered(engine)
+
+
 class WorkCLIClient(SubscriptionChatClient):
     """The CLI as the model of one Work turn. Built per turn (Agent._cli_model_client): its run lives while the turn's
     tool calls go back and forth, and ends with the turn."""

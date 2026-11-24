@@ -6998,20 +6998,24 @@ class Agent(GoalLifecycle):
         return [{**row, "path": self._turn_files_path(row["path"])} for row in rows], total
 
     def _ignored_by_git(self, paths: list[str]) -> set[str]:
-        """Of these recorded paths, the ones the project's Git ignores now. Nothing when it isn't Git."""
+        """Of these recorded paths, the ones the card leaves out as the bar under the chat does: in a folder the bar never
+        counts (chat_changes._IGNORED: .venv, __pycache__, node_modules, .pytest_cache...), or ignored by the project's
+        Git now."""
+        from .chat_changes import _IGNORED
         from .command_watch import _repo_of
         from .worktree import ignored_now
+        noise = {path for path in paths if any(part in _IGNORED for part in Path(path).parts)}
         found = _repo_of(self)
         if not found or not paths:
-            return set()
+            return noise
         repo = found[0]
         listed = ignored_now(repo)
         if not listed:
-            return set()
+            return noise
         dirs, files = listed
         if not dirs and not files:
-            return set()
-        out: set[str] = set()
+            return noise
+        out: set[str] = set(noise)
         for path in paths:
             try:
                 rel = Path(path).relative_to(repo).as_posix()

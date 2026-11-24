@@ -2449,6 +2449,21 @@ test("Favorites: the side bar's tab and the editor tab star only what the Librar
   assert.equal("favorites" in homeCard(), false, "and Home's card has no star");
 });
 
+test("Home's Artifacts and Widgets cards hear again when DGC is ready: an answer from before it no longer says it keeps none", async () => {
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const hub = fakeArtifacts(null);
+  chat.useArtifacts(hub);
+  await chat.homeCardsMessage({ type: "homeArtifactsGet" }); await wait();
+  const cards = (type) => host.home.filter((m) => m.type === type);
+  assert.equal(cards("homeArtifacts").at(-1).offered, false, "asked before DGC was ready: none, for now");
+  hub.offer = ARTIFACTS;
+  hub.tell({ type: "artifactsOffered", offered: ARTIFACTS }); await wait(); await wait();
+  const now = cards("homeArtifacts").at(-1);
+  assert.equal(now.offered, true, "told again at once, not five minutes later");
+  assert.deepEqual(now.items.map((a) => a.id), ["ar_" + "1".repeat(16)]);
+  assert.ok(cards("homeWidgets").length >= 1, "the Widgets card too");
+});
+
 test("Home's Artifacts card is given every favorite, however old: the newest sixty and the favorites after them", async () => {
   const hub = fakeArtifacts();
   const all = Array.from({ length: 70 }, (_, n) => ({ id: "ar_" + String(n).padStart(16, "0"), type: "page", title: `Page ${n}`, updated: new Date(Date.UTC(2026, 10, 19) - n * 3600000).toISOString() }));

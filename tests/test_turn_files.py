@@ -72,7 +72,7 @@ class ChangesTests(unittest.TestCase):
         self.assertEqual(rows["a.py"], {"path": str(self.root / "a.py"), "additions": 2, "deletions": 1,
                                         "counted": True, "status": "modified"})
 
-    def test_new_binary_large_deleted_and_permission_changes_have_no_line_count(self):
+    def test_binary_large_and_permission_changes_have_no_line_count_and_new_or_deleted_text_counts_its_lines(self):
         from dgc.workspace_changes import MAX_DIFF_BYTES
         (self.root / "logo.png").write_bytes(b"\x89PNG\0old")
         (self.root / "big.txt").write_text("x\n" * 10)
@@ -87,10 +87,11 @@ class ChangesTests(unittest.TestCase):
         rows, total = self.rows()
         self.assertEqual(total, 5)
         self.assertEqual({name: (row["status"], row["counted"]) for name, row in rows.items()},
-                         {"new.py": ("new", False), "logo.png": ("modified", False), "big.txt": ("modified", False),
-                          "gone.py": ("deleted", False), "run.sh": ("modified", False)})
-        self.assertTrue(all(row["additions"] == row["deletions"] == 0 for row in rows.values()),
-                        "no made-up numbers beside a file with no count")
+                         {"new.py": ("new", True), "logo.png": ("modified", False), "big.txt": ("modified", False),
+                          "gone.py": ("deleted", True), "run.sh": ("modified", False)})
+        self.assertEqual((rows["new.py"]["additions"], rows["gone.py"]["deletions"]), (1, 1), "as the bar counts them")
+        self.assertTrue(all(row["additions"] == row["deletions"] == 0 for name, row in rows.items()
+                            if name not in ("new.py", "gone.py")), "no made-up numbers beside a file with no count")
 
     def test_a_file_put_back_exactly_is_not_a_change_and_undo_does_not_count_it(self):
         (self.root / "a.py").write_text("keep\n")
@@ -187,8 +188,29 @@ class TurnFilesAgentTests(HarnessCase):
         self.assertTrue(h.run("parent: edit", [("parent: edit", parent)]))
         self.assertEqual(h.agent.last_turn_files["files"], [
             {"path": "billing.py", "additions": 1, "deletions": 1, "counted": True, "status": "modified"},
-            {"path": "notes/NEW.md", "additions": 0, "deletions": 0, "counted": False, "status": "new"}],
-            "one line changed twice is one line changed; a new file is New")
+            {"path": "notes/NEW.md", "additions": 1, "deletions": 0, "counted": True, "status": "new"}],
+            "one line changed twice is one line changed; a new file is New, with its lines, as the bar counts it")
+
+    def test_a_deleted_file_counts_the_lines_it_had_and_a_binary_new_file_stays_uncounted(self):
+        """The card says what the bar under the chat says: a file deleted takes its lines (-N), a new text file adds its
+        lines (+N); a binary or very large file has no honest count and says so."""
+        from dgc.checkpoints import CheckpointManager
+        with tempfile.TemporaryDirectory(prefix="dgc-turn-files-") as d:
+            root = Path(os.path.realpath(d))
+            (root / "old.txt").write_text("one\ntwo\nthree\n")
+            cp = CheckpointManager(root)
+            self.assertTrue(cp.open(1, "the turn"))
+            for name in ("old.txt", "new.md", "pic.bin"):
+                cp.record_file(str(root / name))
+            (root / "old.txt").unlink()
+            (root / "new.md").write_text("# New\nline two\n")
+            (root / "pic.bin").write_bytes(b"\x00\x01binary\x00")
+            rows, total = cp.changes(0)
+            by = {Path(r["path"]).name: r for r in rows}
+            self.assertEqual(total, 3)
+            self.assertEqual((by["old.txt"]["status"], by["old.txt"]["deletions"], by["old.txt"]["counted"]), ("deleted", 3, True))
+            self.assertEqual((by["new.md"]["status"], by["new.md"]["additions"], by["new.md"]["counted"]), ("new", 2, True))
+            self.assertEqual((by["pic.bin"]["status"], by["pic.bin"]["counted"]), ("new", False))
 
     def test_an_edit_put_back_is_left_off_and_a_turn_that_changed_nothing_has_an_empty_card(self):
         h = self.repo()

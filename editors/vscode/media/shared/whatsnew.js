@@ -175,7 +175,7 @@
     // found, said in its words, waits on Home under Needs you, with its face.
     levels: () => {
       const levels = (on) => { const m = box("dgc-menu dgc-menu-rows wn-levels"); m.setAttribute("role", "presentation");
-        for (const [label, sub] of [["Ask me first", "Asks before every new site"], ["Approve for me", "Asks before it pays or posts"], ["Do it all", "Does the whole job"]]) {
+        for (const [label, sub] of [["Ask me first", "Asks before it submits or sends"], ["Approve for me", "Asks before it pays or posts"], ["Do it all", "Does the whole job"]]) {
           const r = span("dgc-menu-row"); r.setAttribute("aria-checked", String(label === on));
           r.append(span("dgc-menu-words", span("dgc-menu-label", label), span("dgc-menu-sub", sub)), part("span", "dgc-menu-check", glyph("check", 14) || "✓"));
           m.append(r);

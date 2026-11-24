@@ -555,6 +555,9 @@ class TUI:
         self.agent.ui = self               # the agent calls back into this TUI
         # Exposes the `monitor` tool: this frontend delivers monitor events and wakes on them.
         self.monitor_wake_enabled = True
+        # Dev Mode's "Work on a subscription uses DGC's tools" (dgc/work_cli.py): with the switch on, a turn on Claude Code
+        # or Codex is the Agent's own here, with the CLI as its model only, as in the editor.
+        self.cli_model_enabled = True
         # Ctrl+B moves what the turn is waiting on to the background (dgc/background_now.py).
         self.background_now_enabled = True
         self._draft_changed_at = 0.0
@@ -1588,9 +1591,9 @@ class TUI:
         worker = sess._worker_thread
         if worker is not None and worker.is_alive():
             return True
-        if (str(sess.config.get("subscription_engine", "") or "").strip()
-                or sess.agent.mode == "plan"):
-            return True
+        from .dev_mode import delegated
+        if delegated(sess.config) or sess.agent.mode == "plan":
+            return True                        # a turn the CLI runs whole can't take a wake; plan mode is read-only
         if (sess is self.active and getattr(self, "input_buf", None) is not None
                 and self.input_buf.text.strip()
                 and time.monotonic() - getattr(self, "_draft_changed_at", 0.0) < self._WAKE_DRAFT_HOLD_S):
@@ -8249,7 +8252,9 @@ class TUI:
         engine = str(cfg.get("subscription_engine", "") or "").strip().lower()
         model = (str(cfg.get("subscription_model", "") or "").strip()
                  or f"{engine} default") if engine else cfg.model
-        host = f"{engine} CLI subscription" if engine else cfg.base_url
+        from .dev_mode import subscription_tools
+        host = ((f"{engine} CLI subscription, as the model only: DGC's tools (Dev Mode)" if subscription_tools(cfg)
+                 else f"{engine} CLI subscription") if engine else cfg.base_url)
         thinking = (str(cfg.get("subscription_effort", "") or "").strip()
                     or "off") if engine else cfg.get("thinking", "off")
         profile = "Ultra" if cfg.get("ultra_mode", False) else "standard"
@@ -10097,10 +10102,19 @@ class TUI:
                 else:
                     self.agent._pending_images = None
                     model_text = text
-                _se = str(self.config.get("subscription_engine", "")).strip().lower()
+                # A turn the CLI runs whole (today's delegation), or the Agent's own: with Dev Mode's switch on, Claude
+                # Code or Codex is only its model (dgc/work_cli.py), and its tools, permissions and records are DGC's.
+                from .dev_mode import delegated
+                _se = delegated(self.config)
                 from .session_turn_events import foreground_turn
                 self.agent._turn_output, self.agent._turn_artifact_types = output, []
                 if _se:
+                    from .work_cli import not_offered_now
+                    reason = not_offered_now(self.config, _se)
+                    told = self.__dict__.setdefault("_not_offered_said", set())
+                    if reason and _se not in told:
+                        told.add(_se)
+                        self.info(reason)      # said once: it runs with its own tools, as before
                     with foreground_turn("vendor"):
                         succeeded = self._run_delegated_turn(_se, model_text)
                 else:

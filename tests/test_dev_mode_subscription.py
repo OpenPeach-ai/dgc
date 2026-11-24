@@ -420,6 +420,42 @@ class WhenItCantAnswer(World):
         self.assertEqual(self.seen()["config"]["mcp_servers.dgc.tool_timeout_sec"], str(24 * 3600))
 
 
+class EditedCard(World):
+    """The Edited card's rows are the same whichever model ran the turn: a new file has no line count on it (the card
+    counts only a file it can diff against its earlier state; the bar under the chat counts a new file's lines), and a
+    changed file has its counts."""
+
+    def native_turn(self, harness, calls, prompt):
+        from tests.test_subagents import calls_then
+        from dgc.llm import ToolCall
+        route = calls_then([ToolCall(f"n{i}", name, args) for i, (name, args) in enumerate(calls)], final="Done.")
+        harness.config.data["dev_subscription_tools"] = False
+        harness.config.data["subscription_engine"] = ""
+        with patch.object(LLMClient, "chat", Script([("", route)])), patch.object(Config, "clone_for_root", clone_fixture):
+            self.assertTrue(harness.agent.run_turn(prompt))
+        return harness.agent.last_turn_files["files"]
+
+    def test_a_new_file_reads_the_same_on_a_native_turn_and_on_the_cli(self):
+        self.script({"call": "write_file", "args": {"path": "cli_new.py", "content": "a = 1\nb = 2\n"}}, {"say": "Done."})
+        harness = self.harness("claude")
+        self.assertTrue(self.run_turn(harness, "Write a file"))
+        cli_row = {k: v for k, v in harness.agent.last_turn_files["files"][0].items() if k != "path"}
+        native = self.harness("claude")
+        native_row = {k: v for k, v in self.native_turn(native, [("write_file", {"path": "native_new.py",
+                                                                               "content": "a = 1\nb = 2\n"})],
+                                                         "Write a file")[0].items() if k != "path"}
+        self.assertEqual(cli_row, native_row)
+        self.assertEqual((cli_row["status"], cli_row["counted"], cli_row["additions"]), ("new", True, 2))
+
+    def test_a_changed_file_has_its_counts_on_the_cli(self):
+        self.script({"call": "edit_file", "args": {"path": "notes.txt", "old_string": "hello from the project",
+                                                   "new_string": "hello from DGC"}}, {"say": "Done."})
+        harness = self.harness("claude")
+        self.assertTrue(self.run_turn(harness, "Edit the note"))
+        row = harness.agent.last_turn_files["files"][0]
+        self.assertEqual((row["status"], row["counted"], row["additions"], row["deletions"]), ("modified", True, 1, 1))
+
+
 class Stop(World):
     def test_stop_ends_the_cli_and_its_whole_process_group(self):
         for engine in ("claude", "codex"):

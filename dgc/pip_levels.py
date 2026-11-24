@@ -45,7 +45,9 @@ ACTOR = re.compile(r"pip-level:(approve|full)\Z")
 NAMES = {ASK: "Ask me first", APPROVE: "Approve for me", FULL: "Do it all"}
 # One plain line a level: what will and won't ask. Shown with the picker and once when it is chosen.
 SAYS = {
-    ASK: "Asks before every new site, every submit and every send.",
+    # (What it does: careful mode asks before a new site once it has read something private; public pages it reads freely.)
+    ASK: ("Asks before every submit and every send. Reads public pages by itself, and asks before each new site once "
+          "it has read something private of yours."),
     APPROVE: ("Opens new sites, searches, adds to carts and saves drafts by itself. Asks before it orders, pays, "
               "sends to someone new, posts, deletes or changes an account."),
     # The risk, said plainly where the level is chosen: sending is what Do it all allows.
@@ -62,8 +64,9 @@ PROJECT_SAYS = {
 # A folder Pip with its own box (0.52, pips-sandbox-design §2): the same three, about its computer and about what it
 # changed in its copy of your folder. Do it all's risk said where it is chosen, as a Personal Pip's is.
 BOX_SAYS = {
-    ASK: ("Asks before every new site, submit and send from its computer, and before every handoff. What it changed "
-          "in its copy of your folder waits for you as a card."),
+    ASK: ("Asks before every submit and send from its computer, and before every handoff. Reads public pages by itself, "
+          "and asks before each new site once it has read something private of yours. What it changed in its copy of "
+          "your folder waits for you as a card."),
     APPROVE: ("Opens new sites, searches and saves drafts on its computer by itself, and runs reviews and checks you "
               "approved once. Asks before it sends, posts or orders. What it changed in its copy waits for you as a card."),
     FULL: ("Does the whole job on its computer, sends included, and applies what it changed to your folder when it "

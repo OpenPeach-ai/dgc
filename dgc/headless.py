@@ -4755,13 +4755,9 @@ class Backend:
     def _say_not_offered(self, config, engine_key: str) -> None:
         """Dev Mode's "Work on a subscription uses DGC's tools" is on, but this session's CLI can't be held to DGC's
         tools (Kimi Code, Qwen Code, Copilot CLI): said once, in plain words, and the turn runs as before."""
-        from .dev_mode import on
-        get = getattr(config, "get", None)
-        if not (callable(get) and on(config) and get("dev_subscription_tools", False) is True):
-            return
+        from .work_cli import not_offered_now
+        reason = not_offered_now(config, engine_key)
         said = self.__dict__.setdefault("_not_offered_said", set())
-        from .work_cli import not_offered
-        reason = not_offered(engine_key)
         if reason and engine_key not in said:
             said.add(engine_key)
             self.ui.info(reason)
@@ -6970,10 +6966,12 @@ class Backend:
             self.em.emit("subagent_settings", thinking=level if level in ("off", "low", "medium", "high", "xhigh") else "",
                          **_request_fields(request_id))
         extra = {}
-        for key, fallback in (("chatdgc_about", ""), ("chatdgc_style", ""), ("chatdgc_personality", "default"),
-                              ("chatdgc_window", "32k")):
+        for key, fallback in (("chatdgc_about", ""), ("chatdgc_style", ""), ("chatdgc_personality", "default")):
             if key in self._config_fields:
                 extra[key] = str(c.get(key, fallback) or fallback)
+        if "chatdgc_window" in self._config_fields:
+            from .chatdgc.window import preset_for
+            extra["chatdgc_window"] = preset_for(c)        # unchosen: Work's window, as the editor's meter shows it
         if "memory" in self._config_fields:
             extra["memory"] = c.get("memory", True) is not False
         if "artifact_bind" in self._config_fields:

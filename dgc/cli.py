@@ -944,6 +944,10 @@ class CLI:
         # Ctrl+B during a turn moves what it waits on to the background (dgc/background_now.py).
         # `dgc -p` builds this CLI too, and never offers it: nothing outlives its one turn.
         self.ui.background_now_enabled = True
+        # Dev Mode's "Work on a subscription uses DGC's tools" (dgc/work_cli.py): this frontend runs a turn on Claude
+        # Code or Codex as the Agent's own, with the CLI as its model only, when the switch is on (the classic prompt
+        # and `dgc -p` alike).
+        self.ui.cli_model_enabled = True
         self.agent = Agent(config, self.ui)
         self.console = self.ui.console
 
@@ -2296,9 +2300,13 @@ class CLI:
         """One turn: through the connected subscription CLI when there is one, else the native
         agent loop. _run_turn_live cleared stale state before exposing the interruptible turn, so
         neither path resets cancellation — an Esc that lands while the worker starts must hold."""
-        engine = str(self.config.get("subscription_engine", "") or "").strip().lower()
+        # A turn the CLI runs whole (today's delegation), or the Agent's own: with Dev Mode's switch on, Claude Code or
+        # Codex is only its model (dgc/work_cli.py).
+        from .dev_mode import delegated
+        engine = delegated(self.config)
         from .session_turn_events import foreground_turn
         if engine:
+            _say_not_offered_once(self, self.config, engine, lambda line: self.ui.info(line))
             with foreground_turn("vendor"):
                 return self._run_delegated_turn(engine, text)
         with foreground_turn("foreground_prompt"):
@@ -3574,7 +3582,8 @@ def main(argv: list[str] | None = None) -> int | None:
         # A session another DGC has open: say where (the turn below is refused, and nothing is written).
         cli._check_owner(interactive=False)
         try:
-            code = _run_oneshot(cli, config, args, parser, _oneshot_engine)
+            code = _run_oneshot(cli, config, args, parser,
+                                _held_to_dgc_tools(config, _oneshot_engine, args.model, args.think))
             sys.stdout.flush()
         except BrokenPipeError:
             # The reader went away (`dgc -p ... | head -1`). Say nothing more: point stdout at
@@ -3626,6 +3635,43 @@ def main(argv: list[str] | None = None) -> int | None:
             termbg.restore_stop_handlers(_stop_handlers)
             termbg.reset()
             _print_resume_hint(cli.agent, config)   # after the alt-screen is restored — no blank lines
+
+
+def _say_not_offered_once(owner, config, engine_key: str, say) -> None:
+    """Dev Mode's switch is on but this CLI can't be held to DGC's tools (Kimi Code, Qwen Code, Copilot CLI): said once
+    per session, in plain words, and the turn runs as before."""
+    from .work_cli import not_offered_now
+    reason = not_offered_now(config, engine_key)
+    said = owner.__dict__.setdefault("_not_offered_said", set()) if hasattr(owner, "__dict__") else set()
+    if reason and engine_key not in said:
+        said.add(engine_key)
+        say(reason)
+
+
+def _held_to_dgc_tools(config, engine_key: str, model, think) -> str:
+    """`dgc -p` with Dev Mode's "Work on a subscription uses DGC's tools" on: Claude Code or Codex is this run's model
+    only (dgc/work_cli.py) and the turn is DGC's own. --model and --think go to that CLI, for this run only, as they do
+    for a turn handed to it. Returns the engine to hand the turn to whole: "" when DGC runs it."""
+    from . import dev_mode
+    engine = str(engine_key or "").strip().lower()
+    if (engine not in dev_mode.SUBSCRIPTION_TOOLS_ENGINES or not dev_mode.on(config)
+            or config.get("dev_subscription_tools", False) is not True):
+        return engine
+    configured = str(config.get("subscription_engine", "") or "").strip().lower()
+    changes = {"subscription_engine": engine}
+    if model is not None:
+        changes["subscription_model"] = str(model).strip()
+    elif configured != engine:
+        changes["subscription_model"] = ""            # another CLI than the saved one: its own default model
+    if think is not None:
+        changes["subscription_effort"] = "" if think == "off" else str(think)
+    elif configured != engine:
+        changes["subscription_effort"] = ""
+    for key, value in changes.items():
+        if config.data.get(key) != value:
+            config.data[key] = value
+            config.mark_ephemeral(key)               # this run's, never written as the default
+    return ""
 
 
 def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont: bool,
@@ -3928,6 +3974,7 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
         cli.ui.em.emit("turn_start", turn_id="t1", prompt=prompt, session_id=session_id())
     if engine_key:
         from .session_turn_events import foreground_turn
+        _say_not_offered_once(cli, config, engine_key, lambda line: cli.ui.info(line))
         with foreground_turn("vendor"):
             ok = _run_subscription_oneshot(
                 config, cli.agent, engine_key, cli.expand_mentions(prompt),

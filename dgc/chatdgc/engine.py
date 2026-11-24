@@ -1597,7 +1597,7 @@ class ChatEngine:
     # -- the context window (window.py): the summary of earlier messages, Compact now, Continue in a new chat
 
     def _preset(self) -> str:
-        return str(self.config.get("chatdgc_window", fit_window.DEFAULT_WINDOW) or fit_window.DEFAULT_WINDOW)
+        return fit_window.preset_for(self.config)
 
     @staticmethod
     def _summary_start(chat: dict) -> int:

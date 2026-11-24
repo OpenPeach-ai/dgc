@@ -19,7 +19,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   the sandbox, checkpoints and the Edited card, steering, goals, compaction and helpers (on their own model) work as on
   any model. Stop ends the CLI's whole process group. DGC never reads, copies or refreshes the CLI's login. Off, or with
   Dev Mode off, each turn is handed to the CLI as before. Kimi Code, Qwen Code and Copilot CLI run as before, and say
-  why once.
+  why once. The terminal app, the classic prompt and `dgc -p` follow the same switch (`dgc -p`'s `--model` and
+  `--think` go to the CLI for that run only), and `/status` says when the CLI is the model only.
 - **Sites Pips can use in Your Browser** (Pips API 113: `seen_your_browser_sites`, `get_your_browser_lanes`): the sites
   you are signed in to, each with All Pips, Some Pips or No Pips; a site you sign in to yourself is noticed (a bank or
   payment site starts at No Pips, others at All Pips); a grant from a chat card can be taken back. While a Pip's run

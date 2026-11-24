@@ -40,6 +40,21 @@ SHORTEN_PROMPT = (
     "only the summary.")
 
 
+def preset_for(config) -> str:
+    """The window preset a chat uses: the one chosen for chats (Settings -> ChatDGC, or the meter's details); unchosen,
+    Work's window (context_size, Settings -> Models) as the largest preset not above it, so one model reads the same
+    window in Chat and in Work."""
+    chosen = str(config.get("chatdgc_window", "") or "")
+    if chosen in WINDOWS:
+        return chosen
+    try:
+        size = int(config.get("context_size", 0) or 0)
+    except (TypeError, ValueError):
+        size = 0
+    fitting = [key for key, value in WINDOWS.items() if value and value <= size]
+    return max(fitting, key=WINDOWS.__getitem__) if fitting else DEFAULT_WINDOW
+
+
 def tokens(text: str) -> int:
     return (len(text or "") + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN
 

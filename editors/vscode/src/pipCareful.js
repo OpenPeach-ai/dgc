@@ -63,7 +63,7 @@ export function carefulWords(summary, pipName = 'The Pip') {
   // Your Browser (dgc/your_browser_lane.py): a Pip's own tab in your browser, a site only you let it use there,
   // and a sign-in only you make, in your own tab.
   if (summary?.kind === 'yb_site') return [`Let ${pipName} use ${summary.site || summary.host} in Your Browser?`,
-    `${pipName} works in its own tab of Your Browser, where you are signed in. Allow lets it use ${summary.shown || summary.site || summary.host} there from now on.`, 'Allow'];
+    `${pipName} works in its own tab of Your Browser, where you are signed in. Allow lets it use ${summary.shown || summary.site || summary.host} there from now on. Not now keeps it out of your browser there; it may still read the public page on its own computer.`, 'Allow'];
   if (summary?.kind === 'yb_sign_in') return [`Sign in to ${summary.site || summary.host} in Your Browser?`,
     `${pipName} needs you signed in there. Sign in yourself, in your own tab: ${pipName} never sees or types your password. Then tell it you have.`, 'I’ve signed in'];
   return null;

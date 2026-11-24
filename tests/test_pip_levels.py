@@ -823,3 +823,17 @@ class RealBrowserTests(Store):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LevelWordsSayWhatHappens(unittest.TestCase):
+    """Ask me first's words say what it does (user tests: "Asks before every new site" while a Pip read public pages
+    freely, round 1 P3 and round 2 P7): it asks before each submit and send; public pages it reads by itself, and a new
+    site asks once it has read something private (careful mode)."""
+
+    def test_ask_me_first_never_claims_every_new_site(self):
+        from dgc import pip_levels
+        for words in (pip_levels.SAYS[pip_levels.ASK], pip_levels.BOX_SAYS[pip_levels.ASK]):
+            self.assertNotIn("every new site", words)
+            self.assertIn("submit", words)
+            self.assertIn("public pages", words)
+            self.assertIn("private", words)

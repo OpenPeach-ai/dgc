@@ -14299,7 +14299,11 @@ function permissionChoices(ev) {
     const waiting = goalEndsWaiting; goalEndsWaiting = [];
     for (const run of waiting) {
       const at = run.ended_at * 1000 + 1500;
-      const under = blocks.filter((block) => block._turnAt <= at).at(-1);
+      // Under one of its own turns: one that began after the goal did. Its turns undone (Undo took them back), it says
+      // nothing; it never borrows the turn before it (user test 24 Nov).
+      const from = run.started_at ? run.started_at * 1000 - 1500 : -Infinity;
+      const under = blocks.filter((block) => block._turnAt <= at && block._turnAt >= from).at(-1);
+      if (!under && run.cycles > 0 && blocks.some((block) => block._turnAt < from)) continue;
       const line = el("div", "sys sys-marked goal-end", icon("target") + esc(`${GOAL_END_WORDS[run.status]} · ${goalFacts(run)}`));
       line.setAttribute("role", "note");
       line.title = `${GOAL_END_WORDS[run.status]}: ${run.name}`;

@@ -145,6 +145,21 @@ test("after a reload the same lines come back, each under the turn its goal ende
   assert.deepEqual(x.v.errors, []);
 });
 
+test("a goal whose turns were undone says nothing: no end line under a turn from before it", () => {
+  // User test round 2 (W11): Undo took the goal's turn back, and "Goal done · 14 s · ..." stayed in the transcript under
+  // the turn before it, with no goal above it.
+  const x = chat();
+  const turn = (id, at, prompt) => [{ type: "turn_start", turn_id: id, prompt, kind: "prompt" }, { role: "time", of: "prompt", at },
+    { type: "text_delta", text: `Reply to ${prompt}` }, { type: "stream_end", message_id: `${id}:1`, phase: "answer" }, { role: "time", of: "reply", at: at + 5 },
+    { type: "turn_end", turn_id: id, reason: "completed", final_message_id: `${id}:1` }];
+  const T = 1_794_000_000;
+  // What is left after the Undo: the turn before the goal; the goal (started at T + 100, ended at T + 114) is in its history.
+  x.event({ type: "history", complete: true, items: [...turn("h1", T, "a checklist job")] });
+  x.event({ type: "goal_runs", runs: [run("g1", "completed", { name: "Make the tests pass", started_at: T + 100, ended_at: T + 114, elapsed_seconds: 14, tokens: 144200, cycles: 1 })] });
+  assert.deepEqual(x.lines().map(text), [], "its turn is gone: so is its end line");
+  assert.deepEqual(x.v.errors, []);
+});
+
 test('"/goal-history" is in the "/" menu only on a DGC with goal_runs; it adds a Goals pill that lists the goals newest first', () => {
   const old = chat({ goalRuns: false });
   old.type("/goal-h");
