@@ -46,9 +46,9 @@ test("it is Google's icon service, keyed on the origin alone", () => {
 });
 
 test("an address no public site has gets DGC's own sharp mark, never Google's blurry stand-in", () => {
-  // (Noted 21 Nov: a link to http://100.71.117.72:4173 wore a soft default globe. Google can't reach a private
+  // (Noted 21 Nov: a link to http://100.88.12.34:4173 wore a soft default globe. Google can't reach a private
   // address, so it sends its stand-in; and the address never needs to leave the machine.)
-  for (const local of ["http://localhost:3000/app", "http://127.0.0.1:5173/", "http://100.71.117.72:4173/", "http://192.168.1.148:46200/",
+  for (const local of ["http://localhost:3000/app", "http://127.0.0.1:5173/", "http://100.88.12.34:4173/", "http://192.168.1.50:46200/",
                        "http://[::1]:8080/", "https://gb10.tail1234.ts.net/x", "http://printer.local/", "https://jira.internal.corp/a",
                        "http://devbox:3000/", "https://wiki.lan/", "https://app.home.arpa/"]) {
     assert.equal(faviconUrl(local), undefined, local);

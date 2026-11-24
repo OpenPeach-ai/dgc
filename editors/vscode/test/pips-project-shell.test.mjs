@@ -142,21 +142,18 @@ test('every page a Project Pip had is in its menu: History, Settings, Schedule, 
   assert.match(x.$('#setupTask').value,/^Change the setup for Billing audit: /);
   await x.click('#create-back');
   assert.equal(x.$('.simple-content').dataset.view,'job','and back to its Settings');
-  // The run's report, from its post in the chat and from History.
+  // The run in the chat is a reply with what it found in its words (24 Nov: no Report ›, no Ask DGC to fix: you ask the
+  // Pip); its report is in History.
   await x.click('#simple-to-chat');
-  x.$(`[data-run-post="${RUN}"] .run-post-report summary`).click();
-  assert.equal(text(x.$(`[data-run-post="${RUN}"] .run-post-report summary`)),'Report · 2 findings');
-  await x.click(`[data-run-post="${RUN}"] [data-post-open="${RUN}"]`);
-  assert.equal(x.$('.simple-content').dataset.view,'runs');
-  assert.equal(x.requests('get_pip_run').at(-1).run_id,RUN);
-  assert.ok(x.$('section[aria-label="Run report"]'),'its report');
+  const post=x.$(`[data-run-post="${RUN}"]`);
+  assert.equal(post.querySelector('.run-post-report,[data-post-open],[data-post-fix]'),null);
+  assert.ok(post.querySelectorAll('.run-post-body .run-post-findings li').length>0,'what it found, listed in its words');
+  await x.click('.pip-topbar .pip-menu [data-tab="runs"]');
   const before=x.requests('get_pip_run').length;
   await x.click(`[data-run="${RUN}"]`);
-  assert.equal(x.requests('get_pip_run').length,before+1,'from History’s row too');
-  // Ask DGC to fix, from its post, as before.
+  assert.equal(x.requests('get_pip_run').length,before+1,'History opens its report');
+  assert.equal(x.requests('get_pip_run').at(-1).run_id,RUN);
   await x.click('#simple-to-chat');
-  await x.click(`[data-post-fix="${RUN}"]`);
-  assert.equal(x.asks.length,1);assert.equal(x.asks[0].session,'chat-shop');assert.equal(x.asks[0].report.run_id,RUN);
   // Each kind's menu is its old tabs: Quill takes no handoffs, Patch has no schedule, Pulse's is its plan.
   await x.open(DOCS);assert.ok(!menu(x).some(([k])=>k==='handoffs'));
   await x.open(PATCH);assert.ok(!menu(x).some(([k])=>k==='schedule'));assert.ok(menu(x).some(([k])=>k==='handoffs'));

@@ -81,7 +81,7 @@ import '../media/shared/linkpreview.css';
 import '../media/shared/linkpreview.js';
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon,outputIcon,questionCard} from './pipsTranscript.js';
 import {patchChildren} from './pipsDomPatch.js';
-import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
+import {runPostsPage,mergePosts,postMarkup,postPlainText,postNeedsWhole,postShort,postStatus,timeline,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
 import {latestActivity,activityEnded,activityParts,activityText,startedWords,routineStartedWords,elapsed} from './pipRunActivity.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
@@ -860,6 +860,9 @@ function currentChatProvider(value){
 // DGC Router, Claude Code and Codex), the chosen one's models beside it, Thinking under both, with Ultra (a Pip has it,
 // as Work does). Its rows' Main and Fallback words and their ⋯ are this Pip's fallback (D14).
 let pipPicker=null,pipPickerPip='',chipFocusUntil=0;
+// What each connection's provider says its models can do (pipModelCaps from the host, src/modelcaps.ts): the page's own
+// name for the connection ('connection', 'provider:<id>') -> {model: {thinks, images, tools}}: the picker's marks.
+const pipCaps=new Map();
 // A model chosen in the picker redraws the chat (its chip, a notice): the keyboard stays on the chip through those
 // redraws, until the user goes somewhere else.
 function focusChip(){chipFocusUntil=Date.now()+1500;$('chat-model')?.focus();}
@@ -903,7 +906,7 @@ function pipPickerView(){
  const fallback=fallbackValue(pipFallback());
  const row=(value,name,desc='',more={})=>{
   const on=more.on===undefined?selected===value:more.on,canFall=S.apiVersion>=76&&!remoteHost&&!!fallbackChoice(value),isFallback=value===fallback&&!on;
-  return{value,name,...(desc?{desc}:{}),caps:more.caps||MP.facts(more.id||name),current:on,...(more.id?{id:more.id}:{}),
+  return{value,name,...(desc?{desc}:{}),caps:more.caps||MP.marksOf(more.id||name,pipCaps.get(more.conn||'')),current:on,...(more.id?{id:more.id}:{}),
    pills:fallback?(on?[['Main','main']]:isFallback&&canFall?[['Fallback','fallback']]:[]):[],
    ...(canFall?{actions:[...(on?[]:[{id:'main',label:'Use as main',disabled:locked}]),{id:'fallback',label:isFallback?'Stop using as fallback':'Use as fallback',disabled:pipBackupState.busy||on}]}:{})};};
  const followsDefault=key=>currentChatProvider('default')===key?[row('default',defaultLabel(),'What Settings has Pips run on',{caps:[]})]:[];
@@ -912,7 +915,7 @@ function pipPickerView(){
  const connections=[];
  if(hostKept){
   const conn={id:'connection',name:ownDefault?ownDefault.name:(S.hostMark?.name||'Current host'),...(ownDefault?from(ownDefault):S.hostMark?{mark:S.hostMark.mark,badge:S.hostMark.badge}:{mark:'',badge:''}),loaded:!S.modelsLoading||S.models.length>0};
-  const rows=S.models.map(m=>row('model:'+m.id,m.name,m.name!==m.id?m.id:'',{id:m.id,on:selected==='model:'+m.id||(!!ownDefault&&selected===`provider:${ownDefault.id}:${m.id}`)}));
+  const rows=S.models.map(m=>row('model:'+m.id,m.name,m.name!==m.id?m.id:'',{id:m.id,conn:'connection',on:selected==='model:'+m.id||(!!ownDefault&&selected===`provider:${ownDefault.id}:${m.id}`)}));
   const def=followsDefault('connection'),sections=listed(conn,rows);
   conn.sections=!def.length?sections:sections.length===1&&!sections[0].title?[{title:'',rows:[...def,...sections[0].rows]}]:[{title:'',rows:def},...sections];
   if(S.modelsError){conn.error=errorText(S.modelsError);conn.footer=[{id:'refresh',label:'Refresh models',icon:'refresh',disabled:S.modelsLoading||locked}];}
@@ -923,7 +926,7 @@ function pipPickerView(){
  for(const p of named){
   if(p.default&&hostKept)continue;
   const conn={id:'provider:'+p.id,name:p.name,...from(p),loaded:true};
-  conn.sections=listed(conn,(p.models||[]).map(id=>row(`provider:${p.id}:${id}`,id,'',{id})));
+  conn.sections=listed(conn,(p.models||[]).map(id=>row(`provider:${p.id}:${id}`,id,'',{id,conn:conn.id})));
   // ChatGPT · your plan (0.52): the shared rail entry; not connected it offers Connect, connected it lists the plan's
   // models in the plan's own order and says "Using ChatGPT plan" while this Pip uses it.
   if(p.plan&&(p.plan!=='connected'||S.planWaiting)){connections.push({...MP.planConnection({id:conn.id,state:p.plan,waiting:S.planWaiting,error:S.planError}),planProvider:p.id});continue;}
@@ -961,7 +964,7 @@ function pipPickerView(){
 function ownPickerView(base,tabs,shownModel,locked){
  const MP=globalThis.DgcModelPicker,own=agentsUi.own,chosen=ownValue(own.model_choice),fallback=ownFallbackValue(own.fallback);
  const row=(value,name,desc='',more={})=>{const on=value===chosen,isFallback=!on&&value===fallback;
-  return{value,name,...(desc?{desc}:{}),caps:more.caps||MP.facts(more.id||name),current:on,agentsFallback:isFallback,
+  return{value,name,...(desc?{desc}:{}),caps:more.caps||MP.marksOf(more.id||name,pipCaps.get(more.conn||'')),current:on,agentsFallback:isFallback,
    pills:fallback?(on?[['Main','main']]:isFallback?[['Fallback','fallback']]:[]):[],
    actions:[{id:'agentsFallback',label:isFallback?'Stop using as the sub-agents’ fallback':'Use as the sub-agents’ fallback',disabled:on||locked}]};};
  const listed=(conn,rows)=>conn.mark==='ollama'&&conn.badge!=='cloud'?MP.ollamaSections(rows):[{title:'',rows}];
@@ -971,14 +974,14 @@ function ownPickerView(base,tabs,shownModel,locked){
   sections:[{title:'',rows:[{value:'pip',name:'This Pip’s model',desc:`Now: ${shownModel||'not chosen yet'}`,current:chosen==='pip'}]}]}];
  if(hostKept){
   const conn={id:'connection',name:ownDefault?ownDefault.name:(S.hostMark?.name||'Current host'),...(ownDefault?from(ownDefault):S.hostMark?{mark:S.hostMark.mark,badge:S.hostMark.badge}:{mark:'',badge:''}),loaded:!S.modelsLoading||S.models.length>0};
-  conn.sections=listed(conn,S.models.map(m=>row('model:'+m.id,m.name,m.name!==m.id?m.id:'',{id:m.id})));
+  conn.sections=listed(conn,S.models.map(m=>row('model:'+m.id,m.name,m.name!==m.id?m.id:'',{id:m.id,conn:'connection'})));
   if(S.modelsError){conn.error=errorText(S.modelsError);conn.footer=[{id:'refresh',label:'Refresh models',icon:'refresh',disabled:S.modelsLoading||locked}];}
   connections.push(conn);
  }
  for(const p of named){
   if(p.default&&hostKept)continue;
   const conn={id:'provider:'+p.id,name:p.name,...from(p),loaded:true};
-  conn.sections=listed(conn,(p.models||[]).map(id=>row(`provider:${p.id}:${id}`,id,'',{id})));
+  conn.sections=listed(conn,(p.models||[]).map(id=>row(`provider:${p.id}:${id}`,id,'',{id,conn:conn.id})));
   connections.push(conn);
  }
  if(routerChoices(routerOffer()).length)connections.push({id:'router',name:'DGC Router',mark:'dgc',badge:'',loaded:true,disabled:true,reason:OWN_NO_ROUTER,sections:[]});
@@ -1322,8 +1325,11 @@ function chatMarkup(){
     {complete:!S.messageCursor,timeOf:i=>Date.parse(i.message?i.message.created_at:(i.streak?i.streak.at(-1):i.post)?.posted_at)||0});
   const context=chatPosts()?postContext():null;
   const settled=settledLines(shown);
+  // A run's post is a reply (asked 24 Nov: "just chat with responses"): said without being asked, so like a routine's
+  // reply it has the Pip's face and name over it; its whole text (fetched when the post cut it), and a reply's row under it.
   const drawPost=i=>{const p=i.streak?i.streak.at(-1):i.post,first=i.streak?i.streak[0]:p;
-    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id),traced:replyStats.get(p.run_id)?.has_trace===true,...(flowCards()&&!i.streak?{under:flowUnderPost(p)}:{})});};
+    const whole=wholeResults.get(p.run_id)||'';if(postNeedsWhole(p)&&!whole)loadWholeResult(p.run_id);
+    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),traced:replyStats.get(p.run_id)?.has_trace===true,whole,lead:true,plain:conv,fix:fixesShown()&&!i.streak?fixState(p.run_id).fix||null:null,buttons:postButtons(p.run_id),...(flowCards()&&!i.streak?{under:flowUnderPost(p)}:{})});};
   // Each prompt opens a box, the rest of its turn inside: the box's end is what pushes a pinned prompt off (pipsFollow.js).
   // What a Pip says by itself (a run's post, a routine's reply) isn't an answer to it, so the box ends there.
   let turnOpen=false,pipRun=false;
@@ -1480,17 +1486,34 @@ function liveMarkup(markdown){
 }
 // To a run in the chat: its live post while it runs, else its post.
 async function jumpToRun(runId){
-  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-run="${runId}"]`);if(!el)return false;el.closest('details')?.setAttribute('open','');revealInChat(el);el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
+  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-ids~="${runId}"]`);if(!el)return false;revealInChat(el);el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
   if(go())return;
   await Promise.all([loadMessages(),loadPosts()]);
   if(!go())openPostReport(runId);
 }
-// A routine's reply (pip_routines) is the Pip's own message, said without being asked: like a run's, it says who and
-// which routine, and a long one starts short with Show all.
+// A routine's reply (pip_routines) is the Pip's own message, said without being asked: it says who and which routine,
+// then its whole text and a reply's row with its time, as any reply (asked 24 Nov: no Show all).
 function routineReply(m,title,type){
-  const cut=shortReply(m.text),look=type||characterType(S.pip.pip_type);
+  const look=type||characterType(S.pip.pip_type);
   const head=`<div class="run-post-head"><span class="run-post-face" aria-hidden="true">${pipAvatar(S.pip,'idle',`routine-${m.id}`,look)}</span><strong class="run-post-name">${esc(S.pip.name)}</strong><span class="run-post-routine">${esc(title)}</span></div>`;
-  return {head,clip:cut.clipped?{text:cut.text,open:shownInFull.has(m.id),key:m.id}:null};
+  return {head};
+}
+// A run's post's Copy and Read aloud, as a reply's (src/pipsTranscript.js): its words as text, the whole result once fetched.
+function postButtons(runId){
+  const id=esc(runId);
+  return `<button type="button" class="ract" data-post-copy="${id}" aria-label="Copy response" title="Copy response">${transcriptIcon('copy')}<span class="sr-only">Copy response</span></button>`
+    +(window.DgcReadAloud?`<button type="button" class="ract" data-post-read="${id}" data-read-aloud="post:${id}" aria-label="Read aloud" title="Read aloud" aria-pressed="false"><span class="ra-play">${transcriptIcon('speaker')}</span><span class="ra-stop">${transcriptIcon('stop')}</span><span class="sr-only">Read aloud</span></button>`:'');
+}
+function postWords(runId){const p=postFor(runId);return p?postPlainText(p,{name:S.pip?.name||'',personal:personalPip(),whole:wholeResults.get(runId)||''}):'';}
+// A result longer than its post keeps (PREVIEW_CHARS): the run's whole result, asked once, drawn when it comes. Open
+// result was the only way to read the rest before (gone, 24 Nov).
+const wholeResults=new Map(),wholeAsked=new Set();
+function loadWholeResult(runId){
+  if(wholeAsked.has(runId)||remoteHost)return;wholeAsked.add(runId);const token=scope();
+  void send('get_pip_run',{run_id:runId}).then(answer=>{
+    if(token!==scope()||!record(answer?.run)||answer.run.id!==runId)return;
+    const text=answer.run.result?.text;if(typeof text==='string'&&text.trim()){wholeResults.set(runId,text);render();}
+  }).catch(()=>{});
 }
 function postContext(){
   return {name:S.pip.name,type:pipType(S.pip,S.types)||characterType(S.pip.pip_type),personal:personalPip(),ask:canAskDgc(),canRun:canRunNow(),renderMarkdown:renderPipMarkdown,
@@ -1540,7 +1563,7 @@ function openPostReport(runId){S.tab='runs';S.overview=false;rememberView();rend
 // The status under its name: to its post in the chat, which says what it found.
 function jumpToPost(runId){
   S.tab='chat';S.overview=false;rememberView();render();
-  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-run="${runId}"]`);if(!el)return false;el.closest('details')?.setAttribute('open','');revealInChat(el);el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
+  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-ids~="${runId}"]`);if(!el)return false;revealInChat(el);el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
   if(!go())void loadMessages().then(()=>{if(!go())openPostReport(runId);});
 }
 function askDgcAbout(runId){
@@ -5241,8 +5264,9 @@ function agentCheckReply(m){
 let agentsByPointer=false;
 const amFocus=el=>{if(!el)return;el.classList.toggle('quiet-focus',agentsByPointer);el.focus({preventScroll:true});};
 const agentsUi={pip:'',list:[],slots:1,own:null,seq:0,doing:new Map(),steps:new Map(),stepsOpen:new Set(),map:false,card:'',earlier:false,stopping:'',timer:0,drawn:'',undoing:'',undoErrors:new Map()};
-const changeUi={folded:new Set(),menu:''};const askedWords=new Map();
-function resetAgents(){window.clearTimeout(agentsUi.timer);Object.assign(agentsUi,{pip:'',list:[],slots:1,own:null,seq:agentsUi.seq+1,map:false,card:'',earlier:false,stopping:'',timer:0,undoing:''});agentsUi.undoErrors.clear();agentsUi.doing.clear();agentsUi.steps.clear();agentsUi.stepsOpen.clear();changeUi.folded.clear();changeUi.menu='';renderAgentMap();}
+// (A change card's files start folded, as Work's Edited card does: asked 24 Nov. `opened`: the ones you opened.)
+const changeUi={opened:new Set(),menu:''};const askedWords=new Map();
+function resetAgents(){window.clearTimeout(agentsUi.timer);Object.assign(agentsUi,{pip:'',list:[],slots:1,own:null,seq:agentsUi.seq+1,map:false,card:'',earlier:false,stopping:'',timer:0,undoing:''});agentsUi.undoErrors.clear();agentsUi.doing.clear();agentsUi.steps.clear();agentsUi.stepsOpen.clear();changeUi.opened.clear();changeUi.menu='';renderAgentMap();}
 const agentsNow=()=>convOn()&&agentsUi.pip===S.selected?agentsUi.list:[];
 const fixAgents=()=>convOn()?(flowNow()?.fixes||[]).map(f=>f.agent).filter(Boolean):[];
 const agentOf=id=>agentsNow().find(a=>a.id===id)||fixAgents().find(a=>a.id===id)||null;
@@ -5428,7 +5452,7 @@ document.addEventListener('click',event=>{
  if((n=at('[data-remove-folder]'))){startFolderMove(MOVE.remove,n);return;}
  if((n=at('[data-retry-again]'))){void retryFix(n.dataset.retryAgain,true);return;}
  if((n=at('[data-retry-leave]'))){void retryFix(n.dataset.retryLeave,false);return;}
- if((n=at('[data-change-fold]'))){const id=n.dataset.changeFold;if(changeUi.folded.has(id))changeUi.folded.delete(id);else changeUi.folded.add(id);render();document.querySelector(`[data-change-fold="${id}"]`)?.focus({preventScroll:true});return;}
+ if((n=at('[data-change-fold]'))){const id=n.dataset.changeFold;if(changeUi.opened.has(id))changeUi.opened.delete(id);else changeUi.opened.add(id);render();document.querySelector(`[data-change-fold="${id}"]`)?.focus({preventScroll:true});return;}
  if((n=at('[data-change-menu]'))){const id=n.dataset.changeMenu;changeUi.menu=changeUi.menu===id?'':id;render();(changeUi.menu?document.querySelector('.pip-change-menu .dgc-menu-row'):document.querySelector(`[data-change-menu="${id}"]`))?.focus({preventScroll:true});return;}
  if(at('.pip-change-menu [data-project-discard]')){changeUi.menu='';return;}
  if(at('[data-agent-map-close]')){closeAgentMap();return;}
@@ -5474,7 +5498,7 @@ function flowChangeCard(fix){
  const off=archived()||!usable();
  return projectCardMarkup({...change,...(fix.tests&&!change.tests?{tests:fix.tests}:{})},{esc,open:projectOpen,diffs:projectDiffs,busy:projectBusy?.id===change.id?projectBusy.what:'',off:off||(!!projectBusy&&projectBusy.id!==change.id),
   confirm:projectConfirm===change.id,note:projectNotes.get(change.id)||'',error:projectErrors.get(change.id)||'',one:true,canCommit:S.apiVersion>=FLOW_API,
-  ...(convOn()?{look:'work',folded:changeUi.folded.has(change.id),menu:changeUi.menu===change.id}:{})});
+  ...(convOn()?{look:'work',folded:!changeUi.opened.has(change.id),menu:changeUi.menu===change.id}:{})});
 }
 /** Under a check's post: its findings as one card, then what became of them: the Allow card, the fix at work, its change. */
 function flowUnderPost(p){
@@ -7907,6 +7931,8 @@ document.addEventListener('click',event=>{
   if(target.id==='pin-pips-sidebar'){S.sidebarPinned=!S.sidebarPinned;rememberView();render();return;}
   if(target.dataset.chatActivity){void toggleChatActivity(target.dataset.chatActivity);return;}
   if(target.dataset.postTrace){void openReplyTrace(target.dataset.postTrace,'');return;}
+  if(target.dataset.postCopy){const text=postWords(target.dataset.postCopy);if(!text)return;vscode.postMessage({type:'copy',text});target.innerHTML=transcriptIcon('check')+'<span class="sr-only">Copied</span>';target.title='Copied';target.setAttribute('aria-label','Copied');return;}
+  if(target.dataset.postRead){const text=postWords(target.dataset.postRead);if(text)reader?.toggle(`post:${target.dataset.postRead}`,text);return;}
   if(target.dataset.chatAction){
     const m=S.messages.find(m=>m.id===target.dataset.messageId);if(!m)return;
     if(target.dataset.chatAction==='read'){reader?.toggle(m.id,m.text);return;}
@@ -8610,6 +8636,8 @@ const stopMessages=options.onMessage(message=>{
     void loadFolders().then(()=>{void loadAttention();render();});}
    return;}
   if(message.type==='pipsFolderPicked'){const done=folderPicks.get(message.id);if(done){folderPicks.delete(message.id);done(typeof message.folder==='string'&&message.folder?message.folder:null);}return;}   // a new-Pip card decided in a chat: Needs attention follows
+  // What each connection's provider says its models can do: the picker's marks (24 Nov).
+  if(message.type==='pipModelCaps'){if(typeof message.id==='string'&&/^(connection|provider:provider_[A-Za-z0-9_]{1,64})$/.test(message.id)&&record(message.caps)){pipCaps.set(message.id,message.caps);refreshPipPicker();}return;}
   // ChatGPT · your plan's Connect from this page's picker, and the usage meter of the chat on screen (0.52).
   if(message.type==='pipPlanConnecting'){S.planWaiting=message.waiting===true;S.planError=typeof message.error==='string'?message.error.slice(0,300):'';refreshPipPicker();return;}
   if(message.type==='pipUsageMeter'){if(message.pip_id===S.selected){usageMeterNow.meter=message.meter||null;usageMeterNow.plan=message.plan===true;usageMeterNow.pip=message.pip_id;render();if(globalThis.DgcUsageMeter?.isOpen())globalThis.DgcUsageMeter.update(pipUsageView());}return;}

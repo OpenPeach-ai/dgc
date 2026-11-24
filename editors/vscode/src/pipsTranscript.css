@@ -150,6 +150,11 @@ details[open]>summary .run-post-chev{transform:rotate(90deg)}
 .run-post[data-outcome=failed] .run-post-chip:first-child svg,.run-post[data-outcome=checks_failed] .run-post-report>summary svg:first-child{color:var(--sev-high)}
 .run-post-report-body,.run-post-times-body{margin-top:6px;padding:8px 10px;border:1px solid var(--pip-edge,var(--line));border-radius:10px;font-size:12px}
 .run-post-report-body>button.link{padding:0;font-size:12px}
+/* A run's post is a reply (24 Nov): what it found is a list in its words; all-clear runs' times and a Work fix's state are
+   quiet lines under them, never chips. */
+.run-post-body .run-post-times-line,.run-post-body .run-post-fix-line{margin:6px 0 0!important;color:var(--muted);font-size:12px;line-height:1.45}
+.run-post-body .run-post-fix-line[data-state=failed]{color:var(--sev-high)}
+.run-post-body .run-post-findings{margin-top:6px!important}
 .run-post-findings{list-style:none;margin:0 0 6px!important;padding:0!important;display:grid;gap:4px}
 .run-post-findings li{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px;min-width:0;margin:0!important;font-size:12px;line-height:1.45}
 .run-post-findings .sev{flex:none;min-width:4.4em;font-weight:600;color:var(--muted)}

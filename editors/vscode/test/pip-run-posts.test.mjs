@@ -1,8 +1,9 @@
-// A Pip's runs in its own chat (Pips API 51), as the Pip speaking. Reported 21 Oct picked "The Pip speaks":
-// each run is a chat message from the Pip (its face, name and the time) in its own short words, grounded in the run's
-// report; the detail sits in a small attachment under it (Report · 4 findings ›, Ask DGC to fix, See what happened,
-// Run again now, Open run); all-clear runs in a row are ONE message that updates itself ("Both checks passed again",
-// "✓ Passed 12 times since Monday ›"), and a failure or findings breaks it. Replay draws the same.
+// A Pip's runs in its own chat (Pips API 51), as the Pip speaking: each run is a reply from the Pip in its own short
+// words, grounded in the run's report (reported 21 Oct, "The Pip speaks"). Since 24 Nov it is a reply like any other
+// ("just chat with responses"): what a check found is a list inside it, and under it the row every reply ends with (its
+// time, Copy, Read aloud, Trace), no chips (no Report ›, Ask DGC to fix, See what happened, Run again now, Open run).
+// All-clear runs in a row are ONE reply that updates itself ("Both checks passed again", "Passed 12 times since
+// Monday: …"), and a failure or findings breaks it. Replay draws the same.
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
@@ -60,7 +61,7 @@ function setup({apiVersion=51,postsValue=[FOUND,FAILED,CLEAR],messages=[],state,
   const held={posts:postsValue};
   const defaults=r=>({list_workspaces:()=>({workspaces:[workspace],current_workspace_id:'ws'}),list_pip_types:()=>({types}),list_pips:()=>({pips:[pipValue]}),
     get_pip_runner:()=>({runner}),get_workspace_context:()=>({context:{workspace_id:'ws',revision:0,entries:[]}}),get_pip:()=>({pip:pipValue}),
-    list_pip_runs:()=>({runs}),get_pip_run:()=>({run:{...runs.find(x=>x.id===r.run_id),result:{summary:'Two high findings.',findings:[],limitations:[]}}}),
+    list_pip_runs:()=>({runs}),get_pip_run:()=>{const found=runs.find(x=>x.id===r.run_id);return {run:{...found,result:found?.result||{summary:'Two high findings.',findings:[],limitations:[]}}};},
     list_pip_messages:()=>({pip_id:PIP,workspace_id:'ws',messages,next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls}),
     list_pip_run_posts:()=>({pip_id:PIP,workspace_id:'ws',posts:held.posts,next_before_id:null}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
     list_pip_setups:()=>({setups:[]}),list_pip_starters:()=>({starters:[]})}[r.type]?.());
@@ -74,32 +75,34 @@ function setup({apiVersion=51,postsValue=[FOUND,FAILED,CLEAR],messages=[],state,
 }
 async function openChat(x){await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();}
 const text=el=>el?.textContent.replace(/\s+/g,' ').trim();
-const said=el=>text(el.querySelector('.run-post-body'));
-const attachments=el=>[...el.querySelector('.run-post-attach').children].map(e=>e.matches('details')?text(e.querySelector('summary')):text(e));
+// The Pip's words, without the list of what it found or the times of a run of passes.
+const said=el=>{const b=el.querySelector('.run-post-body').cloneNode(true);b.querySelectorAll('.run-post-findings,.run-post-more,.run-post-times-line').forEach(n=>n.remove());return text(b);};
+// What a reply has under it: the words of its row's buttons. No chips are left anywhere on it.
+const NO_CHIPS='.run-post-attach,.run-post-chip,.run-post-report,.run-post-fix,[data-post-run],[data-post-fix],[data-post-more],details';
+const attachments=el=>{assert.deepEqual([...el.querySelectorAll(NO_CHIPS)].map(n=>n.className||n.tagName),[],'no chips');return [...el.querySelectorAll(':scope > .response-actions > button')].map(b=>b.getAttribute('aria-label')||text(b));};
+const ROW=['Copy response','Read aloud'];   // a reply's row: Copy, Read aloud (Trace too, for a run that kept its steps)
+const listed=el=>[...el.querySelectorAll('.run-post-body .run-post-findings li')].map(li=>[...li.children].map(text).join(' '));
 const log=d=>[...d.querySelectorAll('.conversation-log [data-run-post],.conversation-log [data-message]')];
 
-test('a run with findings is the Pip saying what it found, with the report one click away',async()=>{
+test('a run with findings is the Pip saying what it found, with what it found listed in the message',async()=>{
   const x=setup();await openChat(x);
   const post=x.d.querySelector(`article.run-post[data-run-post="${R1}"]`);
   assert.ok(post,'the run is in the chat');
   assert.ok(post.closest('.conversation-log'),'inside the conversation, not above it');
   assert.ok(post.matches('.pip-message.assistant'),'drawn as the Pip’s own message');
-  assert.ok(post.querySelector('.run-post-head .run-post-face .avatar'),'the Pip’s face');
+  assert.ok(post.querySelector('.run-post-head .run-post-face .avatar'),'the Pip’s face: it says this without being asked');
   assert.equal(text(post.querySelector('.run-post-name')),'ERP daily audit');
-  assert.ok(post.querySelector('.run-post-head time.msg-time'),'chat-style time beside its name');
+  assert.equal(post.querySelector('.run-post-head time'),null,'no time beside its name');
+  assert.ok(post.querySelector(':scope > .response-actions time.msg-time'),'its time, in the row a reply ends with');
   assert.match(said(post),/^(I found 5 issues|5 issues this run|This run turned up 5 issues), 2 of them serious\. The (worst|top one) is in push\.py: E-way bill number is never written back to Tally\.$/);
   assert.doesNotMatch(post.textContent,/Today’s audit found/,'not DGC’s report line any more');
-  assert.deepEqual(attachments(post),['Report · 5 findings','Ask DGC to fix']);
-  const report=post.querySelector('details.run-post-report');
-  assert.equal(report.open,false,'the findings wait one click away');
-  report.querySelector('summary').click();
-  assert.equal(report.open,true);
-  assert.deepEqual([...report.querySelectorAll('.run-post-findings li')].map(li=>[...li.children].map(text).join(' ')),[
+  assert.deepEqual(attachments(post),ROW,'no Ask DGC to fix: you ask the Pip');
+  assert.deepEqual(listed(post),[
     'high E-way bill number is never written back to Tally erp/tally/push.py:214',
     'high GST total skips cess on mixed-rate invoices erp/gst/totals.py:88',
-    'medium Rounding drops paise on credit notes erp/billing/notes.py:41']);
-  assert.equal(text(report.querySelector('.run-post-more')),'2 more in the full report');
-  assert.ok(report.querySelector(`button[data-post-open="${R1}"]`),'and the full report from there');
+    'medium Rounding drops paise on credit notes erp/billing/notes.py:41'],'what it found, in the message');
+  assert.equal(text(post.querySelector('.run-post-body .run-post-more')),'2 more findings: ask ERP daily audit for them.');
+  assert.equal(post.querySelector('[data-post-open]'),null,'no Open full report');
   assert.match(post.getAttribute('aria-label'),/^ERP daily audit: (I found 5 issues|5 issues this run|This run turned up 5 issues)/);
 });
 
@@ -149,13 +152,13 @@ test('a failed run says what stopped it in the Pip’s voice, that nothing chang
   const x=setup();await openChat(x);
   const post=x.d.querySelector(`article.run-post[data-run-post="${R2}"]`);
   assert.match(said(post),/^(I couldn’t finish this run\.|This run stopped before it finished\.|I didn’t get to the end of this run\.) A finding quoted code that does not match the file, so Pips refused the report\. Nothing in your project was changed\. I’ll try again (today|tomorrow) at /);
-  assert.deepEqual(attachments(post),['See what happened','Run again now','Ask DGC to fix']);
+  assert.deepEqual(attachments(post),ROW,'no See what happened, Run again now or Ask DGC to fix');
   assert.doesNotMatch(post.textContent,/erp\/tally\/push\.py/,'the saved error detail is in the report, not the chat');
   const y=setup({postsValue:[{...FAILED,reason:'It ran out of time.'}]});await openChat(y);
   assert.match(said(y.d.querySelector('article.run-post')),/ I ran out of time\. /,'“It ran out of time” in its own voice');
 });
 
-test('all-clear runs in a row are one message that says it again, with how many times since when, opening to each',async()=>{
+test('all-clear runs in a row are one message that says it again, with how many times since when, and each time as words',async()=>{
   const passes=[0,1,2,3,4].map(k=>checks(k,NOW-DAY-(10-k)*HOUR)),more=[5,6,7].map(k=>checks(k,NOW-(9-k)*HOUR));
   const x=setup({pipValue:pulse(),postsValue:[...passes,...more]});await openChat(x);
   const [fold,...others]=x.d.querySelectorAll('article.run-post');
@@ -163,41 +166,35 @@ test('all-clear runs in a row are one message that says it again, with how many 
   assert.ok(fold.matches('.run-post-streak'));
   assert.equal(fold.dataset.runPost,runId(7),'it stands for the newest run');
   assert.equal(said(fold),'Both checks passed again. Nothing for you to do.');
-  assert.equal(text(fold.querySelector('.run-post-head time')),new Date(NOW-2*HOUR).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}),'the newest run’s time');
-  const times=fold.querySelector('details.run-post-times');
-  assert.equal(text(times.querySelector('summary')),'✓ Passed 8 times since yesterday');
-  assert.equal(times.open,false);
-  times.querySelector('summary').click();
-  assert.deepEqual([...times.querySelectorAll('.run-post-day')].map(day=>[text(day.querySelector('.run-post-day-name')),day.querySelectorAll('button[data-post-open]').length]),[['Yesterday',5],['Today',3]]);
+  const clock=ms=>new Date(ms).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+  assert.equal(text(fold.querySelector(':scope > .response-actions time')),clock(NOW-2*HOUR),'the newest run’s time, in its row');
+  const line=text(fold.querySelector('.run-post-times-line'));
+  assert.equal(line,`Passed 8 times since yesterday: Yesterday ${passes.map(p=>clock(Date.parse(p.posted_at))).join(', ')} · Today ${more.map(p=>clock(Date.parse(p.posted_at))).join(', ')}`,'each time, as words');
+  assert.deepEqual(attachments(fold),ROW,'nothing to open on the fold');
   assert.equal(x.d.querySelectorAll('.run-post-quiet, details.run-posts-fold').length,0,'no log lines left');
-  x.click(`.run-post-times button[data-post-open="${runId(2)}"]`);await x.drain();
-  assert.equal(x.requests('get_pip_run').at(-1).request.run_id,runId(2),'each time opens its run');
 });
 
 test('a new all-clear run updates the fold in place; a failure breaks it and is its own message',async()=>{
   const x=setup({pipValue:pulse(),postsValue:[0,1,2].map(k=>checks(k,NOW-(6-k)*HOUR))});await openChat(x);
   const before=x.d.querySelector('article.run-post-streak');
-  assert.equal(text(before.querySelector('summary')),`✓ Passed 3 times since ${new Date(NOW-6*HOUR).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}`);
-  before.querySelector('details.run-post-times').open=true;
-  const face=before.querySelector('.run-post-face [data-avatar-key]');
+  assert.match(text(before.querySelector('.run-post-times-line')),new RegExp(`^Passed 3 times since ${new Date(NOW-6*HOUR).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}: Today `));
   await x.arrive(checks(3,NOW-2*HOUR));
   const now=x.d.querySelectorAll('article.run-post');
   assert.equal(now.length,1,'still one message');
   assert.equal(now[0].dataset.runPost,runId(3));assert.equal(now[0].dataset.runs,'4');
-  assert.match(text(now[0].querySelector('summary')),/^✓ Passed 4 times since /);
-  assert.equal(now[0].querySelector('details.run-post-times').open,true,'opened, it stays open as it updates');
-  assert.equal(now[0].querySelector('.run-post-face [data-avatar-key]'),face,'the same face, kept: the message is updated where it is, not drawn anew');
+  assert.match(text(now[0].querySelector('.run-post-times-line')),/^Passed 4 times since /);
   await x.arrive(checks(4,NOW-HOUR,'checks_failed'));
   const [fold,failure]=x.d.querySelectorAll('article.run-post');
   assert.equal(fold.dataset.runs,'4','the fold keeps its runs');
   assert.equal(failure.dataset.outcome,'checks_failed');
   assert.match(said(failure),/GET http:\/\/127\.0\.0\.1:8000\/api\/invoices → 200/);
-  assert.deepEqual(attachments(failure),['Report · 1 of 2 failed','Ask DGC to fix']);
+  assert.deepEqual(listed(failure),['failed GET http://127.0.0.1:8000/api/invoices → 200'],'the check that failed, in the message');
+  assert.deepEqual(attachments(failure),ROW);
   await x.arrive(checks(5,NOW-HOUR/2));
   const last=[...x.d.querySelectorAll('article.run-post')].at(-1);
   assert.equal(last.dataset.runPost,runId(5));assert.ok(!last.matches('.run-post-streak'),'one pass after a failure is one message');
   assert.equal(said(last),'Both checks passed this time. Nothing for you to do.');
-  assert.deepEqual(attachments(last),['Open run']);
+  assert.deepEqual(attachments(last),ROW,'no Open run');
 });
 
 test('a message from you ends the fold: the next pass is a new message, which says again',async()=>{
@@ -224,21 +221,16 @@ test('runs sit among the messages in time order, and a reload draws exactly the 
   assert.deepEqual(html(b.d),html(a.d),'the fold too, whatever order the posts came in');
 });
 
-test('Open full report opens the run under History; Ask DGC to fix asks once, in the chat the Pip reports to',async()=>{
+// No Open full report and no Ask DGC to fix on a run's post (24 Nov: "if anything needs fixing, user could just ask the
+// Pip"): History still opens each run.
+test('a run’s post opens nothing and asks nothing; History still opens each run',async()=>{
   const x=setup();await openChat(x);
-  x.click(`[data-post-fix="${R1}"]`);
-  assert.equal(x.asks.length,1);
-  assert.equal(x.asks[0].session,'chat-erp');
-  assert.equal(x.asks[0].report.run_id,R1);assert.equal(x.asks[0].report.outcome,'findings');
-  const fix=x.d.querySelector(`[data-post-fix="${R1}"]`);
-  assert.equal(text(fix),'Asked DGC');assert.equal(fix.disabled,true);
-  fix.disabled=false;fix.click();assert.equal(x.asks.length,1,'never twice');
-  assert.ok(x.persisted().asked.includes(R1),'kept with the view, so a reload says Asked DGC too');
-  x.d.querySelector(`[data-run-post="${R1}"] .run-post-report summary`).click();
-  x.click(`.run-post-report [data-post-open="${R1}"]`);await x.drain();
-  // A Project Pip has the Personal Pips page (24 Oct): History is the page open, named beside the Pip's name.
+  const post=x.d.querySelector(`[data-run-post="${R1}"]`);
+  assert.equal(post.querySelector('[data-post-fix],[data-post-open]'),null);
+  assert.equal(x.asks.length,0);
+  x.click('[data-tab=runs]');await x.drain();
+  x.click(`[data-run="${R1}"]`);await x.drain();
   assert.equal(x.d.querySelector('.simple-content')?.dataset.view,'runs');
-  assert.equal(x.d.querySelector('.pip-topbar .pip-pill small')?.textContent,'History');
   assert.equal(x.requests('get_pip_run').at(-1).request.run_id,R1);
   assert.ok(x.d.querySelector(`[data-run="${R1}"][aria-current=true]`),'that run is the one open');
 });
@@ -260,35 +252,31 @@ test('History says what each run found, and the status under its name goes to th
   const passes=[0,1,2].map(k=>checks(k,NOW-(5-k)*HOUR));
   const y=setup({pipValue:pulse({latest_run:{id:runId(1),status:'succeeded'}}),postsValue:passes,runs:passes.map(p=>run(p.run_id,p.posted_at))});await openChat(y);
   y.click('.pip-topbar button.last-run');await y.drain();
-  assert.equal(y.d.activeElement?.dataset.streakRun,runId(1));
-  assert.equal(y.d.activeElement.closest('details').open,true);
+  assert.equal(y.d.activeElement?.dataset.runPost,runId(2),'the reply that holds it, the newest of the passes');
+  assert.match(y.d.activeElement.dataset.streakIds,new RegExp(runId(1)));
 });
 
-test('a Personal Pip’s scheduled result is its own reply, short, with Show all and Open result',async()=>{
+test('a Personal Pip’s scheduled result is its own reply, whole: a result the post cut is fetched and drawn whole',async()=>{
   const long='Good morning. Weather first: Mumbai is 30° and clearing.\n\n**Today**\n- 10:00 standup\n- 2:00 PM review of the billing fixes\n\n**GST**\n'+'GSTR-1 for September is due in 3 days. Two invoices from the 18th are not uploaded yet. '.repeat(3)+'\n\n**Also**\nYour car insurance renews on the 30th.';
-  const RESULT={...base,run_id:R1,kind:'result',outcome:'result',pip_type:'scout',name:'Morning brief',posted_at:iso(NOW-HOUR),preview:long,truncated:true};
-  const x=setup({workspace:{id:'ws',name:'Personal',kind:'personal'},postsValue:[RESULT],
+  const RESULT={...base,run_id:R1,kind:'result',outcome:'result',pip_type:'scout',name:'Morning brief',posted_at:iso(NOW-HOUR),preview:long.slice(0,120),truncated:true};
+  const x=setup({workspace:{id:'ws',name:'Personal',kind:'personal'},postsValue:[RESULT],runs:[{...run(R1,RESULT.posted_at),manifest:{run_kind:'personal_task',job_version:1,trigger:'schedule'},result:{text:long}}],
     pipValue:pip({pip_type:'scout',name:'Morning brief',source_policy:{mode:'personal'},report_chats:0,report_session:null})});
   await openChat(x);
-  let post=x.d.querySelector(`article.run-post[data-run-post="${R1}"]`);
+  assert.equal(x.requests('get_pip_run').filter(r=>r.request.run_id===R1).length,1,'the whole result is asked for, once');
+  const post=x.d.querySelector(`article.run-post[data-run-post="${R1}"]`);
   assert.ok(post,'its result is in its chat');
-  assert.equal(text(post.querySelector('.run-post-name')),'Morning brief');
-  assert.match(said(post),/^Good morning\. Weather first: Mumbai is 30° and clearing\. Today 10:00 standup 2:00 PM review of the billing fixes ?Show all$/);
+  assert.match(said(post),/^Good morning\. Weather first: Mumbai is 30° and clearing\. Today 10:00 standup 2:00 PM review of the billing fixes GST GSTR-1 .* Your car insurance renews on the 30th\.$/,'all of it');
   assert.ok(post.querySelector('.run-post-body strong'),'its words, as Markdown');
-  assert.deepEqual(attachments(post),['Open result'],'no Ask DGC to fix for a Personal Pip');
-  x.click(`[data-post-more="${R1}"]`);
-  post=x.d.querySelector(`article.run-post[data-run-post="${R1}"]`);
-  assert.match(said(post),/Your car insurance renews on the 30th\. The rest is in the full result\. ?Show less$/);
-  assert.equal(post.querySelector('[data-post-more]').getAttribute('aria-expanded'),'true');
-  x.click(`[data-post-more="${R1}"]`);
-  assert.match(said(x.d.querySelector('article.run-post')),/review of the billing fixes ?Show all$/);
+  assert.deepEqual(attachments(post),ROW,'no Show all, no Open result');
+  x.d.querySelector(`[data-post-copy="${R1}"]`).click();
+  assert.equal(x.sent.filter(m=>m.type==='copy').at(-1).text,long,'Copy has the whole result');
   assert.equal(x.d.querySelector('[data-tab=runs]').textContent,'History','Results became History');
 });
 
 // The routine's turn, exactly as dgc/pip_routines.py writes it (ROUTINE_TURN): the editor finds the routine by it.
 const routineSource=readFileSync(new URL('../../../dgc/pip_routines.py',import.meta.url),'utf8');
 const ROUTINE_TURN=/ROUTINE_TURN = \(((?:\s*"(?:[^"\\]|\\.)*")+)\)/.exec(routineSource)[1].match(/"(?:[^"\\]|\\.)*"/g).map(s=>JSON.parse(s)).join('');
-test('a routine’s reply is the Pip’s own message with its face, name and routine; a long one starts short',async()=>{
+test('a routine’s reply is the Pip’s own message with its face, name and routine, whole, its time in its row',async()=>{
   const turn=ROUTINE_TURN.replace('{title}','Unpaid invoices').replace('{when}','every weekday at 9:30 AM').replace('{prompt}','List unpaid invoices.');
   assert.equal(posts.routineTitle(turn),'Unpaid invoices','the editor reads the routine from DGC’s own turn');
   const reply='Three invoices are still unpaid:\n\n'+Array.from({length:9},(_,i)=>`- Invoice ${i+1}, ₹${(i+1)*1000}, due on the ${i+20}th`).join('\n')+'\n\nWant me to draft a reminder?';
@@ -302,9 +290,10 @@ test('a routine’s reply is the Pip’s own message with its face, name and rou
   assert.equal(text(reply1.querySelector('.run-post-name')),'Morning brief');
   assert.equal(text(reply1.querySelector('.run-post-routine')),'Unpaid invoices');
   assert.ok(reply1.querySelector('.run-post-face .avatar'));
-  assert.doesNotMatch(reply1.textContent,/Want me to draft a reminder/,'a long reply starts short');
-  x.click('[data-post-more="msg_a"]');
-  assert.match(x.d.querySelector('[data-message="msg_a"]').textContent,/Want me to draft a reminder\?/);
+  assert.match(reply1.textContent,/Want me to draft a reminder\?/,'all of it, no Show all');
+  assert.equal(reply1.querySelector('[data-post-more]'),null);
+  assert.ok(reply1.querySelector(':scope > .response-actions time.msg-time'),'its time in the row a reply ends with');
+  assert.equal(reply1.querySelector('.run-post-head time'),null);
   assert.equal(x.d.querySelector('[data-message="msg_r"]'),null,'DGC’s turn stays hidden');
   assert.equal(x.d.querySelector('[data-message="msg_b"] .run-post-head'),null,'a reply you asked for is as it was');
 });
@@ -367,8 +356,8 @@ test('a review kept as its document shows the card Work draws on its post, and t
   assert.equal(card.dataset.tone,'doc');
   assert.equal(text(card.querySelector('.dgc-doc-name')),'ERP daily audit: findings');
   assert.equal(text(card.querySelector('.dgc-doc-meta')),'Document · version 3');
-  assert.ok(card.compareDocumentPosition(x.d.querySelector(`[data-run-post="${R1}"] .run-post-attach`))&x.w.Node.DOCUMENT_POSITION_FOLLOWING,
-    'after the words, before the report and its chips');
+  assert.ok(card.compareDocumentPosition(x.d.querySelector(`[data-run-post="${R1}"] > .response-actions`))&x.w.Node.DOCUMENT_POSITION_FOLLOWING,
+    'after the words, before the row the reply ends with');
   const sheet=x.d.querySelector(`[data-run-post="${R3}"] .dgc-doc-card`);
   assert.equal(text(sheet.querySelector('.dgc-doc-name')),'Sheet','a sheet with no name says what it is');
   assert.equal(sheet.dataset.tone,'sheet');

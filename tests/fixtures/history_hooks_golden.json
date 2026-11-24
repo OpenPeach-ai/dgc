@@ -442,5 +442,7 @@
   }
  ],
  "long_sha256": "3868cf46442655ae58a1fa59e1b2bb12ca609dadec6de2e15346e0cc7565bdfd",
- "long_chars": 943101
+ "long_chars": 943101,
+ "long_cut_turn_sha256": "89882cd7964377a8d3069e66a22c842e33449f1e5aae6d28fe083bd4050eb4a1",
+ "long_cut_turn_chars": 978747
 }

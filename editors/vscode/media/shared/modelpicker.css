@@ -1,7 +1,7 @@
 /* The model picker (media/shared/modelpicker.js): one for Work, ChatDGC and a Pip's chat. Centred over a dim page, as
    the agent map is (the shared dialog's scrim, lift and arrival: media/shared/dialog.css); its rows are the shared
    menu's rows (media/shared/menu.css). In a side bar it fills the width but for 16 px each side; in an editor tab it is
-   a panel 432 px (27 rem) wide. Every control here has the button family's corner (--btn-r): the search field, the rail's
+   a panel 520 px wide. Every control here has the button family's corner (--btn-r): the search field, the rail's
    buttons, the tabs and the thinking levels, which are one segmented control. Nothing is a pill. Tokens from
    media/shared/tokens.css. */
 .dgc-mp-layer {
@@ -12,7 +12,8 @@
   --mp-rail: 44px; container: dgc-mp / inline-size;
   position: relative; box-sizing: border-box; display: flex; flex-direction: column;
   /* One size, whatever a connection lists: looking down the rail never moves the rail under the pointer. */
-  width: min(432px, 100%); height: min(512px, 100%); min-height: 0; padding: 0;      /* (27 rem at the editor's 16 px; a Pips tab's root is 13 px) */
+  /* (520 px, 24 Nov: wide enough for a row's name, its Main or Fallback word and all its marks; was 432) */
+  width: min(520px, 100%); height: min(512px, 100%); min-height: 0; padding: 0;
   border-radius: var(--r-dialog); background: var(--raised, var(--surface2)); color: var(--text);
   font: var(--w-reg) var(--t-base)/1.35 var(--sans); overflow: hidden; outline: 0; text-align: left;
 }
@@ -114,15 +115,24 @@
 .dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row,
 .dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row { padding-right: 8px; }
 /* While its ⋯ shows, the row keeps its capability marks (user test 2: they vanished under the pointer): the row's
-   padding makes the ⋯ its room, and the name is what gives way. */
-.dgc-mp .dgc-mp-row.is-tight .dgc-mp-caps { display: none; }
+   padding makes the ⋯ its room, and the name is what gives way. A row that says Main or Fallback and would cut its name
+   folds its marks into one (is-tight), and gives the name their room only if it is still cut (is-tighter). */
+.dgc-mp .dgc-mp-row.is-tighter .dgc-mp-caps { display: none; }
 .dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row .dgc-mp-check,
 .dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row .dgc-mp-check { margin-left: 28px; }
-/* A narrow list: a row that says Main or Fallback gives its capability marks' room to its name. Narrower (a 220 px
-   side bar): the line under a name is one line, cut with "…". At the side bar's least (170 px): the names alone, a
-   smaller rail, and the rows under the list on as many lines as their words need. */
+/* A narrow list (under 400 px, the side bar and a narrow tab, 24 Nov): every row's marks fold into one small icon in
+   the same column, which says them (its label; pointed at or reached with the keys, the card under its row). A row with
+   one mark shows that mark: it is one icon already. Narrower (a 220 px side bar): the line under a name is one line,
+   cut with "…". At the side bar's least (170 px): the names alone, a smaller rail, and the rows under the list on as
+   many lines as their words need. */
 .dgc-mp-pane { container: dgc-mp-pane / inline-size; }
-@container dgc-mp-pane (max-width: 300px) { .dgc-mp-row:has(.dgc-menu-pill) .dgc-mp-caps { display: none; } }
+.dgc-mp-fold { display: none; align-items: center; }
+@container dgc-mp-pane (max-width: 399px) {
+  .dgc-mp-caps:has(> .dgc-mp-fold) > .dgc-mp-cap { display: none; }
+  .dgc-mp-caps > .dgc-mp-fold { display: inline-flex; }
+}
+.dgc-mp-row.is-tight .dgc-mp-caps:has(> .dgc-mp-fold) > .dgc-mp-cap { display: none; }
+.dgc-mp-row.is-tight .dgc-mp-caps > .dgc-mp-fold { display: inline-flex; }
 @container dgc-mp-pane (max-width: 200px) {
   .dgc-mp .dgc-mp-desc { display: block; white-space: nowrap; text-overflow: ellipsis; }
   .dgc-mp-head { flex-wrap: wrap; row-gap: 0; }
@@ -293,6 +303,25 @@ body.vscode-dark .dgc-menu.dgc-mp, .vscode-dark .dgc-menu.dgc-mp { --mp-frame: c
 .dgc-mp-cap[data-cap="thinks"] { color: var(--accent-text, var(--accent)); }
 .dgc-mp-cap[data-cap="images"] { color: color-mix(in srgb, #1A9E8C 82%, var(--text)); }
 .dgc-mp-cap[data-cap="cloud"] { color: var(--muted-raised, var(--muted)); }
+/* No tools: quiet, in the cloud's grey (an exception said, not a colour of its own); Uses tools (the one-line switch
+   in modelpicker.js) the same. The fold: the frame's own grey, its own 14 px glyph. */
+.dgc-mp-cap:is([data-cap="notools"], [data-cap="tools"]), .dgc-mp-fold { color: var(--muted-raised, var(--muted)); }
+.dgc-mp-fold { padding: 0 5px; }
+.dgc-mp-fold > svg { width: 14px; height: 14px; }
+/* The folded marks shown: a small card under the row (over it at the picker's foot), each mark in its colour beside its
+   words, on the card's solid ground; the button family's corner. It never takes the pointer. */
+.dgc-mp-capsheet {
+  position: absolute; z-index: 4; display: flex; flex-direction: column; gap: 5px; width: max-content; max-width: calc(100% - 12px);
+  padding: 7px 10px 7px 8px; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px); background: var(--mp-card); box-shadow: var(--lift-1, 0 4px 14px rgba(0, 0, 0, .18));
+  color: var(--text-strong); font: var(--w-reg) var(--t-xs, 11px)/1.3 var(--sans); pointer-events: none;
+}
+.dgc-mp-sheet-line { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.dgc-mp-sheet-line > svg { flex: none; width: 14px; height: 14px; color: var(--muted-raised, var(--muted)); }
+.dgc-mp-sheet-line[data-cap="thinks"] > svg { color: var(--accent-text, var(--accent)); }
+.dgc-mp-sheet-line[data-cap="images"] > svg { color: color-mix(in srgb, #1A9E8C 82%, var(--text)); }
+@media (prefers-reduced-motion: no-preference) { .dgc-mp-capsheet:not([hidden]) { animation: dgc-mp-sheet-in .1s ease-out; } }
+@keyframes dgc-mp-sheet-in { from { opacity: 0; } }
+@media (forced-colors: active) { .dgc-mp-capsheet { border-color: CanvasText; } }
 /* Thinking, inside the card: the meter, its name, the level it is at; the levels one segmented control whose chosen
    level is raised. */
 .dgc-mp-think { margin: 4px 0 0; padding: 8px 6px 0; border-top: 1px solid var(--hair); }
@@ -379,7 +408,7 @@ body.vscode-high-contrast .dgc-mp-tabs, body.vscode-high-contrast-light .dgc-mp-
 .dgc-mp-page-words { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .dgc-mp-page-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-semi) var(--t-base)/1.25 var(--sans); color: var(--text-strong); }
 .dgc-mp-page-conn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-reg) var(--t-xs)/1.25 var(--mono, ui-monospace, monospace); letter-spacing: .02em; color: var(--muted-raised, var(--muted)); }
-.dgc-mp-page-body { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 2px 12px 10px; scrollbar-width: thin; }
+.dgc-mp-page-body { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 2px 12px 10px; }
 /* (Each part is a container as Thinking in the card is, so its control folds by its own width the same way.) */
 .dgc-mp-page-part { padding: 12px 0 2px; container: dgc-mp-think / inline-size; }
 .dgc-mp-page-part + .dgc-mp-page-part { margin-top: 10px; border-top: 1px solid var(--hair); }

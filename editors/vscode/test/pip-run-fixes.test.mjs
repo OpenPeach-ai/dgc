@@ -2,8 +2,9 @@
 // Ask DGC to fix for a Pip card, and it gets fixed, the Pips page, for that Pip under chat, its card still gives an
 // option 'Ask DGC to fix'. Should its status also get updated as fixed?" Yes. The fix runs in a Work chat and keeps its
 // record (dgc/pip_fix.py); the run's post reads it with list_pip_run_fixes and says fixing, Fixed, failed or undone, as
-// the Work chat's card does, and a click goes to that card, where Review and Undo are. The state comes from DGC, not
-// from the view: a reload draws the same.
+// the Work chat's card does. Since 24 Nov a run's post is a reply with no chips ("if anything needs fixing, user could
+// just ask the Pip"): no Ask DGC to fix on it, and the fix's state is a line in its words; Review and Undo are on the
+// fix's card in the Work chat. The state comes from DGC, not from the view: a reload draws the same.
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
@@ -64,62 +65,44 @@ function setup({apiVersion=65,fixes=[],state,onOpenFix=true}={}){
 }
 async function openChat(x){await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();}
 const text=el=>el?.textContent.replace(/\s+/g,' ').trim();
-const chips=x=>[...x.d.querySelector(`[data-run-post="${R1}"] .run-post-attach`).children].map(e=>e.matches('details')?text(e.querySelector('summary')):text(e));
-const fixChip=x=>x.d.querySelector(`[data-run-post="${R1}"] .run-post-fix`);
+const fixLine=x=>x.d.querySelector(`[data-run-post="${R1}"] .run-post-body .run-post-fix-line`);
+const noChips=x=>assert.equal(x.d.querySelector(`[data-run-post="${R1}"]`).querySelector('.run-post-attach,.run-post-fix,[data-post-fix],[data-post-fix-open]'),null,'no Ask DGC to fix, no chip');
 
-test('the post follows the fix: Ask DGC to fix, then DGC is fixing this, then Fixed · 3 files, opening the Work chat',async()=>{
+test('the post says what the fix did, in words: DGC is fixing this, then Fixed · 3 files; no Ask DGC to fix',async()=>{
   const x=setup();await openChat(x);
   assert.deepEqual(x.requests('list_pip_run_fixes').map(m=>JSON.parse(JSON.stringify(m.request))).at(-1),{type:'list_pip_run_fixes',pip_id:PIP});
-  assert.deepEqual(chips(x),['Report · 2 findings','Ask DGC to fix']);
-  assert.equal(fixChip(x).dataset.state,'ask');
-  x.click(`[data-post-fix="${R1}"]`);
-  assert.equal(x.asks.length,1);assert.equal(x.asks[0].session,'chat-shop');
-  assert.equal(text(fixChip(x)),'Asking DGC…');assert.equal(fixChip(x).disabled,true,'never asked twice');
-  assert.ok(!(x.persisted()?.asked||[]).includes(R1),'nothing kept with the view: what DGC says is what the post says');
+  noChips(x);
+  assert.equal(fixLine(x),null,'no fix yet: nothing said');
   await x.later([fix({state:'queued'})]);
-  assert.equal(fixChip(x).dataset.state,'fixing');
-  assert.deepEqual(chips(x),['Report · 2 findings','DGC is fixing this']);
-  assert.equal(x.d.querySelector(`[data-post-fix="${R1}"]`),null,'no second Ask while it fixes');
+  assert.equal(text(fixLine(x)),'DGC is fixing this.');assert.equal(fixLine(x).dataset.state,'fixing');
   await x.later([fix({state:'applied',ended_at:NOW/1000+200,files:files(3),undo:{state:'available'},tests:{state:'passed'}})]);
-  assert.equal(fixChip(x).dataset.state,'fixed');
-  assert.deepEqual(chips(x),['Report · 2 findings','Fixed · 3 files']);
-  assert.match(fixChip(x).title,/review or undo it/);
-  x.click(`[data-post-fix-open="${R1}"]`);
-  assert.deepEqual(x.opens,[{session:'chat-shop',run_id:R1}],'to the chat it ran in, where Undo is');
+  assert.equal(text(fixLine(x)),'Fixed · 3 files.');assert.equal(fixLine(x).dataset.state,'fixed');
+  noChips(x);
   await x.later([fix({state:'undone',files:files(3),undo:{state:'done',restored:['billing0.py'],kept:[]}})]);
-  assert.deepEqual(chips(x),['Report · 2 findings','Ask DGC to fix'],'undone: back to Ask DGC to fix');
-  assert.equal(fixChip(x).disabled,false);
+  assert.equal(fixLine(x),null,'undone: nothing left to say');
+  assert.equal(x.asks.length,0);
 });
 
-test('a fix that didn’t finish says so and offers Ask DGC to fix again; held back and nothing to change say so too',async()=>{
+test('a fix that didn’t finish, held back or had nothing to change says so in words',async()=>{
   const x=setup({fixes:[fix({state:'failed',created_at:(NOW+2*HOUR)/1000,ended_at:(NOW+2*HOUR)/1000+90,message:'The fix didn’t finish: the model stopped. Nothing in your project was changed.'})]});
   await openChat(x);
-  assert.deepEqual(chips(x),['Report · 2 findings','The fix didn’t finish','Ask DGC to fix again']);
-  assert.equal(fixChip(x).dataset.state,'failed');
-  assert.match(fixChip(x).title,/the model stopped/);
-  x.click(`[data-post-fix="${R1}"]`);
-  assert.equal(x.asks.length,1);
-  assert.equal(text(x.d.querySelector(`[data-post-fix="${R1}"]`)),'Asking DGC…');
-  await x.later([fix({fix_id:F2,state:'running',created_at:(NOW+3*HOUR)/1000})]);
-  assert.deepEqual(chips(x),['Report · 2 findings','DGC is fixing this'],'the new fix, not the failed one');
+  assert.equal(text(fixLine(x)),'The fix didn’t finish.');assert.equal(fixLine(x).dataset.state,'failed');
+  noChips(x);
   await x.later([fix({fix_id:F2,state:'partial',files:files(2),held:[{path:'billing.py',n:0,why:'you changed the same lines while it worked'}]})]);
-  assert.deepEqual(chips(x),['Report · 2 findings','Fixed 2 files · 1 held back']);
+  assert.equal(text(fixLine(x)),'Fixed 2 files · 1 held back.');
   await x.later([fix({fix_id:F2,state:'unchanged'})]);
-  assert.deepEqual(chips(x),['Report · 2 findings','Nothing to change']);
-  for(const [state,said] of [['stopped','The fix was stopped'],['interrupted','The fix was interrupted'],['not_applied','The fix wasn’t applied']]){
+  assert.equal(text(fixLine(x)),'Nothing to change.');
+  for(const [state,said] of [['stopped','The fix was stopped.'],['interrupted','The fix was interrupted.'],['not_applied','The fix wasn’t applied.']]){
     await x.later([fix({fix_id:F2,state})]);
-    assert.deepEqual(chips(x),['Report · 2 findings',said,'Ask DGC to fix again'],state);
+    assert.equal(text(fixLine(x)),said,state);
   }
 });
 
-test('a reloaded page draws Fixed from DGC alone; a page with no way to the Work chat says it without a link',async()=>{
+test('a reloaded page says Fixed from DGC alone',async()=>{
   const done=fix({state:'applied',files:files(1),undo:{state:'available'}});
   const x=setup({fixes:[done],state:undefined});await openChat(x);
-  assert.deepEqual(chips(x),['Report · 2 findings','Fixed · 1 file']);
-  const plain=setup({fixes:[done],onOpenFix:false});await openChat(plain);
-  assert.equal(fixChip(plain).tagName,'SPAN','said, not a button that goes nowhere');
-  assert.equal(text(fixChip(plain)),'Fixed · 1 file');
-  assert.equal(plain.d.querySelector(`[data-post-fix-open="${R1}"]`),null);
+  assert.equal(text(fixLine(x)),'Fixed · 1 file.');
+  noChips(x);
 });
 
 test('only runs with something to fix are asked about, and a fix this editor can’t read is left out',async()=>{
@@ -129,15 +112,14 @@ test('only runs with something to fix are asked about, and a fix this editor can
   assert.throws(()=>posts.runFixesPage({pip_id:'pip_other',workspace_id:'ws',fixes:[]},PIP,'ws'));
   assert.deepEqual(posts.fixWords(fix({state:'applied',files:files(3)})),{state:'fixed',text:'Fixed · 3 files',title:'DGC fixed this. Open the Work session it ran in to review or undo it.'});
   const x=setup();await openChat(x);
-  assert.equal(x.d.querySelector(`[data-run-post="${R2}"] .run-post-fix`),null,'an all-clear run has nothing to fix');
+  assert.equal(x.d.querySelector(`[data-run-post="${R2}"] .run-post-fix-line`),null,'an all-clear run has nothing to fix');
 });
 
-test('before Pips API 65 nothing is asked: Asked DGC, kept with the view, as before',async()=>{
+test('before Pips API 65 nothing is asked about fixes, and there is nothing to ask DGC from',async()=>{
   const x=setup({apiVersion:64});await openChat(x);
   assert.equal(x.requests('list_pip_run_fixes').length,0);
-  x.click(`[data-post-fix="${R1}"]`);
-  assert.equal(text(fixChip(x)),'Asked DGC');assert.equal(fixChip(x).disabled,true);
-  assert.ok(x.persisted().asked.includes(R1));
+  noChips(x);
+  assert.equal(fixLine(x),null);
 });
 
 test('the host refuses list_pip_run_fixes from a CLI older than API 65',()=>{

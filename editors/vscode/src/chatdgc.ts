@@ -91,6 +91,9 @@ export interface ChatDGCHost {
    *  has no ChatDGC. */
   chatdgcSend(cmd: Record<string, unknown>): "sent" | "starting" | "old_cli";
   chatdgcModels(providerId?: string): Promise<{ ids: string[]; current: string; providerId?: string; defaultId?: string; profiles?: any[]; noProvider?: boolean; listError?: string; cli?: { versions: Record<string, string>; fixed: string[] }; host?: { name: string; mark: string; badge: string } }>;
+  /** What a connection's provider says each of its models can do ("" the host DGC is on): {model: {thinks, images,
+   *  tools}}, names only (src/modelcaps.ts). */
+  chatdgcModelCaps?(providerId: string): Promise<Record<string, { thinks?: boolean; images?: boolean; tools?: boolean }>>;
   /** A file link in a reply: in the chat's own folder, else the window's. */
   chatdgcOpenFile?(path: string, line?: number, endLine?: number, folder?: string): Promise<void>;
   /** Resolve a saved native provider just before a model turn; its key never enters chat storage. */
@@ -3283,6 +3286,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       this.post(tab, { type: "models", ids, current, ...(noProvider === true ? { noProvider: true } : {}), ...(listError ? { listError: true } : {}),
                        ...(profiles ? { profiles } : {}), ...(defaultId ? { defaultId } : {}),
                        ...(selected ? { providerId: selected } : {}), ...(cli ? { cli } : {}), ...(host ? { host } : {}) });
+      // What its provider says each of these models can do: the picker's marks, as a message of its own (24 Nov).
+      if (!noProvider && this.host.chatdgcModelCaps) {
+        const id = selected || "", caps = await this.host.chatdgcModelCaps(id).catch(() => ({}));
+        if (Object.keys(caps).length) this.post(tab, { type: "modelCaps", id, caps });
+      }
     } catch (err: any) {
       this.post(tab, { type: "models", ids: [], current: "", error: String(err?.message || err || "") });
     }

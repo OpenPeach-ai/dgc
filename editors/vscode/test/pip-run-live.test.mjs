@@ -121,7 +121,8 @@ test('▶ Run now: one live post from the start, with what it is doing, then the
   assert.equal(posts.length,1,'one item for the run, never two');
   assert.equal(items(x.d).at(-1),posts[0],'in the same place, at the end');
   assert.match(text(posts[0].querySelector('.run-post-body')),/2 issues|two issues|issues/);
-  assert.ok(posts[0].querySelector('.run-post-head time.msg-time'),'its time where the clock was');
+  assert.ok(posts[0].querySelector('.run-post-head .run-post-name'),'its face and name where they were');
+  assert.ok(posts[0].querySelector(':scope > .response-actions time.msg-time'),'its time, in the row a reply ends with');
 });
 
 test('Stop stops the run; a run you stop posts nothing, and the chat says so',async()=>{

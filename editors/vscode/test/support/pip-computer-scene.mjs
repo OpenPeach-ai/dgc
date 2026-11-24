@@ -88,8 +88,8 @@ function host(PIP, scene) {
 const b64 = (bytes) => Buffer.from(bytes).toString("base64");
 /**
  * Open the tab. `opts`: width, height, theme ("dark" | "light"), api, using (a Pip run has the keyboard), screen and
- * screens (what get_pip_computer says; screens: null for a DGC that says neither), actions (its held submits) and
- * motion ("reduce", the default, or "no-preference").
+ * screens (what get_pip_computer says; screens: null for a DGC that says neither), actions (its held submits),
+ * motion ("reduce", the default, or "no-preference") and init (a script the page runs first).
  * Returns the page `p`; `rfb()`, the fake server the screen is on now, and `servers`, every one it has been on;
  * `cut(text)`, the computer copying text; `scene(patch)` to change what DGC says; `errors`; `close()`.
  */
@@ -102,6 +102,7 @@ export async function openComputer(browser, opts = {}) {
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, colorScheme: theme, hasTouch: !!opts.touch });   // (opts.touch: a finger, no pointer)
   const p = await context.newPage();
   if (opts.now !== undefined) await p.clock.setFixedTime(opts.now);     // (opts.now: the page's clock, timers still run)
+  if (opts.init) await p.addInitScript(opts.init);                      // (opts.init: a script run first: a stand-in viewer)
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e)));
   p.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });

@@ -10635,8 +10635,9 @@ class Agent(GoalLifecycle):
                     if cached:
                         out += ("\n\nThe result you already received, repeated once so you have "
                                 f"it:\n{cached[:_LOOP_REPLAY_CHARS]}")
-                    self.ui.info(f"↻ loop guard: blocked a repeated {call.name} call"
-                                 + (" and returned its earlier result" if cached else ""))
+                    # (In plain words: the chat showed "loop guard: blocked a repeated edit_artifact call", 24 Nov.)
+                    self.ui.info("↻ Skipped a step repeated with the same inputs"
+                                 + (", and reused its earlier result" if cached else ""))
                 else:
                     if call_index in parallel_tasks:
                         task_outcome = parallel_tasks[call_index]

@@ -116,9 +116,14 @@ test('when it ends: the Pip\'s words from its check, the finished row, then the 
  assert.ok(card,'Work\'s changed-files card');
  assert.equal(card.querySelector('.pip-change-title').textContent,'Edited 2 files');
  assert.equal(x.squash(card.querySelector('.pip-change-totals').textContent),'+15 −5');
- assert.deepEqual([...card.querySelectorAll('.pip-change-actions > button')].map(b=>b.getAttribute('aria-label')||b.textContent.trim()),['More','Hide the files','Review','Apply']);
+ assert.deepEqual([...card.querySelectorAll('.pip-change-actions > button')].map(b=>b.getAttribute('aria-label')||b.textContent.trim()),['More','Show the files','Review','Apply']);
  assert.ok(card.querySelector('[data-project-apply]').classList.contains('primary'));
+ // Its files start folded, as Work's Edited card's do (asked 24 Nov); its chevron opens them.
+ assert.equal(card.querySelector('.pip-project-files').hidden,true,'folded to start');
+ card.querySelector('[data-change-fold]').click();await x.drain();
+ assert.equal(x.$('.pip-change .pip-project-files').hidden,false);
  assert.equal(x.$$('.pip-change .pip-project-file').length,2,'its files, each opening its diff');
+ assert.equal(x.$('.pip-change [data-change-fold]').getAttribute('aria-label'),'Hide the files');
  card.querySelector('[data-change-menu]').click();await x.drain();
  const menu=x.$('.pip-change .pip-change-menu [role="menuitem"]');
  assert.equal(x.squash(menu.textContent),'Discard');

@@ -126,12 +126,13 @@ test('a Project Pip’s chat draws the Personal Pip’s pieces: the Pip at work,
   assert.ok(x.$('.pip-conversation.chat-style .composer-hint'),'the source line is kept for a screen reader, hidden as the Personal box hides it');
 });
 
-test('what only a Project Pip has sits in the same chat: its run with Ask DGC to fix',async()=>{
+test('what only a Project Pip has sits in the same chat: its run, a reply like any other',async()=>{
   const x=setup();await x.drain();await x.open('project',AUDIT);
   const post=x.$(`.chat-style .conversation-log [data-run-post="${POST}"]`);
   assert.ok(post,'the run is a message in the same chat');
   assert.ok(post.querySelector('.run-post-head .avatar'),'from the Pip, with its face');
-  assert.equal(text(post.querySelector(`[data-post-fix="${POST}"]`)),'Ask DGC to fix');
+  assert.equal(post.querySelector('[data-post-fix],.run-post-attach'),null,'no Ask DGC to fix: you ask the Pip (24 Nov)');
+  assert.ok(x.$(`article[data-run-post="${POST}"] > .response-actions [data-post-copy]`),'the row a reply ends with');
   x.$('#chat-permissions').click();await x.drain();
   assert.match(text(x.d.querySelector('[role=dialog], .review, #review-root')),/reads the committed code of this project, and only reads/,'which code it reads is one click away');
 });

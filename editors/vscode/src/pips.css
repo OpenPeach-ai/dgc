@@ -488,9 +488,10 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 /* A Personal Pip's page: its face and name, then Info · Links · Media · Files. */
 .simple-home-actions{display:inline-flex;align-items:center;gap:8px}
 .pip-page{display:flex;flex-direction:column;gap:14px;max-width:560px;margin:0 auto;width:100%}
-.pip-page-head{position:relative;display:flex;justify-content:center;padding:6px 0 0}
+/* Its face, and Edit for it under the face, centred: never on top of it (it sat over the face's lower right, 24 Nov). */
+.pip-page-head{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px 0 0}
 .pip-page-head .avatar{width:112px;height:108px}
-.pip-face-edit{position:absolute;left:calc(50% + 34px);bottom:2px;display:inline-flex;align-items:center;gap:4px;min-height:26px;padding:2px 10px;border-radius: var(--btn-r, 6px);border:1px solid var(--pip-edge);background:var(--vscode-editor-background);color:var(--vscode-foreground);font-size:11px}
+.pip-face-edit{position:static;display:inline-flex;align-items:center;gap:4px;min-height:26px;padding:2px 10px;border-radius: var(--btn-r, 6px);border:1px solid var(--pip-edge);background:var(--vscode-editor-background);color:var(--vscode-foreground);font-size:11px}
 .pip-face-edit:hover{background:var(--pip-wash)}
 .pip-name-form{display:grid;gap:4px;justify-items:center;text-align:center}
 .pip-name-form input{border:1px solid transparent;background:transparent;text-align:center;border-radius:10px;padding:4px 10px;max-width:360px}
@@ -649,7 +650,7 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 
 .tabs-menu .danger-text{color:var(--vscode-errorForeground)}
 .settings-pill{padding:6px 16px}
-@container(max-width:420px){.pip-face-edit{left:calc(50% + 26px)}.pip-page-head .avatar{width:96px;height:92px}.shared-when{display:none}}
+@container(max-width:420px){.pip-page-head .avatar{width:96px;height:92px}.shared-when{display:none}}
 
 
 .pip-menu .tabs-menu button.danger-text{color:var(--vscode-errorForeground)}
@@ -1712,7 +1713,9 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
    the dock's strip over its foot, and the page scrolls under both. The side bar says how tall each is (--glass-top,
    --glass-bottom, inherited through the shadow root); the page keeps that room, and a row that takes focus under a bar
    scrolls clear of it with room for its focus ring (--glass-clear-*). All are 0 inside a Pip, and in a Pips tab, which has neither bar. */
-.pip-app-root{padding-top:var(--glass-top,0px);padding-bottom:var(--glass-bottom,0px);scroll-padding-block:var(--glass-clear-top,0px) var(--glass-clear-bottom,0px)}
+/* (border-box: the bars' room is inside its 100% height. Outside it, the page stood that much taller than the side bar's
+   Pips area, which then scrolled by code and slid a Pip's top bar under the logo line, 24 Nov.) */
+.pip-app-root{box-sizing:border-box;padding-top:var(--glass-top,0px);padding-bottom:var(--glass-bottom,0px);scroll-padding-block:var(--glass-clear-top,0px) var(--glass-clear-bottom,0px)}
 /* Apps it can use (pips-09): one row an app with its switch; its addresses under it, each a short row with Disconnect,
    then "Add another address". An app switched off reads muted (its name and its addresses); its switch stays as clear. */
 .pip-apps-list>.pip-app>.pip-app-addresses{border-top:1px solid var(--pip-edge)}
@@ -2091,7 +2094,6 @@ body.vscode-light .error,body.vscode-high-contrast-light .error,:host-context(bo
  .routine-open>:first-child:not(.routine-words){display:none}
  .routine-words strong{overflow-wrap:break-word}
  .routine-row>.switch,.routine-row>label.switch,.routine-row>button[role=switch]{margin:0 0 8px 10px}
- .pip-face-edit{left:50%;transform:translateX(-50%);bottom:-14px}
  .pip-composer .composer-controls{gap:2px;padding-left:6px;padding-right:6px}
  .pip-page-body .link,.pip-page-group>button.link{white-space:normal;height:auto;text-align:left}
 }

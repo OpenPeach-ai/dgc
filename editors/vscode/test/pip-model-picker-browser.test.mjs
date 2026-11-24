@@ -5,7 +5,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { GST, openOnePips } from "./support/one-pips-scene.mjs";
-import { PIP_CATALOG, PIP_MODELS } from "./support/model-menu-scene.mjs";
+import { PIP_CATALOG, PIP_CLOUD, PIP_MODELS } from "./support/model-menu-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -37,9 +37,10 @@ const pressStop = async (x, level) => {
   await x.page.mouse.click(at.x, at.y);
 };
 
-test("in the side bar it covers the view with 16 px each side; in a Pips tab it is a 27 rem panel; its glyphs are inline drawings", async (t) => {
+test("in the side bar it covers the view with 16 px each side; in a Pips tab it is a 520 px panel; its glyphs are inline drawings", async (t) => {
   if (skipOrFail(t)) return;
-  for (const [width, where, wide] of [[300, "side", 268], [440, "side", 408], [700, "tab", 432], [1100, "tab", 432]]) {
+  // (520 px, 24 Nov: wide enough for a name, its Main or Fallback word and all its marks; it was 432.)
+  for (const [width, where, wide] of [[300, "side", 268], [440, "side", 408], [700, "tab", 520], [1100, "tab", 520]]) {
     const x = await open({ width, where });
     try {
       const facts = await x.inPips((root) => { const d = root.querySelector(".dgc-mp").getBoundingClientRect(), l = root.querySelector(".dgc-mp-layer").getBoundingClientRect(), box = root.querySelector(".dgc-mp");
@@ -143,6 +144,30 @@ test("with motion on it arrives once and stays through the page's redraws; Think
     // A click on the dim layer closes it.
     await x.page.mouse.click(6, 6); await x.page.waitForTimeout(120);
     assert.equal(await x.inPips((root) => !!root.querySelector(".dgc-mp-layer")), false);
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+});
+
+// 24 Nov: what each provider says its models can do comes from the Pips view's host (pipModelCaps, by the page's own
+// name for the connection): the rows take those marks over their names' guesses; at 300 px a row's marks fold into
+// one icon whose label says them.
+test("pipModelCaps: a Pip's picker shows what the provider says, on the host's list and on a saved provider's", async (t) => {
+  if (skipOrFail(t)) return;
+  const x = await open();
+  try {
+    const rows = () => x.inPips((root) => Object.fromEntries([...root.querySelectorAll(".dgc-mp-list .dgc-mp-row")].map((r) => [r.querySelector(".dgc-mp-name").textContent,
+      { marks: [...r.querySelectorAll(".dgc-mp-cap")].map((c) => c.dataset.cap), fold: r.querySelector(".dgc-mp-fold")?.checkVisibility() ? r.querySelector(".dgc-mp-fold").getAttribute("aria-label") : "" }])));
+    assert.deepEqual((await rows())["m"].marks, [], "premise: its name earns nothing");
+    await x.send({ type: "pipModelCaps", id: "connection", caps: { m: { thinks: false, images: true, tools: false }, "qwen3-coder:480b": { thinks: true, images: false, tools: true } } });
+    await x.send({ type: "pipModelCaps", id: `provider:${PIP_CLOUD}`, caps: { "kimi-k3:cloud": { thinks: true, images: true, tools: true } } });
+    await x.page.waitForTimeout(150);
+    const home = await rows();
+    assert.deepEqual(home["m"], { marks: ["images", "notools"], fold: "Takes images, No tools" }, "it sees images and has no tools: one icon at 300 px that says both");
+    assert.deepEqual(home["qwen3-coder:480b"].marks, ["thinks"]);
+    assert.deepEqual(home["glm-5.3:cloud"].marks, ["cloud", "thinks"], "nothing said of it: its name's guess");
+    await x.click(`.dgc-mp-conn[data-rail="provider:${PIP_CLOUD}"]`);
+    await x.page.waitForTimeout(150);
+    assert.deepEqual((await rows())["kimi-k3:cloud"].marks, ["thinks", "images"], "the saved provider's own map");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });

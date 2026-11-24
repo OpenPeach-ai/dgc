@@ -25,9 +25,9 @@ It can also hand each turn to a coding subscription you already pay for (Claude 
 
 Pure Python 3.10+, five dependencies (`rich`, `prompt_toolkit`, `requests`, `ddgs` for web search, `pypdf` for reading PDFs). With a local model and local-only integrations, prompts and selected code can stay on your machine; cloud models and remote integrations receive the context or requests you direct to them. A configured language server receives workspace metadata and full text for documents queried through code intelligence.
 
-![DGC docked in your editor — VS Code and Cursor](docs/screenshot.png)
+![A Work session in VS Code: the side bar with Home, Work, Chat, Library and Pips, and one turn's sheet, document, slides, page and dashboard](docs/editor-work.webp)
 
-<sub>The same agent and local models inside a native editor side panel — streaming tool cards, inline diffs, session resume. Named specialists (explorer, researcher, critic) land as coloured chips you can open; a background task can finish after the turn ends and wake the chat, which shows its report as one quiet line that opens to all of it. Installs alongside the CLI ([VS Code · Cursor](https://vibedgc.com/vscode/)).</sub>
+<sub>The same agent inside your editor's side bar. One prompt made a sheet, a document, slides, a page and a dashboard, each opening in its own editor; the Edited card keeps its count and Undo in sight. Installs alongside the CLI ([VS Code · Cursor](https://vibedgc.com/vscode/)).</sub>
 
 ## Install
 
@@ -51,17 +51,61 @@ dgc           # start the interactive agent
 
 <sub>Prefer to do it by hand? See [Manual install](#manual-install). Want your own coding agent to set it up? See [Let your agent install it](#let-your-agent-install-it).</sub>
 
-## In your editor: Work, Chat and Pips
+## In your editor: Home, Work, Chat, Library and Pips
 
-The VS Code and Cursor extension keeps three things side by side in the DGC side bar.
+The VS Code and Cursor extension keeps everything in one side bar, with a dock at its foot for the sessions, chats, Pips
+and folders you pin.
 
-- **Work** — DGC's coding sessions: the same agent as the terminal, with structured tools, readable diffs, plan review and goals. A session keeps running through a window reload; `dgc ps` and **Settings → Running sessions** show what is running.
-- **ChatDGC — a chat for everything else.** Ask anything that isn't code. It looks things up and cites every page, researches in depth, reads your files and draws the charts. Your own model answers, and your chats stay on your computer. Deep research with a plan you can edit, Study mode, interactive answers (a calculator, converter, timer or quiz that opens in a locked-down tab beside the chat), a canvas, projects and a Library, the plugins you turned on, and your voice: dictation, read aloud and voice mode, on speech models that run on your computer. [vibedgc.com/chatdgc](https://vibedgc.com/chatdgc) · [guide](docs/CHATDGC.md)
-- **DGC Pips — for the work you come back to.** Give recurring reviews, focused fixes, test runs and the errands of your day a home of their own. Your Pips keep their own conversations, work with the models you choose, and bring decisions back to you; each run is a message from the Pip in its own chat. **Ask DGC to fix** on a Pip's report starts a helper in your chat's session without starting a turn, in one fix copy DGC keeps for the project, so you keep chatting: the report card is its live status (Watch, Stop, and any question asked right on the card), and when it's done the card says what changed and whether the tests ran in the fix copy, with Review and Undo. **A Pulse that watches live data** runs up to six exact read-only commands you approve (a query, a disk check, a health URL): only those lines ever run, in a read-only box, so nothing it runs can change anything, and its model writes a short summary whose numbers must come from what they print. It runs on Linux with bubblewrap, on a Mac under Seatbelt (a little weaker, as its card says), and in WSL 2 on Windows. A Personal Pip has a computer of its own (the whole desktop on Linux), asks as much as you set (**Ask me first**, **Approve for me** or **Do it all**, right in its prompt box; a payment always asks), signs in with logins you saved, can borrow your signed-in Chrome for one task when you allow it, and can think with the Claude Code or Codex you are signed in to. Pips run on Linux, macOS and Windows (DGC inside WSL 2), in the CLI (`dgc pips`), the extension and the SDK. [vibedgc.com/pips](https://vibedgc.com/pips) · [guide](docs/PIPS.md)
+- **Home** — cards you arrange: what needs you (answer some right on the card), what is new, what is running, your token
+  use, quick starts, notes (lock one with a PIN), a clock and the weather.
+- **Work** — DGC's coding sessions: the same agent as the terminal, with structured tools, readable diffs and an
+  Edited card with Undo. **Goals**: type `/goal fix the flaky tests` and DGC works until it's done, checking in when it
+  runs long. **Steps** tick off as a turn works, and "make a checklist for X and work through it" keeps a checklist you
+  can see, with proof for each item. **Plan mode** asks what it needs on a question card, then shows the plan for you to
+  approve in plain words. **Auto mode** runs routine steps and stops a risky one (outside the project, credentials,
+  deleting, sending data out, system changes, publishing) and says why; what you asked for in so many words goes ahead.
+  **Helpers** work beside the session on a model of your choice, and the agent map shows them all. A session keeps
+  running through a window reload; archive the ones you're done with.
+- **ChatDGC — a chat for everything else.** Ask anything that isn't code. It looks things up and cites every page,
+  researches in depth, reads your files and draws the charts. Your own model answers, and your chats stay on your
+  computer. Spaces, incognito chats, Study mode, interactive answers, the plugins you turned on, and your voice.
+  [vibedgc.com/chatdgc](https://vibedgc.com/chatdgc) · [guide](docs/CHATDGC.md)
+- **Library** — every document, deck, sheet, page, dashboard, checklist and design DGC made, and the pictures, videos
+  and files you kept, with search, filters and favorites.
+- **DGC Pips — for the work you come back to.** One kind of Pip: each has its own chat, its own computer (a real
+  desktop with a browser, files and a terminal), and with a folder, its own copy of that folder, so nothing in your
+  project changes until you apply its change. Choose how much it asks: **Ask me first**, **Approve for me** or **Do it
+  all**; a payment stays inside the daily dollar limit you set. Give it routines, give it a folder later, or none.
+  A Pip can hand a fix to a sub-agent (one with Work's tools when the fix needs your real folder), check the work and
+  tell you when it's done. `@Tile checker check the tax rounding` from any chat hands a Pip the job, and its answer
+  comes back where you asked. Pips run on Linux, macOS and Windows (DGC inside WSL 2), in the CLI (`dgc pips`), the
+  extension and the SDK. [vibedgc.com/pips](https://vibedgc.com/pips) · [guide](docs/PIPS.md)
+- **Your Browser** — one Chrome, signed in as you, in its own walled profile, from the dock. Your Pips use it for the
+  sites you allow ("Let Scout use this site?"); you can watch the tab they work in. Over Remote-SSH it streams into an
+  editor tab, sharp and one to one.
 
-**In all three:** type `@` to name a plugin, an Output, a Pip or a file (each box lists what it can use). Alt+Enter keeps a later message above the box, where you can drag it, steer it in or remove it. **Trace** beside a finished answer replays what it did, with each model round's tokens and each tool's time. A paste comes through clean, with invisible characters removed and its lists and indentation kept. The model button lists the providers saved in **Settings → Models**: you need only one, and a signed-in Claude Code or Codex alone runs Work, ChatDGC and Personal Pips. Each chat keeps its own choice after a reload.
+![A Pip's chat: Tile checker answers questions about its folder, with Needs you and Your Pips in the side bar](docs/pip-chat.webp)
 
-Pips can work together: a **Workflow** passes an exact result through two to four Pips, asking at each handoff or within a route you reviewed. Core, your first Personal Pip, can propose up to three new Pips, and each waits for your Create Pip. New Personal Pips start at Ask.
+<sub>A Pip's chat. Tile checker works in its own copy of the project; what waits on you shows above its chat and under Needs you.</sub>
+
+**What DGC makes, you can keep and change.** A document, slides, a sheet, a page, a dashboard over data you allow (it
+refreshes when the data changes), a checklist, or a **design**: ask for "a landing page for my bakery, desktop and
+phone" and DGC draws each artboard on a canvas while you watch; pick a part to change it, play it as a prototype,
+download it. Every version is kept, with Compare. **Comment** on any of them: select a sentence, a cell or a part of a
+design and ask DGC to change it, or accept its suggestion.
+
+![A design on the canvas: a bakery's landing page drawn as a desktop and a phone artboard beside the Work chat](docs/design-canvas.webp)
+
+<sub>"Design a landing page for a bakery, desktop and phone": both artboards on the canvas beside the chat.</sub>
+
+**In all of them:** type `@` to name a plugin, an Output, a Pip or a file. One model picker, with a fallback model for
+when yours can't answer and a separate model for helpers, shows what each model can do. Alt+Enter keeps a later message
+above the box, where you can drag it, steer it in or remove it. **Trace** beside a finished answer replays what it did.
+Point at a link for a preview. Pictures open in the chat, download to your computer and save to the Library. You need
+only one provider: a signed-in Claude Code or Codex alone runs Work, ChatDGC and your Pips.
+
+Pips can work together: a **Workflow** passes an exact result through two to four Pips, asking at each handoff or within
+a route you reviewed. Core, your first Pip, can propose new Pips, and each waits for your Create.
 
 ## Plugins, apps and MCP
 

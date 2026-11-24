@@ -748,6 +748,20 @@ export class PipsEditor implements vscode.Disposable {
    *  by the panel, which knows a saved provider's address and key; 0 when it can't say. */
   private modelWindow?: (choice: { mode: 'model' | 'provider'; model: string; provider?: string }) => Promise<number>;
   useModelWindow(ask: (choice: { mode: 'model' | 'provider'; model: string; provider?: string }) => Promise<number>): void { this.modelWindow = ask; }
+  /** What each connection's provider says its models can do (src/modelcaps.ts, through the panel), by the Pips page's
+   *  own name for it ("connection", "provider:<id>"): the model picker's marks. Names and abilities only. */
+  private modelCaps?: () => Promise<{ id: string; caps: Record<string, unknown> }[]>;
+  useModelCaps(ask: () => Promise<{ id: string; caps: Record<string, unknown> }[]>): void { this.modelCaps = ask; }
+  /** After a list of models has gone to a page: each connection's marks, one pipModelCaps message each (never a field
+   *  on the Pips' own answer). */
+  private async sayModelCaps(surface: string | undefined): Promise<void> {
+    if (!this.modelCaps) return;
+    let said: { id: string; caps: Record<string, unknown> }[] = [];
+    try { said = await this.modelCaps(); } catch { return; }
+    for (const row of Array.isArray(said) ? said : []) {
+      if (row && typeof row.id === 'string' && row.caps && typeof row.caps === 'object') this.post({ type: 'pipModelCaps', id: row.id, caps: row.caps }, surface);
+    }
+  }
   useSavedProviders(list: () => Promise<unknown[]>, save: (id: string, model: string) => Promise<void>, none: () => boolean = () => false, host: () => unknown = () => undefined): void { this.savedProviders = { list, save, none, host }; }
   /** ChatGPT · your plan and the usage meter in a Pip's chat (0.52), the panel's: the plan's sign-in state when no saved
    *  provider is the plan (`offer`, "" for none: the picker then offers Connect); Connect and Cancel from the picker
@@ -1111,7 +1125,17 @@ export class PipsEditor implements vscode.Disposable {
     if (message?.type === 'yourBrowserScreen') {
       // Your own tab's viewer: its screen's bytes in base64, from your own tab only (a Pip's tab never has one).
       const refused = yourBrowserScreenRefusal(message, !tab.pip);
-      if (refused || !this.browserScreen || !this.state.connected || !this.state.supported || !this.state.enabled) return;
+      if (refused) return;
+      if (!this.browserScreen || !this.state.connected || !this.state.supported || !this.state.enabled) {
+        // Answered, never dropped: the tab tries again a few times, then says why. Dropped, it waited on "Opening Your
+        // Browser…" for ever (25 Nov, Cursor over Remote-SSH).
+        if (message.op === 'open') {
+          const reason = !this.browserScreen ? 'This DGC can’t show Your Browser’s screen. Update DGC.'
+            : !this.state.connected ? 'DGC is still connecting.' : 'Pips aren’t on, and Your Browser needs them.';
+          this.post({ type: 'yourBrowserScreenClosed', reason, pictures: false }, surface);
+        }
+        return;
+      }
       this.send({ type: 'your_browser_screen', op: message.op, ...(message.op === 'send' ? { data: message.data } : {}) }, this.backendIdentity);
       return;
     }
@@ -1485,9 +1509,12 @@ export class PipsEditor implements vscode.Disposable {
     }
     if (owner.command === 'list_pip_models' && event.type === 'pips_result' && event.ok === true && this.savedProviders) {
       void Promise.all([this.savedProviders.list().catch(() => [] as unknown[]), this.planHooks?.offer().catch(() => '') ?? Promise.resolve('')]).then(([providers, planOffer]) =>
-        this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { ...event.result, providers, ...(planOffer ? { plan_offer: planOffer } : {}), ...(this.savedProviders?.host() ? { host: this.savedProviders.host() } : {}), ...(this.savedProviders?.none() ? { no_provider: true } : {}) } }, owner.surface));
+        this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { ...event.result, providers, ...(planOffer ? { plan_offer: planOffer } : {}), ...(this.savedProviders?.host() ? { host: this.savedProviders.host() } : {}), ...(this.savedProviders?.none() ? { no_provider: true } : {}) } }, owner.surface))
+        .then(() => this.sayModelCaps(owner.surface));
       return true;
     }
+    // (Without saved providers the list's answer goes on as it is, below: the marks follow it.)
+    if (owner.command === 'list_pip_models' && event.type === 'pips_result' && event.ok === true && this.modelCaps) void Promise.resolve().then(() => this.sayModelCaps(owner.surface));
     if (event.type === 'pips_status') this.state.enabled = event.enabled === true;
     if (owner.newsDismiss && event.type === 'pips_result' && event.ok === true) {
       this.newsDismissed?.(owner.newsDismiss.pipIds, owner.newsDismiss.until);

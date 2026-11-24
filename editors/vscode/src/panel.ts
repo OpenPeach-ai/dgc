@@ -33,11 +33,13 @@ import { imagesCommand, MAX_WORKFLOW_CHARS } from "./imagesCommands";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
 import { PipsEditor, openEngineSignIn, workSessionTitles, type ChatConversation, type ChatPip, type ProjectWork, type WorkSessionTitle } from "./pipsView";
 import { sameHost } from "./endpointmodels";
+import { modelCaps as sharedModelCaps, type CapsMap } from "./modelcaps";
 import { mcpAppsHost } from "./mcpApps";
 import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from "./pluginLogos";
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
+import { dismissedNotesMessage, rememberDismissedNote } from "./dismissedNotes";
 import { dockOf, dockSettings, setDockSetting } from "./dock";
 import { homeCardsOf, usageForHome } from "./homeCards";
 import { folderLabel, folderRows, foldersOffered, fullFolder, homeAsTilde, keepProjectFolder, projectFolder, type FolderRow } from "./projectFolder";
@@ -1212,6 +1214,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       videosLibrary: (cmd) => this.videosLibrary(cmd),
       mcpAppsOffered: () => this.mcpAppsSupported,
       chatdgcModels: (providerId) => this.chatdgcModels(providerId),
+      chatdgcModelCaps: (providerId) => this.chatdgcModelCaps(providerId),
       usageFor: (model, fresh) => this.chatdgcUsage(model, fresh === true) as Promise<any>,
       openUsagePage: (source, page) => this.openUsagePage(source, page),
       watchUsage: (changed) => DgcViewProvider.usageLimits.watch(changed),
@@ -1496,6 +1499,51 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (ev.error !== "a newer request replaced this one" || attempt >= 8) return ev;
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
+  }
+
+  /** What a provider says each of its models can do (src/modelcaps.ts): one reader for every page with a picker, so a
+   *  host is read once. (A field, so a test can stand another in.) */
+  modelCaps: { get(from: { base_url: string; api_key?: string; name?: string }): Promise<CapsMap> } = sharedModelCaps;
+
+  /** What a connection's provider says of its models, for a model picker: "" (or "native") is the host DGC is on, a
+   *  saved provider is named by its id; a subscription app lists names only. Names and abilities only: no address and no
+   *  key leaves here. Never throws: a host that can't be read says nothing, and the picker keeps its guesses. */
+  private async connectionCaps(id: string): Promise<CapsMap> {
+    try {
+      if (!id || id === "native") {
+        const base = String(this.state.baseUrl || "");
+        if (!base || this.noProvider()) return {};
+        const name = Object.values(PROVIDERS).find(p => sameHost(p.url, base))?.label || "";
+        return await this.modelCaps.get({ base_url: base, api_key: await this.mainKeyFor(base), name });
+      }
+      if (!id.startsWith("provider_")) return {};
+      const { route, api_key } = await profileCredential(this.context, id);
+      if (route.kind === "subscription" || !route.base_url) return {};
+      return await this.modelCaps.get({ base_url: String(route.base_url), api_key, name: String(route.name || "") });
+    } catch { return {}; }
+  }
+  /** The main key, only where it was saved for this address (read as storedSecret reads it, and changing nothing). */
+  private async mainKeyFor(base: string): Promise<string> {
+    const [key, bound] = await Promise.all([this.context.secrets.get("dgc.apiKey"), this.context.secrets.get("dgc.apiKey.endpoint")]);
+    return key && bound && bound === endpointId(base) ? key : "";
+  }
+  /** Work's picker: a connection's marks as its own page message (modelCaps), when its provider says anything. `route`
+   *  is the page's name for it, `from` the connection to ask ("" the host DGC is on). */
+  private async postModelCaps(route: string, from: string): Promise<void> {
+    const caps = await this.connectionCaps(from);
+    if (Object.keys(caps).length) this.post({ type: "modelCaps", id: route, caps });
+  }
+  /** ChatDGC's picker: a connection's marks ("" the host DGC is on); src/chatdgc.ts posts them to the chat's page. */
+  chatdgcModelCaps(id: string): Promise<CapsMap> { return this.connectionCaps(id); }
+  /** A Pip's picker: each connection's marks by the Pips page's own name for it, "connection" (the Pips' own list: the
+   *  default provider's host, else the host DGC is on) and "provider:<id>"; only those that say anything. */
+  async pipModelCaps(): Promise<{ id: string; caps: CapsMap }[]> {
+    if (this.noProvider()) return [];
+    const saved = listProfiles(this.context).filter(row => row.kind !== "subscription");
+    const own = saved.find(row => row.id === defaultProfileId(this.context));
+    const asked = [{ id: "connection", from: own ? own.id : "" }, ...saved.map(row => ({ id: `provider:${row.id}`, from: row.id }))];
+    const said = await Promise.all(asked.map(async ({ id, from }) => ({ id, caps: await this.connectionCaps(from) })));
+    return said.filter(row => Object.keys(row.caps).length);
   }
 
   /** One saved provider's models, as Work's menu and Settings' row list them. No address and no key reaches the page. */
@@ -6216,6 +6264,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     // A reply's pictures folded or opened (media/pictureFold.js): kept, so it holds after a reload and a reopen.
     if (rememberPictureFold(this.context, msg)) return;
+    if (rememberDismissedNote(this.context, msg)) return;   // a chat line closed with its ×, kept
     // The dock (src/dock.ts): a pin, an unpin, a move, a session's colour. Kept for this computer.
     // (A Work session's pin keeps the folder it runs in when that is not this window's: the host's own word for it, as
     // it listed the session, never the page's.)
@@ -6362,6 +6411,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.cancelAutoModePrompt();
         this.webviewReady = true;
         this.post(pictureFoldsMessage(this.context));     // which pictures stay folded, and the setting
+        this.post(dismissedNotesMessage(this.context));   // the chat lines closed with their ×
         this.post(dockOf(this.context).state());          // what is pinned, each session's colour, and the Dock settings
         if (this.home) this.post(homeCardsOf(this.context).state());   // Home's cards, in their order, and their settings
         if (this.home) this.post({ type: "homePages", pages: homePages(this.context) });   // what was made while the page was being built
@@ -6789,6 +6839,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // Work's menu, an All models provider: what its host offers, before anything moves.
         if (typeof msg.id === "string" && msg.id.startsWith("provider_")) {
           this.post(await this.providerModels(msg.id).catch(() => ({ type: "providerModels" as const, id: String(msg.id), ids: [], error: "DGC didn't answer" })));
+          void this.postModelCaps(msg.id, msg.id);       // (what its provider says each model can do, as it says it)
         }
         break;
       case "setAgentsModel":
@@ -9027,6 +9078,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const ids = await this.fetchModels();
       this.post({ type: "models", ids, current: this.state.model, base, supportsEffort: true,
                   routes, currentRouteKey, fallback: this.fallbackView(), agents: this.agentsView() });
+      // What its provider says each model can do: its own message, never a field of DGC's models answer (24 Nov).
+      void this.postModelCaps(currentRouteKey, currentProfile?.id || "");
     } catch {
       this.post({ type: "models", ids: [], base, err: true, routes, currentRouteKey, fallback: this.fallbackView(), agents: this.agentsView() });
     }
@@ -9399,6 +9452,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
       this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider(), () => this.pipHostMark());
+      this.pipsEditor.useModelCaps(() => this.pipModelCaps());
       this.pipsEditor.useModelWindow((choice) => this.pipModelWindow(choice));      // a Pip's Sub-agents page (Pips API 104)
       this.pipsEditor.usePlan(this.pipPlanHooks());                                  // ChatGPT · your plan, the usage meter (0.52)
       this.context.subscriptions.push(DgcViewProvider.usageLimits.watch(() => this.pipsEditor?.usageChanged()));
@@ -9951,6 +10005,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsTab.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsTab.usePluginLogos(plugin => this.replyPluginLogo(plugin));
       this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), (id, model) => this.savePipProvider(id, model), () => this.noProvider(), () => this.pipHostMark());
+      this.pipsTab.useModelCaps(() => this.pipModelCaps());
       this.pipsTab.usePlan(this.pipPlanHooks());
       this.context.subscriptions.push(DgcViewProvider.usageLimits.watch(() => this.pipsTab?.usageChanged()));
       this.pipsTab.useModelWindow((choice) => this.pipModelWindow(choice));

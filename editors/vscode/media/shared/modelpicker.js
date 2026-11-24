@@ -16,7 +16,7 @@
 //               face: the page's own markup (a Pip's face)
 //     settings: [{ id, label, value, options: [{value, label}] }],
 //     footer: [{id, label, icon}], empty: { title, text } }
-//   row: { value, name, desc, caps: ["thinks", "images"], cloud, current, pills: [[label, tone]],
+//   row: { value, name, desc, caps: ["thinks", "images", "notools"], cloud, current, pills: [[label, tone]],   // caps: marksOf(id, map)
 //          actions: [{id, label, disabled}], disabled, title }
 //   on: { pick(row, connection), thinking(value, {keys}), thinkingRest(), select(connection), search(),
 //         action(id, {connection, row, text}), tab(id), setting(id, value), close(),
@@ -155,6 +155,8 @@
     return `<span class="dgc-mp-mark dgc-mp-tile${cls ? ` ${cls}` : ""}" data-mark="" style="--mp-hue:${tileHue(name)}" aria-hidden="true">${esc(letter)}</span>`;
   }
   // The small glyphs: a rail badge (11 px), a row's capability marks and cloud mark (13 px), and the picker's own controls.
+  // (Upright, its jaw open at the top: the No tools stroke crosses it as "off", where a slanted one read as two tools.)
+  const WRENCH = "M6.8 1.93V4.2h2.4V1.93A3.3 3.3 0 0 1 9.2 8.07v4.83a1.2 1.2 0 0 1-2.4 0V8.07a3.3 3.3 0 0 1 0-6.14z";
   const GLYPH = {
     cli: '<path d="M3.5 5l3 3-3 3M8.5 11h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
     key: '<circle cx="5.5" cy="10.5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 8.5l5-5M10.5 5.5l2 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
@@ -170,11 +172,22 @@
     refresh: '<path d="M12.6 6.2A5 5 0 1 0 13 8.6M12.8 3v3.4H9.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
     back: '<path d="M13 8H3.5M7.5 3.8L3.3 8l4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
     help: '<circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.25 6.3a1.8 1.8 0 0 1 3.5.55c0 1.25-1.75 1.5-1.75 2.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.55" r=".85" fill="currentColor"/>',
+    // Tools (a wrench) and No tools (the wrench struck through, the stroke cut clear of it by the card's own ground).
+    tools: `<path d="${WRENCH}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>`,
+    notools: `<path d="${WRENCH}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M2.6 2.6l10.8 10.8" fill="none" stroke="var(--mp-card, Canvas)" stroke-width="3.4" stroke-linecap="round"/><path d="M2.6 2.6l10.8 10.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,
+    // A row's marks folded into one (a narrow picker): a small stack.
+    fold: '<path d="M8 2.6l5.4 2.7L8 8 2.6 5.3z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M2.6 8.1L8 10.8l5.4-2.7M2.6 10.8L8 13.5l5.4-2.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
   };
   const glyph = (name, cls = "") => `<svg class="dgc-mp-glyph${cls ? ` ${cls}` : ""}" viewBox="0 0 16 16" aria-hidden="true" focusable="false">${GLYPH[name] || ""}</svg>`;
   /** One action, one icon: Add, Settings and Close are the shared ones (media/shared/icons.js) where that is loaded. */
   const actionIcon = (name) => (root && root.DgcIcons && ["add", "settings", "close", "back"].includes(name) ? root.DgcIcons.html(name, { cls: "dgc-mp-glyph" }) : glyph(name));
-  const CAP_WORDS = { thinks: "Thinks", images: "Takes images" };
+  // A mark's words: on its row (its hover label and what a screen reader says) and in a folded row's card. No tools says
+  // a little more where it stands alone: why it matters.
+  const CAP_WORDS = { thinks: "Thinks", images: "Takes images", notools: "No tools", tools: "Uses tools" };
+  const CAP_SAYS = { notools: "No tools: it can only answer, not run steps" };
+  const CLOUD_WORDS = "Runs in Ollama’s cloud";
+  const capWords = (cap) => (cap === "cloud" ? CLOUD_WORDS : CAP_WORDS[cap] || "");
+  const capSays = (cap) => (cap === "cloud" ? CLOUD_WORDS : CAP_SAYS[cap] || CAP_WORDS[cap] || "");
 
   // ---- what DGC knows about a model by its name ----------------------------------------------------------------------
   // A host lists names and nothing else, so the capability marks come from the model's family, where the family's
@@ -195,6 +208,23 @@
     const found = new Set();
     for (const [re, caps] of FAMILY_FACTS) if (re.test(name)) for (const cap of caps) found.add(cap);
     return ["thinks", "images"].filter((cap) => found.has(cap));
+  }
+
+  // ---- what a model's provider says of it (24 Nov) ---------------------------------------------------------------------
+  // A connection's map comes from the extension's host (src/modelcaps.ts), as each page's own message: {model name:
+  // {thinks, images, tools}}, each true or false where the provider's own list says it (Ollama's /api/tags does). What
+  // it says wins; what it doesn't say is the name's guess. Tools mark the exception: nearly every model can use them, so
+  // a mark on every row would say nothing, and "No tools" is on a model its provider says can't (it can't run Work's
+  // steps). The owner may want a tools mark on every row instead: that is this one line.
+  const TOOLS_ON_EVERY_ROW = false;
+  /** A row's marks: ["thinks", "images", "notools"] or any of them ("tools" too when `every`). `said`: the map. */
+  function marksOf(id, said, every = TOOLS_ON_EVERY_ROW) {
+    const name = String(id || "");
+    const own = said && typeof said === "object" && Object.prototype.hasOwnProperty.call(said, name) ? said[name] : null;
+    const told = own && typeof own === "object" && !Array.isArray(own) ? own : {};
+    const guess = facts(name);
+    const has = (cap) => (typeof told[cap] === "boolean" ? told[cap] : guess.includes(cap));
+    return [...["thinks", "images"].filter(has), ...(told.tools === false ? ["notools"] : every && told.tools === true ? ["tools"] : [])];
   }
 
   // ---- Claude Code's rows ---------------------------------------------------------------------------------------------
@@ -389,6 +419,7 @@ void main() {
       + `<div class="dgc-mp-card"><div class="dgc-mp-head"></div><div class="dgc-mp-list" id="${id}-list" role="listbox" aria-label="Models"></div><div class="dgc-mp-under"></div><div class="dgc-mp-fb" hidden></div>`
       + `<div class="dgc-mp-think"></div><div class="dgc-mp-settings" hidden></div></div></div></div>`
       + `<div class="dgc-mp-page" role="group" hidden></div>`
+      + `<div class="dgc-mp-capsheet" aria-hidden="true" hidden></div>`
       + `<div class="dgc-mp-live" role="status" aria-live="polite"></div></div>`;
     const box = layer.firstElementChild;
     const $ = (cls) => box.querySelector(`.dgc-mp-${cls}`);
@@ -434,16 +465,19 @@ void main() {
     function rowHtml(conn, row, found) {
       const picks = state.choosing ? fbAct(row) : null;
       const key = keyOf(conn, row), on = row.current === true, off = row.disabled === true || data.locked === true || (state.choosing && (!picks || picks.disabled === true));
-      const caps = (Array.isArray(row.caps) ? row.caps : []).filter((cap) => CAP_WORDS[cap]);
-      const marks = (row.cloud ? `<span class="dgc-mp-cap" data-cap="cloud" title="Runs in Ollama’s cloud" role="img" aria-label="Runs in Ollama’s cloud">${glyph("cloud")}</span>` : "")
-        + caps.map((cap) => `<span class="dgc-mp-cap" data-cap="${cap}" title="${CAP_WORDS[cap]}" role="img" aria-label="${CAP_WORDS[cap]}">${glyph(cap)}</span>`).join("");
+      // Its marks, cloud first; two or more also fold into one small icon, which a narrow picker shows in their place
+      // (its label says them all; pointed at, or its row reached with the keys, the card under it shows them).
+      const caps = [...new Set([...(row.cloud ? ["cloud"] : []), ...(Array.isArray(row.caps) ? row.caps : []).filter((cap) => CAP_WORDS[cap])])];
+      const marks = caps.map((cap) => `<span class="dgc-mp-cap" data-cap="${cap}" title="${esc(capSays(cap))}" role="img" aria-label="${esc(capSays(cap))}">${glyph(cap)}</span>`).join("")
+        + (caps.length > 1 ? `<span class="dgc-mp-fold" role="img" aria-label="${esc(caps.map(capWords).join(", "))}">${glyph("fold")}</span>` : "");
       const pills = (Array.isArray(row.pills) ? row.pills : []).map(([label, tone]) => `<span class="dgc-menu-pill dgc-mp-tag${tone ? ` dgc-menu-pill-${esc(tone)}` : ""}">${esc(label)}</span>`).join("");
       const sub = [found ? conn.name : "", row.desc || ""].filter(Boolean).join(" · ");
       const button = `<button type="button" role="option" class="dgc-menu-row dgc-mp-row${sub ? " dgc-menu-row-sub" : ""}" data-k="${esc(key)}" data-conn="${esc(conn.id)}" data-value="${esc(row.value)}" aria-selected="${on}" tabindex="-1"${off ? ' aria-disabled="true"' : ""}${row.title ? ` title="${esc(row.title)}"` : ""}>`
         + (found ? markHtml(conn.mark, conn.name, "dgc-mp-row-mark") : "")
         + `<span class="dgc-menu-words"><span class="dgc-mp-nameline"><span class="dgc-menu-label dgc-mp-name" title="${esc(row.name)}">${esc(row.name)}</span>`
         + `<span class="dgc-mp-check" aria-hidden="true">${on ? glyph("check") : ""}</span></span>${sub ? `<span class="dgc-menu-sub dgc-mp-desc">${esc(sub)}</span>` : ""}</span>`
-        + (marks ? `<span class="dgc-mp-caps">${marks}</span>` : "") + pills + `</button>`;
+        // (Main and Fallback before the marks, so every row's marks stand in one column: decided 24 Nov.)
+        + pills + (marks ? `<span class="dgc-mp-caps" data-caps="${caps.join(" ")}">${marks}</span>` : "") + `</button>`;
       const actions = state.choosing ? [] : Array.isArray(row.actions) ? row.actions : [];   // (choosing: the row itself is the choice)
       if (!actions.length) return button;
       const openNow = state.more === key;
@@ -704,10 +738,15 @@ void main() {
       if (!connOf(state.sel)) state.sel = (connOf(data.selected) || conns().find((c) => c.current && !c.disabled) || conns().find((c) => !c.disabled) || conns()[0] || { id: "" }).id;
       paintTabs(); paintRail(); paintFallback(); paintPane(); paintThinking(); paintSettings(); paintFoot(); paintPage();
       // A row that says Main or Fallback and has to cut its own name gives its capability marks' room to the name
-      // (user test 2: "deepseek-v4.1-flash…" beside its marks and "Main", where the name alone would fit).
+      // (user test 2: "deepseek-v4.1-flash…" beside its marks and "Main", where the name alone would fit): first its
+      // marks fold into their one icon, in the same column; a name still cut then has that room too.
       for (const row of list.querySelectorAll(".dgc-mp-row")) {
         const name = row.querySelector(".dgc-mp-name");
-        if (name && row.querySelector(".dgc-menu-pill") && row.querySelector(".dgc-mp-caps") && name.scrollWidth > name.clientWidth + 1) row.classList.add("is-tight");
+        if (!name || !row.querySelector(".dgc-menu-pill") || !row.querySelector(".dgc-mp-caps")) continue;
+        const cut = () => name.scrollWidth > name.clientWidth + 1;
+        if (!cut()) continue;
+        row.classList.add("is-tight");
+        if (cut()) row.classList.add("is-tighter");
       }
       const shown = `${data.tab || ""}|${state.query ? "?" : state.sel}`;
       list.dataset.shown = shown;
@@ -732,6 +771,8 @@ void main() {
       if (typed && focused() !== typed && state.typing) typed.focus();
       const sized = box.querySelector(".dgc-mp-custom-input");
       if (sized && focused() === sized && key === "custom-in") { const end = sized.value.length; try { sized.setSelectionRange(end, end); } catch { /* (not a text field) */ } }
+      // The folded marks' card: its row was drawn again (another list, new marks): on the row the keys are on, else gone.
+      if (sheetRow) { const row = keyRow(); if (row) showSheet(row); else hideSheet(); }
       // (Drawn again while it is open: it does not arrive a second time. media/shared/dialog.css)
       if (!state.first) layer.classList.add("dgc-still");
       state.first = false;
@@ -761,6 +802,48 @@ void main() {
       if (reason !== "replaced" && reason !== "silent" && trigger && trigger.isConnected !== false && typeof trigger.focus === "function") trigger.focus();
       if (typeof on.close === "function") on.close(reason);
     }
+
+    // ---- a row's marks, folded (24 Nov) ----
+    // In a narrow picker a row's marks are one small icon in their column. The pointer on it, or the keys on its row,
+    // show them with their words in a small card under the row (over it where the picker ends), never over the row.
+    const sheet = $("capsheet");
+    let sheetRow = null;
+    const keyed = (node) => { try { return node.matches(":focus-visible"); } catch { return true; } };
+    /** A row's fold, where it is shown in place of its marks. */
+    const foldOf = (row) => { const fold = row && row.isConnected ? row.querySelector(".dgc-mp-fold") : null; return fold && fold.getClientRects().length ? fold : null; };
+    /** The row the keys are on, when its marks are folded. */
+    const keyRow = () => { const at = focused(); return at && at.classList.contains("dgc-mp-row") && keyed(at) && foldOf(at) ? at : null; };
+    function hideSheet() { sheetRow = null; if (!sheet.hidden) { sheet.hidden = true; sheet.innerHTML = ""; } }
+    function showSheet(row) {
+      const fold = foldOf(row), list = $("list");
+      const r = row ? row.getBoundingClientRect() : null, l = list.getBoundingClientRect();
+      if (!fold || r.bottom <= l.top + 2 || r.top >= l.bottom - 2) { hideSheet(); return; }     // (scrolled out of sight)
+      const caps = String(fold.parentElement.dataset.caps || "").split(" ").filter(capWords);
+      if (sheetRow !== row || sheet.hidden) {
+        sheet.innerHTML = caps.map((cap) => `<span class="dgc-mp-sheet-line" data-cap="${esc(cap)}">${glyph(cap)}<span>${esc(capWords(cap))}</span></span>`).join("");
+        sheet.hidden = false;
+      }
+      sheetRow = row;
+      const b = box.getBoundingClientRect(), f = fold.getBoundingClientRect(), s = sheet.getBoundingClientRect(), x0 = b.left + box.clientLeft, y0 = b.top + box.clientTop;
+      const under = r.bottom + 4 + s.height <= b.bottom - 6;
+      const top = under ? r.bottom + 4 - y0 : r.top - 4 - s.height - y0;
+      const left = Math.max(6, Math.min(f.right + 3 - x0 - s.width, box.clientWidth - s.width - 6));
+      sheet.style.top = `${Math.round(Math.max(6, top))}px`; sheet.style.left = `${Math.round(left)}px`;
+      sheet.dataset.side = under ? "below" : "above";
+    }
+    box.addEventListener("pointerover", (event) => {
+      const fold = event.target.closest ? event.target.closest(".dgc-mp-fold") : null;
+      if (fold && box.contains(fold)) showSheet(fold.closest(".dgc-mp-row"));
+    });
+    box.addEventListener("pointerout", (event) => {
+      const fold = event.target.closest ? event.target.closest(".dgc-mp-fold") : null;
+      if (!fold || (event.relatedTarget && fold.contains(event.relatedTarget))) return;
+      const row = keyRow();
+      if (row) showSheet(row); else hideSheet();
+    });
+    box.addEventListener("focusin", () => { const row = keyRow(); if (row) showSheet(row); else if (sheetRow && !foldOf(sheetRow)?.matches(":hover")) hideSheet(); });
+    box.addEventListener("focusout", (event) => { if (sheetRow && event.target === sheetRow && !foldOf(sheetRow)?.matches(":hover")) hideSheet(); });
+    $("list").addEventListener("scroll", () => { if (sheetRow) showSheet(sheetRow); }, { passive: true });
 
     // ---- the pointer ----
     layer.addEventListener("pointerdown", (event) => { if (event.target === layer) { event.preventDefault(); close("outside"); } });
@@ -1015,6 +1098,6 @@ void main() {
     };
   }
 
-  return { open, markOf, tipOf, markHtml, glyph, facts, versionLabel, claudeRows, ollamaSections, isCloudModel, sizeWords, windowSizes, parseSize, sizeProblem,
-    planConnection, PLAN_NAME, WINDOW_STEPS, MARK_NAMES, PROVIDER_MARKS, CAP_WORDS };
+  return { open, markOf, tipOf, markHtml, glyph, facts, marksOf, versionLabel, claudeRows, ollamaSections, isCloudModel, sizeWords, windowSizes, parseSize, sizeProblem,
+    planConnection, PLAN_NAME, WINDOW_STEPS, MARK_NAMES, PROVIDER_MARKS, CAP_WORDS, TOOLS_ON_EVERY_ROW };
 });

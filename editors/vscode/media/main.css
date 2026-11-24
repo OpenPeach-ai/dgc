@@ -130,7 +130,9 @@ body:not([data-agent-page]) #phead .pm ~ .thread-title { margin-left: calc(6px -
 #phead .pips-nav-core:empty { display: none; }
 #phead .pips-back { display:inline-flex; align-items:center; gap:4px; border:0; background:transparent; color:var(--muted); padding:4px 6px 4px 0; font-size:var(--t-sm); cursor:pointer; }
 #phead .pips-back:hover { color:var(--text); }
-#pips-host { display:flex; flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; width:100%; }
+/* clip, never hidden: a hidden area still scrolls by code (a focus or a scrollIntoView below the fold), and a Pip's top bar slid
+   up under the logo line, cut in half (24 Nov). Its page scrolls inside it. */
+#pips-host { display:flex; flex:1 1 auto; min-height:0; min-width:0; overflow:clip; width:100%; }
 /* (The Pips view stands on the side bar's own ground, as Home, Work and Chat do, 13 Nov: the tab bar and the dock keep
    the one ground on every tab. They took the editor's ground under the Pips view, which stood on it.) */
 body.pips-active > :not(#phead):not(#side-tabs):not(#pips-host):not(#announcer):not(.dgc-trace-backdrop):not(#dgc-dock):not(.dgc-pop):not(.dgc-linkcard):not(#whats-new):not(#pips-welcome):not(#pips-mac-note):not(.yb-install-dialog):not(.yb-clear-dialog):not(.yb-sites-dialog):not(script) { display:none !important; }
@@ -359,7 +361,7 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 /* Install Google Chrome's dialog (Your Browser, 18 Nov): New session's dialog and buttons, and where no password prompt can
    open, the one terminal line in a box of its own, scrolled sideways rather than cut. */
 .yb-install-line { display:block; box-sizing:border-box; align-self:stretch; max-width:100%; padding:6px 8px; border:1px solid var(--hair); border-radius:var(--btn-r, 6px);
-  overflow-x:auto; white-space:nowrap; scrollbar-width:thin; background:var(--surface2); color:var(--text); font:var(--t-xs)/1.5 var(--mono); user-select:all; -webkit-user-select:all; }
+  overflow-x:auto; white-space:nowrap; background:var(--surface2); color:var(--text); font:var(--t-xs)/1.5 var(--mono); user-select:all; -webkit-user-select:all; }
 .yb-install-dialog button.act { gap:6px; border-radius:var(--btn-r, 6px); }
 .yb-install-dialog button.act > svg { flex:none; width:14px; height:14px; }
 /* Clear browsing data (Your Browser's dock menu): New session's dialog and buttons; three kinds, each a checkbox with its
@@ -970,6 +972,9 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 .turn-summary { margin-top: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); overflow: hidden; }
 .ts-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3); background: color-mix(in srgb, var(--surface2) 45%, transparent); color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1 var(--sans); }
 .ts-heading { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: row; align-items: baseline; gap: var(--sp-2); }
+/* The title opens and folds the files, as its chevron does (the card starts folded, 24 Nov). */
+.ts-heading { cursor: pointer; }
+.ts-heading:hover .ts-title { color: var(--text-strong); }
 .ts-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ts-totals { flex: none; display: flex; gap: 6px; font: var(--w-med) var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; }
 .ts-counts { flex: none; display: flex; gap: var(--sp-3); margin-left: auto; font: var(--w-med) var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; }
@@ -1606,6 +1611,10 @@ li.todo.todo-gone .todo-label { color: var(--muted); text-decoration: line-throu
 .sys.monitor-restart { align-items: center; }
 .sys.monitor-restart[data-state="stopped"] { color: var(--muted); }
 .monitor-restart > button.monitor-restart-again { flex: none; margin-left: auto; min-height: 24px; }
+/* Narrow, Run again / Resume go under the words instead of squeezing them to a word a line (seen 24 Nov at 300 px). */
+.sys.monitor-restart { flex-wrap: wrap; row-gap: var(--sp-2, 8px); }
+.sys.monitor-restart > span { flex: 1 1 220px; min-width: 0; }
+@media (max-width: 480px) { .sys.monitor-restart { align-items: flex-start; } .sys.monitor-restart > span { flex-basis: calc(100% - 32px); } }   /* (beside its icon, which keeps to the first line; only the button wraps) */
 
 /* composer */
 footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direction: column; gap: var(--sp-1);

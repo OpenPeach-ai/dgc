@@ -19,7 +19,7 @@ import '../media/shared/dismiss.css';   // one × for every line that stays, the
 import '../media/shared/dismiss.js';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
-import {ScreenChannel,clipboardThrough} from './screenView.js';
+import {ScreenChannel,clipboardThrough,showScreen,fitScreenTo,zoomMarkup} from './screenView.js';
 import {esc,errorText,record,requestBroker,pipLogin,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer,pipComputerApps} from './pipsModel.js';
 
 const vscode=acquireVsCodeApi();
@@ -373,7 +373,7 @@ function startScreen(explicit=false){
  const Viewer=globalThis.__dgcTestRFB||RFB;
  try{
   viewer=new Viewer($('pc-vnc'),channel,{shared:true});
-  viewer.scaleViewport=S.fit;viewer.resizeSession=false;viewer.focusOnClick=true;viewer.background='transparent';
+  showScreen(viewer,S.fit);   // (shown as every screen is: src/screenView.js)
   viewer.addEventListener?.('connect',()=>{S.screen={state:'live',reason:''};S.restart=null;S.sizePicked=false;render();});
   viewer.addEventListener?.('disconnect',()=>{if(!['closed','elsewhere','restarting'].includes(S.screen.state)){S.screen={state:'closed',reason:S.screen.reason||'The screen closed.'};render();}});
   // What was copied on the computer (ServerCutText): text only, at most 1 MB.
@@ -440,8 +440,7 @@ function toolsMarkup(){
  const sizes=screenSizes();
  const menu=S.sizeMenu&&sizes.length?`<div id="pc-size-menu" class="dgc-menu pc-size-menu" role="menu" aria-label="Screen size"><div class="dgc-menu-head" role="presentation"><span>Screen size</span></div>`
   +window.DgcMenu.html([{rows:sizes.map(size=>({id:size,label:sizeWords(size),checked:size===S.computer.screen,attrs:S.sizeBusy?'disabled':''}))}],{role:'menuitemradio',data:'size',check:true})+'</div>':'';
- return `<span class="pc-seg" role="group" aria-label="Zoom"><button type="button" id="pc-fit" class="dgc-btn small pc-tool" aria-pressed="${S.fit}" title="Fit the screen to this tab">Fit</button>`
-  +`<button type="button" id="pc-actual" class="dgc-btn small pc-tool" aria-pressed="${!S.fit}" title="Real size: scroll to see the rest">100%</button></span>`
+ return zoomMarkup(S.fit,{fitId:'pc-fit',actualId:'pc-actual',cls:'pc-tool',groupCls:'pc-seg'})
   +(sizes.length?tool('pc-size','Screen size',ICON.size,{expanded:S.sizeMenu,popup:true}):'')
   +tool('pc-keys','Keyboard',ICON.keys,{expanded:S.panel==='keys'&&!off,off})
   +tool('pc-clip','Clipboard',ICON.clip,{expanded:S.panel==='clip'&&!off,off,dot:S.clip.fresh&&!off})
@@ -477,7 +476,7 @@ function panelMarkup(){
 // A part of the stage is redrawn only when what it says changes, so a poll never takes a box you are typing in.
 const drawn=new Map();
 function put(id,html){const el=$(id);if(!el||drawn.get(id)===html&&(el.innerHTML!==''||html===''))return false;drawn.set(id,html);el.innerHTML=html;return true;}
-function applyFit(){if(viewer&&'scaleViewport' in viewer&&viewer.scaleViewport!==S.fit){viewer.clipViewport=false;viewer.scaleViewport=S.fit;}}
+function applyFit(){fitScreenTo(viewer,S.fit);}
 // What the tab says (an error, a notice, the apps offer) floats at the foot of the screen, each with a way to put it away.
 function saysMarkup(){
  return (S.error?`<div class="pc-note"><p class="pc-error" role="alert">${esc(S.error)}</p>${window.DgcDismiss.html({attrs:'data-dismiss="error"'})}</div>`:'')

@@ -119,10 +119,37 @@ class HistoryParityTests(unittest.TestCase):
         self.assertEqual(dumps(replay(rich_transcript())), dumps(golden["rich"]))
 
     def test_long_transcript_trims_byte_identically(self):
+        # The hooks change nothing: with 0.52's one change to the trim left out (the cut turn's own start, below), the
+        # 1 MB projection is still what the pre-hook _history made, byte for byte.
         golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
-        text = dumps(replay(long_transcript()))
+        text = dumps(replay(long_transcript(), _NoCutTurnStart))
         self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(), golden["long_sha256"])
         self.assertEqual(len(text), golden["long_chars"])
+
+    def test_long_transcript_keeps_the_cut_turns_start(self):
+        # 0.52 (24 Nov, the owner's goal session): a 1 MB cut inside a turn keeps that turn's start above what fits of it,
+        # where the trim used to drop the turn's leftover steps (its answer among them) up to the next turn. So the
+        # projection is the old one with the cut turn put back in front: its start, its last steps, its end.
+        golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+        old, new = replay(long_transcript(), _NoCutTurnStart), replay(long_transcript())
+        kept = len(old) - 1                                   # everything after the notice
+        self.assertEqual(dumps(new[-kept:]), dumps(old[1:]))
+        self.assertEqual(new[0]["role"], "notice")
+        cut = new[1:len(new) - kept]
+        self.assertEqual([item.get("type") for item in cut], ["turn_start", "stream_end", "tool_call", "tool_result", "turn_end"])
+        self.assertEqual({item.get("turn_id") for item in cut if "turn_id" in item}, {cut[0]["turn_id"]})
+        text = dumps(new)
+        self.assertLessEqual(len(json.dumps(new, ensure_ascii=True)), 1_000_000 + 200)   # the notice is outside the budget
+        self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(), golden["long_cut_turn_sha256"])
+        self.assertEqual(len(text), golden["long_cut_turn_chars"])
+
+
+class _NoCutTurnStart(Backend):
+    """The trim as it was before 0.52: a cut turn's leftover steps are dropped, its start is not put back."""
+
+    @staticmethod
+    def _history_cut_turn_start(items, first):
+        return None
 
 
 class _Recorder(Backend):

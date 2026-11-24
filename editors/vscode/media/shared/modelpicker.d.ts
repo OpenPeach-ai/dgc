@@ -6,6 +6,8 @@ declare const picker: {
   tipOf(name: string, badge: string): string;
   versionLabel(full: string): string;
   facts(id: string): string[];
+  /** A row's marks: what its provider says (`said`: {model: {thinks, images, tools}}), else its name's guess. */
+  marksOf(id: string, said?: Record<string, { thinks?: boolean; images?: boolean; tools?: boolean }>, every?: boolean): string[];
   readonly MARK_NAMES: Readonly<Record<string, string>>;
   readonly PLAN_NAME: string;
 };

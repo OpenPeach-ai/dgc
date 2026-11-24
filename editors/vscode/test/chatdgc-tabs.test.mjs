@@ -203,6 +203,34 @@ test("a new chat opens in an editor tab of its own, named by its chat", async ()
   assert.equal(chatTitle(""), "New chat");
 });
 
+// 24 Nov: what a provider says its models can do (src/modelcaps.ts) follows each list the picker asks for, as a page
+// message of its own under that connection's id ("" the host DGC is on): never a field of the models answer.
+test("a provider's marks follow its models: modelCaps under the connection the list was for, and none when it says nothing", async () => {
+  chat.open("");
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(1), title: "New chat", temporary: false });
+  await new Promise((r) => setTimeout(r, 10));            // (the list it asks for as it opens, answered before the hook)
+  const said = { "glm-5.3:cloud": { thinks: true, images: false, tools: true } }, asked = [];
+  host.chatdgcModelCaps = async (id) => { asked.push(id); return id === "provider_x" || id === "" ? said : {}; };
+  host.models = { ids: ["glm-5.3:cloud"], current: "glm-5.3:cloud", providerId: "provider_x" };
+  assert.equal(panel.last("modelCaps"), undefined, "premise: none yet");
+  panel.say({ type: "models", provider: "provider_x" });
+  for (let i = 0; i < 50 && !panel.last("modelCaps"); i++) await new Promise((r) => setTimeout(r, 2));
+  assert.deepEqual(panel.last("modelCaps"), { type: "modelCaps", id: "provider_x", caps: said });
+  assert.equal(Object.hasOwn(panel.last("models"), "caps"), false, "the models answer is as it was");
+  host.models = { ids: ["fixture"], current: "fixture" };
+  panel.say({ type: "models", provider: "" });
+  for (let i = 0; i < 50 && panel.webview.posted.filter((m) => m.type === "modelCaps").length < 2; i++) await new Promise((r) => setTimeout(r, 2));
+  assert.deepEqual(panel.last("modelCaps"), { type: "modelCaps", id: "", caps: said }, "the host DGC is on");
+  host.models = { ids: ["opus"], current: "opus", providerId: "subscription_claude" };
+  const count = panel.webview.posted.filter((m) => m.type === "modelCaps").length;
+  panel.say({ type: "models", provider: "subscription_claude" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(panel.webview.posted.filter((m) => m.type === "modelCaps").length, count, "nothing said: no message");
+  assert.deepEqual(asked, ["provider_x", "", "subscription_claude"]);
+});
+
 test("one conversation, one tab: opening it again brings its tab forward", () => {
   chat.open(ID(2));
   const [panel] = world.panels;

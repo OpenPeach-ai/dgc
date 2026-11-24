@@ -165,7 +165,7 @@ body.vscode-light .art-now { color: var(--link); }
      next, then its form. So a slide is in sight as the panel opens, and stays in sight with its comments under it. */
   .sl { display: flex; flex-direction: column; overflow-y: auto; }
   .sl-side { flex: none; flex-direction: row; align-items: center; overflow: visible; padding: var(--sp-2); border-right: 0; border-bottom: 1px solid var(--border); }
-  .sl-list { flex: 1; min-width: 0; flex-direction: row; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; padding: 1px; }
+  .sl-list { flex: 1; min-width: 0; flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 1px; }
   .sl-item { flex: none; width: 150px; box-sizing: border-box; }
   .sl-item.drop-before::before, .sl-item.drop-after::after { top: var(--sp-1); bottom: var(--sp-1); width: 2px; height: auto; right: auto; left: -2px; }
   .sl-item.drop-after::after { left: auto; right: -2px; }

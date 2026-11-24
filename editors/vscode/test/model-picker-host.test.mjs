@@ -146,3 +146,51 @@ test("the side bar's Pip page: its meter and plan messages reach the Pips bridge
   await x.provider.onMessage({ type: "pipUsageMeter", documentId: "someone-else", pip_id: `pip_${"a".repeat(32)}` });
   assert.deepEqual(got, ["pipUsageMeter", "pipOpenUsagePage", "pipPlanConnect", "pipPlanCancel"]);
 });
+
+// 24 Nov: what each provider says its models can do (src/modelcaps.ts) reaches every page with a picker as a page
+// message of its own (never a new field on DGC's `models` event): Work's `modelCaps` beside the session's list and
+// beside a saved provider's, ChatDGC's through its host, a Pip's through the Pips view (pipModelCaps). Names and what
+// each can do only: no address, no key.
+const settle = async (predicate) => { for (let i = 0; i < 200 && !predicate(); i++) await new Promise((r) => setTimeout(r, 5)); };
+const OLLAMA_SAYS = { "qwen3.8:27b": { thinks: true, images: true, tools: true }, "glm-5.3:cloud": { thinks: true, images: false, tools: true } };
+function capsWorld(more) {
+  const x = world(more), asked = [];
+  x.provider.modelCaps = { get: async (from) => { asked.push(from); return /11434/.test(from.base_url) ? OLLAMA_SAYS : {}; } };
+  return { ...x, asked, caps: () => x.posted.filter((m) => m.type === "modelCaps") };
+}
+
+test("Work's picker: the session's provider's marks follow its list, and a saved provider's follow its own; nothing for a host that says none", async () => {
+  const x = capsWorld();
+  await x.provider.listModels();
+  await settle(() => x.caps().length);
+  assert.deepEqual(x.caps(), [{ type: "modelCaps", id: A, caps: OLLAMA_SAYS }], "beside the models answer, under the route the page knows it by");
+  assert.deepEqual(x.asked, [{ base_url: "http://localhost:11434/v1", api_key: "key", name: "Ollama" }], "asked of its own host, with its own key");
+  assert.equal(Object.hasOwn(x.models(), "caps"), false, "DGC's models answer itself is as it was");
+  x.posted.length = 0; x.asked.length = 0;
+  await x.provider.onMessage({ type: "providerModels", id: B });
+  await settle(() => x.asked.length);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(x.asked.map((a) => a.name), ["Anthropic"]);
+  assert.deepEqual(x.caps(), [], "a host that says nothing: no message, the names' guesses stay");
+  // A session on a subscription app: its CLI lists names, never a host to ask.
+  const cli = capsWorld({ config: { subscription_engine: "claude", subscription_model: "opus" } });
+  await cli.provider.listModels();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual([cli.asked, cli.caps()], [[], []]);
+  for (const m of x.posted) assert.doesNotMatch(JSON.stringify(m), /https?:\/\/|api_key|"key"/);
+});
+
+test("ChatDGC's and a Pip's: the panel says each connection's marks by the page's own name for it", async () => {
+  const x = capsWorld({ capabilities: { saved_model_providers: 1 } });
+  assert.deepEqual(await x.provider.chatdgcModelCaps(A), OLLAMA_SAYS);
+  assert.deepEqual(await x.provider.chatdgcModelCaps(B), {});
+  assert.deepEqual(await x.provider.chatdgcModelCaps("subscription_claude"), {}, "a subscription app: nothing to ask");
+  const before = x.asked.length;
+  assert.deepEqual(await x.provider.chatdgcModelCaps(""), OLLAMA_SAYS, "the host DGC is on, when it is no saved provider");
+  assert.equal(x.asked[before].base_url, "http://localhost:11434/v1");
+  const pip = await x.provider.pipModelCaps();
+  assert.deepEqual(pip, [{ id: "connection", caps: OLLAMA_SAYS }, { id: `provider:${A}`, caps: OLLAMA_SAYS }], "the Pips' own list (the default provider's host) and each saved provider that says anything");
+  assert.doesNotMatch(JSON.stringify(pip), /https?:\/\/|api_key/);
+  x.provider.noProvider = () => true;
+  assert.deepEqual(await x.provider.pipModelCaps(), [], "no provider: nothing");
+});

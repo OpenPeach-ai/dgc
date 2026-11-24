@@ -7,7 +7,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openMapScene } from "./support/agent-map-scene.mjs";
 import { launchArgs, openThinking } from "./support/uir2b-scene.mjs";
-import { ROUTES, SPARE, claudeMessage, manyRoutes, modelsMessage } from "./support/model-menu-scene.mjs";
+import { IDS, ROUTES, SPARE, claudeMessage, manyRoutes, modelsMessage } from "./support/model-menu-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -36,7 +36,7 @@ const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
 test("the model button opens the one picker, centred over a dim page: the connections' marks, the session's models, Thinking under them", async (t) => {
   if (skipOrFail(t)) return;
-  for (const [width, wide] of [[300, 268], [700, 432]]) {
+  for (const [width, wide] of [[300, 268], [700, 520]]) {      // (520 px in a tab since 24 Nov; it was 432)
     const { page } = await open(width);
     try {
       assert.equal(await page.locator("#modelmenu").count(), 0, "Work's own model menu is gone");
@@ -341,4 +341,37 @@ test("W15: a level DGC never takes goes back to what DGC last said", async (t) =
     assert.equal((await x.now()).button, "Low", "DGC said nothing: the button says the level it is really at");
     assert.equal((await x.now()).value, "low", "and so does the open picker");
   } finally { await x.page.close(); }
+});
+
+// 24 Nov: what the provider says each model can do (src/modelcaps.ts) reaches Work's page as its own message,
+// modelCaps {id: the route, caps}: the rows of that connection take its marks over the guess from their names, and a
+// model without tools wears a quiet No tools. A connection it wasn't for keeps its guesses.
+test("modelCaps: the provider's marks replace the names' guesses on that connection's rows, on both tabs", async (t) => {
+  if (skipOrFail(t)) return;
+  const { page, post } = await open(700);
+  try {
+    const marks = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll(".dgc-mp-list .dgc-mp-row")].map((r) => [r.querySelector(".dgc-mp-name").textContent, [...r.querySelectorAll(".dgc-mp-cap")].map((c) => c.dataset.cap)])));
+    const before = await marks();
+    assert.deepEqual([before["qwen3.8:27b"], before["codellama:13b"]], [["thinks"], []], "premise: the names' guesses");
+    const said = { "qwen3.8:27b": { thinks: true, images: true, tools: true }, "codellama:13b": { thinks: false, images: false, tools: false }, "glm-5.3:cloud": { thinks: true, images: false, tools: true } };
+    await post({ type: "modelCaps", id: SPARE, caps: { "qwen3.8:27b": { thinks: false, images: false, tools: false } } });
+    await page.waitForTimeout(100);
+    assert.deepEqual((await marks())["qwen3.8:27b"], ["thinks"], "another connection's map: not this one's rows");
+    await post({ type: "modelCaps", id: ROUTES[0].key, caps: said });
+    await page.waitForFunction(() => !!document.querySelector('.dgc-mp-cap[data-cap="notools"]'));
+    const after = await marks();
+    assert.deepEqual(after["qwen3.8:27b"], ["thinks", "images"], "it sees images: its provider says so");
+    assert.deepEqual(after["codellama:13b"], ["notools"]);
+    assert.deepEqual(after["glm-5.3:cloud"], ["cloud", "thinks"]);
+    assert.deepEqual(after["gpt-oss:120b-32k"], before["gpt-oss:120b-32k"], "nothing said of it: its guess");
+    assert.equal(await page.locator(".dgc-mp-row", { hasText: "codellama:13b" }).locator('.dgc-mp-cap[data-cap="notools"]').getAttribute("aria-label"), "No tools: it can only answer, not run steps");
+    // The Sub-agents tab lists the same connection: the same marks.
+    await page.click('.dgc-mp-tab[data-tab="agents"]');
+    await page.click(`.dgc-mp-conn[data-rail="${ROUTES[0].key}"]`);
+    await post({ type: "providerModels", id: ROUTES[0].key, ids: IDS });
+    await page.waitForSelector(".dgc-mp-list .dgc-mp-row");
+    const agents = await marks();
+    assert.deepEqual(agents["qwen3.8:27b"], ["thinks", "images"]);
+    assert.deepEqual(agents["codellama:13b"], ["notools"]);
+  } finally { await page.close(); }
 });

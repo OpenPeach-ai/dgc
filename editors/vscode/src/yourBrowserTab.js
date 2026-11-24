@@ -18,10 +18,13 @@
 // DGC lets no Pip, model or tool); its pictures stay in this tab.
 //
 // Your own screen (`yourBrowserInit {own: true, screen: true}`, where DGC can): Chrome draws on a screen of its own, the
-// kind a Pip's computer has, and this tab shows that screen with the Pip computer's own viewer and stream
-// (src/screenView.js): the picture as it changes, your mouse and keys straight to it, no picture asked for at a time.
-// It is Chrome's real window (its tabs, address bar, menus, dropdowns and password manager), so DGC's own bar steps
-// aside. The screen is asked for this tab's size, in the pixels DGC says Chrome draws at. Where DGC says it shows
+// kind a Pip's computer has, and this tab shows that screen exactly as a Pip's computer is shown (src/screenView.js: the
+// same viewer, stream and settings): the picture as it changes, your mouse and keys straight to it, no picture asked for
+// at a time. It is Chrome's real window (its tabs, address bar, menus, dropdowns and password manager), so DGC's own bar
+// steps aside for a slim one with the Pip computer's Fit / 100% and the quiet line. Chrome's window is sized to this
+// tab where it can; it is never narrower than Chrome's own minimum, and DGC says the screen's size (the tab's, or the
+// whole window's where that is larger). At 100%, the first choice, the screen is one of its pixels for each of the
+// tab's and the tab scrolls to the rest; Fit scales it into the tab, as on a Pip's computer. Where DGC says it shows
 // pictures here instead, the tab is the streamed tab above.
 import '../media/shared/tokens.css';
 import '../media/shared/dismiss.css';   // one × for every line that stays (window.DgcDismiss)
@@ -29,7 +32,7 @@ import '../media/shared/dismiss.js';
 import '../media/shared/siteicon.js';   // a site's icon: what may be drawn, and a dark one lifted on a dark editor (window.DgcSiteIcon)
 import './yourBrowserTab.css';
 import RFB from '@novnc/novnc';
-import { ScreenChannel, clipboardThrough, askScreenSize } from './screenView.js';
+import { ScreenChannel, clipboardThrough, askScreenSize, showScreen, fitScreenTo, zoomMarkup } from './screenView.js';
 
 const vscode = acquireVsCodeApi();
 const API = 107, POLL_MS = 330;
@@ -37,9 +40,13 @@ const S = { pip: null, own: false, generation: 0, connected: false, api: 0, fram
 // Your own screen: whether DGC streams it here (`screen`), or said it shows pictures instead (`pictures`); `live` while
 // it shows; `tries` after it closed by itself (it opens again, a few times).
 Object.assign(S, { screen: false, pictures: false, live: false, tries: 0 });
+// How the screen is shown (a Pip computer's choice, kept for this tab): 100% (one screen pixel per tab pixel, the tab
+// scrolling to the rest), or Fit (scaled into the tab).
+S.fit = (() => { try { return vscode.getState()?.fit === true; } catch { return false; } })();
 const OWN_LINE = 'Passkeys, security keys and your computer’s password manager don’t work in this tab.';
 const SCREEN_LINE = 'Passkeys and security keys don’t work in this tab.';
 let screenScale = 1;                // how many of the screen's pixels Chrome draws each of your page's with (DGC says)
+let screenWanted = null;            // the screen's size DGC said, in its pixels: [width, height]
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const svg = (d) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const BACK = svg('<path d="M9.5 3.5 5 8l4.5 4.5"/>'), FORWARD = svg('<path d="M6.5 3.5 11 8l-4.5 4.5"/>'), RELOAD = svg('<path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2"/><path d="M12.5 3v2.6H9.9"/>');
@@ -58,11 +65,11 @@ app.innerHTML = `<header class="yb-bar">
     <button type="button" class="yb-btn yb-window" title="Show this tab in Your Browser's window" aria-label="Show this tab in Your Browser's window">${WINDOW}</button>
   </div>
 </header>
-<p class="yb-line" hidden></p>
+<div class="yb-top"><div class="yb-zoom" hidden>${zoomMarkup(S.fit, { fitId: 'yb-fit', actualId: 'yb-actual' })}</div><p class="yb-line" hidden></p></div>
 <div class="yb-stage"><img class="yb-frame" tabindex="0" alt="" hidden draggable="false"><div class="yb-vnc" hidden></div><textarea class="yb-keys" aria-label="What you type goes to your tab" autocomplete="off" autocapitalize="off" spellcheck="false" hidden></textarea><p class="yb-note" role="status"></p><div class="yb-again" hidden><p></p><button type="button" class="yb-again-go">Open it again</button></div></div>`;
 const $ = (sel) => app.querySelector(sel);
 const tabs = $('.yb-tabs'), url = $('.yb-url'), frame = $('.yb-frame'), note = $('.yb-note'), line = $('.yb-line'), keys = $('.yb-keys'), stage = $('.yb-stage');
-const vnc = $('.yb-vnc'), again = $('.yb-again');
+const vnc = $('.yb-vnc'), again = $('.yb-again'), zoom = $('.yb-zoom');
 
 function ask(type, fields = {}) {
   return new Promise((resolve, reject) => {
@@ -102,8 +109,10 @@ let channel = null, viewer = null, againTimer = 0, fitTimer = 0, wanted = '';
 function paintScreen() {
   document.title = 'Your Browser';
   app.classList.add('yb-own-mode', 'yb-screen-mode');
+  document.body.classList.add('yb-screen-page');      // (edge to edge: no editor gutter beside the screen)
   frame.hidden = true; keys.hidden = true;
   vnc.hidden = false;
+  zoom.hidden = false; paintZoom();
   if (line.textContent !== SCREEN_LINE) line.textContent = SCREEN_LINE;
   line.hidden = false;
   sayNote();
@@ -122,8 +131,8 @@ function startScreen() {
   try {
     vnc.textContent = '';
     viewer = new Viewer(vnc, channel, { shared: true });
-    viewer.scaleViewport = true; viewer.resizeSession = false; viewer.clipViewport = false; viewer.focusOnClick = true; viewer.background = 'transparent';
-    viewer.addEventListener?.('connect', () => { S.live = true; S.tries = 0; S.note = ''; wanted = ''; paint(); fitScreen(); });
+    showScreen(viewer, S.fit);          // (as a Pip's computer shows its screen)
+    viewer.addEventListener?.('connect', () => { S.live = true; S.tries = 0; S.note = ''; wanted = ''; screenWanted = null; paint(); fitScreen(); });
     viewer.addEventListener?.('disconnect', () => { if (viewer && channel) screenEnded(''); });
     // What was copied there: onto your clipboard after your own Copy or Cut on it (never a copy made there by itself).
     viewer.addEventListener?.('clipboard', (event) => { const text = event?.detail?.text; if (typeof text === 'string' && text.length <= 1000000) clip.copied(text); });
@@ -139,25 +148,46 @@ function screenEnded(reason) {
   if (S.tries < MAX_TRIES && !document.hidden) { S.note = 'Opening Your Browser…'; againTimer = setTimeout(startScreen, 700 + 400 * S.tries); }
   paint();
 }
-/** The screen at this tab's size: Chrome's window laid out for it (DGC sizes the window), and the screen asked for the
- *  same size in its pixels, so the picture is drawn sharp and fills the tab. */
+/** The room the screen has here: the viewer's own box less its scroll bars (a screen wider than the tab takes a scroll
+ *  bar's height, and the screen is asked for what is left, so it scrolls one way only), else the stage's. */
+function screenRoom() {
+  const box = viewer?._screen instanceof HTMLElement && viewer._screen.isConnected ? viewer._screen : vnc;
+  return [Math.floor(box.clientWidth), Math.floor(box.clientHeight)];
+}
+/** The screen for this tab: Chrome's window laid out for the tab's room (DGC sizes the window), and the screen asked for
+ *  the size DGC says, so the picture is one to one and fills the tab, or scrolls where Chrome's window is wider. */
 function fitScreen() {
   if (!screenMode() || !viewer || !S.live) return;
-  const width = Math.floor(vnc.clientWidth), height = Math.floor(vnc.clientHeight);
+  const [width, height] = screenRoom();
   if (width < 50 || height < 50) return;
   const said = `${width}x${height}`;
   if (said !== wanted) { wanted = said; void sizeScreen(width, height); }
-  askScreenSize(viewer, width * screenScale, height * screenScale);
+  if (screenWanted) askScreenSize(viewer, screenWanted[0], screenWanted[1]);
 }
-/** Chrome's window at the tab's size; DGC answers the scale it draws at, and the screen is asked for its pixels. */
+/** Chrome's window at the tab's room; DGC answers the scale it draws at and the screen's size, which the screen is
+ *  asked for. An older DGC answers only its scale: the room in Chrome's pixels. */
 async function sizeScreen(width, height) {
   try {
     const said = await ask('use_your_browser_view', { op: 'size', width, height });
+    if (wanted !== `${width}x${height}`) return;      // (a newer size was asked for since)
     const scale = Number(said?.scale);
     if (Number.isFinite(scale) && scale >= 1 && scale <= 3) screenScale = scale;
-    if (viewer && S.live) askScreenSize(viewer, width * screenScale, height * screenScale);
+    const screen = said?.screen, whole = (n) => Number.isSafeInteger(n) && n >= 64 && n <= 16384;
+    screenWanted = screen && whole(screen.width) && whole(screen.height) ? [screen.width, screen.height] : [width * screenScale, height * screenScale];
+    if (viewer && S.live) askScreenSize(viewer, screenWanted[0], screenWanted[1]);
   } catch (error) { S.note = String(error?.message || 'Your Browser didn’t answer.'); paint(); }
 }
+/** Fit or 100%, as on a Pip's computer: the pair says which, the viewer shows it, and this tab keeps the choice. */
+function paintZoom() {
+  for (const [id, on] of [['yb-fit', S.fit], ['yb-actual', !S.fit]]) { const b = zoom.querySelector(`#${id}`); if (b && b.getAttribute('aria-pressed') !== String(on)) b.setAttribute('aria-pressed', String(on)); }
+}
+function chooseFit(fit) {
+  if (S.fit === fit) return;
+  S.fit = fit; paintZoom(); fitScreenTo(viewer, fit);
+  try { vscode.setState({ ...(vscode.getState() || {}), fit }); } catch { /* kept for this page only */ }
+  fitScreen();
+}
+zoom.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b?.id === 'yb-fit') chooseFit(true); else if (b?.id === 'yb-actual') chooseFit(false); });
 const clip = clipboardThrough(document, { viewer: () => viewer, onScreen: (node) => !!node?.closest?.('.yb-vnc'), mayType: () => S.live });
 again.querySelector('.yb-again-go').addEventListener('click', () => { S.tries = 0; startScreen(); });
 // A screen that said its size a moment ago may not take another yet: asked again until it is this tab's.
@@ -422,8 +452,8 @@ window.addEventListener('message', (event) => {
     if (msg.pictures === true) {
       // DGC shows pictures of your tab here (no screen of its own came up): the streamed tab, as before.
       const old = channel; channel = null; viewer = null; S.live = false; old?.end('');
-      S.pictures = true; S.note = ''; vnc.hidden = true; vnc.textContent = ''; again.hidden = true;
-      app.classList.remove('yb-screen-mode'); paint(); if (ready()) start();
+      S.pictures = true; S.note = ''; vnc.hidden = true; vnc.textContent = ''; again.hidden = true; zoom.hidden = true;
+      app.classList.remove('yb-screen-mode'); document.body.classList.remove('yb-screen-page'); paint(); if (ready()) start();
       return;
     }
     if (channel || S.live) screenEnded(typeof msg.reason === 'string' && msg.reason !== 'closed' ? msg.reason.slice(0, 300) : '');

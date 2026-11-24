@@ -93,7 +93,9 @@
   // has no switch for it (reported 2026-10-18: "it anyway uses web, so let's not confuse users"). Settings -> Web
   // search -> Search in ChatDGC turns it off for every chat.
   const searchMode = () => "auto";
-  const state = { fallback: "", fallbackOn: null, fallbackOffered: false, cliFacts: {}, host: null,
+  // modelCaps: what each connection's provider says its models can do ("" the host DGC is on): id -> {model: {thinks,
+  // images, tools}} (src/modelcaps.ts), the picker's marks.
+  const state = { fallback: "", fallbackOn: null, fallbackOffered: false, cliFacts: {}, host: null, modelCaps: new Map(),
                   conversation: null, messages: [], earlier: 0, busy: false, maxAttachments: 10, replyId: "", models: [], defaultModel: "", modelProfiles: [], providerModels: {}, providerErrors: {}, menuProvider: "", menuProviders: false, windows: [], breakdown: null,
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
@@ -4288,7 +4290,8 @@
         actions: [...(on ? [] : [{ id: "main", label: "Use as main" }]), { id: "fallback", label: isFallback ? "Stop using as fallback" : "Use as fallback", disabled: on }] } : {};
       return { ...row, current: on, ...more };
     };
-    const plain = (profile, ids) => ids.filter(Boolean).map((id) => dress({ id, value: valueOf(profile, id), name: id, caps: MP.facts(id) }));
+    // A connection's rows: their marks as its provider says them (modelCaps), else as their names do.
+    const plain = (profile, ids) => ids.filter(Boolean).map((id) => dress({ id, value: valueOf(profile, id), name: id, caps: MP.marksOf(id, state.modelCaps.get(profile && profile.id ? profile.id : "")) }));
     const sections = (conn, rows) => (conn.mark === "ollama" && conn.badge !== "cloud" ? MP.ollamaSections(rows) : [{ title: "", rows }]);
     const typed = { id: "typed", label: "Enter another model…", icon: "edit", input: { placeholder: "A model’s name, as its host knows it", label: "Model name" } };
     // ChatGPT · your plan (0.52): the shared rail entry (MP.planConnection). Not connected, it offers Connect; connected,
@@ -5053,6 +5056,9 @@
         state.planWaiting = msg.waiting === true;
         state.planError = typeof msg.error === "string" ? msg.error.slice(0, 300) : "";
         refreshPicker();
+        return;
+      case "modelCaps":
+        if (typeof msg.id === "string" && msg.caps && typeof msg.caps === "object" && !Array.isArray(msg.caps)) { state.modelCaps.set(msg.id, msg.caps); refreshPicker(); }
         return;
       case "models":
         state.models = Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string").slice(0, 500) : [];

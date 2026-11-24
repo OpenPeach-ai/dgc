@@ -242,11 +242,15 @@ export function mountHomePips(options) {
    latest: '', chips: item.detail ? [item.detail] : [], waiting: 1, unread: 0, canRead: false, canDismiss: false, at: item.created_at});
   return {rows, fresh, out};
  }
- let last = null, unreadable = false;
+ let last = null, unreadable = false, conn = null;   // conn: the last pipsConnection (what "not ready" means)
  function paint() {
   if (disposed) return;
   // (unknown: DGC was asked for the Pips and couldn't say, so "nothing needs you" isn't something Home can tell. H3.)
-  if (!ready || !pips) { last = {ready: false, pips: [], cards: [], need: 0, fresh: 0, more: 0, canClear: false, unreadFailure: false, failure: '', unknown: ready && unreadable}; options.onModel?.(last); options.onChange?.(); tellDock(); return; }
+  // (checking: the Pips are on but not read yet -- DGC starting, reconnecting, the first read under way -- so Home says it is
+  // checking, not "nothing needs you", which it said for the first seconds after a start while things waited, 24 Nov.
+  // Pips turned off, or a CLI before this list, are not being checked.)
+  const checking = !unreadable && (!conn || (conn.enabled === true && conn.supported !== false && (conn.connected !== true || (conn.apiVersion || 0) >= 41)));
+  if (!ready || !pips) { last = {ready: false, pips: [], cards: [], need: 0, fresh: 0, more: 0, canClear: false, unreadFailure: false, failure: '', unknown: ready && unreadable, checking}; options.onModel?.(last); options.onChange?.(); tellDock(); return; }
   const {rows, fresh, out} = cards();
   const unreadCount = fresh.reduce((n, item) => n + item.count, 0);
   // Needs attention's number and this project's, as its two tabs say them. A DGC with no such list has no number here.
@@ -362,6 +366,7 @@ export function mountHomePips(options) {
  function receive(message) {
   if (disposed) return;
   if (message.type === 'pipsConnection') {
+   conn = message;
    if (generation !== message.generation) { epoch++; loading = false; for (const p of pending.values()) { clearTimeout(p.timer); p.reject(Error('The connection changed.')); } pending.clear(); }
    generation = message.generation;
    ready = message.connected === true && message.supported !== false && message.enabled === true && (message.apiVersion || 0) >= 41;

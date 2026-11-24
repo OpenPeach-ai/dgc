@@ -103,3 +103,21 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     } finally { await page.close(); }
   });
 }
+
+
+// The owner, 24 Nov: Main and Fallback come before a row's marks, so the marks stand in one column down the list.
+test("Main and Fallback come before a row's marks; the marks of every row end at one edge (700px)", async (t) => {
+  if (C.skipOrFail(t)) return;
+  const { page } = await open(700, "dark-modern");
+  try {
+    const rows = await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-row")].filter((r) => r.querySelector(".dgc-mp-caps")?.checkVisibility()).map((r) => {
+      const caps = r.querySelector(".dgc-mp-caps"), tag = r.querySelector(".dgc-menu-pill");
+      return { tag: tag ? tag.textContent.trim() : "", tagFirst: tag ? !!(tag.compareDocumentPosition(caps) & Node.DOCUMENT_POSITION_FOLLOWING) : null,
+        tagLeft: tag ? tag.getBoundingClientRect().right <= caps.getBoundingClientRect().left + 0.5 : null, capsRight: Math.round(caps.getBoundingClientRect().right) };
+    }));
+    const tagged = rows.filter((r) => r.tag);
+    assert.ok(tagged.length >= 1 && rows.length >= 3, `premise: rows with marks, one with a tag (${JSON.stringify(rows)})`);
+    assert.ok(tagged.every((r) => r.tagFirst && r.tagLeft), `the tag sits before the marks (${JSON.stringify(tagged)})`);
+    assert.equal(new Set(rows.map((r) => r.capsRight)).size, 1, `the marks end at one edge (${rows.map((r) => r.capsRight)})`);
+  } finally { await page.close(); }
+});

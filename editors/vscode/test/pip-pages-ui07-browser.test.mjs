@@ -128,6 +128,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     try {
       const muted = (await tokenColours(x.p, ["--muted"], ".pip-page"))["--muted"];
       assert.equal(await x.p.evaluate(() => !!(window.__pipsRoot || document).getElementById("pipPageTitle")), false, "no empty box where a title would go");
+      await x.p.mouse.move(1, 1);       // its resting look: the pointer isn't on it (where it rests depends on the layout above)
       const link = await look(x.p, "[data-pip-title-edit]");
       assert.deepEqual([await x.p.evaluate(() => (window.__pipsRoot || document).querySelector("[data-pip-title-edit]").textContent.trim()), link.fill, link.words, link.lineWidth === "0px" || link.line === "rgba(0, 0, 0, 0)"],
         ["Add a title", "rgba(0, 0, 0, 0)", muted, true], "a quiet link: muted words, no fill, no line");

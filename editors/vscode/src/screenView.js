@@ -1,7 +1,8 @@
 // One screen in an editor tab, shown with the RFB viewer. A Pip computer's desktop and Your Browser's own window (where
 // the computer DGC runs on has no screen) are this one piece: the screen's bytes ride the extension host's messages (the
-// page never holds a socket, a path or a token), Copy and Paste go straight through it, and the page can ask the screen
-// for the size of the tab it is shown in.
+// page never holds a socket, a path or a token), Copy and Paste go straight through it, the page can ask the screen
+// for the size of the tab it is shown in, and the screen is shown and zoomed the same way in both (Fit or 100%).
+import './screenView.css';
 
 /** Bytes as base64, and back. */
 export function toB64(bytes) { let text = ''; for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(text); }
@@ -72,4 +73,26 @@ export function askScreenSize(viewer, width, height) {
   if (viewer._fbWidth === w && viewer._fbHeight === h) return true;
   say(viewer._sock, w, h, viewer._screenID, viewer._screenFlags);
   return true;
+}
+
+/** How every screen is shown in its tab, the same for a Pip's computer and Your Browser's own screen: the viewer never
+ *  resizes the screen by itself, takes the keyboard on a click and paints no ground of its own; the stream is the
+ *  viewer's own (its encodings, at quality 6 and compression 2, the viewer's defaults, said here so both stay the same);
+ *  and the picture is the screen's own pixels, one for each of the tab's, the tab's room scrolling to the rest, unless
+ *  Fit is chosen: then it is scaled to the tab with its shape kept. */
+export const SCREEN_QUALITY = 6, SCREEN_COMPRESSION = 2;
+export function showScreen(viewer, fit) {
+  viewer.scaleViewport = !!fit; viewer.clipViewport = false; viewer.resizeSession = false; viewer.focusOnClick = true;
+  viewer.background = 'transparent'; viewer.qualityLevel = SCREEN_QUALITY; viewer.compressionLevel = SCREEN_COMPRESSION;
+}
+/** Fit or 100% on a screen already shown. */
+export function fitScreenTo(viewer, fit) {
+  if (viewer && 'scaleViewport' in viewer && viewer.scaleViewport !== !!fit) { viewer.clipViewport = false; viewer.scaleViewport = !!fit; }
+}
+/** Fit and 100%, one pair of buttons, the same words, titles and look on every screen. `fitId`, `actualId`: the two
+ *  buttons' ids; `cls` and `groupCls`: a page's own class on the buttons and on the pair (a Pip computer's bar sizes and
+ *  folds its tools by them). */
+export function zoomMarkup(fit, { fitId, actualId, cls = '', groupCls = '' }) {
+  const button = (id, on, words, title) => `<button type="button" id="${id}" class="dgc-btn small dgc-zoom-btn${cls ? ` ${cls}` : ''}" aria-pressed="${on}" title="${title}">${words}</button>`;
+  return `<span class="dgc-zoom${groupCls ? ` ${groupCls}` : ''}" role="group" aria-label="Zoom">${button(fitId, !!fit, 'Fit', 'Fit the screen to this tab')}${button(actualId, !fit, '100%', 'Real size: scroll to see the rest')}</span>`;
 }

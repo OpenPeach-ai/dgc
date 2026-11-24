@@ -6,6 +6,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.52.0 — unreleased (the date goes in on release day)
 
+- **A reopened chat's history never starts inside a turn.** The 1 MB a reopened chat is sent could begin in the middle of
+  a long turn; it now begins with that turn's own start, so the turn replays whole and folds.
+- **"Show me here in the Canvas" makes a design.** DGC's docs say what the canvas is, `dgc_docs` weighs a rare word over
+  common ones, and `make_artifact` says a design's page is what the user calls the Canvas.
+- **Your Browser's `size` answer says the screen's size** (`screen` {width, height}): as large as the tab and Chrome's
+  whole window, so a tab narrower than Chrome's least width scrolls to the rest at one to one.
+- **The line when DGC skips a step the model repeated is in plain words**, without the tool's name.
+
 - **Checklist and Design are outputs a client can ask for** (`capabilities.artifacts.outputs` lists them; `--make
   checklist` and `/make design` too).
 - **"Hand it to a Pip" offers every Pip**, with the folder it works in, and any of them takes the job (only Pips with

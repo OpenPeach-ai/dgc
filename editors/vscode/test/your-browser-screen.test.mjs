@@ -4,9 +4,10 @@
 //   - the host (src/pipsView.ts): only your own tab may open, feed or close that stream (never a Pip's tab, never another
 //     page); the screen's bytes go to your own tab only; an editor whose DGC can't is told so (screen: false);
 //   - the page (src/yourBrowserTab.js, real Chromium, the viewer stood in for): one viewer on the tab's whole stage,
-//     scaled to fit, DGC's own bar stepping aside for Chrome's own; bytes both ways through the host; the screen asked for
-//     the tab's size at twice its pixels; Copy there lands on your clipboard; pictures where DGC says so; it opens again
-//     by itself after a close, then offers Open it again; no frames asked at all.
+//     one to one (100%, as a Pip computer's 100%; Fit when chosen: test/your-browser-view-browser.test.mjs), DGC's own
+//     bar stepping aside for Chrome's own; bytes both ways through the host; the screen asked for the tab's size in the
+//     pixels DGC says Chrome draws at (an older DGC that says no screen size); Copy there lands on your clipboard;
+//     pictures where DGC says so; it opens again by itself after a close, then offers Open it again; no frames asked.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -106,6 +107,23 @@ test("the host: with a DGC that can't, the tab is told so and nothing is sent", 
   assert.doesNotMatch(doc, /unsafe-eval|https?:\/\//);
 });
 
+// A screen asked for while this window can't pass it on (Pips off, DGC still connecting) is answered, never dropped: the
+// tab then tries again a few times and says why. Dropped, the tab waited on "Opening Your Browser…" for ever (25 Nov).
+test("the host: a screen this window can't open yet is answered with why, so the tab tries again", () => {
+  const h = editorWith({ your_browser_screen: 1, pips_enabled: false });
+  h.editor.openYourBrowserTab(null);
+  const [own] = h.panels;
+  own.receive({ type: "pipsReady" });
+  own.receive({ type: "yourBrowserScreen", op: "open" });
+  assert.deepEqual(h.screen(), [], "nothing reaches DGC");
+  const closed = own.posted.filter((m) => m.type === "yourBrowserScreenClosed");
+  assert.equal(closed.length, 1, "the tab is answered");
+  assert.match(closed[0].reason, /Pips/);
+  assert.equal(closed[0].pictures, false);
+  own.receive({ type: "yourBrowserScreen", op: "send", data: "AAEC" });
+  assert.equal(own.posted.filter((m) => m.type === "yourBrowserScreenClosed").length, 1, "only an open is answered");
+});
+
 // ---- the page ---------------------------------------------------------------------------------------------------------
 
 async function openScreen(theme = "dark", { width = 900, height = 600, screen = true } = {}) {
@@ -153,7 +171,7 @@ test("your own screen: one viewer on the tab's whole stage, Chrome's own bar in 
   const x = await openScreen();
   try {
     const viewer = await x.page.evaluate(() => { const v = window.__made[0]; return { n: window.__made.length, target: v.target.className, shared: v.options.shared, scale: v.scaleViewport, resize: v.resizeSession, clip: v.clipViewport, focus: v.focusOnClick }; });
-    assert.deepEqual(viewer, { n: 1, target: "yb-vnc", shared: true, scale: true, resize: false, clip: false, focus: true });
+    assert.deepEqual(viewer, { n: 1, target: "yb-vnc", shared: true, scale: false, resize: false, clip: false, focus: true }, "one to one, as a Pip computer's 100%");
     assert.deepEqual((await x.posted("yourBrowserScreen")).map((m) => m.op), ["open"]);
     const seen = await look(x.page);
     assert.equal(seen.bar, null, "DGC's own bar steps aside: Chrome's own is in the picture");

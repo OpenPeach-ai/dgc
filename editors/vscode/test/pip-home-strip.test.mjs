@@ -338,3 +338,22 @@ test('H3: when DGC cannot list the Pips the model says so (unknown), and stops s
  assert.equal(h.model().ready,true);
  assert.equal(h.model().unknown??false,false);
 });
+
+// Home said "0 · Nothing needs you" for the first seconds after a start, while things waited (24 Nov RC check): until the
+// Pips are read, the model says it is still checking (DGC starting, reconnecting, the first read under way); Pips turned
+// off or a CLI too old for this list are not "checking".
+test('before the Pips are read the model says it is checking; Pips that are off are not',async t=>{
+ const state={list:[pip(1,'Daily check',{pending_review_count:1})],digest:digest([])};
+ const x=harness(t,state);
+ x.strip.receive({type:'pipsConnection',generation:1,connected:false,supported:true,enabled:true,apiVersion:48});
+ assert.deepEqual([x.model().ready,x.model().checking],[false,true],'DGC starting: checking');
+ await x.connect();
+ assert.equal(x.model().ready,true);
+ assert.notEqual(x.model().checking,true,'read: no longer checking');
+ x.strip.receive({type:'pipsConnection',generation:2,connected:false,supported:true,enabled:true,apiVersion:48});
+ assert.equal(x.model().checking,true,'the connection went: checking again, never "nothing needs you"');
+ x.strip.receive({type:'pipsConnection',generation:3,connected:true,supported:true,enabled:false,apiVersion:48});
+ assert.notEqual(x.model().checking,true,'Pips off: nothing to check');
+ x.strip.receive({type:'pipsConnection',generation:4,connected:true,supported:true,enabled:true,apiVersion:30});
+ assert.notEqual(x.model().checking,true,'a CLI before this list: nothing to check');
+});

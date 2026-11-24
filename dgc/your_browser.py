@@ -1606,7 +1606,11 @@ def chrome_argv(chrome, profile: Path, url: str = "", place: dict | None = None,
     (Chrome 158, 18 Nov) and then did the same."""
     # --test-type: Chrome otherwise puts "You are using an unsupported command-line flag" across the top of every
     # start for the flag that keeps it from being marked as automated; it keeps only Chrome's start-up bars away.
-    argv = [str(chrome), "--remote-debugging-pipe", f"--user-data-dir={profile}", "--no-first-run",
+    # --profile-directory=Default: always DGC's own profile, never Chrome's profile picker. A second profile in the folder
+    # (Chrome's sign-in or "Add profile" makes one) opened the picker: no tab came, and Your Browser gave up after 15 s
+    # with "its window never opened", the tab on "Opening Your Browser…" for ever (25 Nov).
+    argv = [str(chrome), "--remote-debugging-pipe", f"--user-data-dir={profile}", "--profile-directory=Default",
+            "--no-first-run",
             "--no-default-browser-check", "--disable-blink-features=AutomationControlled", "--test-type", *test_flags]
     if headless and virtual:
         # A real window on its own screen (start_virtual_screen), streamed like a headless one. A Pip's lane there is a
@@ -2204,6 +2208,7 @@ class YourBrowserHost:
         self.fetch_icon, self.icon_wait = fetch_icon, False
         self.own: str | None = None
         self.own_size = OWN_SIZE
+        self.screen_size = (OWN_SIZE[0] * VNC_SCALE, OWN_SIZE[1] * VNC_SCALE)   # its VNC screen's, as the last size said
         self.own_cast: tuple | None = None       # (target, size) being cast
         self.own_cast_at = -1e9
         self.own_info_at = -1e9
@@ -2879,21 +2884,26 @@ class YourBrowserHost:
         except (BrowserError, socket.timeout, OSError):
             pass
 
-    def _fill_screen(self, target) -> None:
-        """Chrome's window over the whole VNC screen at the editor tab's size (the tab's viewer asks the screen for the
-        same size, in its pixels): Chrome's own bar, tabs and page, laid out for the tab."""
-        if not target:
-            return
+    def _fill_screen(self, target) -> tuple[int, int]:
+        """Chrome's window over the VNC screen at the editor tab's size: Chrome's own bar, tabs and page, laid out for the
+        tab. Chrome's window is never narrower than its own minimum (500 px, Chrome 158 on a screen with no window
+        manager), so it is read back as Chrome made it. Returns the screen's size, in its pixels, for the tab's viewer to
+        ask for: as large as the tab and the whole window, so a tab narrower than the window scrolls to the rest of it
+        at one screen pixel per tab pixel, never a window cut off at the screen's edge."""
         width, height = self.own_size
-        try:
-            window = self.browser._browser_call("Browser.getWindowForTarget", {"targetId": target}, timeout=5).get("windowId")
-            if window is None:
-                return
-            self.browser._browser_call("Browser.setWindowBounds", {"windowId": window, "bounds": {"windowState": "normal"}})
-            self.browser._browser_call("Browser.setWindowBounds", {"windowId": window, "bounds": {
-                "left": 0, "top": 0, "width": width, "height": height}})
-        except (BrowserError, socket.timeout, OSError):
-            pass
+        made = (width, height)
+        if target:
+            try:
+                window = self.browser._browser_call("Browser.getWindowForTarget", {"targetId": target}, timeout=5).get("windowId")
+                if window is not None:
+                    self.browser._browser_call("Browser.setWindowBounds", {"windowId": window, "bounds": {"windowState": "normal"}})
+                    self.browser._browser_call("Browser.setWindowBounds", {"windowId": window, "bounds": {
+                        "left": 0, "top": 0, "width": width, "height": height}})
+                    bounds = self.browser._browser_call("Browser.getWindowBounds", {"windowId": window}, timeout=5).get("bounds") or {}
+                    made = (int(bounds.get("width") or width), int(bounds.get("height") or height))
+            except (BrowserError, socket.timeout, OSError, TypeError, ValueError):
+                pass
+        return (min(OWN_MOST[0], max(width, made[0])) * VNC_SCALE, min(OWN_MOST[1], max(height, made[1])) * VNC_SCALE)
 
     def _ensure_own_cast(self, target) -> None:
         """A screencast of the person's own tab, every frame, sized to the editor tab: started once per tab and size."""
@@ -2933,9 +2943,11 @@ class YourBrowserHost:
                 refused = self._own_act(op, self.own_tab(), fields)
             except (BrowserError, socket.timeout, OSError, ValueError) as error:
                 return {"ok": False, "error": str(error)[:300] or "Your Browser didn't answer.", **self._own_state()}
-            # (On its VNC screen, the size answers how many of the screen's pixels Chrome draws each of the page's with:
-            # the editor's tab asks the screen for its own size times that.)
-            scale = {"scale": VNC_SCALE} if op == "size" and self.screen_socket() is not None else {}
+            # (On its VNC screen, the size answers how many of the screen's pixels Chrome draws each of the page's with,
+            # and the screen's size in them: the tab's own size, or Chrome's whole window where that is larger (a tab
+            # narrower than Chrome's least width). The editor's tab asks the screen for it and shows it one to one.)
+            scale = ({"scale": VNC_SCALE, "screen": {"width": self.screen_size[0], "height": self.screen_size[1]}}
+                     if op == "size" and self.screen_socket() is not None and not refused else {})
             return {"ok": not refused, **({"error": refused} if refused else {}), **self._own_state(), **scale}
 
     def _own_frame(self, seq: int) -> dict:
@@ -3094,7 +3106,7 @@ class YourBrowserHost:
                 return "The editor tab's size is its width and height."
             self.own_size = (max(320, min(OWN_MOST[0], width)), max(240, min(OWN_MOST[1], height)))
             if self.screen_socket() is not None:
-                self._fill_screen(target)          # (its screen streams itself: no pictures to make)
+                self.screen_size = self._fill_screen(target)   # (its screen streams itself: no pictures to make)
                 return ""
             self._ensure_own_cast(target)
             return ""

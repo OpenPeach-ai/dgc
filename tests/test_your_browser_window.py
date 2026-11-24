@@ -329,10 +329,15 @@ class ViewCommand(Base):
 class ChromePipe:
     """Google Chrome's DevTools pipe, scripted: the person's window with one tab, new tabs, windows and pictures."""
 
+    # Chrome's window is never narrower than this (Chrome 158 on a screen with no window manager): a narrower one asked
+    # for is made this wide, and Browser.getWindowBounds says so.
+    MIN_WIDTH = 500
+
     def __init__(self, person_url="https://news.example.org/"):
         self.sent, self.inbox, self.targets, self.n = [], [], {}, 0
         self.person_url = person_url
         self.closed = False
+        self.window = {"left": 0, "top": 0, "width": 800, "height": 600, "windowState": "normal"}
 
     def settimeout(self, timeout):
         pass
@@ -362,6 +367,12 @@ class ChromePipe:
             self.attach(target, params.get("url", "about:blank"))
         elif method == "Browser.getWindowForTarget":
             result = {"windowId": 7, "bounds": {"left": 0, "top": 0, "width": 800, "height": 600, "windowState": "normal"}}
+        elif method == "Browser.setWindowBounds":
+            asked = params.get("bounds") or {}
+            self.window = {**self.window, **{k: v for k, v in asked.items() if k in ("left", "top", "width", "height")}}
+            self.window["width"] = max(self.MIN_WIDTH, int(self.window["width"]))
+        elif method == "Browser.getWindowBounds":
+            result = {"bounds": dict(self.window)}
         elif method == "Page.captureScreenshot":
             result = {"data": TINY_JPEG}
         elif method == "Storage.getCookies":

@@ -252,24 +252,6 @@ const where=f=>typeof f.path==='string'&&f.path?`${f.path}${Number.isSafeInteger
 const chip=(attrs,inner,cls='')=>`<button type="button" class="run-post-chip${cls?' '+cls:''}" ${attrs}>${inner}</button>`;
 
 // The report under a run that found something: one click opens the top findings, or the checks that failed.
-function reportMarkup(p){
-  const id=esc(p.run_id);
-  let label,rows,more=0;
-  if(p.outcome==='findings'){
-    const total=count(p.total),top=(Array.isArray(p.findings)?p.findings:[]).filter(record).slice(0,3);
-    label=`Report · ${plural(total,'finding')}`;more=total-top.length;
-    rows=top.map(f=>{const s=SEVERITIES.includes(f.severity)?f.severity:'low';return `<li><span class="sev" data-sev="${s}">${s}</span><span class="t">${esc(f.title)}</span>${where(f)?`<span class="w">${esc(where(f))}</span>`:''}</li>`;});
-  }else if(p.kind==='live'){
-    const labels=(Array.isArray(p.failed_commands)?p.failed_commands:[]).filter(l=>typeof l==='string').slice(0,3),n=count(p.commands?.total);
-    label=`Output · ${plural(n,'command')}`;more=count(p.commands?.failed)-labels.length;
-    rows=labels.map(l=>`<li><span class="sev" data-sev="high">didn’t run</span><span class="w">${esc(l)}</span></li>`);
-  }else{
-    const labels=(Array.isArray(p.failed_checks)?p.failed_checks:[]).filter(l=>typeof l==='string').slice(0,3);
-    label=`Report · ${count(p.checks?.failed)} of ${count(p.checks?.total)} failed`;more=count(p.checks?.failed)-labels.length;
-    rows=labels.map(l=>`<li><span class="sev" data-sev="high">failed</span><span class="w">${esc(l)}</span></li>`);
-  }
-  return `<details class="run-post-report" data-details="report-${id}"><summary class="run-post-chip">${icon('doc')}<span>${esc(label)}</span>${chev}</summary><div class="run-post-report-body">${rows.length?`<ul class="run-post-findings">${rows.join('')}</ul>`:''}${more>0?`<p class="run-post-more">${more} more in the full report</p>`:''}<button type="button" class="link" data-post-open="${id}">${p.kind==='live'?'Open the full output':'Open full report'}</button></div></details>`;
-}
 // ---- The document a run kept (Pips API 78, ui-04-pip-doc-card, asked 10 Nov) ----
 // A review kept as the Pip's document or sheet, or a Quill draft that became its document, is on the run's post; the
 // chat draws the card Work and ChatDGC draw (media/shared/doccard.css): its tile, its name over "Document · version 3",
@@ -298,64 +280,86 @@ export function foldWords(runs,now=Date.now()){
   const n=runs.length,times=n===2?'twice':`${n} times`;
   return `${runs[0].kind==='checks'?'Passed':runs[0].kind==='live'?'All clear':'Nothing found'} ${times} since ${sinceWords(at(runs[0]),now)}`;
 }
-function timesMarkup(runs,now){
+
+
+/** What a check found, as a list inside its message: every finding the post carries (a failed check's or command's name
+ *  for checks and live data), and how many more its report has. Text for Copy and Read aloud with `plain`. */
+function foundRows(p){
+  if(p.outcome==='findings'){
+    const rows=(Array.isArray(p.findings)?p.findings:[]).filter(record).slice(0,50).map(f=>({sev:SEVERITIES.includes(f.severity)?f.severity:'low',title:String(f.title||''),at:where(f)}));
+    return {rows,more:Math.max(0,count(p.total)-rows.length),word:'finding'};
+  }
+  if(p.outcome==='checks_failed'||p.outcome==='live_attention'){
+    const live=p.kind==='live',labels=(Array.isArray(live?p.failed_commands:p.failed_checks)?(live?p.failed_commands:p.failed_checks):[]).filter(l=>typeof l==='string').slice(0,50);
+    const failed=count(live?p.commands?.failed:p.checks?.failed);
+    return {rows:labels.map(l=>({sev:'high',label:live?'didn’t run':'failed',title:'',at:l})),more:Math.max(0,failed-labels.length),word:live?'command':'check'};
+  }
+  return {rows:[],more:0,word:''};
+}
+function foundMarkup(p,name){
+  const {rows,more,word}=foundRows(p);if(!rows.length&&!more)return '';
+  const list=rows.length?`<ul class="run-post-findings">${rows.map(r=>`<li><span class="sev" data-sev="${r.sev}">${esc(r.label||r.sev)}</span>${r.title?`<span class="t">${esc(r.title)}</span>`:''}${r.at?`<span class="w">${esc(r.at)}</span>`:''}</li>`).join('')}</ul>`:'';
+  return list+(more?`<p class="run-post-more">${esc(plural(more,`more ${word}`))}: ask ${esc(name)} for ${more===1?'it':'them'}.</p>`:'');
+}
+function foundText(p){
+  const {rows,more,word}=foundRows(p);
+  return rows.map(r=>`- ${r.label||r.sev}: ${[r.title,r.at].filter(Boolean).join(' · ')}`).join('\n')+(more?`\n${plural(more,`more ${word}`)}`:'');
+}
+// All-clear runs in a row, as words under the one reply that says it again: "Passed 3 times since 9:00 AM: Today 9:00 AM, 10:00 AM, 11:00 AM".
+function timesLine(runs,now){
   const days=new Map();
   for(const p of runs){const d=startOfDay(at(p));if(!days.has(d))days.set(d,[]);days.get(d).push(p);}
   const dayName=d=>{const n=daysAgo(d,now);return n===0?'Today':n===1?'Yesterday':new Date(d).toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'});};
-  const rows=[...days].map(([d,list])=>`<div class="run-post-day"><span class="run-post-day-name">${esc(dayName(d))}</span><span class="run-post-day-times">${list.map(p=>`<button type="button" class="run-post-time" data-post-open="${esc(p.run_id)}" data-streak-run="${esc(p.run_id)}" title="${esc(new Date(at(p)).toLocaleString(undefined,{dateStyle:'full',timeStyle:'short'}))} · Open this run">${esc(clock(at(p)))}</button>`).join('')}</span></div>`).join('');
-  return `<details class="run-post-times" data-details="streak-${esc(runs[0].run_id)}"><summary class="run-post-chip"><span class="ok" aria-hidden="true">✓</span> <span>${esc(foldWords(runs,now))}</span>${chev}</summary><div class="run-post-times-body">${rows}</div></details>`;
+  return `${foldWords(runs,now)}: ${[...days].map(([d,list])=>`${dayName(d)} ${list.map(p=>clock(at(p))).join(', ')}`).join(' · ')}`;
 }
 
-// Ask DGC to fix, or what the fix did (Pips API 65): a chip that says so and goes to the Work chat it ran in (where its
-// Review, Undo, Watch and Stop are), and Ask DGC to fix again when it didn't finish or was undone.
-function fixMarkup(p,{ask,asked,asking,fix,openFix}){
-  const id=esc(p.run_id),words=fix?fixWords(fix):null;
-  const again=words&&words.state==='failed',undone=words?.state==='undone';
-  const askChip=asking?chip(`data-post-fix="${id}" data-state="asking" disabled title="DGC is starting the fix in the Work session."`,`${icon('fix')}<span>Asking DGC…</span>`,'run-post-fix asked')
-    :asked&&!fix?chip(`data-post-fix="${id}" data-state="asked" disabled title="DGC was asked to fix this run, in the Work session it reports to."`,`${icon('fix')}<span>Asked DGC</span>`,'run-post-fix asked')
-    :chip(`data-post-fix="${id}" data-state="ask"${undone?' title="DGC’s fix of this run was undone."':''}`,`${icon('fix')}<span>${again?'Ask DGC to fix again':'Ask DGC to fix'}</span>`,'run-post-fix');
-  if(!ask&&!fix)return '';
-  if(!words||undone)return ask?askChip:'';
-  const mark=icon(words.state==='fixing'?'spin':words.state==='failed'?'x':'check');
-  const status=openFix&&fix.session_id
-    ?chip(`data-post-fix-open="${id}" data-state="${words.state}" title="${esc(words.title)}"`,`${mark}<span>${esc(words.text)}</span>${chev}`,'run-post-fix')
-    :`<span class="run-post-chip run-post-fix" data-state="${words.state}" title="${esc(words.title)}">${mark}<span>${esc(words.text)}</span></span>`;
-  return status+(again&&ask?askChip:'');
-}
+/** A result post the post itself cut short (its text is kept to PREVIEW_CHARS): the page fetches the whole result. */
+export function postNeedsWhole(p){return p?.outcome==='result'&&p.truncated===true;}
 
-/** One run in the chat, or a fold of all-clear runs (`streak`, oldest first, `p` its newest), as a message from the
- *  Pip. `previous`: its run before (for "again"); `ask`: Ask DGC to fix is offered (a project Pip's audit or checks,
- *  with a chat to send it to); `asked`: it was (before Pips API 65, kept with the view); `asking`: it was just now, and
- *  the fix hasn't been read yet; `fix`: its latest fix (Pips API 65), whose state the post says; `openFix`: a click on
- *  that goes to the Work chat it ran in; `canRun`: Run again now would start a run; `expanded`: Show all. */
-export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=false,asked=false,asking=false,fix=null,openFix=false,canRun=false,previous=null,streak=null,expanded=false,traced=false,docs=false,under=undefined,renderMarkdown=s=>`<p>${esc(s)}</p>`}){
-  // `under` (One Pips, src/pipFlow.js): what stands under the Pip's words in place of the report chip and Ask DGC to
-  // fix: its findings as one card, then what became of them (the Allow card, the fix at work, its change).
+/** One run in the chat, or all-clear runs in a row (`streak`, oldest first, `p` its newest), as a reply from the Pip
+ *  (asked 24 Nov: "a routine run should just respond in chat whatever the result is"; "just chat with responses"): its
+ *  whole text (`whole`, the result fetched when the post cut it), what a check found as a list inside it, and the row
+ *  every reply ends with, its time, `buttons` (Copy, Read aloud: the page's), Trace. No chips: you ask the Pip.
+ *  `lead`: its face and name over it (said without being asked, as a routine's reply); `plain`: the conversation look.
+ *  `previous`: its run before (for "again"); `under` (One Pips, src/pipFlow.js): what stands under its words, its
+ *  findings as one card and what became of them; `fix`: the fix DGC made of it in a Work chat, said in words. */
+export function postMarkup(p,{name,face='',now=Date.now(),personal=false,previous=null,streak=null,traced=false,docs=false,under=undefined,whole='',lead=false,plain=false,buttons='',fix=null,renderMarkdown=s=>`<p>${esc(s)}</p>`}){
   const id=esc(p.run_id),runs=streak&&streak.length>1?streak:null,before=runs?runs.at(-2):previous;
   const time=globalThis.DgcTime?.markup(at(p))||'';
-  let body,text;
+  const text=postPlainText(p,{name,previous:before,personal,now,whole});
+  let body;
   if(p.outcome==='result'){
-    const whole=String(p.preview||''),cut=shortReply(whole);
-    body=renderMarkdown(expanded||!cut.clipped?whole:cut.text)
-      +(expanded&&p.truncated?'<p class="run-post-more">The rest is in the full result.</p>':'')
-      +(cut.clipped?`<button type="button" class="link run-post-show" data-post-more="${id}" aria-expanded="${expanded}">${expanded?'Show less':'Show all'}</button>`:'');
-    text=cut.text.replace(/[*_`#>|]/g,'').replace(/\s+/g,' ').slice(0,200);
+    body=renderMarkdown(typeof whole==='string'&&whole.trim()?whole:String(p.preview||''));
   }else{
     // What the Pip itself said about this check (`said`, the flow design: what is wrong, why it matters, how sure it
     // is), in its own short messages; without it, the words made from the report's own numbers.
     const own=under!==undefined&&typeof p.said==='string'&&p.said.trim()?p.said.trim().slice(0,4000):'';
     const words=pipWords(p,{previous:before,personal,now});
     body=own?own.split(/\n\s*---\s*\n/).map(part=>`<div class="run-post-said">${renderMarkdown(part.trim())}</div>`).join(''):words.map(w=>`<p>${w.map(partHtml).join('')}</p>`).join('');
-    text=own?own.replace(/[*_`#>|]/g,'').replace(/\s+/g,' ').slice(0,200):wordsText(words);
+    // (One Pips draws its findings as their card under the words: `under`.)
+    if(under===undefined)body+=foundMarkup(p,name);
   }
-  const fixable=!personal&&askable(p),fixChip=fixable?fixMarkup(p,{ask,asked,asking,fix,openFix}):'';
-  const attach=runs?timesMarkup(runs,now)
-    :under!==undefined&&p.outcome==='findings'?''
-    :p.outcome==='findings'||p.outcome==='checks_failed'||p.outcome==='live_attention'?reportMarkup(p)+fixChip
-    :p.outcome==='failed'?chip(`data-post-open="${id}"`,`${icon('warn')}<span>See what happened</span>`)+(canRun?chip(`data-post-run="${id}"`,`${icon('play')}<span>Run again now</span>`):'')+fixChip
-    :chip(`data-post-open="${id}"`,`<span>${p.outcome==='draft'?'Open draft':p.kind==='result'?'Open result':'Open run'}</span>${chev}`,'quiet');
-  const head=`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong>${time}</div>`;
-  return `<article class="pip-message assistant dgc run-post${runs?' run-post-streak':''}" data-run-post="${id}" data-outcome="${esc(p.outcome)}"${runs?` data-runs="${runs.length}"`:''} tabindex="-1" aria-label="${esc(`${name}: ${text}${runs?` ${foldWords(runs,now)}.`:''}`)}">${head}<div class="answer"><div class="message-body text final run-post-body">${body}</div></div>${docs&&!runs&&postArtifact(p)?docCardMarkup(postArtifact(p)):''}${under||''}<div class="run-post-attach">${attach}${traced&&!runs?`<button type="button" class="ract ract-trace" data-post-trace="${id}" aria-label="Replay response trace" title="Replay response trace">Trace</button>`:''}</div></article>`;
+  if(runs)body+=`<p class="run-post-times-line">${esc(timesLine(runs,now))}</p>`;
+  // What a fix DGC made of it in a Work chat (Pips API 65) did, in words under its own (asked 24 Oct: "should its status
+  // also get updated as fixed? Yes"): a line, not a chip, as nothing here opens (24 Nov).
+  const fixed=fix&&!runs?fixWords(fix):null;
+  if(fixed?.text)body+=`<p class="run-post-fix-line" data-state="${fixed.state}">${esc(fixed.text)}.</p>`;
+  const head=lead?`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong></div>`:'';
+  // A draft's text isn't in the chat: Open draft stays, a quiet word in the row like Trace.
+  const draft=p.outcome==='draft'&&!runs?`<button type="button" class="ract ract-trace" data-post-open="${id}" title="Open the draft it wrote">Open draft</button>`:'';
+  const trace=traced&&!runs?`<button type="button" class="ract ract-trace" data-post-trace="${id}" aria-label="Replay response trace" title="Replay response trace">Trace</button>`:'';
+  const label=`${name}: ${text.replace(/\s+/g,' ').slice(0,200)}${runs?` ${foldWords(runs,now)}.`:''}`;
+  return `<article class="pip-message msg assistant dgc run-post${plain?' pip-plain':''}${plain&&lead?' pip-led':''}${runs?' run-post-streak':''}" data-run-post="${id}" data-outcome="${esc(p.outcome)}"${runs?` data-runs="${runs.length}" data-streak-ids="${runs.map(r=>esc(r.run_id)).join(' ')}"`:''} tabindex="-1" aria-label="${esc(label)}">${head}<span class="sr-only role">${esc(name)}</span><div class="answer"><div class="message-body text final run-post-body">${body}</div></div>${docs&&!runs&&postArtifact(p)?docCardMarkup(postArtifact(p)):''}${under||''}<div class="response-actions">${time}${buttons}${draft}${trace}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+}
+
+/** A post's words as text, for Copy, Read aloud and its label: the result (whole once fetched), or what the Pip said and
+ *  the list of what it found. */
+export function postPlainText(p,{name='',previous=null,personal=false,now=Date.now(),whole=''}={}){
+  if(p.outcome==='result')return (typeof whole==='string'&&whole.trim()?whole:String(p.preview||'')).trim();
+  const own=typeof p.said==='string'&&p.said.trim()?p.said.trim().slice(0,4000).replace(/\n\s*---\s*\n/g,'\n\n'):'';
+  const said=own||wordsText(pipWords(p,{previous,personal,now}));
+  const found=foundText(p);
+  return [said,found].filter(Boolean).join('\n\n');
 }
 
 // ---- A run while it runs (reported 24 Oct) ----------------------------------------------------------------------

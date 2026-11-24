@@ -100,20 +100,18 @@ function pips({apiVersion=60,pipValue=pulse(),postsValue=[],runs=[LIVE_RUN],repl
   return {w,d:w.document,sent,asks,requests,drain,click,send};
 }
 const text=el=>el?.textContent.replace(/\s+/g,' ').trim();
-const said=el=>text(el.querySelector('.run-post-body'));
-const attachments=el=>[...el.querySelector('.run-post-attach').children].map(e=>e.matches('details')?text(e.querySelector('summary')):text(e));
+// The Pip's words, without what it lists under them (a run's post is a reply since 24 Nov: no chips under it).
+const said=el=>{const b=el.querySelector('.run-post-body').cloneNode(true);b.querySelectorAll('.run-post-findings,.run-post-more,.run-post-times-line,.run-post-fix-line').forEach(n=>n.remove());return text(b);};
+const listed=el=>[...el.querySelectorAll('.run-post-body .run-post-findings li')].map(li=>[...li.children].map(text).join(' '));
 
-test('its chat says the summary; a run that needs you has its output and Ask DGC to fix one click away',async()=>{
+test('its chat says the summary; a run that needs you lists the commands that didn’t run, in its words',async()=>{
   const x=pips({postsValue:[attention(1,NOW-HOUR)]});await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();
   const post=x.d.querySelector('article.run-post');
   assert.equal(post.dataset.outcome,'live_attention');
   assert.equal(said(post),'The health check failed: curl printed nothing. Orders: 1 unpaid.','the summary is the Pip’s words');
-  assert.deepEqual(attachments(post),['Output · 3 commands','Ask DGC to fix']);
-  const report=post.querySelector('details.run-post-report');report.querySelector('summary').click();
-  assert.deepEqual([...report.querySelectorAll('.run-post-findings li')].map(li=>[...li.children].map(text).join(' ')),['didn’t run curl -s http://127.0.0.1:8765/health']);
-  assert.equal(text(report.querySelector('button[data-post-open]')),'Open the full output');
-  post.querySelector('[data-post-fix]').click();await x.drain();
-  assert.equal(x.asks.length,1);assert.equal(x.asks[0].report.kind,'live');assert.equal(x.asks[0].report.outcome,'live_attention');
+  assert.deepEqual(listed(post),['didn’t run curl -s http://127.0.0.1:8765/health']);
+  assert.equal(post.querySelector('.run-post-attach,details,[data-post-open],[data-post-fix]'),null,'no Output ›, Open the full output or Ask DGC to fix');
+  assert.ok(post.querySelector(':scope > .response-actions'),'the row a reply ends with');
 });
 
 test('all-clear runs fold into one message that shows the newest summary',async()=>{
@@ -121,7 +119,7 @@ test('all-clear runs fold into one message that shows the newest summary',async(
   const all=x.d.querySelectorAll('article.run-post');
   assert.equal(all.length,1,'three all-clear runs, one message');
   assert.equal(said(all[0]),'Orders: 2 paid, 1 unpaid. Disk 62% used. Health ok, queue 2.');
-  assert.match(text(all[0].querySelector('details.run-post-times summary')),/^✓ All clear 3 times since /);
+  assert.match(text(all[0].querySelector('.run-post-times-line')),/^All clear 3 times since .*: Today /);
   assert.deepEqual(posts.postShort(clear(0,NOW)),{text:'All clear',tone:'clear'});
   assert.deepEqual(posts.postShort(attention(0,NOW)),{text:'Needs you · 1 of 3 commands didn’t run',tone:'bad'});
   assert.equal(posts.postStatus(attention(0,NOW),NOW),'Today’s check: needs you');

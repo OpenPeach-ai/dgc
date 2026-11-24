@@ -524,11 +524,11 @@ class EachArtifactItsOwnOrigin(unittest.TestCase):
         self.assertIn("frame-src http://127.0.0.1:*", shell_headers["content-security-policy"])
 
     def test_reached_over_tailscale_or_the_lan_the_shell_may_still_frame_it(self):
-        # (The 21 Nov test: opened at http://100.71.117.72:45001 the shell showed its header and Chrome blocked the page:
+        # (The 21 Nov test: opened at http://100.88.12.34:45001 the shell showed its header and Chrome blocked the page:
         # "This content is blocked". The address it was reached on wasn't among those allowed to frame it.)
-        csp = A._page_csp(self.srv, A._FILE_CSP, also="100.71.117.72")
+        csp = A._page_csp(self.srv, A._FILE_CSP, also="100.88.12.34")
         ancestors = next(p.strip() for p in csp.split(";") if p.strip().startswith("frame-ancestors")).split()[1:]
-        self.assertIn(f"http://100.71.117.72:{self.srv.port}", ancestors)
+        self.assertIn(f"http://100.88.12.34:{self.srv.port}", ancestors)
         self.assertFalse([a for a in ancestors if "[" in a], "no IPv6 literal: Chrome rejects it as an invalid source")
         self.assertIn(f"http://127.0.0.1:{self.srv.port}", ancestors)
 

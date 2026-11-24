@@ -2,6 +2,27 @@
 
 ## 0.36.0 — unreleased (the date goes in on release day)
 
+- **A Pip's runs read as replies.** A run or a routine's result is a reply like any other: its whole text (a long result
+  is fetched whole), what a check found as a list in its words, and the row every reply ends with (its time, Copy, Read
+  aloud, Trace). No Open result, Report, See what happened or Ask DGC to fix: ask the Pip. A fix DGC made in a Work chat
+  is said as a line.
+- **A long goal turn folds after a reload.** Its steps fold under "Worked" with its prompt above and its answer below,
+  instead of coming back page after page of open steps.
+- **A background command a restart stopped is on the agent map**, with Run again on its card; the map's button says
+  "Agent map · 1 stopped". The chat has no line for it.
+- **Your Browser at one to one**, as on a Pip's computer: sharp, never shrunk or cut off; a narrow tab scrolls to the
+  rest of Chrome's window, and Fit / 100% is in a slim bar.
+- **A Pip's page**: Edit sits under its face, and its top bar no longer slides under DGC's logo line.
+- **Home says "Checking your Pips…"** until it has read them, never a false "Nothing needs you" at start.
+- **Plain words**: the card offering Continue after a stop, and the line when DGC skips a repeated step.
+- **No bright scrollbars**: every page keeps the slim bars (a slides editor's strip had a standard bar with arrows).
+- **The Edited card starts folded** to its header after a reply, in Work and in a Pip's chat: its count, Undo and Session
+  changes (or Review and Apply) stay in sight, and its chevron or its title opens the files.
+- **Your Browser never waits on "Opening Your Browser…" for ever**: a screen the window couldn't ask for yet was dropped
+  without a word; the tab is told why, tries again, then says so with Try again. And it always opens its own Chrome
+  profile: a second profile in its folder (a Chrome sign-in or profile prompt makes one) opened Chrome's profile picker,
+  no tab came, and it gave up after 15 seconds.
+
 - **Checklist and Design are outputs** in Work's Output chip and `@` menu, ChatDGC's menu and a Pip's `@` outputs,
   beside Document, Slides, Spreadsheet, Page and Dashboard.
 - **A pinned prompt looks pinned**: once its turn has scrolled past, it is one line with an ellipsis and an edge, so

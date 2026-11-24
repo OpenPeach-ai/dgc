@@ -689,9 +689,12 @@ An artifact is something DGC makes that you keep: a **Document**, **Slides**, a 
 reports in one. Every artifact lives on this computer, in `~/.dgc/artifacts/`, whichever part of
 DGC made it, and nothing is hosted anywhere: exporting is how you share one.
 
-Open **Library → Artifacts** in Chat to find artifacts made in Chat, Work or Pips. **Work → Library**
-opens that same saved collection filtered to Work. From either place, reopen, export or remove an
-artifact; removal moves its versions to DGC's trash. A Page or Dashboard has a **Copy text** button
+The **Library** tab of DGC's side bar, and the Library's own editor tab, list everything DGC made or you
+kept, in five tabs: **Artifacts**, **Widgets**, **Images**, **Videos** and **Files**. The search box searches
+the tab you are on, and each tab has its own filters: the kind, and who made it (Work, Chat or your Pips).
+Every row names who made it, and the name leads back to that session, chat or Pip. One menu, on a
+right-click or a row's **…**, opens, saves a copy, copies, renames or removes an item; removing an
+artifact moves its versions to DGC's trash. A Page or Dashboard has a **Copy text** button
 in its editor panel, so its readable text can be copied even when the embedded preview does not
 offer a working copy command.
 
@@ -786,6 +789,18 @@ dashboards to refresh after every run it finishes.
   `export ID FORMAT [--to PATH]`; `restore ID VERSION`; `rm ID` moves it to DGC's trash
   (`~/.dgc/artifacts/.trash`), where it can be put back.
 - `/artifacts` in the full-screen terminal lists them and opens one, and asks before the trash.
+
+## Designs: the canvas
+
+Ask for a design ("design a landing page for my bakery, desktop and phone", "show it in the Canvas",
+"mock up the settings screen") and DGC makes a **Design**: a canvas of artboards, each a screen, a page at
+desktop or phone size, a poster or a step of a clickable prototype. The agent makes it with
+`make_artifact` (type `design`): it names the artboards first, then draws them one at a time, and the
+canvas fills in while you watch. Nothing is written to your project. A card under the reply opens the
+canvas beside the chat (the pop-up's **Open** too), where you pick a part to see and change its
+properties, move and rename artboards, comment on one or ask in the chat to change it, **Play** it as a
+prototype, and download the artboards as pictures, a PDF or a web page. A page or app built *in your
+project* (files, a dev server) is not a design: that is a Page, below.
 
 ## Pages
 
@@ -3541,7 +3556,7 @@ It is **free and local**. You do not pay DGC to use it; optional `Pricing` only 
 model-token spend your provider bills you.
 
 **dgc-sdk 0.10.0** pairs with CLI **0.52.0** over editor protocol v14. This version has been tested on Linux only;
-macOS and Windows through WSL 2 passed for an earlier candidate. Native Windows is experimental. The guide and API reference are in
+macOS and Windows through WSL 2 remain release test targets. Native Windows is experimental. The guide and API reference are in
 [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/main/docs/SDK.md). Check
 [PyPI](https://pypi.org/project/dgc-sdk/) or [npm](https://www.npmjs.com/package/@vibedgc/sdk)
 for the published version before installing.
@@ -3675,7 +3690,7 @@ CLI; the extension updates through your editor.
 
 ## The side bar
 
-DGC's side bar has one tab bar at its top: **Home**, **Work**, **Chat** and **Pips**. The tab you were
+DGC's side bar has one tab bar at its top: **Home**, **Work**, **Chat**, **Library** and **Pips**. The tab you were
 on is kept across a reload, and the dock sits under every tab.
 
 - **Home** is one scrolling page of cards you choose. A new Home starts with Needs you, Recent, Running
@@ -3700,6 +3715,8 @@ on is kept across a reload, and the dock sits under every tab.
   turn runs or while the session is open somewhere. Archiving never asks about Pips: sessions don't own
   Pips.
 - **Chat** lists your ChatDGC chats the same way (see **ChatDGC**), and **Pips** your Pips (see **Pips**).
+- **Library** lists what DGC made or you kept: artifacts, widgets, images, videos and files, with search,
+  filters and Favorites (see **Artifacts**).
 - **The dock**, at the foot of the side bar: what you pinned (a Pip, a session, a chat, an artifact, a
   Library file, a widget or a Work folder), then **+** (a new Work session, ChatDGC chat or Personal Pip,
   and Settings). Pin with the pin on a row. A dot says it is open or running, and a number says it needs
@@ -3748,6 +3765,9 @@ one, and it never repeats after a reload.
 
 ## What an answer can show
 
+- **A link's preview.** Point at a link in an answer for its page's title, picture and first words, in
+  Work, ChatDGC and a Pip's chat. DGC reads public pages only, never one that needs your sign-in, and
+  Settings → Security → **Show a preview when you point at a link** turns it off.
 - **Trace.** The word beside a finished answer's icons, in Work, ChatDGC and a Pip's chat. It replays what
   the answer did: each model round with the tokens the provider reported, tools with their own time, a search
   with its hits, cards and plugin calls. Play it or scrub its timeline; it survives a reload. An answer that
@@ -3910,8 +3930,8 @@ coding sessions) and from Pips. The full guide is
 
 ## Using it
 
-The **Chat** tab of DGC's side bar lists your chats (the tab bar is **Home**, **Work**, **Chat** and
-**Pips**, and it remembers the tab you were on). **New chat** opens a chat in an editor tab, as
+The **Chat** tab of DGC's side bar lists your chats (the tab bar is **Home**, **Work**, **Chat**,
+**Library** and **Pips**, and it remembers the tab you were on). **New chat** opens a chat in an editor tab, as
 does **DGC: New Chat (ChatDGC)** in the Command Palette. One search box finds a chat by its name or
 anything said in it. **Archive** in a chat's **…** menu takes it off the list; **Archived (N)** at the
 list's end has **Restore** and **Delete**. Enter sends, Shift+Enter adds a line, Esc stops a reply. A message you send
@@ -4040,6 +4060,11 @@ so, and it never moves to another by itself. A Pip can have several conversation
 of its chat opens them, and its scheduled checks and routines post in the first one unless you move a
 routine.
 
+**Hand a Pip a job from any chat**: `@Tile checker check the tax rounding and fix it` in Work, ChatDGC or
+another Pip's chat. The Pip works in its own chat (on its copy of your folder), and its answer comes back
+where you asked, as one card with **Apply** when it changed something. A busy Pip queues the job; at **Ask me
+first** it waits for your **Start** in its own chat, and the card where you asked says so.
+
 ## Its own computer and its own copy
 
 Every new Pip has its own computer: a browser, Files and a Terminal in a sandbox, walled off from this
@@ -4123,6 +4148,9 @@ there, or **came back**. A run with nothing new says nothing new. What happens n
 - **Undo** puts back each file that still holds exactly what the change wrote. In a Git folder the card
   says whether the change is committed; **Commit these files** commits exactly the files that change put
   in your folder, as you, and nothing else.
+- **A sub-agent with Work tools.** A fix its copy can't do (it needs your `.env` or a running service) can
+  go to a sub-agent that works on your real folder with a Work session's full tools, from the fix card. It
+  shows in the Pip's chat, and its change has **Undo** like any other.
 - **One try per finding.** A finding it fixed that comes back is asked about, at every level, and never
   fixed again by itself. One fix at a time per Pip: while its Allow card waits, a later check updates
   that card; while a change waits at Apply, a later check asks nothing new.
@@ -4230,7 +4258,23 @@ PIP --usd 50` (or `no_limit`), and `dgc pips payments 200` (or `none`) for all P
   own Chrome. **Allow once** (Chrome asks too), and it works in a tab of its own, on the card's sites
   only. It asks every time; there is no Always allow.
 - **Fallback model.** The ⋯ beside a model in a Pip's model picker: **Use as fallback**. When its model
-  doesn't answer, its turn carries on with it; its prompt box says so in olive.
+  doesn't answer, its turn carries on with it, and its prompt box says so.
+
+## Your Browser
+
+**Your Browser** is one Google Chrome, signed in as you, in a profile of its own that DGC keeps apart from
+your everyday Chrome. Open it from the dock or Home's Browser card; on a computer with no screen (over
+Remote-SSH) its tabs stream into an editor tab, one screen pixel per tab pixel, and a tab narrower than
+Chrome's window scrolls to the rest (**Fit** shows it all, smaller). Sign in to the sites your Pips may use.
+
+- **A Pip asks before a site.** The first time a Pip wants a site in Your Browser, its chat asks **Let
+  Scout use this site?**; Allow it once or always. While it works, Your Browser's tile says so, and
+  **Watch** shows the tab it works in.
+- **Sites Pips can use…** (right-click Your Browser on the dock) lists every site you allowed, with
+  **Remove**.
+- **Clear browsing data…** (the same menu) clears history (ticked), sign-ins or saved passwords (not
+  ticked), and says what it cleared. A Pip's visits are in the history too, so they go with it.
+- Passkeys and security keys don't work in the streamed tab; it says so at the top.
 
 ## Secrets and what it sent
 
@@ -5464,6 +5508,12 @@ settings are `dev_mode` and `dev_limits`.
 **Let DGC change Dev Mode settings** (`dev_mode_tools`: a switch under Dev Mode, and a tick box in the
 warning that turns it on) is off unless you switch it on. With it on, and only while Dev Mode is on, DGC
 can change a Dev Mode limit when you ask. DGC can never turn on Dev Mode, and only you set this switch.
+
+**Work on a subscription uses DGC's tools** (`dev_subscription_tools`, under Dev Mode, off by default): with
+it on, a Work turn on Claude Code or Codex is DGC's own turn with that CLI as its model only. The CLI runs
+with its own tools off and none of your settings or MCP servers; every step goes through Work's own tools,
+so Allow cards, auto mode and its safety check, the sandbox, checkpoints and the Edited card, goals,
+helpers and DGC's artifacts work as on any other model. DGC never reads or reuses the CLI's sign-in.
 
 ## Useful keys
 

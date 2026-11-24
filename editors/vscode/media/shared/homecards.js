@@ -345,7 +345,7 @@
     }
     function needsCard(form, d) {
       const x = d.needs || { count: 0, faces: [] };
-      if (form === "s") return `<span class="hc-lbl">Needs you</span><span class="hc-big">${x.count}</span><span class="hc-sub hc-grow">${x.count ? "waiting for you" : x.unknown ? "Your Pips couldn’t be checked" : "Nothing needs you"}</span><span class="hc-row hc-faces">${(x.faces || []).slice(0, 4).map((f) => `<span class="hc-ico hc-ico-f">${f}</span>`).join("")}</span>`;
+      if (form === "s") return `<span class="hc-lbl">Needs you</span><span class="hc-big">${!x.count && x.checking ? "–" : x.count}</span><span class="hc-sub hc-grow">${x.count ? "waiting for you" : x.unknown ? "Your Pips couldn’t be checked" : x.checking ? "Checking your Pips…" : "Nothing needs you"}</span><span class="hc-row hc-faces">${(x.faces || []).slice(0, 4).map((f) => `<span class="hc-ico hc-ico-f">${f}</span>`).join("")}</span>`;
       return '<div data-slot="needs"></div>';
     }
     function runningCard(form, d, tight) {

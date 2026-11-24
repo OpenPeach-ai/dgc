@@ -7786,8 +7786,18 @@ class Backend:
             retained.append(item)
             size += cost
         retained.reverse()
-        # Never hand the panel a turn that begins in the middle. Trimming from the front is the
-        # honest cut: the dropped fragments are the oldest, and the notice below says so.
+        # Never hand the panel a turn that begins in the middle. A cut inside a turn keeps that turn's own start
+        # above what is left of it, so it reads as the turn it is: its prompt, its work folded under one row, its
+        # answer. Without it the leftover steps had no turn above them (the cut stopped at a time marker, 24 Nov):
+        # a goal's 316-step turn replayed as page after page of open steps, each ending "Worked" with no answer.
+        head = self._history_cut_turn_start(items, len(items) - len(retained))
+        if head is not None and retained:
+            cost = len(json.dumps(head, ensure_ascii=True))
+            while retained and size + cost > 1_000_000:
+                size -= len(json.dumps(retained.pop(0), ensure_ascii=True))
+            retained.insert(0, head)
+        # Otherwise trimming from the front is the honest cut: the dropped fragments are the oldest, and the notice
+        # below says so.
         while retained and (retained[0].get("type") in _MID_TURN_ITEMS or retained[0].get("role") == "steering"):
             retained.pop(0)
         if len(retained) < len(items):
@@ -11883,6 +11893,25 @@ class Backend:
             if item is not None:
                 items.append(item)
         return items
+
+    @staticmethod
+    def _history_cut_turn_start(items: list, first: int) -> dict | None:
+        """A copy of the turn_start of the turn that the payload's cut falls inside (``first``: the index of the first
+        item kept), its prompt shortened as a kept item's is; None when the cut falls between turns or keeps all."""
+        if first <= 0 or first >= len(items):
+            return None
+        for item in reversed(items[:first]):
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "turn_end":
+                return None
+            if item.get("type") == "turn_start":
+                head = dict(item)
+                prompt = head.get("prompt")
+                if isinstance(prompt, str) and len(prompt) > 50000:
+                    head["prompt"] = prompt[:50000] + "\n[Long saved message truncated for display]"
+                return head
+        return None
 
     def _history_turn_finished(self, turn: dict, finished: bool) -> bool:
         """Whether a replayed turn counts as finished; a dismissed question may end a turn."""

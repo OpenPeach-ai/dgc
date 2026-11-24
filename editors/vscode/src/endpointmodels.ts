@@ -17,7 +17,8 @@ function candidates(base: string): string[] {
   return [...new Set(list)];
 }
 
-async function readJson(url: string, apiKey: string): Promise<unknown> {
+/** One host's JSON answer: at most 2 MB, within 5 s, never redirected; the key as a bearer token (src/modelcaps.ts too). */
+export async function readJson(url: string, apiKey: string): Promise<unknown> {
   const headers: Record<string, string> = { "User-Agent": "dgc-vscode", Accept: "application/json" };
   // "ollama" is the placeholder a keyless local host is saved with; it is not a credential.
   if (apiKey && apiKey !== "ollama") { headers.Authorization = `Bearer ${apiKey}`; }
@@ -43,7 +44,7 @@ async function readJson(url: string, apiKey: string): Promise<unknown> {
 /** Model ids the host lists: Ollama's `models[].name`, or OpenAI's `data[].id`. Sorted, unique. */
 /** An address as it is compared: lower-case scheme and host, this computer by one name (127.0.0.1 and [::1] are
  *  localhost), no slash at its end and no /v1 there. "" for what is no http(s) address. */
-function hostKey(address: string): string {
+export function hostKey(address: string): string {
   let url: URL;
   try { url = new URL(String(address || "").trim()); } catch { return ""; }
   if (url.protocol !== "http:" && url.protocol !== "https:") return "";

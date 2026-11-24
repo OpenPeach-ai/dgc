@@ -48,6 +48,8 @@ async function editedTurn(theme, width) {
   await x.event({ type: "text_delta", text: "Done." }); await x.event({ type: "stream_end", message_id: "t9:1", phase: "final" });
   await x.event({ type: "turn_end", turn_id: "t9", status: "completed", reason: "completed", usage: {} });
   await x.page.waitForSelector(".turn-summary .change-add");
+  // (The card starts folded to its header since 24 Nov: its files' rows are read once it is opened.)
+  await x.page.click(".turn-summary .ts-fold"); await x.page.waitForSelector(".turn-summary .ts-list:not([hidden])");
   return x;
 }
 for (const theme of ["light-modern", "dark-modern"]) for (const width of [300, 700]) {

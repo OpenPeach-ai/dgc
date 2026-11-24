@@ -98,6 +98,7 @@ test("files are grouped by folder, each folder with its counts, folding both way
 test("a long turn starts with its folders folded, and the whole card folds from its chevron", () => {
   const many = ["a", "b", "c", "d", "e", "f", "g"].map((n) => ({ path: `src/${n}.py`, diff: true }));
   const card = turnThatEdited(many);
+  card.querySelector(".ts-head .ts-fold").click();          // (the card starts folded to its header: open it)
   const folder = card.querySelector(".ts-folder-row");
   assert.equal(folder.getAttribute("aria-expanded"), "false", "seven files: folded to start, the header stays near");
   assert.equal(folder.nextElementSibling.hidden, true);
@@ -112,6 +113,24 @@ test("a long turn starts with its folders folded, and the whole card folds from 
   assert.equal(fold.getAttribute("aria-label"), "Show the changed files", "it says what it does next");
   fold.click();
   assert.equal(list.hidden, false);
+});
+
+// After a reply the card starts folded to its header (asked 24 Nov: "the edited files card comes up open, let's make it
+// collapsed by default, and if user wants they can open it"): its title, counts, Undo and Session changes stay; the
+// chevron or a click on its title opens the files.
+test("the card starts folded to its header; its chevron or its title opens the files", () => {
+  const card = turnThatEdited([{ path: "src/a.py", diff: true }, { path: "README.md", diff: true }]);
+  const fold = card.querySelector(".ts-head .ts-fold"), list = card.querySelector(".ts-list");
+  assert.equal(list.hidden, true, "folded to start");
+  assert.equal(fold.getAttribute("aria-expanded"), "false");
+  assert.equal(fold.getAttribute("aria-label"), "Show the changed files");
+  assert.equal(card.querySelector(".ts-title").textContent, "Edited 2 files");
+  assert.ok(card.querySelector(".ts-head .ts-undo") && card.querySelector(".ts-head .ts-review"), "Undo and Session changes stay in sight");
+  card.querySelector(".ts-heading").click();
+  assert.equal(list.hidden, false, "a click on its title opens it");
+  assert.equal(fold.getAttribute("aria-expanded"), "true");
+  card.querySelector(".ts-heading").click();
+  assert.equal(list.hidden, true, "and folds it again");
 });
 
 // A live run (22 Nov): a command made a whole tree of new files (a virtual environment) and the card drew one row per

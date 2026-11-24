@@ -576,6 +576,6 @@ dialog.hc-library:not([open]) { display: none; }
 .hc-install > span, .hc-copy-line > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hc-install > svg, .hc-copy-line > svg { flex: none; width: 14px; height: 14px; }
 .hc-cmd { display: block; box-sizing: border-box; max-width: 100%; min-width: 0; padding: 4px 8px; border: 1px solid var(--hair); border-radius: var(--btn-r, 6px);
-  overflow-x: auto; white-space: nowrap; scrollbar-width: thin; font: var(--t-xs)/1.5 var(--mono, ui-monospace, monospace); color: var(--text-2, inherit); background: var(--surface2, transparent); user-select: all; -webkit-user-select: all; }
+  overflow-x: auto; white-space: nowrap; font: var(--t-xs)/1.5 var(--mono, ui-monospace, monospace); color: var(--text-2, inherit); background: var(--surface2, transparent); user-select: all; -webkit-user-select: all; }
 .hc-card[data-form="s"] .hc-install, .hc-card[data-form="s"] .hc-copy-line { padding: 0 8px; font-size: var(--t-xs); }
 .hc-installing { overflow-wrap: anywhere; }

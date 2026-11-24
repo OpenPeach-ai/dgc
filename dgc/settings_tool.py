@@ -334,15 +334,24 @@ def docs(query: str) -> str:
     bounded: how DGC works, never a guess. (It answered with the first 4,000 characters of the best pages, so a section
     far down a long page was never seen.)"""
     from .docs import DOCS
-    words = [w for w in str(query or "").lower().split() if len(w) > 2][:12]
-    scored = []
+    import math
+    import re as _re
+    words = [w for w in _re.findall(r"[a-z0-9_]+", str(query or "").lower()) if len(w) > 2][:12]
+    pages = []
     for page in DOCS:
         title, description, body = (str(page[0]), str(page[1]), str(page[2])) if isinstance(page, (tuple, list)) else (
             str(page.get("title", "")), str(page.get("description", "")), str(page.get("markdown", page.get("body", ""))))
-        in_title = sum(3 * (w in title.lower()) + (w in description.lower()) for w in words)
-        for section in _sections(body):
+        pages.append((title, description, _sections(body)))
+    # A word's weight is how rare it is in the docs: "canvas" names one section, "show" and "user" are everywhere. Counted
+    # alike, a question about the Canvas found the Configuration page first (24 Nov), and the model built files instead.
+    sections = [section.lower() for _, _, parts in pages for section in parts]
+    weight = {w: math.log(1 + len(sections) / (1 + sum(w in text for text in sections))) for w in words}
+    scored = []
+    for title, description, parts in pages:
+        in_title = sum(weight[w] * (3 * (w in title.lower()) + (w in description.lower())) for w in words)
+        for section in parts:
             text = section.lower()
-            score = sum(text.count(w) + 4 * (w in text.split("\n", 1)[0]) for w in words) + in_title if words else 1
+            score = sum(weight[w] * (min(text.count(w), 6) + 4 * (w in text.split("\n", 1)[0])) for w in words) + in_title if words else 1
             if score:
                 scored.append((score, title, description, section))
     scored.sort(key=lambda item: -item[0])

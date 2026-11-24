@@ -4538,7 +4538,7 @@ test("a card's place never cuts the reply's Markdown: inside a code fence or a l
   } finally { await s.page.close(); }
 });
 
-test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined up at the right end, the model button in red while it answers", async (t) => {
+test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined up before the marks, the model button in red while it answers", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen({ width: 700 });
   const at = "2026-11-09T10:00:00.000Z";
@@ -4564,8 +4564,13 @@ test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined u
     assert.equal(await fallback.textContent(), "Fallback");
     const [a, b] = [await main.boundingBox(), await fallback.boundingBox()];
     assert.ok(Math.abs((a.x + a.width) - (b.x + b.width)) < 1.5, `Main and Fallback end on one line (${a.x + a.width} vs ${b.x + b.width})`);
+    // (Main and Fallback come before a model's marks, so every row's marks stand in one column: decided 24 Nov.)
+    const marks = async (name) => picker.locator(".dgc-mp-row", { hasText: name }).locator(".dgc-mp-caps").boundingBox();
+    const [ma, mb] = [await marks("deepseek-v4.1-flash:cloud"), await marks("glm-5.3:cloud")];
+    assert.ok(b.x + b.width <= mb.x + 0.5, `Fallback ends before its row's marks (${b.x + b.width} vs ${mb.x})`);
+    assert.ok(Math.abs((ma.x + ma.width) - (mb.x + mb.width)) < 1.5, "the marks end on one line, row after row");
     const rowBox = await picker.locator(".dgc-mp-row", { hasText: "glm-5.3:cloud" }).boundingBox();
-    assert.ok(rowBox.x + rowBox.width - (b.x + b.width) <= 34, "at the row's right end, before the check's place");
+    assert.ok(rowBox.x + rowBox.width - (mb.x + mb.width) <= 34, "the marks at the row's right end, before the check's place");
     await s.page.keyboard.press("Escape");
     // Its model didn't answer: the waiting line names the fallback, and so does the pill, in red, with the word.
     await s.send({ type: "turn", state: "started", replyId: M(2) });
@@ -4585,6 +4590,35 @@ test("a chat's fallback (D14): the ⋯ beside a model, Main and Fallback lined u
     assert.equal(await s.page.locator("#cd-model-name").textContent(), "deepseek-v4.1-flash:cloud");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+// 24 Nov: what the provider says each model can do comes as its own message (modelCaps, "" the host DGC is on): the
+// picker's rows take those marks over their names' guesses, and in a narrow tab they fold into one icon that says them.
+test("modelCaps: a chat's picker shows what the provider says (images, No tools), folded into one icon when narrow", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const width of [700, 300]) {
+    const s = await openScreen({ width });
+    try {
+      await s.send({ type: "opened", conversation: conversation({ model: "deepseek-v4.1-flash:cloud" }), messages: [], earlier: 0, busy: false });
+      await s.send({ type: "models", current: "deepseek-v4.1-flash:cloud", ids: ["deepseek-v4.1-flash:cloud", "glm-5.3:cloud", "codellama:13b"], host: { name: "Ollama", mark: "ollama", badge: "" } });
+      await s.send({ type: "modelCaps", id: "", caps: { "deepseek-v4.1-flash:cloud": { thinks: true, images: true, tools: true }, "glm-5.3:cloud": { thinks: true, images: false, tools: true },
+        "codellama:13b": { thinks: false, images: false, tools: false } } });
+      await s.page.locator("#cd-model-pill").click();
+      const picker = s.page.locator(".dgc-mp");
+      await picker.evaluate((n) => Promise.all(n.getAnimations().map((a) => a.finished)));
+      const rows = await picker.evaluate((p) => Object.fromEntries([...p.querySelectorAll(".dgc-mp-row")].map((r) => [r.querySelector(".dgc-mp-name").textContent,
+        { marks: [...r.querySelectorAll(".dgc-mp-cap")].map((c) => c.dataset.cap), seen: [...r.querySelectorAll(".dgc-mp-cap")].filter((c) => c.checkVisibility()).map((c) => c.dataset.cap),
+          fold: r.querySelector(".dgc-mp-fold")?.checkVisibility() ? r.querySelector(".dgc-mp-fold").getAttribute("aria-label") : "" }])));
+      assert.deepEqual(rows["deepseek-v4.1-flash:cloud"].marks, ["cloud", "thinks", "images"], `${width}px: it sees images, as its provider says`);
+      assert.deepEqual(rows["glm-5.3:cloud"].marks, ["cloud", "thinks"]);
+      assert.deepEqual(rows["codellama:13b"].marks, ["notools"]);
+      if (width === 700) assert.deepEqual([rows["deepseek-v4.1-flash:cloud"].seen, rows["deepseek-v4.1-flash:cloud"].fold], [["cloud", "thinks", "images"], ""], "wide: every mark in sight");
+      else assert.deepEqual([rows["glm-5.3:cloud"].seen, rows["glm-5.3:cloud"].fold], [[], "Runs in Ollama’s cloud, Thinks"], "narrow: one icon that says them");
+      assert.deepEqual(rows["codellama:13b"].seen, ["notools"], "one mark: itself, at every width");
+      if (process.env.MODEL_CAPS_SHOTS) await s.page.screenshot({ path: `${process.env.MODEL_CAPS_SHOTS}/chatdgc-${width}-dark.png` });
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  }
 });
 
 test("a chat's fallback: Claude Code or Codex can be one too, and nothing is offered by an older process", async (t) => {

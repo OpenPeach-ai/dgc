@@ -1,0 +1,8 @@
+/* Fit and 100% (src/screenView.js zoomMarkup): how a screen is shown in its tab, one pair of the shared small buttons
+   joined by one hairline, the same on a Pip's computer and in Your Browser. The chosen one is washed, never purple. */
+.dgc-zoom{display:inline-flex;flex:none}
+.dgc-btn.dgc-zoom-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:auto;min-width:26px;padding:0 7px}
+.dgc-zoom .dgc-zoom-btn:first-child{border-radius:var(--btn-r) 0 0 var(--btn-r)}
+.dgc-zoom .dgc-zoom-btn:last-child{border-radius:0 var(--btn-r) var(--btn-r) 0;margin-left:-1px}
+.dgc-zoom .dgc-zoom-btn:hover:not(:disabled),.dgc-zoom .dgc-zoom-btn:active:not(:disabled){transform:none}
+.dgc-zoom .dgc-zoom-btn[aria-pressed="true"]{z-index:1;background:var(--wash);border-color:var(--btn-line-hover);color:var(--text-strong)}

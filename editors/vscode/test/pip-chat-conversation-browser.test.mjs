@@ -125,6 +125,9 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       button(review, "Review"); button(apply, "Apply");
       assert.equal(review.top, apply.top, "Review and Apply on one line"); assert.ok(apply.left > review.right, "Apply last"); assert.ok(apply.right <= card.right - 4);
       assert.equal((await look(x, ".pip-change-title")).cut, false);
+      // Its files start folded, as Work's Edited card's do (24 Nov); the chevron opens them.
+      assert.equal(await x.inPips((root) => root.querySelector(".pip-change .pip-project-files").hidden), true, "folded to start");
+      await x.click(".pip-change [data-change-fold]"); await x.waitIn(".pip-change .pip-project-files:not([hidden])");
       const files = await x.inPips((root) => [...root.querySelectorAll(".pip-change .pip-project-file")].map((f) => { const r = f.getBoundingClientRect(), c = root.querySelector(".pip-change").getBoundingClientRect(); return r.left >= c.left && r.right <= c.right + 1; }));
       assert.equal(files.length, 2); assert.ok(files.every(Boolean), "each file's row inside the card");
       await x.click(".pip-change [data-change-menu]"); await x.waitIn(".pip-change-menu");

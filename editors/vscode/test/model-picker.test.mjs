@@ -88,6 +88,30 @@ test("a model's name earns only the marks its family is known for", () => {
   assert.deepEqual(P.facts(""), []);
 });
 
+// 24 Nov (the owner: "what about image icon too? and maybe icon if model has tools capability as well?"): what the
+// provider says of a model (src/modelcaps.ts, a page message per connection) wins over the guess from its name; what
+// it doesn't say is still the name's guess. Tools mark the exception: "No tools", only where the provider says so.
+test("a model's marks: what its provider says, else its name's guess; a quiet No tools only where the provider says it has none", () => {
+  const said = { "deepseek-v4.1-flash:cloud": { thinks: true, images: true, tools: true }, "glm-5.3:cloud": { thinks: true, images: false, tools: true },
+    "codellama:13b": { thinks: false, images: false, tools: false }, "pixtral-large": { images: true, tools: true }, "qwen3-14b-mlx": { images: false } };
+  assert.deepEqual(P.facts("deepseek-v4.1-flash:cloud"), ["thinks"], "premise: its name alone earns no image mark");
+  assert.deepEqual(P.marksOf("deepseek-v4.1-flash:cloud", said), ["thinks", "images"], "it sees images: its provider says so");
+  assert.deepEqual(P.marksOf("glm-5.3:cloud", said), ["thinks"]);
+  assert.deepEqual(P.marksOf("codellama:13b", said), ["notools"], "it can't use tools: the one quiet mark");
+  assert.deepEqual(P.marksOf("qwen3-14b-mlx", said), ["thinks"], "thinking unsaid: the name's guess; images said: none");
+  assert.deepEqual(P.marksOf("magistral-medium", said), ["thinks"], "nothing said of it: its name's guess");
+  assert.deepEqual(P.marksOf("pixtral-large", said), ["images"]);
+  assert.deepEqual(P.marksOf("llava:13b", undefined), ["images"], "no map at all: the guess");
+  assert.deepEqual(P.marksOf("constructor", {}), [], "a map is read for its own names only");
+  assert.deepEqual(P.marksOf("toString", { toString: "x" }), [], "and only for what it says in words it knows");
+  // The one-line switch, kept for the owner: a tools mark on every row the provider says can use them.
+  assert.deepEqual(P.marksOf("glm-5.3:cloud", said, true), ["thinks", "tools"]);
+  assert.deepEqual(P.marksOf("codellama:13b", said, true), ["notools"]);
+  assert.equal(P.TOOLS_ON_EVERY_ROW, false, "as decided 24 Nov: only the exception is marked");
+  for (const cap of ["thinks", "images", "notools", "tools"]) assert.ok(P.CAP_WORDS[cap], `${cap} says what it is`);
+  assert.match(P.glyph("notools"), /<path/);
+});
+
 test("each connection wears its company's own website icon, carried in the picker: nothing to fetch, nothing to clash", () => {
   // Decided 17 Nov: the exact logo for each, then the icons their websites use. A picture is a data: image; a drawing
   // (the three black ones, in the text's colour) has no id (two pickers' marks would clash) and no link.

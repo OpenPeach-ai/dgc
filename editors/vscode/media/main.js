@@ -2452,6 +2452,8 @@
     const mark = window.DgcFolderPick?.folderMark ? window.DgcFolderPick.folderMark(folder) : "";
     return mark.replace('class="folder-icon ', `style="--folder-size:${Number(size) || 64}px" class="folder-icon hc-folder `).replace(/<\/span>$/, `${label ? `<span class="folder-label">${esc(label)}</span>` : ""}</span>`);
   }
+  // Home's Pips not read yet (DGC starting, reconnecting, the first read under way): src/pipHomeStrip.js says so.
+  function pipsChecking() { return !!homePips && (!pipModel || pipModel.checking === true); }
   function homeData() {
     const needs = homeNow.cards.filter((c) => c.group === "needs"), fresh = homeNow.cards.filter((c) => c.group === "new");
     const isNew = new Set(fresh.map((c) => c.key));
@@ -2471,7 +2473,9 @@
     return {
       notes: homeNow.notes,
       // (unknown: DGC couldn't list the Pips, so "nothing needs you" isn't something Home can say. H3.)
-      needs: { count: hubWaiting(needs) + (pipModel?.more || 0), faces: needs.map((c) => c.who?.html || ""), unknown: pipModel?.unknown === true },
+      // (checking: the Pips aren't read yet, so "nothing needs you" isn't something Home can say either: 24 Nov.)
+      needs: { count: hubWaiting(needs) + (pipModel?.more || 0), faces: needs.map((c) => c.who?.html || ""), unknown: pipModel?.unknown === true,
+        checking: pipsChecking() },
       // (On the card's own rows, the short way to say where it is from: a row has less room than an opened card. H2.)
       news: fresh.map((c) => ({ key: `hub:${c.key}`, at: Number(c.at) || 0, icon: c.who?.html || "", name: c.title, meta: Array.isArray(c.fromShort) && typeof c.fromShort.at(-1) === "string" ? c.fromShort.at(-1) : c.from, title: `Open: ${c.title} · ${c.from}` })),
       recent,
@@ -2559,7 +2563,7 @@
     // card opened. What is new is in one place only, Recent: as rows on the card, and with Recent opened as cards with
     // the answers Home had (Open, Mark read, Dismiss, Undo) and Clear.
     const needsHost = part("needs"), newHost = part("new");
-    hub = window.DgcHub.create({ host: needsHost, groups: ["needs"], always: () => !hubForm.full, empty: "Nothing needs you.",
+    hub = window.DgcHub.create({ host: needsHost, groups: ["needs"], always: () => !hubForm.full, empty: () => (pipsChecking() ? "Checking your Pips…" : "Nothing needs you."),
       first: () => hubForm.first, onRest: () => { if (hubForm.full) return false; home?.open("needs"); return true; }, onViewAll: () => home?.open("needs"),
       onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry() });
     hubNew = window.DgcHub.create({ host: newHost, groups: ["new"], empty: "",
@@ -3373,6 +3377,9 @@
   let modelPicker = null, lastModelMenu = null;
   let pickerTab = "main";                 // "main" | "agents"
   const pickerLists = new Map();          // a saved provider's models: key -> {ids, error}, or null while its host is asked
+  // What each connection's provider says its models can do (modelCaps, src/modelcaps.ts): route key -> {model: {thinks,
+  // images, tools}}. Kept between openings (a model's abilities don't change): a new answer replaces its connection's.
+  const pickerCaps = new Map();
   const modelPickerOpen = () => !!modelPicker && modelPicker.isOpen();
   function refreshModelPicker() { if (modelPickerOpen()) modelPicker.update(modelPickerView()); }
   function askProviderModels(key) {
@@ -3600,7 +3607,8 @@
     const from = sub ? { engine: String(row.engine || row.key) } : row.plan ? { plan: true } : { base_url: row.key === "native" ? lastModelMenu.base : String(row.base_url || ""), name: agentsHostLabel(row) };
     return { id: row.key, name: connName(row), ...MP.markOf(from), route: row, loaded: true, sections: [] };
   }
-  const plainRows = (ids, current) => ids.map((id) => ({ id, value: id, name: id, caps: MP.facts(id), current: id === current }));
+  /** A connection's rows by model name: their marks as its provider says them (pickerCaps), else as their names do. */
+  const plainRows = (ids, current, key = "") => ids.map((id) => ({ id, value: id, name: id, caps: MP.marksOf(id, pickerCaps.get(key)), current: id === current }));
   const listed = (conn, rows) => (conn.mark === "ollama" && conn.badge !== "cloud" ? MP.ollamaSections(rows) : [{ title: "", rows }]);
   /** A CLI's rows: its own default first, then its models: Claude Code's by nickname with the version each last ran
    *  as, then its fixed versions; any other CLI's as it lists them. `current`: the chosen name, or null when the
@@ -3619,7 +3627,7 @@
       return [{ title: "", rows: mains([first, ...rows.followed]) }, ...(rows.fixed.length ? [{ title: "Fixed versions", rows: mains(rows.fixed) }] : [])];
     }
     const ids = [...new Set([...(current ? [current] : []), ...info.hints])];
-    return [{ title: "", rows: mains([first, ...plainRows(ids, current)]) }];
+    return [{ title: "", rows: mains([first, ...plainRows(ids, current, row.key)]) }];
   }
   /** A row's Main and Fallback words and its ⋯ (D14). */
   function fbParts(target, isMain, isFallback) {
@@ -3668,13 +3676,13 @@
       if (here) {
         if (row.plan && row.plan !== "connected") return planConn(row, conn, here);
         if (m.err || !m.ids.length) { conn.error = m.err ? "Can’t reach its host." : "It lists no models."; conn.footer = [{ id: "connect", label: "Connect…", icon: "plug" }]; return row.plan ? planConn(row, conn, here) : conn; }
-        conn.sections = listed(conn, withFb(plainRows(m.ids, m.current)));
+        conn.sections = listed(conn, withFb(plainRows(m.ids, m.current, row.key)));
         return row.plan ? planConn(row, conn, here) : conn;
       }
       const list = pickerLists.get(row.key);
       if (!list) { conn.loaded = false; return row.plan ? planConn(row, conn, here) : conn; }
       if (list.error && !list.ids.length) conn.error = "Couldn’t list its models.";
-      conn.sections = listed(conn, withFb(plainRows(list.ids, null)));
+      conn.sections = listed(conn, withFb(plainRows(list.ids, null, row.key)));
       conn.footer = [{ id: "typedFor", label: "Enter another model…", icon: "edit" }];
       return row.plan ? planConn(row, conn, here) : conn;
     });
@@ -3696,7 +3704,7 @@
       if (list.error && !list.ids.length) conn.error = "Couldn’t list its models.";
       // The sub-agents' own fallback (subagent_fallback): a row's ⋯, and Main and Fallback on the rows once one is set.
       const fb = agentsModel.fallback_offered, set = !!agentsModel.fallback_model;
-      conn.sections = listed(conn, plainRows(list.ids, on ? agentsModel.model : null).map((r) => {
+      conn.sections = listed(conn, plainRows(list.ids, on ? agentsModel.model : null, row.key).map((r) => {
         if (!fb) return r;
         const isFallback = !r.current && agentsFallbackOn(row, r.value);
         return { ...r, pills: set ? (r.current ? [["Main", "main"]] : isFallback ? [["Fallback", "fallback"]] : []) : [],
@@ -6876,23 +6884,28 @@
       + `<span class="ts-totals">${totals}</span></span>`
       + `<span class="ts-actions">`
       + `<button type="button" class="ts-undo" title="Put these files back as they were before this turn">Undo <span class="codicon codicon-discard" aria-hidden="true"></span></button>`
-      + `<button type="button" class="ts-fold" aria-expanded="true" aria-controls="${listId}" aria-label="Fold the changed files" title="Fold the changed files"><span class="ts-chev">${icon("chevron-down", "sm")}</span></button>`
+      + `<button type="button" class="ts-fold" aria-expanded="false" aria-controls="${listId}" aria-label="Show the changed files" title="Show the changed files"><span class="ts-chev">${icon("chevron-down", "sm")}</span></button>`
       + `<button type="button" class="act wide ts-review" title="Open everything this session changed, file by file">${icon("file-text", "sm")}<span>Session changes</span></button>`
       + `</span></div>`
-      + `<div class="ts-list" id="${listId}">${body}</div>`;
+      // (Folded to its header to start, asked 24 Nov: "the edited files card comes up open, let's make it collapsed by
+      // default, and if user wants they can open it". Its chevron or a click on its title opens the files.)
+      + `<div class="ts-list" id="${listId}" hidden>${body}</div>`;
     card.querySelectorAll(".ts-folder-row").forEach((button) => button.onclick = () => {
       const files = button.nextElementSibling, open = files.hidden;      // about to open?
       files.hidden = !open;
       button.setAttribute("aria-expanded", String(open));
     });
     const fold = card.querySelector(".ts-fold");
-    fold.onclick = () => {
-      const list = card.querySelector(".ts-list"), open = list.hidden;
-      list.hidden = !open;
+    const setOpen = (open) => {
+      card.querySelector(".ts-list").hidden = !open;
       fold.setAttribute("aria-expanded", String(open));
       const words = open ? "Fold the changed files" : "Show the changed files";
       fold.setAttribute("aria-label", words); fold.title = words;
     };
+    card._setOpen = setOpen;            // a redraw of the card (turn_files) keeps it open if you opened it
+    fold.onclick = () => setOpen(card.querySelector(".ts-list").hidden);
+    const heading = card.querySelector(".ts-heading");
+    heading.onclick = () => setOpen(card.querySelector(".ts-list").hidden);
     card.querySelectorAll("[data-file]").forEach((row) => row.onclick = () => {
       const entry = files[Number(row.dataset.file)];
       if (entry) vscode.postMessage({ type: "reviewChange", path: entry[0], scope: "chat" });
@@ -6992,6 +7005,7 @@
     box._checkpoint = files.checkpoint || box._checkpoint;
     const fresh = turnSummaryCard(files.edits, box._turnPrompt, files);
     const old = box.querySelector(":scope > .turn-summary");
+    if (old && fresh && old.querySelector(".ts-list")?.hidden === false) fresh._setOpen?.(true);
     if (old && fresh) old.replaceWith(fresh);
     else if (old) old.remove();
     else if (fresh) box.insertBefore(fresh, box.querySelector(":scope > .response-actions"));
@@ -9327,8 +9341,19 @@ function permissionChoices(ev) {
   // note (the note is saved with the chat first), so whichever comes second gives way: a replay skips a marker whose
   // live line is on screen, and a live line takes the place of its replayed marker (the live one has the buttons).
   const restartNoteId = (ev) => `${String(ev?.key || "")}:${String(ev?.state || "")}:${Number(ev?.at) || 0}`;
+  // Lines the user put away with their × (asked 24 Nov: Run again is no way out for a command you don't want run). The
+  // extension keeps them (src/dismissedNotes.ts), so a reload or another tab replays the chat without them.
+  const dismissedNotes = new Set();
   function placeRestartNote(line, ev, live) {
     line.dataset.note = restartNoteId(ev);
+    if (dismissedNotes.has(line.dataset.note)) return;
+    // (Kept only for a line that names its record and its moment; any other closes for this page alone.)
+    const keep = !!ev?.key && Number(ev?.at) > 0;
+    window.DgcDismiss?.add(line, { focus: () => $("input"), onDismiss: () => {
+      if (!keep || dismissedNotes.has(line.dataset.note)) return;
+      dismissedNotes.add(line.dataset.note);
+      vscode.postMessage({ type: "dismissNote", id: line.dataset.note });
+    } });
     const twins = [...log.querySelectorAll(".monitor-restart")].filter((n) => n.dataset.note === line.dataset.note);
     if (!live) {
       if (twins.some((n) => !n.classList.contains("hist"))) return;
@@ -9369,6 +9394,10 @@ function permissionChoices(ev) {
   function taskInterruptedLine(ev, live) {
     const state = String(ev?.state || "");
     if (!TASK_INTERRUPTED_ICONS[state]) return;
+    // A background command a restart stopped is on the agent map, with Run again on its card, and the map's button says
+    // how many are stopped (renderAgentsPill): not in the chat, nor its "running again" line (asked 24 Nov: "it should not
+    // be part of chat, and instead on the agent map"). A Run again that failed is an error, and stays in the chat.
+    if (String(ev?.kind || "") === "shell" && state !== "failed") return;
     const line = el("div", "sys sys-marked monitor-restart task-interrupted" + (live ? "" : " hist") + (state === "failed" ? " err" : ""));
     line.dataset.state = state;
     line.dataset.kind = String(ev.kind || "");
@@ -13347,8 +13376,12 @@ function permissionChoices(ev) {
         continue;
       }
       if (!REPLAYABLE.has(type)) continue;
-      if (open) { open.push(it); if (type === "turn_end") open = null; }
-      else units.push([it]);                 // a fragment with no turn above it still renders
+      // A fragment with no turn above it (its start was cut away) still renders, and is ONE turn: one unit up to its
+      // end, so paging never splits it. Each step was a unit of its own, and a goal's 316-step turn came back 25 steps
+      // a page, every page ending "Worked" with its steps open (24 Nov).
+      if (!open) { open = []; units.push(open); }
+      open.push(it);
+      if (type === "turn_end") open = null;
     }
     return units;
   }
@@ -14876,6 +14909,12 @@ function permissionChoices(ev) {
     const msg = e.data;
     if (window.DgcVideo?.message(msg)) return;     // a video's bytes, its state or its Stop (src/videoHost.ts)
     if (window.DgcPictureFold?.message(msg)) return;   // which pictures stay folded, and the setting
+    // The lines the user closed (src/dismissedNotes.ts): any on screen go, and a replay leaves them out.
+    if (msg.type === "dismissedNotes") {
+      for (const id of Array.isArray(msg.ids) ? msg.ids.slice(0, 1000) : []) if (typeof id === "string" && id) dismissedNotes.add(id);
+      for (const line of log.querySelectorAll(".monitor-restart")) if (dismissedNotes.has(line.dataset.note)) line.setAttribute("data-dgc-dismissed", "");
+      return;
+    }
     if (msg?.type === "autoModePrompt") { showAutoModePrompt(msg); return; }
     if (msg?.type === "sessions_note") { if (chatPlace === "home" && msg.kind === "archived") sessionArchivedNote(msg); return; }
     if (msg?.type === "autoModeDismiss") {
@@ -15004,10 +15043,11 @@ function permissionChoices(ev) {
     // pipsChatDraft, pipsChatChanged: a Pip's chat is open in another page too (its editor tab, the Pips tab): what was
     // typed there, and that something was sent or answered there (15 Nov, "Open in editor").
     // pipUsageMeter, pipUsageChanged, pipPlanConnecting: a Pip's chat's usage meter and its picker's ChatGPT plan Connect (0.52).
+    // pipModelCaps: what each connection's provider says its models can do, the picker's marks (24 Nov).
     // pipsPhotoData (a chat picture's original: its pop-up's Download), pipsFileCopy, pipsFileSaid, pipsGitRefs (a commit's link),
     // pipsProfileChanged: never passed on here before (20 Nov: a Pip chat's pop-up Download did nothing in the side bar).
     if (["pipsPluginLogos", "pipsAppLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged", "pipsProjectFolder", "pipsFolderPicked", "pipsChatDraft", "pipsChatChanged", "pipsFileData",
-      "pipUsageMeter", "pipUsageChanged", "pipPlanConnecting",
+      "pipUsageMeter", "pipUsageChanged", "pipPlanConnecting", "pipModelCaps",
       "pipsPhotoData", "pipsFileCopy", "pipsFileSaid", "pipsGitRefs", "pipsProfileChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     // pipSetupChanged: a new-Pip card was created or turned down somewhere else; this chat's copy and the Pips page read it again.
     if (msg.type === "pipSetupChanged") { pipSetupCards?.receive(msg); for (const listener of pipsListeners) listener(msg); return; }
@@ -15081,6 +15121,7 @@ function permissionChoices(ev) {
     else if (msg.type === "usageMeter") onUsageMeter(msg);
     else if (msg.type === "planConnecting") onPlanConnecting(msg);
     else if (msg.type === "agentsWindow") onAgentsWindow(msg);
+    else if (msg.type === "modelCaps") { if (typeof msg.id === "string" && msg.id && msg.caps && typeof msg.caps === "object" && !Array.isArray(msg.caps)) { pickerCaps.set(msg.id, msg.caps); refreshModelPicker(); } }
     else if (msg.type === "providerModels") { if (modelPickerOpen() && typeof msg.id === "string") { pickerLists.set(msg.id, { ids: Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string" && id) : [], error: !!msg.error }); refreshModelPicker(); } }
     else if (msg.type === "models" && modelPickerOpen()) { if ("agents" in msg) { setAgentsModel(msg.agents); updateModelControl(); } onModels(msg); }
     else if (msg.type === "fallbackActive") { fallbackActive = typeof msg.model === "string" ? msg.model.slice(0, 256) : ""; updateModelControl(); }
@@ -15227,7 +15268,9 @@ function permissionChoices(ev) {
     else if (msg.type === "continue_offer") {
       if (msg.sessionId && msg.sessionId !== draftSession) return;
       imageViewerAttention("continue_offer");
-      const cause = String(msg.cause || "").slice(0, 300);
+      // (A signal's name, the backend's log words, said plainly: "SIGTERM — a stop signal from another process…" read as
+      // jargon on the card, 24 Nov.)
+      const raw = String(msg.cause || "").slice(0, 300), cause = /^SIG[A-Z]+\b/.test(raw) ? "something on this computer stopped DGC, not the editor" : raw;
       recoveryCard("continue-offer",
         (msg.windowless
           ? `Your last turn was stopped while no window was open${cause ? ` (${cause})` : ""}. `
@@ -16687,7 +16730,10 @@ function permissionChoices(ev) {
     const c = agentCounts(), active = amRunningTasks();
     const tasks = active.filter((task) => task.kind !== "preview").length;
     const previews = active.length - tasks;
-    if (c.total <= 0 && tasks <= 0 && previews <= 0) {
+    // Background commands a restart stopped: on the map with Run again (amShellTask), never in the chat. Counted here so
+    // the button says so, and shows while one waits even with nothing running.
+    const stopped = amAllTasks().filter((task) => !task.running && task.rerun).length;
+    if (c.total <= 0 && tasks <= 0 && previews <= 0 && stopped <= 0) {
       hoverTip.hide();
       picker.hidden = true;
       return;
@@ -16696,14 +16742,17 @@ function permissionChoices(ev) {
     const n = c.active;
     const state = c.waiting > 0 ? "waiting" : n > 0 || tasks > 0 ? "running" : "idle";
     const nothing = state === "idle" && !previews;         // nothing runs at all: the pill is the map's door
-    const label = nothing ? "Agent map" : [n > 0 || !tasks && !previews ? agentPlural(n, "sub-agent") : "",
+    const running = nothing ? "Agent map" : [n > 0 || !tasks && !previews ? agentPlural(n, "sub-agent") : "",
       tasks ? agentPlural(tasks, "task") : "", previews ? agentPlural(previews, "preview") : ""].filter(Boolean).join(" · ");
+    const label = stopped ? `${running} · ${stopped} stopped` : running;
     const inBackground = tasks > 0 ? `${agentPlural(tasks, "background task")} running` : "";
     const said = state === "waiting"
       ? [c.waitingPermission > 0 ? "A sub-agent is waiting for your permission" : "A sub-agent is waiting for your answer", inBackground]
       : state === "idle" ? ["No sub-agents working"]
       : [n > 0 ? (tasks > 0 ? `${agentPlural(n, "sub-agent")} working and ${inBackground}` : "Sub-agents are working") : inBackground];
-    const title = [...said.filter(Boolean), previews ? `${agentPlural(previews, "live preview")} serving a page` : "", "Click to open the agent map"].filter(Boolean).join(" · ");
+    const title = [...said.filter(Boolean), previews ? `${agentPlural(previews, "live preview")} serving a page` : "",
+      stopped ? `${agentPlural(stopped, "background command")} a restart stopped: Run again is on the map` : "",
+      "Click to open the agent map"].filter(Boolean).join(" · ");
     pill.dataset.state = state;
     agentsSetText(pill.querySelector(".agents-text"), label);
     agentsSetText(pill.querySelector(".agents-short"), nothing ? "" : String(n + tasks + previews));

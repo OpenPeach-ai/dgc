@@ -3471,8 +3471,11 @@ test("a list of edited files folds by folder AND the card folds and opens again"
     ["src", "tests", "src/app/routes/deeply/nested", "docs", "editors/vscode/media"], "each folder once, in the order they came");
   assert.ok(folders.every((f) => f.getAttribute("aria-expanded") === "true"), "five files: every folder open");
 
-  // The card folds to its header and opens again; its chevron says what it does next.
+  // The card starts folded to its header (24 Nov), opens, folds and opens again; its chevron says what it does next.
   const fold = card.querySelector(".ts-fold"), list = card.querySelector(".ts-list");
+  assert.equal(list.hidden, true, "folded to start");
+  fold.click();
+  assert.equal(list.hidden, false, "opened");
   fold.click();
   assert.equal(list.hidden, true, "it really folds");
   assert.equal(fold.hidden, false, "and the way back must still be on screen");

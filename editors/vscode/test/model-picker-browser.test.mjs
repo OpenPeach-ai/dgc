@@ -33,9 +33,10 @@ const box = (page, selector) => page.evaluate((s) => { const r = document.queryS
 const focusKey = (page) => page.evaluate(() => document.activeElement?.dataset?.k || document.activeElement?.id || document.activeElement?.tagName);
 const picked = (page) => page.evaluate(() => window.picked);
 
-test("it opens centred over a dim page: the side bar's width less 16 px each side, a 27 rem panel in a tab", async (t) => {
+test("it opens centred over a dim page: the side bar's width less 16 px each side, a 520 px panel in a tab", async (t) => {
   if (skipOrFail(t)) return;
-  for (const [width, want] of [[300, 268], [440, 408], [700, 432], [1100, 432]]) {
+  // (520 px, 24 Nov: wide enough for a name, its Main or Fallback word and all its marks; it was 432.)
+  for (const [width, want] of [[300, 268], [440, 408], [700, 520], [1100, 520]]) {
     const { page, errors } = await scene(t, { width });
     const dialog = await box(page, ".dgc-mp"), layer = await box(page, ".dgc-mp-layer");
     assert.equal(Math.round(dialog.w), want, `${width}px wide`);
@@ -88,7 +89,8 @@ test("more connections than fit: the rail scrolls with no scrollbar, and the one
 
 test("a connection's models: name, one quiet line, capability marks that say what they are, a check on the chosen one", async (t) => {
   if (skipOrFail(t)) return;
-  const { page } = await scene(t, { width: 440 });
+  // (700 px, 24 Nov: at 440 the list is under 400 px and a row's marks fold into one icon, model-caps-fold-browser.)
+  const { page } = await scene(t, { width: 700 });
   const head = await page.evaluate(() => document.querySelector(".dgc-mp-head").innerText.replace(/\s+/g, " ").trim());
   assert.equal(head, "Claude Code your subscription");
   const rows = await page.evaluate(() => [...document.querySelectorAll(".dgc-mp-list .dgc-mp-row")].map((r) => ({

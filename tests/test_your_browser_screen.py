@@ -234,6 +234,36 @@ class OnTheScreen(OwnHost):
         self.assertIn({"left": 0, "top": 0, "width": 1200, "height": 700}, bounds)
         self.assertEqual(self.pipe.calls("Page.startScreencast"), [], "the screen streams itself: no pictures to make")
 
+    def test_the_screen_is_as_large_as_the_tab_and_chromes_whole_window_never_a_window_cut_off(self):
+        """Chrome's window follows the tab where it can; it is never narrower than Chrome's own minimum, so in a tab
+        narrower than that the screen stays as wide as the window (the tab scrolls to the rest, one to one), never the
+        tab's width with Chrome's window running off its edge (24 Nov: "I can't scroll Your Browser horizontally")."""
+        self.host.open("", None, headless=True)
+        s = your_browser.VNC_SCALE
+        said = self.host.view_own("size", {"width": 300, "height": 640})
+        self.assertEqual(self.pipe.calls("Browser.setWindowBounds")[-1]["params"]["bounds"], {"left": 0, "top": 0, "width": 320, "height": 640},
+                         "Chrome's window asked for the tab's size (as narrow as DGC takes)")
+        self.assertEqual(said["screen"], {"width": self.pipe.MIN_WIDTH * s, "height": 640 * s}, "the whole window is on the screen")
+        said = self.host.view_own("size", {"width": 1200, "height": 700})
+        self.assertEqual(said["screen"], {"width": 1200 * s, "height": 700 * s}, "a wide tab: the screen is the tab's size")
+        self.assertEqual(said["scale"], s)
+        said = self.host.view_own("size", {"width": 700, "height": 100})
+        self.assertEqual(said["screen"], {"width": 700 * s, "height": 240 * s}, "never shorter than DGC's least height")
+
+    def test_where_chrome_doesnt_say_its_window_the_screen_is_the_tabs_size(self):
+        self.host.open("", None, headless=True)
+        send = self.pipe.send
+        self.pipe.send = lambda payload: send({**payload, "method": "Browser.nothing"}) if payload.get("method") == "Browser.getWindowBounds" else send(payload)
+        said = self.host.view_own("size", {"width": 900, "height": 600})
+        self.assertEqual(said["screen"], {"width": 900 * your_browser.VNC_SCALE, "height": 600 * your_browser.VNC_SCALE})
+
+    def test_without_its_screen_the_size_says_no_screen(self):
+        self.host.open("", None, headless=True)
+        self.host.screen_socket = lambda: None
+        said = self.host.view_own("size", {"width": 900, "height": 600})
+        self.assertNotIn("screen", said)
+        self.assertNotIn("scale", said)
+
     def test_a_pips_lane_opens_in_a_window_of_its_own_off_the_screen(self):
         self.host.open("", None, headless=True)
         self.host.open_lane(A, "https://shop.example.com/", your_browser.Grants(["example.com"]))
@@ -576,6 +606,15 @@ class RealScreen(unittest.TestCase):
             self.addCleanup(host.close)
             host.open(site.url("/form"), None, headless=True)
             self.assertIsNotNone(host.screen_socket(), "a VNC screen of its own")
+            said = host.view_own("size", {"width": 900, "height": 600})
+            self.assertEqual(said["screen"], {"width": 900 * your_browser.VNC_SCALE, "height": 600 * your_browser.VNC_SCALE},
+                             "the screen is the tab's size where Chrome's window can be")
+            # A tab narrower than Chrome's window can be: Chrome keeps its own least width, and the screen is as wide.
+            narrow = host.view_own("size", {"width": 300, "height": 600})
+            with host.lock:
+                window = host.browser._browser_call("Browser.getWindowForTarget", {"targetId": host.own_tab()}, timeout=10)["bounds"]
+            self.assertGreater(window["width"], 320, f"Chrome keeps a least width of its own: {window}")
+            self.assertEqual(narrow["screen"]["width"], window["width"] * your_browser.VNC_SCALE, "Chrome's whole window is on the screen")
             host.view_own("size", {"width": 900, "height": 600})
             server = your_browser.ViewServer(host)
             self.addCleanup(server.close)
