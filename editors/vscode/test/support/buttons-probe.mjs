@@ -60,7 +60,9 @@ export function check(assert, found, { where, sizes = ["h", "hSm"], oneFilled = 
   // One box a size, whatever its words: the shared width (or the one wide width); or, in a row too narrow for them,
   // the row shared equally. `free`: the buttons whose words are a name or a sentence (a tool row's), at their own width.
   const small = (b) => Math.round(b.height) === tokens.hSm, fixed = boxed.filter((b) => !(free && free.test(b.cls)));
-  const odd = fixed.filter((b) => ![small(b) ? tokens.wSm : tokens.w, tokens.wWide].includes(Math.round(b.width)));
+  // (A square button at the shared height is the icon form: New Pip's plus in a narrow side bar, 24 Nov.)
+  const square = (b) => Math.abs(b.width - b.height) <= 1;
+  const odd = fixed.filter((b) => !square(b) && ![small(b) ? tokens.wSm : tokens.w, tokens.wWide].includes(Math.round(b.width)));
   const shared = new Map(); for (const b of odd) shared.set(b.card + "@" + b.top, [...(shared.get(b.card + "@" + b.top) || []), b]);
   // (Since 15 Nov a button in a shared row is never narrower than its own words (finding 45: "Allow…", "Not n…"): the
   // one whose words need a little more than an equal share has it, and the others share the rest, all words whole.)

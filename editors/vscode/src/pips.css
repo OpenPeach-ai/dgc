@@ -272,6 +272,8 @@ button.pill{border-radius: var(--btn-r, 6px);padding:6px 16px}
 .core-offer button.primary{background:transparent;border-color:var(--pip-edge);color:var(--vscode-foreground)}.core-offer button.primary:hover{background:var(--pip-wash);border-color:color-mix(in srgb,var(--vscode-foreground) 30%,transparent)}
 .core-offer p{margin:0;display:grid;gap:2px}
 .core-offer span{color:var(--muted);font-size:12px}
+/* (Narrow, Create goes under the words: beside them it left a word a line, seen at the default side bar width.) */
+@container(max-width:340px){.core-offer{grid-template-columns:44px minmax(0,1fr)}.core-offer>button,.core-offer>.actions{grid-column:2;justify-self:start}}
 .core-offer .avatar,.pip-row .avatar{width:44px;height:42px}
 .pip-rows{display:grid;gap:2px}
 .pip-row{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:center;gap:12px;padding:8px 10px;border:0;border-radius:var(--r-lg,12.5px);background:transparent;text-align:left;width:100%;color:var(--vscode-foreground);min-height:0}
@@ -1401,15 +1403,20 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 /* A row with no switch (Core) keeps the switch's room where the rows wear a "…" (under 400 px), so its "…" stands in
    the other rows' column, not at the far edge (user test 2, P1). */
 @container(max-width:399px){.pip-rows>.pip-row-slot.has-more,.pip-row-line:not(:has(>.pip-switch))>.pip-row-slot.has-more{margin-right:var(--pip-switch-room,52px)}}
-/* A side bar under 300 px (user test 2, P1: "Your P…" cut by its three buttons, a name squeezed out by its
+/* A side bar of 340 px and under, the default width included (user test 2, P1: "Your P…" cut by its three buttons, a name squeezed out by its
    "…", dot, count and switch, and Core's "…" in another column). There New Pip is its plus, so the heading is whole;
    every row's "…" stands at the end of its row, in one column, with the row's dot and count before it; a row with
    no switch (Core) keeps the switch's room, so its "…" is in that column too; and what waits on a Pip is a number on
    its face's corner, as on a dock tile, which gives its room to the name. */
-@container(max-width:298px){
+@container(max-width:340px){
  .simple-home-head button#simple-new,.simple-home-head button#projects-new{width:var(--btn-h,28px);padding:0;font-size:0;line-height:0;display:inline-grid;place-items:center}
  .simple-home-head button#simple-new::before,.simple-home-head button#projects-new::before{content:"";width:12px;height:12px;background:linear-gradient(currentColor,currentColor) center/12px 1.5px no-repeat,linear-gradient(currentColor,currentColor) center/1.5px 12px no-repeat}
  .simple-home-head{gap:6px}.simple-home-actions{gap:4px}
+ /* (The menu beside it lines up with the page's edge: shifted by the plus's width, not New Pip's.) */
+ .simple-home-actions .pip-menu .tabs-menu{right:calc(-1 * (var(--btn-h,28px) + 4px))}
+}
+/* Under 300 px the rows change too: */
+@container(max-width:298px){
  .pip-row-slot>.job-more,.pip-row-slot:has(.pip-row-marked)>.job-more,.pip-row-slot:has(.pip-row-both)>.job-more,.pip-row-slot:has(.pip-row-marks-live)>.job-more{right:calc(6px + var(--pip-dot-room,0px))}
  .pip-row-slot>.pip-row-menu,.pip-row-slot:has(.pip-row-marked)>.pip-row-menu,.pip-row-slot:has(.pip-row-both)>.pip-row-menu,.pip-row-slot:has(.pip-row-marks-live)>.pip-row-menu{right:calc(6px + var(--pip-dot-room,0px))}
  .pip-row-slot.has-more .pip-row,.pip-row-slot.has-more:is(.is-pinned,:hover,:focus-within) .pip-row{padding-right:calc(26px + var(--pip-dot-room,0px))}

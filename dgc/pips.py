@@ -2840,7 +2840,13 @@ def validate_report(text: str, snapshot: Path, *, read_calls: int) -> dict:
             raise RegistryError("invalid_report", "The evidence line must be a positive integer.")
         evidence = finding["evidence"]
         _text(evidence, "evidence", 1000)
-        title = _text(finding["title"], "finding title", 200)
+        # A title the model let run past 200 characters is shortened at a word, never the report lost (a real 0.51
+        # install, 24 Nov: two scheduled audits failed whole on one long title).
+        raw_title = finding["title"]
+        if isinstance(raw_title, str) and "\x00" not in raw_title and len(" ".join(raw_title.split())) > 200:
+            words = " ".join(raw_title.split())[:199]
+            raw_title = (words.rsplit(" ", 1)[0] if " " in words[100:] else words).rstrip(" ,;:.-") + "…"
+        title = _text(raw_title, "finding title", 200)
         # Evidence that does not check out costs that finding, never the report. One inexact quote used to fail the
         # whole run with unverified_report, losing every verified finding beside it (ERP session review,
         # 2026-10-18). The strictness stays: a finding is reported only with an excerpt found at its line; the

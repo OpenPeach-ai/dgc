@@ -38,6 +38,22 @@ class PipReportDiagnosticTests(unittest.TestCase):
         self.assertIs(first["tests_executed"], False)
         self.assertEqual(first["findings"][0]["evidence"], report["findings"][0]["evidence"])
 
+    def test_a_finding_title_past_200_characters_is_shortened_never_the_report_lost(self):
+        # Seen on a real 0.51 install (24 Nov, read-only): two scheduled audits failed whole on "finding title must be
+        # text between 1 and 200 characters", losing every finding beside the one with a long title.
+        long = "Adding the same tile twice makes two cart rows instead of one row with quantity two, because " * 3
+        report = {"summary": "Inspected source", "findings": [
+            {"title": long, "severity": "medium", "path": "source.py", "line": 2, "evidence": "    return 42"},
+            {"title": "Review boundary", "severity": "low", "path": "source.py", "line": 1, "evidence": "def answer():"}],
+            "limitations": []}
+        result = self.parse(json.dumps(report))
+        self.assertEqual(len(result["findings"]), 2, "both findings kept")
+        title = result["findings"][0]["title"]
+        self.assertLessEqual(len(title), 200)
+        self.assertTrue(title.endswith("…") and long.startswith(title[:-1].rstrip()), title)
+        self.assertNotIn("  ", title)
+        self.assertEqual(result["findings"][1]["title"], "Review boundary")
+
     def test_missing_optional_limitations_keeps_existing_semantics(self):
         self.assertEqual(self.parse('{"summary":"Reviewed","findings":[]}')["limitations"], [])
 

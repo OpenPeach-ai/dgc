@@ -20,6 +20,14 @@ from dgc import launch
 from test_monitors import MockModel, isolated_env, sse_call, sse_text
 
 
+
+def _is_open(fd: int) -> bool:
+    try:
+        os.fstat(fd)
+        return True
+    except OSError:
+        return False
+
 class WhereThePromptIsTests(unittest.TestCase):
     def test_every_way_argparse_takes_a_prompt(self):
         self.assertEqual(launch._prompt_at(["-p", "fix it"]), (1, ""))
@@ -39,8 +47,10 @@ class WhereThePromptIsTests(unittest.TestCase):
             self.assertNotIn(launch.HANDOFF, os.environ)
 
     def test_a_placeholder_that_cannot_be_filled_stops_dgc_instead_of_becoming_the_task(self):
+        # A descriptor this process doesn't have open (999 was assumed: in a long run the suite's own sockets reached it).
+        closed = next(fd for fd in range(999, 4096) if not _is_open(fd))
         with mock.patch.object(sys, "argv", ["dgc", "-p", "<dgc-prompt:abc>"]), \
-                mock.patch.dict(os.environ, {launch.HANDOFF: "999:abc"}):
+                mock.patch.dict(os.environ, {launch.HANDOFF: f"{closed}:abc"}):
             with self.assertRaises(SystemExit) as stopped:
                 launch._take_back()
         self.assertIn("couldn't read the prompt back", str(stopped.exception))
