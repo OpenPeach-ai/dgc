@@ -32,7 +32,7 @@ steps as `trace` (`{v, ms, steps}`, each step a model round with its reported to
 milliseconds from the first step). A reply that stopped or failed has none. A Pip's reply lists the plugin cards it
 showed as `apps`; `session.cards.get(card_id)` reads one, and `session.cards.watch("pip")` asks for them live.
 
-It pairs with DGC CLI 0.51.0, which advertises **Pips API 74** over editor protocol
+It pairs with DGC CLI 0.52.0, which advertises **Pips API 113** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -156,7 +156,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.51.0 is API 74; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.52.0 is API 113; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 

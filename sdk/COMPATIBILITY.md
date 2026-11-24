@@ -2,7 +2,8 @@
 
 | SDK | Protocol | CLI | Python | Node | Host proven |
 | --- | --- | --- | --- | --- | --- |
-| **0.9.0** | **v14, Pips API 74** | **0.51.0** | **≥ 3.10** | **≥ 22** | **Linux** |
+| **0.10.0** | **v14, Pips API 113** | **0.52.0** | **≥ 3.10** | **≥ 22** | **Linux** |
+| 0.9.0 | v14, Pips API 74 | 0.51.0 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.8.0 | v14, Pips API 69 | 0.50.0 | ≥ 3.10 | ≥ 22 | Linux, macOS 26.5.1 (Apple silicon), Windows 11 via WSL 2 (Ubuntu 24.04) |
 | 0.7.0 | v14 | 0.48.0 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.10 | v14 | 0.47.0 | ≥ 3.10 | ≥ 22 | Linux |
@@ -18,6 +19,8 @@
 | 0.6.0 | v14 | 0.42.0 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.5.3 | v14 | 0.41.6 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.5.2 | v14 | 0.41.5 | ≥ 3.10 | ≥ 22 (source only, strip-types) | Linux |
+
+SDK 0.10.0 has been tested on Linux only. macOS and WSL 2 remain release test targets.
 
 SDK 0.9.0 as released has been tested on Linux only. Its Python and TypeScript suites passed on
 macOS 26.5.1 (Apple silicon) and on Windows 11 through WSL 2 (Ubuntu 24.04) for an earlier 0.9.0

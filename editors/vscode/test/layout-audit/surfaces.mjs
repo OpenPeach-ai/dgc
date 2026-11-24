@@ -101,9 +101,9 @@ const OWN = {
       const x = await openDock(b, { tab: "home", width, height: 760, theme: modern(theme), touch, motion });
       try {
         await x.send({ type: "whatsNew", auto: true, release: "0.52" }); await x.page.waitForSelector("#whats-new:not([hidden])"); await settle(x.page, 400);
-        for (let k = 0; k < 7; k++) {
+        for (let k = 0; k < 8; k++) {
           await visit(`${motion === "reduce" ? "still" : "moving"}-${k + 1}`, x.page, { scope: "#whats-new", hover: false, focus: k === 0 });
-          if (k < 6) { await x.page.evaluate((i) => document.querySelectorAll("#whats-new .wn-dot")[i]?.click(), k + 1); await settle(x.page, 300); }
+          if (k < 7) { await x.page.evaluate((i) => document.querySelectorAll("#whats-new .wn-dot")[i]?.click(), k + 1); await settle(x.page, 300); }
         }
       } finally { await x.close(); }
     }
@@ -165,7 +165,7 @@ export const PLAN = [
   { scene: "settings", name: "Settings", states: { general: MAIN, ...Object.fromEntries(["models", "web", "chatdgc", "memory", "voice", "running", "usage", "security", "plugins", "mcp", "dev"].map((s) => [s, "LR"])) } },
   { scene: "notes-tab", name: "a note in its own tab", states: { "a-note": MAIN }, passes: "AB" },
   { scene: "stress-lists", name: "lists of 200 with awkward names", states: { "work-200": "LRs", "work-200-end": "LE", "chat-200": "LRs", "chat-200-end": "LE", "library-200": "LRs", "library-200-end": "LE", "work-no-dock-end": "LE" }, passes: "AB", widths: [440, 300, 1000] },
-  { scene: "whats-new", name: "What's new (a dialog)", states: { "moving-1": "ORs", ...Object.fromEntries([2, 3, 4, 5, 6, 7].map((k) => [`moving-${k}`, "OR"])), ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map((k) => [`still-${k}`, "R"])) }, passes: "ABCE" },
+  { scene: "whats-new", name: "What's new (a dialog)", states: { "moving-1": "ORs", ...Object.fromEntries([2, 3, 4, 5, 6, 7, 8].map((k) => [`moving-${k}`, "OR"])), ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((k) => [`still-${k}`, "R"])) }, passes: "ABCE" },
   { scene: "stress-chats", name: "chats with awkward words", states: { "work-long-words": "Rs", "chatdgc-long-words": "Rs" }, passes: "A" },
   // A layer the scene opens itself, with the layers inside it (each ends its entry: see I above).
   ...[["work-list", "Work's list (side bar)", "folder-menu"], ["work-list", "Work's list (side bar)", "whats-new-1"], ["work-list", "Work's list (side bar)", "new-session"], ["home-library", "Home's Cards library (a dialog)", "library"],

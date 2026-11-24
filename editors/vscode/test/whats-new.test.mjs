@@ -1,12 +1,15 @@
 // "What's new in 0.52" (pips-flow-design §3.3, item 1; src/whatsNew.ts, media/shared/whatsnew.js): a dialog in the side
-// bar the first time 0.52's side bar is shown. Since 17 Nov each slide is a card: a 16:9 picture on top (the slide's
-// scene as a glass panel on a soft two-stop backdrop in the slide's own hue, gently moving; × at its top right, the dots
-// on its bottom edge), a quiet eyebrow, the title, three rows (an icon, a heading, a muted line), and a footer under a
-// hairline: the slide's own action on the left (Open Pips, Arrange Home, Open Library, Open Work), Next on the right
-// (Done on the last). ×, Done and Esc close it for good, and so does a slide's action, which also takes the side bar
-// there (the host's {type: "sideTab"}). Never again by itself once answered, kept in the editor's global state so
-// every window of this editor agrees; opened again from the DGC view's ⋯ menu ("What's New"). A line that isn't true
-// at this commit is `ships: false` and isn't shown; slide 7 is the "Also new" list, at most three that have shipped.
+// bar the first time 0.52's side bar is shown. Each slide is a card: a picture on top (the slide's scene as a glass
+// panel on a soft two-stop backdrop in the slide's own hue, gently moving; × at its top right, the dots on its bottom
+// edge), a quiet eyebrow, the title, three rows (an icon, a heading, a muted line), and a footer under a hairline: the
+// slide's own action on the left (Open Pips, Open Your Browser, Open Library, Open Work, Open Settings), Next on the
+// right (Done on the last). ×, Done and Esc close it for good, and so does a slide's action, which also takes the side
+// bar there (the host's {type: "sideTab"}) or opens Settings. Never again by itself once answered, kept in the editor's
+// global state so every window of this editor agrees; opened again from the DGC view's ⋯ menu ("What's New").
+//
+// Since 24 Nov (user test round 2) the eight slides say what 0.52 ships, Your Browser, comments, the canvas and
+// checklists among them, in a new user's words; and the picture has a narrow form, so it can be read in a 290 px side
+// bar: 4:3, the one part that tells the story, no word under 10 px.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -65,7 +68,7 @@ test("×, Done or Esc: kept in the editor's global state, so no window shows it 
 });
 
 test("a slide's own action (whatsNewGo) answers the news for good, and the side bar goes there with its own navigation", async () => {
-  const where = { pips: { type: "sideTab", tab: "pips" }, "home-cards": { type: "sideTab", tab: "home", open: "cards" },
+  const where = { pips: { type: "sideTab", tab: "pips" }, "home-cards": { type: "sideTab", tab: "home", open: "cards" }, browser: { type: "sideTab", tab: "home", open: "browser" },
     library: { type: "sideTab", tab: "library" }, work: { type: "sideTab", tab: "work" } };
   for (const [to, go] of Object.entries(where)) {
     const state = memory(), side = provider(state);
@@ -74,6 +77,15 @@ test("a slide's own action (whatsNewGo) answers the news for good, and the side 
     assert.deepEqual(side.posted.filter((m) => m.type === "sideTab"), [go], `${to}: the side bar is told where to go`);
     side.p.offerWhatsNew();
     assert.deepEqual(side.news(), [], `${to}: and it never shows by itself again`);
+  }
+  // Open Settings: DGC's Settings tab, as the header's gear opens it; nothing for the side bar to do.
+  {
+    const state = memory(), side = provider(state), opened = [];
+    side.p.openSettings = (section) => { opened.push(section); };
+    await side.p.onMessage({ type: "whatsNewGo", to: "settings" });
+    assert.equal(state.kept.get(KEY), "0.52", "settings: it counts as an answer");
+    assert.deepEqual(opened, ["general"], "settings: Settings opens");
+    assert.deepEqual(side.posted.filter((m) => m.type === "sideTab"), []);
   }
   // A place the host doesn't know is still an answer (the page has closed the news), and goes nowhere.
   const state = memory(), odd = provider(state);
@@ -140,36 +152,42 @@ before(async () => {
 });
 after(async () => { await browser?.close(); });
 
-// The slides as decided (17 Nov), each line checked against the code at this commit. Four lines are not true yet and
-// are `ships: false` (left out): 1 "A computer of its own" (you can't step in while it works), 2 "Free inside, asks at
-// the wall" (at Ask me first a Pip asks before a new site inside its computer), 3 "Fixed in its own copy" (Do it all
-// applies the change by itself), 4 "They fit any width" (Home is never a full editor tab).
+// The slides (24 Nov), each line checked against the code at this commit: what 0.52 ships, in a new user's words.
 const SLIDES = [
-  { scene: "pips-list", hue: "violet", title: "Pips are one kind now", go: ["Open Pips", "pips"], rows: [
-    ["One list, one New Pip", "Every Pip gets everything: its own chat, its own computer, and its own copy of any folder you give it."],
-    ["It talks to you in its chat", "A Pip says what it found, sends you files, and shows the helpers it hands work to."]] },
-  { scene: "wall", hue: "amber", title: "Each Pip works behind a wall", go: null, rows: [
-    ["You choose how much it asks", "Ask me first, Approve for me, or Do it all."],
-    ["A daily limit in dollars", "For each Pip and for all of them. Inside it, Always allow is one tap."]] },
-  { scene: "levels", hue: "violet", title: "Pips tell you, then fix", go: null, rows: [
-    ["What's wrong, and why", "When a check finds something, the Pip explains it in its chat."],
-    ["Asked once, kept in one place", "What only you can do waits on Home, under Needs you."]] },
-  { scene: "cards", hue: "green", title: "Home is yours", go: ["Arrange Home", "home-cards"], rows: [
-    ["Cards you arrange", "Needs you, Recent, Running now, Token usage, Notes, Clock, Weather and more."],
-    ["Notes, a full notes app", "Folders, search, checklists, and formatting as you type."]] },
-  { scene: "library", hue: "azure", title: "One Library for everything", go: ["Open Library", "library"], rows: [
-    ["Everything you make, in one place", "Pages, docs, sheets, decks, dashboards, widgets, charts, pictures, videos and files, from Chat, Work and Pips."],
-    ["Search, then narrow it down", "A tab for each kind, then filters, like Kind in Widgets."],
-    ["One menu on every file", "Open, open in the editor, save a copy, copy its path, or show it in its folder."]] },
-  { scene: "work", hue: "blue", title: "Work, tidier", go: ["Open Work", "work"], rows: [
-    ["Archive and restore", "Put finished sessions away, and bring them back any time."],
-    ["Goals you can follow", "A goal runs as turns you can read, and its clock holds when you change the model."],
-    ["Edit a queued message", "Change the message waiting to go next, without losing your draft."]] },
-  { scene: "settings", hue: "neutral", title: "Also new", go: null, rows: [
+  { scene: "pips", hue: "violet", title: "Pips, each with a computer of its own", go: ["Open Pips", "pips"], rows: [
+    ["Its own chat, its own computer", "A Pip tells you what it found in its chat, and works on a desktop of its own, in its own copy of a folder you give it."],
+    ["You choose how much it asks", "Ask me first, Approve for me, or Do it all. Set it for each Pip, in its prompt box."],
+    ["A daily limit in dollars", "The most a Pip may pay by itself in a day. Always allow on a card lets that same step run next time without asking."]] },
+  { scene: "browser", hue: "teal", title: "Your Browser", go: ["Open Your Browser", "browser"], rows: [
+    ["Chrome, with your sign-ins", "Sign in to your sites once. It opens beside the editor, or in a tab when DGC runs on another computer."],
+    ["A Pip works in its own tab", "Only on the sites you let it use, never in your tabs. The dock says “Ava is working in it”, and you can watch."],
+    ["You decide, from the dock", "Your Browser's menu there has Sites Pips can use and Clear browsing data."]] },
+  { scene: "comments", hue: "amber", title: "Comment on anything DGC made", go: ["Open Library", "library"], rows: [
+    ["Point at a part and say it", "Pick words in a doc, cells in a sheet, a slide, part of a page or a checklist item, and comment."],
+    ["Ask DGC", "DGC answers in the thread, or makes the change and says so."],
+    ["Suggestions you accept", "In a doc or a page, new wording comes as a suggestion: Accept or Reject each one."]] },
+  { scene: "canvas", hue: "blue", title: "A design canvas, drawn while you watch", go: ["Open Work", "work"], rows: [
+    ["Screens, side by side", "Ask for a design and DGC draws each artboard in turn: desktop, phone, tablet, a poster."],
+    ["Steer it as it draws", "Comment on an artboard, or ask in the chat, and DGC changes that screen."],
+    ["Play it, then take it along", "Click through the prototype. Download the artboards as pictures, a PDF or a web page."]] },
+  { scene: "checklist", hue: "green", title: "DGC keeps a checklist", go: ["Open Work", "work"], rows: [
+    ["A checklist for the job", "Ask for one, or pick Checklist under Output. Each item says what done means."],
+    ["Worked through, with proof", "DGC takes one item at a time, and ticks it with a note and its proof."],
+    ["Yours to change", "Tick, reopen, edit and add items in its panel. Pinned to a project, every new chat there carries on with it."]] },
+  { scene: "home-library", hue: "azure", title: "Home in cards, and one Library", go: ["Open Library", "library"], rows: [
+    ["Home, arranged by you", "Needs you, Running now, Token usage, Notes, Clock, Weather and more, as cards you add and move."],
+    ["One Library for everything", "Pages, docs, sheets, decks, dashboards, widgets, pictures, videos and files, from Chat, Work and Pips."],
+    ["Find it again", "Search, a tab for each kind, filters, and a star for your favorites."]] },
+  { scene: "work", hue: "copper", title: "Work: goals, steps and previews", go: ["Open Work", "work"], rows: [
+    ["Type /goal and what you want", "“/goal fix the failing tests” starts a goal: DGC keeps going, turn after turn, until it is done."],
+    ["The steps, as it works", "A turn's plan shows as steps that tick off one by one."],
+    ["A peek at a link, a tidy list", "Point at a link in a chat to see its page. Archive finished sessions, and bring them back any time."]] },
+  { scene: "also", hue: "neutral", title: "Also new", go: ["Open Settings", "settings"], rows: [
     ["One model picker", "Every model you've added, in one place, for Chat, Work and Pips."],
     ["Auto that stays out of your way", "Everyday steps just run. A risky one stops and says why; your yes lets it go."],
     ["Settings by asking", "Say “use 8 Pip runs at once”, and it changes, with Undo in the chat."]] },
 ];
+const HUES = [...new Set(SLIDES.map((s) => s.hue))];
 const N = SLIDES.length;
 /** The dialog as it is on screen, or null when it is closed. */
 const now = (page) => page.evaluate(() => {
@@ -214,7 +232,8 @@ const now = (page) => page.evaluate(() => {
 const seen = (x) => x.posted("whatsNewSeen");
 const went = (x) => x.posted("whatsNewGo");
 const open = async (options = {}, message = { type: "whatsNew", auto: true, release: "0.52" }) => {
-  const x = await openHome(browser, { width: 300, height: 760, ...options });
+  // (Pips API 113: a DGC that has Your Browser, as 0.52's own is; Open Your Browser is offered there.)
+  const x = await openHome(browser, { width: 300, height: 760, api: 113, ...options });
   x.page.setDefaultTimeout(10000);
   try {
     await x.send(message);
@@ -224,7 +243,7 @@ const open = async (options = {}, message = { type: "whatsNew", auto: true, rele
 };
 const goTo = (x, i) => x.page.evaluate((k) => document.querySelectorAll("#whats-new .wn-dot")[k].click(), i);
 
-test("the card: a picture on top with × and the dots on it, the eyebrow, a larger title, the rows, and a footer under a hairline with the slide's action and Next; Next walks the seven slides to Done", async (t) => {
+test("the card: a picture on top with × and the dots on it, the eyebrow, a larger title, the rows, and a footer under a hairline with the slide's action and Next; Next walks the eight slides to Done", async (t) => {
   if (skipOrFail(t)) return;
   const x = await open({ width: 460 });
   try {
@@ -261,7 +280,7 @@ test("the card: a picture on top with × and the dots on it, the eyebrow, a larg
       if (!last) await x.page.click("#whats-new .wn-next");
     }
     assert.deepEqual(scenes, SLIDES.map((s) => s.scene), "each slide has its own picture");
-    assert.deepEqual(hues, SLIDES.map((s) => s.hue), "in its own hue: the Pips' violet, the wall's amber, Home's green, the Library's azure, Work's blue");
+    assert.deepEqual(hues, SLIDES.map((s) => s.hue), "in its own hue: the Pips' violet, Your Browser's teal, comments' amber, the canvas's blue, checklists' green, the Library's azure, Work's copper");
     assert.deepEqual(await seen(x), [], "nothing is remembered until it is answered");
     await x.page.click("#whats-new .wn-next");                      // Done
     assert.equal(await now(x.page), null);
@@ -271,23 +290,132 @@ test("the card: a picture on top with × and the dots on it, the eyebrow, a larg
   } finally { await x.close(); }
 });
 
-test("the lines: what isn't true at this commit is left out (ships: false), and comes back by its id; Also new is at most three that shipped", async (t) => {
+test("the words: eight slides for what 0.52 ships, three rows each, in a new user's words; every row has its own id and its glyph", async (t) => {
   if (skipOrFail(t)) return;
   const x = await open();
   try {
-    const got = await x.page.evaluate(() => {
-      const W = window.DgcWhatsNew, heads = (list) => list.map((s) => s.rows.map((r) => r.head));
-      return { now: heads(W.slides()), back: heads(W.slides(["pip-computer", "own-copy"])), also: W.alsoNew().map((r) => r.id), alsoAll: W.alsoNew(["picker", "browser"]).map((r) => r.id),
-        ids: W.slides().flatMap((s) => s.rows.map((r) => r.id)), icons: W.slides().flatMap((s) => s.rows.map((r) => !!window.DgcIcons?.has?.(r.icon))) };
-    });
-    assert.deepEqual(got.now, SLIDES.map((s) => s.rows.map((r) => r[0])));
-    for (const left of ["A computer of its own", "Free inside, asks at the wall", "Fixed in its own copy", "They fit any width", "Your Browser"])
-      assert.ok(!got.now.flat().includes(left), `“${left}” is not shown`);
-    assert.ok(got.back[0].includes("A computer of its own") && got.back[2].includes("Fixed in its own copy"), "a line comes back in its place when its id has shipped");
-    assert.deepEqual(got.also, ["picker", "auto", "settings"], "Also new: the picker, auto mode, settings (payments is slide 2's)");
-    assert.deepEqual(got.alsoAll, ["picker", "auto", "settings"], "at most three: the first three that shipped");
+    const got = await x.page.evaluate(() => { const W = window.DgcWhatsNew, list = W.slides();
+      return { titles: list.map((s) => s.title), rows: list.map((s) => s.rows.map((r) => [r.head, r.text])), gos: list.map((s) => (s.go ? [s.go.label, s.go.to] : null)),
+        ids: list.flatMap((s) => s.rows.map((r) => r.id)), icons: list.flatMap((s) => s.rows.map((r) => !!window.DgcIcons?.has?.(r.icon))), api: Object.keys(W).sort() }; });
+    assert.equal(got.titles.length, 8, "eight slides");
+    assert.deepEqual(got.titles, SLIDES.map((s) => s.title));
+    assert.deepEqual(got.rows, SLIDES.map((s) => s.rows));
+    assert.deepEqual(got.gos, SLIDES.map((s) => s.go), "every slide's action goes somewhere real");
+    for (const rows of got.rows) assert.equal(rows.length, 3, "three rows a slide: no card is half empty under two");
     assert.equal(new Set(got.ids).size, got.ids.length, "every line has its own id");
-    assert.ok(got.icons.every(Boolean), "every line shown has its glyph in media/shared/icons.js");
+    assert.ok(got.icons.every(Boolean), "every line has its glyph in media/shared/icons.js");
+    assert.deepEqual(got.api, ["mount", "slides"], "no line is held back: nothing here is `ships: false`");
+    // What 0.52's biggest new things are, each told (user test round 2, N1).
+    const all = got.titles.concat(got.rows.flat(2)).join("\n");
+    for (const said of ["Your Browser", "Sites Pips can use", "Clear browsing data", "Comment", "Ask DGC", "suggestion", "canvas", "artboard", "prototype", "checklist", "what done means", "proof", "Output",
+      "/goal", "steps", "link", "Archive", "Library", "favorites", "model picker", "Always allow", "daily limit"]) assert.ok(all.toLowerCase().includes(said.toLowerCase()), `it says “${said}”`);
+    // In a new user's words (N3, N5): no "one kind", no "Personal", nothing that reads as inside a setting, no
+    // internal names; and never the two-letter word DGC doesn't use for itself.
+    const banned = new RegExp("\\b" + "A" + "I\\b");
+    for (const not of [/one kind/i, /\bPersonal\b/, /Inside it/, banned, /sub-?agent/i, /\bAPI\b/]) assert.doesNotMatch(all, not);
+    // (Work's sub-agents are called helpers too: a Pip is not "a helper" here.)
+    assert.doesNotMatch(got.titles.join("\n"), /helper/i);
+    // Nor in the pictures.
+    for (let i = 0; i < N; i++) {
+      const said = await x.page.evaluate(() => document.querySelector("#whats-new .wn-stage").textContent);
+      for (const not of [/\bPersonal\b/, /one kind/i, banned]) assert.doesNotMatch(said, not, `slide ${i + 1}'s picture`);
+      if (i < N - 1) await x.page.click("#whats-new .wn-next");
+    }
+  } finally { await x.close(); }
+});
+
+// User test round 2, N4: in a 290 px side bar the picture was the wide still scaled to 240 px, its words about 4 px,
+// and the card was half empty under the rows.
+test("a 290 px side bar: the picture takes the card's whole width in its narrow form, its smallest word is 10 px or more, and no card is half empty", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const theme of ["dark-modern", "light-modern"]) {
+    const x = await open({ width: 290, height: 720, theme, motion: "reduce" });
+    try {
+      for (let i = 0; i < N; i++) {
+        const m = await x.page.evaluate(() => {
+          const layer = document.getElementById("whats-new"), q = (s) => layer.querySelector(s), r = (n) => n.getBoundingClientRect();
+          const pic = q(".wn-picture"), stage = q(".wn-stage"), box = q(".wn-dialog"), k = r(stage).width / stage.offsetWidth;
+          // Every word in the picture, as it is drawn: its own size, times the still's scale.
+          const words = [];
+          const walk = document.createTreeWalker(stage, NodeFilter.SHOW_TEXT);
+          for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            const p = n.parentElement;
+            // (A file's sheet is an icon: the tag lettered on it, PAGE or SHEET, is part of its drawing, as on every page.)
+            if (!n.textContent.trim() || p.closest(".dgc-sheet") || !p.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+            const range = document.createRange(); range.selectNodeContents(n);
+            if (!range.getClientRects().length) continue;
+            words.push({ text: n.textContent.trim().slice(0, 30), px: Math.round(parseFloat(getComputedStyle(p).fontSize) * k * 100) / 100 });
+          }
+          const last = [...layer.querySelectorAll(".wn-item")].at(-1), foot = q(".wn-foot");
+          return { form: pic.dataset.form, pic: r(pic).width, box: r(box).width, ratio: r(pic).width / r(pic).height, k, words, smallest: words.reduce((a, b) => (b.px < a.px ? b : a), { px: 99 }),
+            empty: r(foot).top - r(last).bottom, height: r(box).height, drawn: [...stage.querySelectorAll(".hc-li, .lib-row, .dgc-cm-msg, .dgc-cm-sug, .wn-board, .wn-ck-item, li.todo")].filter((n) => n.checkVisibility()).length };
+        });
+        const where = `${theme} slide ${i + 1} (${SLIDES[i].scene})`;
+        assert.equal(m.form, "narrow", `${where}: the narrow form`);
+        assert.ok(m.pic >= 260 && Math.abs(m.pic - m.box) <= 2.5, `${where}: the picture takes the card's whole width (${m.pic} of ${m.box})`);
+        assert.ok(Math.abs(m.ratio - 4 / 3) < 0.02, `${where}: 4:3, so there is room to draw it larger (${m.ratio})`);
+        if (SLIDES[i].scene !== "canvas") assert.ok(m.words.length >= 3, `${where}: it has words to read (${m.words.length})`);   // (the canvas's are its page's own, in its picture)
+        assert.ok(m.smallest.px >= 10, `${where}: its smallest word is 10 px or more (“${m.smallest.text}” is ${m.smallest.px} px; scale ${m.k})`);
+        assert.ok(m.drawn >= (SLIDES[i].scene === "canvas" ? 1 : 2) && m.drawn <= 4, `${where}: the one part that tells the story, not the whole page shrunk (${m.drawn} rows)`);
+        assert.ok(m.empty <= m.height * 0.15, `${where}: the card isn't half empty under its rows (${Math.round(m.empty)} px of ${Math.round(m.height)})`);
+        if (i < N - 1) await x.page.click("#whats-new .wn-next");
+      }
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  }
+});
+
+test("the canvas at 290 px: the one artboard that reads best, the real desktop page, whole and as wide as the glass; assets are small", async (t) => {
+  if (skipOrFail(t)) return;
+  const x = await open({ width: 290, height: 720, motion: "reduce" });
+  try {
+    await goTo(x, 3);
+    const m = await x.page.evaluate(async () => {
+      const st = document.querySelector("#whats-new .wn-stage"), glass = st.querySelector(".wn-glass").getBoundingClientRect();
+      const shown = [...st.querySelectorAll(".wn-board")].filter((b) => b.checkVisibility());
+      const pics = [...shown[0].querySelectorAll("img")].filter((i) => i.checkVisibility({ opacityProperty: true }));
+      await Promise.all(pics.map((i) => i.decode().catch(() => {})));
+      const r = pics[0]?.getBoundingClientRect(), f = shown[0].querySelector(".wn-board-frame").getBoundingClientRect();
+      return { boards: shown.length, name: shown[0].querySelector(".wn-board-name").textContent.replace(/\s+/g, " ").trim(), file: pics[0] ? new URL(pics[0].src).pathname.split("/media/")[1] : "",
+        natural: pics[0] ? [pics[0].naturalWidth, pics[0].naturalHeight] : [], pic: r ? [r.width, r.height] : [], whole: r && r.left >= f.left - 0.5 && r.right <= f.right + 0.5 && r.top >= f.top - 0.5 && r.bottom <= f.bottom + 0.5,
+        inGlass: f.left >= glass.left && f.right <= glass.right && f.top >= glass.top && f.bottom <= glass.bottom, glass: glass.width, covers: [...st.querySelectorAll(".wn-cover")].filter((c) => { const b = c.getBoundingClientRect(); return b.top < f.bottom - 1 && b.bottom > f.top + 1 && c.closest(".wn-board").checkVisibility(); }).length };
+    });
+    assert.equal(m.boards, 1, "one artboard");
+    assert.deepEqual([m.name, m.file], ["Desktop home 1440 × 900", "whatsnew/canvas-desktop.webp"], "the desktop page, as it is after the comment, named as the canvas names it");
+    assert.ok(m.whole && m.inGlass, "whole, in its frame, on the glass");
+    assert.ok(m.pic[0] >= 200 && m.pic[0] >= m.glass * 0.85, `as wide as the glass allows (${m.pic[0]} of ${m.glass})`);
+    assert.ok(Math.abs(m.pic[0] / m.pic[1] - 1440 / 900) < 0.02, "at its own shape, not squeezed");
+    assert.ok(m.natural[0] >= m.pic[0] * 2, `sharp on a 2x screen (${m.natural[0]} px for ${m.pic[0]})`);
+    assert.equal(m.covers, 0, "reduced motion: the finished artboard, nothing over it");
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+  // Small assets: a few tens of KB each.
+  for (const name of ["canvas-desktop.webp", "canvas-desktop-before.webp", "canvas-phone.webp"]) {
+    const bytes = readFileSync(`${extensionRoot}/media/whatsnew/${name}`).length;
+    assert.ok(bytes > 4000 && bytes < 90000, `${name}: ${bytes} bytes`);
+  }
+});
+
+test("Open Your Browser is offered where Your Browser is, and opens it as the dock does; a DGC without it shows the slide and no action", async (t) => {
+  if (skipOrFail(t)) return;
+  let x = await open({ width: 440 });
+  try {
+    await goTo(x, 1);
+    assert.deepEqual((await now(x.page)).buttons, ["Open Your Browser", "Next"]);
+    await x.page.click("#whats-new .wn-go");
+    assert.equal(await now(x.page), null);
+    assert.deepEqual(await went(x), [{ type: "whatsNewGo", to: "browser" }]);
+    await x.send({ type: "sideTab", tab: "home", open: "browser" });           // (the host's answer, src/whatsNew.ts)
+    await x.page.waitForFunction(() => window.__requests.some((r) => r.type === "open_your_browser"));
+    assert.equal(await x.page.evaluate(() => document.querySelector("#side-tabs [role='tab'][aria-selected='true']")?.dataset.tab), "home", "Home stays in sight");
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+  x = await open({ width: 440, api: 69 });
+  try {
+    await goTo(x, 1);
+    const s = await now(x.page);
+    assert.equal(s.title, "Your Browser");
+    assert.deepEqual(s.buttons, ["Next"], "no Open Your Browser where there is none to open");
   } finally { await x.close(); }
 });
 
@@ -359,7 +487,7 @@ test("× and Esc close it for good; the arrows and the dots move; a click outsid
     for (let i = 0; i < 9; i++) await x.page.keyboard.press("ArrowLeft");
     assert.equal((await now(x.page)).at, 0, "it stops at the first");
     for (let i = 0; i < 9; i++) await x.page.keyboard.press("ArrowRight");
-    assert.deepEqual([(await now(x.page)).at, (await now(x.page)).buttons], [N - 1, ["Done"]], "and at the last, which never closes by an arrow");
+    assert.deepEqual([(await now(x.page)).at, (await now(x.page)).buttons], [N - 1, ["Open Settings", "Done"]], "and at the last, which never closes by an arrow");
     // A dot (on the picture) goes straight to its slide.
     await x.page.click("#whats-new .wn-dot >> nth=3");
     assert.equal((await now(x.page)).title, SLIDES[3].title);
@@ -396,10 +524,10 @@ test("× and Esc close it for good; the arrows and the dots move; a click outsid
   } finally { await x.close(); }
 });
 
-test("a slide's action goes there and closes the news for good: Open Pips, Arrange Home (the Cards library), Open Library, Open Work", async (t) => {
+test("a slide's action goes there and closes the news for good: Open Pips, Open Library, Open Work, Open Settings", async (t) => {
   if (skipOrFail(t)) return;
   for (const [i, slide] of SLIDES.entries()) {
-    if (!slide.go) continue;
+    if (slide.go[1] === "browser") continue;                       // (Open Your Browser has its own test, above)
     const x = await open({ width: 440 });
     try {
       if (i) await goTo(x, i);
@@ -410,13 +538,13 @@ test("a slide's action goes there and closes the news for good: Open Pips, Arran
       assert.deepEqual(await went(x), [{ type: "whatsNewGo", to: slide.go[1] }], `${slide.go[0]} asks the host to go to ${slide.go[1]}`);
       assert.deepEqual(await seen(x), [], "(the host keeps the answer for a whatsNewGo: one message, not two)");
       // The host's answer (src/panel.ts): the side bar's own navigation.
-      const message = { pips: { type: "sideTab", tab: "pips" }, "home-cards": { type: "sideTab", tab: "home", open: "cards" }, library: { type: "sideTab", tab: "library" }, work: { type: "sideTab", tab: "work" } }[slide.go[1]];
+      const message = { pips: { type: "sideTab", tab: "pips" }, library: { type: "sideTab", tab: "library" }, work: { type: "sideTab", tab: "work" } }[slide.go[1]];
+      if (!message) { assert.equal(slide.go[1], "settings", "(Settings is the host's own tab: nothing for the side bar to do)"); continue; }
       await x.send(message);
       await x.page.waitForTimeout(250);
       const there = await x.page.evaluate(() => ({ tab: document.querySelector("#side-tabs [role='tab'][aria-selected='true']")?.dataset.tab || "", pips: document.body.classList.contains("pips-active"),
         cards: !!document.querySelector("dialog.hc-library[open]") }));
       if (slide.go[1] === "pips") assert.ok(there.pips || there.tab === "pips", `Open Pips: the Pips list (${JSON.stringify(there)})`);
-      if (slide.go[1] === "home-cards") assert.deepEqual([there.tab, there.cards], ["home", true], "Arrange Home: Home, with the Cards library open");
       if (slide.go[1] === "library") assert.equal(there.tab, "library", "Open Library: the Library tab");
       if (slide.go[1] === "work") assert.equal(there.tab, "work", "Open Work: the Work tab");
       assert.deepEqual(x.errors, []);
@@ -426,13 +554,15 @@ test("a slide's action goes there and closes the news for good: Open Pips, Arran
 
 test("motion: each scene tells its story in a calm loop of 5-7 s with transforms and opacity only, moves no words or buttons, and stops when the window is hidden or the news is closed", async (t) => {
   if (skipOrFail(t)) return;
-  const x = await open({ width: 440, motion: "no-preference" });
+  for (const width of [290, 440]) {
+  const x = await open({ width, motion: "no-preference" });
   try {
     const read = () => x.page.evaluate(() => {
       // The story is the scene's own loop (Web Animations); a Pip's face breathing and blinking, or a running session's
       // mark, is the real part's own life (its stylesheet's CSS animations), drawn as it is everywhere else.
       const pic = document.querySelector("#whats-new .wn-stage"), list = pic.getAnimations({ subtree: true }), story = list.filter((a) => !(a instanceof CSSAnimation));
-      const props = new Set(); for (const a of list) for (const k of a.effect.getKeyframes()) for (const p of Object.keys(k)) if (!["offset", "easing", "composite", "computedOffset"].includes(p)) props.add(p);
+      // (What moves: the story, and a part's own life while it runs. A part at rest is still: Your Browser's halo, as on the dock.)
+      const props = new Set(); for (const a of list.filter((a) => a.playState === "running")) for (const k of a.effect.getKeyframes()) for (const p of Object.keys(k)) if (!["offset", "easing", "composite", "computedOffset"].includes(p)) props.add(p);
       // (A part at rest, a session's mark that isn't at work, keeps its own motion paused, as it does on its page.)
       return { n: story.length, states: [...new Set(story.map((a) => a.playState))], all: [...new Set(list.map((a) => a.playState))], loops: list.every((a) => a.effect.getTiming().iterations === Infinity),
         durations: [...new Set(story.map((a) => a.effect.getTiming().duration))], props: [...props] };
@@ -441,7 +571,7 @@ test("motion: each scene tells its story in a calm loop of 5-7 s with transforms
     await x.page.waitForTimeout(400);                               // (the dialog's own arrival, 180 ms, is over)
     for (let i = 0; i < N; i++) {
       await x.page.waitForTimeout(120);
-      const m = await read(), where = `slide ${i + 1} (${SLIDES[i].scene})`;
+      const m = await read(), where = `${width} px slide ${i + 1} (${SLIDES[i].scene})`;
       assert.ok(m.n >= 4, `${where}: the scene plays out its story (${m.n} animations)`);
       assert.deepEqual(m.states, ["running"], `${where}: running`);
       assert.ok(m.loops, `${where}: in a loop`);
@@ -463,36 +593,73 @@ test("motion: each scene tells its story in a calm loop of 5-7 s with transforms
     assert.equal(await x.page.evaluate(() => document.querySelector("#whats-new .wn-stage")?.getAnimations({ subtree: true }).length ?? 0), 0, "closed: nothing moves");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
+  }
 });
 
-test("each picture is a still of DGC's own parts: the real Pip faces, session marks, file sheets, Home cards, Library rows, queue row and icons", async (t) => {
+test("the two forms: under 400 px the narrow still (4:3, 288 wide), from 400 px the wide one (16:9, 480 wide); a side bar dragged across starts the story in the other", async (t) => {
+  if (skipOrFail(t)) return;
+  const x = await open({ width: 300, motion: "no-preference" });
+  try {
+    const read = () => x.page.evaluate(() => { const pic = document.querySelector("#whats-new .wn-picture"), stage = pic.querySelector(".wn-stage"), b = pic.getBoundingClientRect();
+      return { form: pic.dataset.form, ratio: b.width / b.height, laid: [stage.offsetWidth, stage.offsetHeight], fits: Math.abs(stage.getBoundingClientRect().width - b.width) < 1,
+        wide: [...stage.querySelectorAll(".wn-w")].filter((n) => n.checkVisibility()).length, moving: stage.getAnimations({ subtree: true }).filter((a) => !(a instanceof CSSAnimation)).length }; });
+    const narrow = await read();
+    assert.deepEqual([narrow.form, narrow.laid, narrow.wide], ["narrow", [288, 216], 0], "300 px: the narrow form, without the wide form's second part");
+    assert.ok(Math.abs(narrow.ratio - 4 / 3) < 0.02 && narrow.fits && narrow.moving >= 3, JSON.stringify(narrow));
+    for (const [width, form] of [[410, "narrow"], [440, "wide"], [700, "wide"]]) {            // (the card is the side bar less its margins)
+      await x.page.setViewportSize({ width, height: 760 }); await x.page.waitForTimeout(150);
+      assert.equal((await read()).form, form, `${width} px`);
+    }
+    const wide = await read();
+    assert.deepEqual([wide.laid, wide.wide > 0], [[480, 270], true], "the wide form, with both parts");
+    assert.ok(Math.abs(wide.ratio - 16 / 9) < 0.02 && wide.fits && wide.moving >= 4, JSON.stringify(wide));
+    await x.page.setViewportSize({ width: 300, height: 760 }); await x.page.waitForTimeout(150);
+    const back = await read();
+    assert.deepEqual([back.form, back.wide], ["narrow", 0]);
+    assert.ok(back.moving >= 3, "and its story plays there");
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+});
+
+test("each picture is made of DGC's own parts: the real Pip faces, file sheets, marks, Home cards, Library rows, a comment's thread, a turn's steps, a link's card and icons", async (t) => {
   if (skipOrFail(t)) return;
   const x = await open({ width: 700, motion: "reduce" });
   try {
     const parts = [];
     for (let i = 0; i < N; i++) {
       parts.push(await x.page.evaluate(() => { const st = document.querySelector("#whats-new .wn-stage"), n = (s) => st.querySelectorAll(s).length;
-        return { faces: [...st.querySelectorAll(".dgc-plush[data-character]")].map((f) => f.dataset.character), star: n(".hc-star"), voxels: n(".voxel[data-mark]"), folios: n(".folio[data-mark]"),
-          sheets: n(".dgc-sheet[data-kind]"), cards: n(".hc-card"), rows: n(".hc-li"), lib: n(".dgc-lib .lib-row"), tabs: n(".dgc-lib .lib-tab"), hub: n(".dgc-hub-card"), queue: n(".dgc-queue-row"),
-          change: n(".sys.setting-change"), user: n(".msg.user .bubble"), icons: n("svg.dgc-icon[data-icon]"), apps: n("img[src*='/media/pips/apps/']"), folder: n(".folder-icon"),
-          stand: n(".wn-face > i, .wn-voxel, .wn-mini, .wn-file-mark, .wn-sheet"),
+        return { faces: [...st.querySelectorAll(".dgc-plush[data-character]")].map((f) => f.dataset.character), star: n(".hc-star"), folios: n(".folio[data-mark]"),
+          sheets: [...st.querySelectorAll(".dgc-sheet[data-kind]")].map((n) => n.dataset.kind), cards: n(".hc-card"), rows: n(".hc-li"), lib: n(".dgc-lib .lib-row"), halo: n(".halo"),
+          thread: n(".dgc-cm-thread .dgc-cm-msg") + n(".dgc-cm-thread .dgc-cm-sug"), buttons: n("span.dgc-btn"), steps: n(".todos-card li.todo .todo-mark svg"), link: n(".dgc-linkcard .dgc-linkcard-title"),
+          change: n(".sys.setting-change"), user: n(".msg.user .bubble"), icons: n("svg.dgc-icon[data-icon]"), apps: n("img[src*='/media/pips/apps/']"), tags: n(".yb-site-tag"), boards: n(".wn-board"), items: n(".wn-ck-item"), blocks: n(".wn-b, .wn-b-alt"),
+          // (The canvas's artboards: pictures of a real design DGC drew, each loaded from the extension's own media folder.)
+          boardPics: [...st.querySelectorAll(".wn-board-frame img")].map((i) => ({ file: new URL(i.src, location.href).pathname.split("/media/")[1] || "", w: i.naturalWidth, h: i.naturalHeight, shown: i.getBoundingClientRect().width })),
+          boardNames: [...st.querySelectorAll(".wn-board-name")].map((b) => b.textContent.replace(/\s+/g, " ").trim()), said: st.textContent,
           controls: n("button, input, select, textarea, a[href], [tabindex], [contenteditable]"), ids: n("[id]") }; }));
       if (i < N - 1) await x.page.click("#whats-new .wn-next");
     }
-    for (const [i, p] of parts.entries()) {
-      assert.equal(p.stand, 0, `slide ${i + 1}: no stand-in drawing of a face, a mark or a file (${JSON.stringify(p)})`);
+    for (const [i, p] of parts.entries())
       assert.deepEqual([p.controls, p.ids], [0, 0], `slide ${i + 1}: a picture: nothing in it can be pressed or reached by Tab, and it keeps no id of the page's`);
-    }
-    const [pips, wall, levels, cards, library, work, also] = parts;
-    assert.deepEqual(pips.faces.slice(0, 4), ["core", "scout", "lens", "quill"], "slide 1: the Pips list wears the real faces, by their kinds' names");
+    const [pips, yb, comments, canvas, checklist, home, work, also] = parts;
+    assert.deepEqual(pips.faces.slice(0, 3), ["core", "scout", "quill"], "slide 1: the Pips list wears the real faces, by their kinds' names");
     assert.equal(pips.star, 1, "slide 1: Core is the one with the star");
-    assert.ok(pips.apps >= 1 && pips.folder >= 1 && pips.icons >= 1, "slide 1: what a Pip has of its own: its chat (the chat glyph), its computer (its apps' own icons), a copy of a folder (the folder icon)");
-    assert.ok(wall.sheets >= 3 && wall.faces.length >= 1 && wall.folder >= 1, "slide 2: your folder's files as their sheets, the Pip's computer with its face");
-    assert.ok(levels.hub >= 1 && levels.faces.length >= 1, "slide 3: the Pip's finding as Home's Needs you card, with its face");
-    assert.ok(cards.cards >= 4 && cards.voxels >= 1, "slide 4: Home's own cards, a running session's mark among them");
-    assert.ok(library.lib >= 3 && library.tabs >= 5 && library.sheets + library.folios >= 3, "slide 5: the Library's own tabs and rows, with their sheets and marks");
-    assert.ok(work.voxels >= 3 && work.queue === 1 && work.icons >= 2, "slide 6: Work sessions with their marks, the queued message's own row (with its Edit)");
-    assert.ok(also.change === 1 && also.user === 1, "slide 7: the message you sent, and the line the change leaves, with Undo");
+    assert.ok(pips.apps === 3 && pips.icons >= 3, "slide 1: what a Pip has of its own: its chat, its computer (its apps' own icons), its level");
+    assert.ok(yb.halo === 1 && yb.faces.length === 1 && yb.tags >= 1, "slide 2: Your Browser's own halo, the Pip's face on its tab, the Sites panel's own tag");
+    assert.ok(comments.thread === 2 && comments.buttons === 2 && comments.sheets.includes("doc"), "slide 3: the rail's own thread (a message, a suggestion with Accept and Reject), the doc's sheet");
+    assert.ok(canvas.boards === 2 && canvas.sheets.includes("design") && canvas.buttons === 2, "slide 4: two artboards, the design's sheet, Play and Download");
+    // The artboards are a real design DGC drew (a bakery's landing page, desktop and phone), not grey blocks: pictures
+    // of its own boards, at twice the size they are shown or more; the desktop one also as it was before the comment.
+    assert.equal(canvas.blocks, 0, "slide 4: no wireframe blocks");
+    assert.deepEqual(canvas.boardPics.map((p) => p.file).sort(), ["whatsnew/canvas-desktop-before.webp", "whatsnew/canvas-desktop.webp", "whatsnew/canvas-phone.webp"], "slide 4: the real boards' pictures");
+    for (const p of canvas.boardPics) assert.ok(p.w > 0 && p.h > 0 && p.w >= p.shown * 2 - 1, `slide 4: ${p.file} is loaded, and sharp at the size it is shown (${p.w} px for ${Math.round(p.shown)})`);
+    const ratio = (file) => { const p = canvas.boardPics.find((x) => x.file === file); return p.w / p.h; };
+    assert.ok(Math.abs(ratio("whatsnew/canvas-desktop.webp") - 1440 / 900) < 0.01 && Math.abs(ratio("whatsnew/canvas-phone.webp") - 390 / 844) < 0.01, "slide 4: each at its board's own shape (1440 × 900, 390 × 844)");
+    assert.deepEqual(canvas.boardNames, ["Desktop home 1440 × 900", "Phone 390 × 844"], "the artboards' own titles and sizes, as the canvas shows them");
+    assert.match(canvas.said, /Bakery Landing Page/, "slide 4: under the design's own title");
+    assert.ok(checklist.items === 3 && checklist.sheets.includes("checklist") && checklist.icons >= 2, "slide 5: the checklist's sheet, its items, ticked with the shared check");
+    assert.ok(home.cards >= 2 && home.lib === 3 && home.faces.length >= 1 && home.sheets.length + home.folios >= 3, "slide 6: Home's own cards, the Library's own rows with their sheets and marks");
+    assert.ok(work.steps === 5 && work.user === 1 && work.link === 1, "slide 7: what you typed, the turn's steps with Work's own marks (a ring and a check for each one done in the story), a link's own preview card");
+    assert.ok(also.change === 1 && also.user === 1 && also.rows === 3, "slide 8: the message you sent, the line the change leaves, with Undo, and three more");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
@@ -503,7 +670,7 @@ test("reduced motion: no scene moves; each shows its final frame, whole", async 
   try {
     for (let i = 0; i < N; i++) {
       const got = await x.page.evaluate(() => { const stage = document.querySelector("#whats-new .wn-stage");
-        const shown = [...stage.querySelectorAll(".hc-card, .hc-li, .lib-row, .dgc-card, .dgc-menu-row, .dgc-queue-row, .sys, .dgc-plush, [data-mark], .dgc-sheet")].filter((n) => n.checkVisibility({ opacityProperty: true }));
+        const shown = [...stage.querySelectorAll(".hc-card, .hc-li, .lib-row, .dgc-cm-msg, .dgc-cm-sug, .wn-board, .wn-board-frame img, .wn-pin, .wn-ck-item, li.todo, .dgc-linkcard, .sys, .dgc-plush, [data-mark], .dgc-sheet")].filter((n) => n.checkVisibility({ opacityProperty: true }));
         return { moving: stage.getAnimations({ subtree: true }).length, shown: shown.length }; });
       assert.equal(got.moving, 0, `slide ${i + 1}: nothing moves`);
       assert.ok(got.shown >= 4, `slide ${i + 1}: its final frame is drawn (${got.shown} parts in sight)`);
@@ -513,7 +680,7 @@ test("reduced motion: no scene moves; each shows its final frame, whole", async 
   } finally { await x.close(); }
 });
 
-test("170, 230, 300, 440, 560 and 700 px: nothing cut, no sideways scroll, the picture 16:9 and whole, the footer never moves between slides", async (t) => {
+test("170, 230, 300, 440, 560 and 700 px: nothing cut, no sideways scroll, the picture whole in its form (4:3 under 400 px, 16:9 from there), the footer never moves between slides", async (t) => {
   if (skipOrFail(t)) return;
   for (const width of [170, 230, 300, 440, 560, 700]) {
     const x = await open({ width, height: 760, motion: "reduce" });
@@ -524,7 +691,8 @@ test("170, 230, 300, 440, 560 and 700 px: nothing cut, no sideways scroll, the p
         assert.equal(s.overflowX, false, `${where}: no sideways scroll`);
         assert.ok(s.box.left >= 0 && s.box.right <= s.width + 0.5 && s.box.top >= 0 && s.box.bottom <= s.height + 0.5, `${where}: the dialog is inside the side bar`);
         assert.ok(s.box.width <= 560.5, `${where}: never wider than 560 px`);
-        assert.ok(Math.abs(s.picture.width / s.picture.height - 16 / 9) < 0.02, `${where}: 16:9 (${s.picture.width}×${s.picture.height})`);
+        const ratio = s.picture.width < 400 ? 4 / 3 : 16 / 9;
+        assert.ok(Math.abs(s.picture.width / s.picture.height - ratio) < 0.02, `${where}: ${s.picture.width < 400 ? "4:3" : "16:9"} (${s.picture.width}×${s.picture.height})`);
         assert.deepEqual(s.foreign, [], `${where}: every picture in it is one of the extension's own files`);
         assert.ok(s.drawn >= 6, `${where}: a picture, not a blank box`);
         assert.equal(s.clipped, 0, `${where}: nothing of the picture pokes out of its frame`);
@@ -576,11 +744,12 @@ test("dark, light, high contrast and forced colours: the buttons are the 6 px fa
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   }
-  for (const hue of ["violet", "amber", "green", "azure", "blue", "neutral"]) {
+  for (const hue of HUES) {
     const dark = [...backs[`dark-modern ${hue}`]][0], light = [...backs[`light-modern ${hue}`]][0];
     assert.ok(dark && light && dark !== light, `${hue}: its own pair in dark and in light`);
   }
-  assert.equal(new Set(["violet", "amber", "green", "azure", "blue", "neutral"].map((h) => [...backs[`dark-modern ${h}`]][0])).size, 6, "each hue its own backdrop");
+  assert.equal(HUES.length, 8, "a hue a slide");
+  assert.equal(new Set(HUES.map((h) => [...backs[`dark-modern ${h}`]][0])).size, 8, "each hue its own backdrop");
   // Forced colours (Windows High Contrast): the reader's colours, no gradient; × and the dots still drawn.
   const x = await open({ width: 300, forced: true, motion: "reduce" });
   try {

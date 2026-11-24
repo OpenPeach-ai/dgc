@@ -6,11 +6,11 @@ answers its permission and question requests, and gets a structured result back.
 
 | Package | Version | Pairs with | Protocol | Runtime |
 | --- | --- | --- | --- | --- |
-| `dgc-sdk` (Python, PyPI) | **0.9.0** | CLI **0.51.0** | editor protocol v14 | Python 3.10+ |
-| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.9.0** | CLI **0.51.0** | editor protocol v14 | Node 22+ |
+| `dgc-sdk` (Python, PyPI) | **0.10.0** | CLI **0.52.0** | editor protocol v14 | Python 3.10+ |
+| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.10.0** | CLI **0.52.0** | editor protocol v14 | Node 22+ |
 
-SDK 0.9.0 has been tested on Linux only. Its suites passed on macOS and on Windows 11 through WSL 2
-for an earlier candidate; [sdk/COMPATIBILITY.md](../sdk/COMPATIBILITY.md) records the scope of the
+SDK 0.10.0 has been tested on Linux only (macOS and Windows 11 through WSL 2 passed for an earlier
+candidate); [sdk/COMPATIBILITY.md](../sdk/COMPATIBILITY.md) records the scope of the
 host checks.
 Native Windows is experimental (custom tools need Unix sockets).
 The SDK is free: there is no DGC fee for embedding it. `Pricing` only lets your
@@ -28,12 +28,12 @@ application attribute the model-token spend your provider bills you.
 
 ## Install
 
-### Pips (SDK 0.9.0)
+### Pips (SDK 0.10.0)
 
 SDK 0.7.0 introduced `session.pips` (`Pips`, and `AsyncPips` on `AsyncDGC` sessions) for
 managing the Pips of an existing DGC profile: standing agents that review, test and
-draft beside the main chat. SDK 0.9.0 pairs with DGC CLI 0.51.0, which advertises Pips API
-74; each control checks the minimum Pips API it needs before sending anything. See
+draft beside the main chat. SDK 0.10.0 pairs with DGC CLI 0.52.0, which advertises Pips API
+113; each control checks the minimum Pips API it needs before sending anything. See
 [sdk/PIPS.md](../sdk/PIPS.md) for the full command list and capability gates.
 
 | API | Purpose |
@@ -143,14 +143,14 @@ iterator. TypeScript uses camelCase (`chatId`, `messageId`,
 ### Published packages
 
 ```bash
-python3 -m pip install dgc-sdk==0.9.0
+python3 -m pip install dgc-sdk==0.10.0
 ```
 
 That installs `import dgc_sdk`. Do not `pip install dgc`: the PyPI project named `dgc` is an
 unrelated library.
 
 The SDK does not contain the agent. It drives `dgc serve` from a DGC CLI install, so you also need
-the CLI (0.51.0 or newer, protocol v14):
+the CLI (0.52.0 or newer, protocol v14):
 
 ```bash
 curl -fsSL https://vibedgc.com/install.sh | bash
@@ -777,7 +777,7 @@ A run that fails does not raise: its `RunResult` has `status="failed"` and the r
 
 ### Constants
 
-`__version__` (`"0.9.0"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.51.0"`).
+`__version__` (`"0.10.0"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.52.0"`).
 
 ## Events
 
@@ -948,15 +948,15 @@ CycloneDX SBOM and `SHA256SUMS` to the GitHub release, each with a GitHub artifa
 
 ```bash
 # The PyPI file matches the GitHub release, and the workflow built it from the tag:
-python3 -m pip download --no-deps dgc-sdk==0.9.0 -d dl
-curl -fsSLO https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.9.0/SHA256SUMS
+python3 -m pip download --no-deps dgc-sdk==0.10.0 -d dl
+curl -fsSLO https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.10.0/SHA256SUMS
 (cd dl && sha256sum -c ../SHA256SUMS --ignore-missing)
-gh attestation verify dl/dgc_sdk-0.9.0-py3-none-any.whl --repo OpenPeach-ai/dgc \
+gh attestation verify dl/dgc_sdk-0.10.0-py3-none-any.whl --repo OpenPeach-ai/dgc \
   --signer-workflow OpenPeach-ai/dgc/.github/workflows/publish-dgc-sdk.yml
 ```
 
 PyPI shows the same provenance on the file's page, and
-`pypi-attestations verify pypi --repository https://github.com/OpenPeach-ai/dgc pypi:dgc_sdk-0.9.0-py3-none-any.whl`
+`pypi-attestations verify pypi --repository https://github.com/OpenPeach-ai/dgc pypi:dgc_sdk-0.10.0-py3-none-any.whl`
 checks it from the command line.
 
 The source tree also carries a checkout manifest: `sdk/sbom/SHA256SUMS` lists every SDK source

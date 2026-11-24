@@ -30,13 +30,15 @@ export function whatsNewMessage(auto: boolean): { type: "whatsNew"; auto: boolea
   return { type: "whatsNew", auto, release: WHATS_NEW_RELEASE };
 }
 
-/** Where a slide's own action goes (Open Pips, Arrange Home, Open Library, Open Work): the side bar's own tabs, as Home's
- *  buttons open them, and Home's Cards library for Arrange Home. What the page is told, or null for a place it doesn't
- *  know (the news is still answered: the page has closed it). */
+/** Where a slide's own action goes (Open Pips, Open Your Browser, Open Library, Open Work, Open Settings): the side bar's
+ *  own tabs, as Home's buttons open them; Your Browser, as the dock's tile opens it (and Home's Cards library, for a
+ *  page that asks for it); DGC's Settings tab. What the page or the host is told, or null for a place it doesn't know
+ *  (the news is still answered: the page has closed it). */
 const WHATS_NEW_PLACES: Record<string, { tab: string; open?: string }> = {
-  pips: { tab: "pips" }, "home-cards": { tab: "home", open: "cards" }, library: { tab: "library" }, work: { tab: "work" },
+  pips: { tab: "pips" }, "home-cards": { tab: "home", open: "cards" }, browser: { tab: "home", open: "browser" }, library: { tab: "library" }, work: { tab: "work" },
 };
-export function whatsNewGoMessage(to: unknown): { type: "sideTab"; tab: string; open?: string } | null {
+export function whatsNewGoMessage(to: unknown): { type: "sideTab"; tab: string; open?: string } | { type: "openSettings" } | null {
+  if (to === "settings") return { type: "openSettings" };
   const place = typeof to === "string" && Object.prototype.hasOwnProperty.call(WHATS_NEW_PLACES, to) ? WHATS_NEW_PLACES[to] : null;
   return place ? { type: "sideTab", ...place } : null;
 }

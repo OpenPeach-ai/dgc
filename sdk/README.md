@@ -1,13 +1,13 @@
 # DGC SDK
 
-Embed the DGC coding agent in an application or a CI job. **0.9.0**, editor protocol **v14**,
-pairs with CLI **0.51.0**. This version has been tested on Linux only; macOS and WSL 2 passed for an
+Embed the DGC coding agent in an application or a CI job. **0.10.0**, editor protocol **v14**,
+pairs with CLI **0.52.0**. This version has been tested on Linux only; macOS and WSL 2 passed for an
 earlier candidate (see [COMPATIBILITY.md](COMPATIBILITY.md)). Native Windows is experimental.
-Release tag **`sdk-v0.9.0`** (not `v0.5.x`, which are historical CLI tags).
+Release tag **`sdk-v0.10.0`** (not `v0.5.x`, which are historical CLI tags).
 
 | Package | Install |
 | --- | --- |
-| Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.9.0` |
+| Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.10.0` |
 | Node `@vibedgc/sdk` | `npm install @vibedgc/sdk` |
 
 Both drive `dgc serve` from a DGC CLI install, which they find on their own; `DGC_PYTHON` pins a
@@ -83,7 +83,7 @@ same rules for state, policy, sandbox, timeouts, usage and errors; its times are
 ## Pips
 
 SDK 0.7.0 added `session.pips` in Python (sync and async) and TypeScript, for managing
-the Pips of an existing DGC profile from trusted host code. SDK 0.9.0 pairs with CLI 0.51.0
+the Pips of an existing DGC profile from trusted host code. SDK 0.10.0 pairs with CLI 0.52.0
 (Pips API 74). It needs a client opened with `inherit_user_state=True`
 (`inheritUserState: true`), and refuses isolated, policy-bound and sandboxed
 sessions. Every mutation needs the host's explicit `approved=True`

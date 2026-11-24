@@ -6690,11 +6690,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         await whatsNewAnswered(this.context);
         break;
       case "whatsNewGo": {
-        // A slide's own action (Open Pips, Arrange Home, Open Library, Open Work): an answer, as × and Done are, and the
-        // side bar goes there by its own navigation (the tab, as Home's buttons choose it; Home's Cards library).
+        // A slide's own action (Open Pips, Open Your Browser, Open Library, Open Work, Open Settings): an answer, as × and
+        // Done are, and the side bar goes there by its own navigation (the tab, as Home's buttons choose it; Your Browser,
+        // as the dock opens it), or DGC's Settings tab opens, as the header's gear opens it.
         await whatsNewAnswered(this.context);
         const go = whatsNewGoMessage(msg.to);
-        if (go) this.post(go);                          // (the page that asked is the one in sight)
+        if (go?.type === "openSettings") this.openSettings("general");
+        else if (go) this.post(go);                     // (the page that asked is the one in sight)
         break;
       }
       // The Pips tab's one-time welcome and the quiet note above an old Work session (src/pipsWelcome.ts).

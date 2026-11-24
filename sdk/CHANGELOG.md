@@ -1,6 +1,6 @@
 # DGC SDK changelog
 
-## Unreleased
+## 0.10.0 — unreleased (the date goes in on release day)
 
 - `output="checklist"` and `output="design"` are sent (Python `session`, `chat`, Pips; TypeScript `session`, `chat`,
   `pips`), as the editor offers them (`capabilities.artifacts.outputs`); a DGC that doesn't make them says so.

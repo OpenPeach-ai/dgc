@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## Unreleased
+## 0.52.0 — unreleased (the date goes in on release day)
 
 - **Checklist and Design are outputs a client can ask for** (`capabilities.artifacts.outputs` lists them; `--make
   checklist` and `/make design` too).

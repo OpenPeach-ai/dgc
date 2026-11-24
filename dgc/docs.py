@@ -3540,7 +3540,7 @@ The DGC SDK runs the same agent inside your own program: an application, a servi
 It is **free and local**. You do not pay DGC to use it; optional `Pricing` only attributes the
 model-token spend your provider bills you.
 
-**dgc-sdk 0.9.0** pairs with CLI **0.51.0** over editor protocol v14. This version has been tested on Linux only;
+**dgc-sdk 0.10.0** pairs with CLI **0.52.0** over editor protocol v14. This version has been tested on Linux only;
 macOS and Windows through WSL 2 passed for an earlier candidate. Native Windows is experimental. The guide and API reference are in
 [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/main/docs/SDK.md). Check
 [PyPI](https://pypi.org/project/dgc-sdk/) or [npm](https://www.npmjs.com/package/@vibedgc/sdk)

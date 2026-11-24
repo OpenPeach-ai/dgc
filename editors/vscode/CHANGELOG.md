@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.36.0 — unreleased (the date goes in on release day)
 
 - **Checklist and Design are outputs** in Work's Output chip and `@` menu, ChatDGC's menu and a Pip's `@` outputs,
   beside Document, Slides, Spreadsheet, Page and Dashboard.

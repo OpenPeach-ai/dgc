@@ -80,11 +80,11 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) for (const width of W
   const x = await openHome(browser, { width, height: width === 300 ? 640 : 760, theme, scale: 2, grid: true });
   await x.send({ type: "whatsNew", auto: true, release: "0.52" });
   await x.page.waitForSelector("#whats-new:not([hidden])");
-  for (let i = 1; i <= 7; i++) {
+  for (let i = 1; i <= 8; i++) {
     if (theme === "hc" && ![1, 3].includes(i)) { await x.page.click("#whats-new .wn-next").catch(() => {}); continue; }
     await x.page.mouse.move(2, 2); await x.page.waitForTimeout(350);
     await x.page.screenshot({ path: `${out}/4-whats-new-slide-${i}-${width}-${t}.png` });
-    if (i < 7) await x.page.click("#whats-new .wn-next");
+    if (i < 8) await x.page.click("#whats-new .wn-next");
   }
   await x.close();
 }

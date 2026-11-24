@@ -1,11 +1,14 @@
-// "What's new in 0.52" (pips-flow-design §3.3, item 1; the new look of 17 Nov): a dialog in the side bar the first time
-// 0.52's side bar is shown, one slide at a time. Each slide is a card: a 16:9 picture on top, a still of the page the
-// slide is about, made of DGC's own parts, as a glass panel on a soft two-stop backdrop in the slide's own hue, playing
-// out its story (a loop of 6 s, transforms and opacity only; still under reduced motion, at its final frame; paused
-// while the window is hidden), with × at its top right and the dots on its bottom edge. Under it a quiet eyebrow, the
-// title, and rows: an icon, a heading and a muted line or two. Then a footer under a hairline: the slide's own action
-// on the left when it has one (Open Pips, Arrange Home, Open Library, Open Work), Next on the right (Done on the last),
-// and the arrow keys.
+// "What's new in 0.52" (pips-flow-design §3.3, item 1; the look of 17 Nov, the slides of 24 Nov): a dialog in the side
+// bar the first time 0.52's side bar is shown, one slide at a time. Each slide is a card: a picture on top, a still of
+// the thing the slide is about, made of DGC's own parts, as a glass panel on a soft two-stop backdrop in the slide's own
+// hue, playing out its story (a loop of 6 s, transforms and opacity only; still under reduced motion, at its final
+// frame; paused while the window is hidden), with × at its top right and the dots on its bottom edge. Under it a quiet
+// eyebrow, the title, and three rows: an icon, a heading and a muted line or two. Then a footer under a hairline: the
+// slide's own action on the left (Open Pips, Open Your Browser, Open Library, Open Work, Open Settings), Next on the
+// right (Done on the last), and the arrow keys.
+//
+// The picture has two forms, so its words can be read in any side bar: wide (the card 400 px or more: 16:9, two parts
+// side by side) and narrow (under 400 px: 4:3, the one part that tells the story, drawn larger).
 //
 // ×, Done and Esc close it for good: the page says {type: "whatsNewSeen"} and the editor remembers (src/whatsNew.ts).
 // A slide's action closes it for good too and says {type: "whatsNewGo", to}: the host keeps the answer and takes the
@@ -20,82 +23,81 @@
   if (root.DgcWhatsNew) return;
 
   // ---- the words ---------------------------------------------------------------------------------------------------
-  // Each line was checked against the code at this commit (17 Nov). A line that isn't true yet is `ships: false`: it
-  // isn't shown, and comes back in its place when slides([id]) says it has shipped. The four held back, and why:
-  //   pip-computer: "or step in" isn't so: while a Pip uses its computer your keys and pointer wait until it stops
-  //                 (src/pipComputerClient.js: "You can watch; it is yours again when it stops").
-  //   wall:         "Inside its computer a Pip never asks" isn't so: at Ask me first it asks before a new site or a
-  //                 submit from its own browser, and at every level a Terminal command that could wipe its Files
-  //                 waits for you (dgc/pip_levels.py).
-  //   own-copy:     "Nothing in your folder changes until you apply it" isn't so at Do it all, which applies what it
-  //                 changed by itself (dgc/pip_levels.py BOX_SAYS, dgc/pip_fixes.py).
-  //   reflow:       "to a full editor tab" isn't so: Home is the side bar's only (src/panel.ts useSessionsHome).
+  // What 0.52 ships, in a user's words; each line was checked against the code at this commit (24 Nov). Three rows a
+  // slide. Where each is so: a Pip's chat, computer and copy (dgc/pip_computer.py, dgc/pip_folder.py), its levels
+  // (dgc/pip_levels.py), its daily limit and Always allow (src/pipPay.js, dgc/pip_action_grants.py); Your Browser
+  // (dgc/your_browser.py, the dock's menu in media/main.js); comments (dgc/artifact_comments.py,
+  // media/shared/comments.js); the canvas (dgc/artifact_design.py, media/artifactDesign.js); checklists
+  // (dgc/artifact_checklist.py, dgc/checklists.py, the Output chip in media/main.js); Home's cards and the Library
+  // (media/shared/homecards.js, media/library.js); a typed /goal, the plan's steps, a link's preview and Archive
+  // (media/main.js, media/shared/linkpreview.js).
   const SLIDES = [
-    { scene: "pips-list", hue: "violet", title: "Pips are one kind now", go: { to: "pips", label: "Open Pips" }, rows: [
-      { id: "one-list", icon: "list-unordered", head: "One list, one New Pip", text: "Every Pip gets everything: its own chat, its own computer, and its own copy of any folder you give it." },
-      { id: "pip-chat", icon: "comment-discussion", head: "It talks to you in its chat", text: "A Pip says what it found, sends you files, and shows the helpers it hands work to." },
-      { id: "pip-computer", icon: "vm", head: "A computer of its own", text: "It opens on a desktop with a browser, Files and Terminal. Watch it work, or step in.", ships: false },
+    { scene: "pips", hue: "violet", title: "Pips, each with a computer of its own", go: { to: "pips", label: "Open Pips" }, rows: [
+      { id: "pip-own", icon: "vm", head: "Its own chat, its own computer", text: "A Pip tells you what it found in its chat, and works on a desktop of its own, in its own copy of a folder you give it." },
+      { id: "levels", icon: "shield", head: "You choose how much it asks", text: "Ask me first, Approve for me, or Do it all. Set it for each Pip, in its prompt box." },
+      { id: "pay-limit", icon: "credit-card", head: "A daily limit in dollars", text: "The most a Pip may pay by itself in a day. Always allow on a card lets that same step run next time without asking." },
     ] },
-    { scene: "wall", hue: "amber", title: "Each Pip works behind a wall", rows: [
-      { id: "wall", icon: "lock", head: "Free inside, asks at the wall", text: "Inside its computer a Pip never asks. Changing your folder, sending, posting or paying does.", ships: false },
-      { id: "levels", icon: "shield", head: "You choose how much it asks", text: "Ask me first, Approve for me, or Do it all." },
-      { id: "pay-limit", icon: "credit-card", head: "A daily limit in dollars", text: "For each Pip and for all of them. Inside it, Always allow is one tap." },
+    { scene: "browser", hue: "teal", title: "Your Browser", go: { to: "browser", label: "Open Your Browser" }, rows: [
+      { id: "yb-chrome", icon: "globe", head: "Chrome, with your sign-ins", text: "Sign in to your sites once. It opens beside the editor, or in a tab when DGC runs on another computer." },
+      { id: "yb-pip-tab", icon: "browser", head: "A Pip works in its own tab", text: "Only on the sites you let it use, never in your tabs. The dock says “Ava is working in it”, and you can watch." },
+      { id: "yb-menu", icon: "settings", head: "You decide, from the dock", text: "Your Browser's menu there has Sites Pips can use and Clear browsing data." },
     ] },
-    { scene: "levels", hue: "violet", title: "Pips tell you, then fix", rows: [
-      { id: "explains", icon: "lightbulb", head: "What's wrong, and why", text: "When a check finds something, the Pip explains it in its chat." },
-      { id: "own-copy", icon: "diff", head: "Fixed in its own copy", text: "Nothing in your folder changes until you apply it. Undo is always there.", ships: false },
-      { id: "needs-you", icon: "bell", head: "Asked once, kept in one place", text: "What only you can do waits on Home, under Needs you." },
+    { scene: "comments", hue: "amber", title: "Comment on anything DGC made", go: { to: "library", label: "Open Library" }, rows: [
+      { id: "cm-pick", icon: "comment", head: "Point at a part and say it", text: "Pick words in a doc, cells in a sheet, a slide, part of a page or a checklist item, and comment." },
+      { id: "cm-ask", icon: "comment-discussion", head: "Ask DGC", text: "DGC answers in the thread, or makes the change and says so." },
+      { id: "cm-suggest", icon: "edit", head: "Suggestions you accept", text: "In a doc or a page, new wording comes as a suggestion: Accept or Reject each one." },
     ] },
-    { scene: "cards", hue: "green", title: "Home is yours", go: { to: "home-cards", label: "Arrange Home" }, rows: [
-      { id: "cards", icon: "layout", head: "Cards you arrange", text: "Needs you, Recent, Running now, Token usage, Notes, Clock, Weather and more." },
-      { id: "reflow", icon: "screen-full", head: "They fit any width", text: "Cards reflow from a narrow side bar to a full editor tab.", ships: false },
-      { id: "notes", icon: "note", head: "Notes, a full notes app", text: "Folders, search, checklists, and formatting as you type." },
+    { scene: "canvas", hue: "blue", title: "A design canvas, drawn while you watch", go: { to: "work", label: "Open Work" }, rows: [
+      { id: "cv-boards", icon: "device-mobile", head: "Screens, side by side", text: "Ask for a design and DGC draws each artboard in turn: desktop, phone, tablet, a poster." },
+      { id: "cv-steer", icon: "comment", head: "Steer it as it draws", text: "Comment on an artboard, or ask in the chat, and DGC changes that screen." },
+      { id: "cv-play", icon: "play", head: "Play it, then take it along", text: "Click through the prototype. Download the artboards as pictures, a PDF or a web page." },
     ] },
-    { scene: "library", hue: "azure", title: "One Library for everything", go: { to: "library", label: "Open Library" }, rows: [
-      { id: "library", icon: "library", head: "Everything you make, in one place", text: "Pages, docs, sheets, decks, dashboards, widgets, charts, pictures, videos and files, from Chat, Work and Pips." },
-      { id: "filters", icon: "filter", head: "Search, then narrow it down", text: "A tab for each kind, then filters, like Kind in Widgets." },
-      { id: "file-menu", icon: "more", head: "One menu on every file", text: "Open, open in the editor, save a copy, copy its path, or show it in its folder." },
+    { scene: "checklist", hue: "green", title: "DGC keeps a checklist", go: { to: "work", label: "Open Work" }, rows: [
+      { id: "ck-make", icon: "checklist", head: "A checklist for the job", text: "Ask for one, or pick Checklist under Output. Each item says what done means." },
+      { id: "ck-work", icon: "check", head: "Worked through, with proof", text: "DGC takes one item at a time, and ticks it with a note and its proof." },
+      { id: "ck-yours", icon: "edit", head: "Yours to change", text: "Tick, reopen, edit and add items in its panel. Pinned to a project, every new chat there carries on with it." },
     ] },
-    { scene: "work", hue: "blue", title: "Work, tidier", go: { to: "work", label: "Open Work" }, rows: [
-      { id: "archive", icon: "archive", head: "Archive and restore", text: "Put finished sessions away, and bring them back any time." },
-      { id: "goals", icon: "target", head: "Goals you can follow", text: "A goal runs as turns you can read, and its clock holds when you change the model." },
-      { id: "queue-edit", icon: "edit", head: "Edit a queued message", text: "Change the message waiting to go next, without losing your draft." },
+    { scene: "home-library", hue: "azure", title: "Home in cards, and one Library", go: { to: "library", label: "Open Library" }, rows: [
+      { id: "cards", icon: "layout", head: "Home, arranged by you", text: "Needs you, Running now, Token usage, Notes, Clock, Weather and more, as cards you add and move." },
+      { id: "library", icon: "library", head: "One Library for everything", text: "Pages, docs, sheets, decks, dashboards, widgets, pictures, videos and files, from Chat, Work and Pips." },
+      { id: "lib-find", icon: "favorite", head: "Find it again", text: "Search, a tab for each kind, filters, and a star for your favorites." },
     ] },
-    { scene: "settings", hue: "neutral", title: "Also new", also: true },
+    { scene: "work", hue: "copper", title: "Work: goals, steps and previews", go: { to: "work", label: "Open Work" }, rows: [
+      { id: "goal", icon: "target", head: "Type /goal and what you want", text: "“/goal fix the failing tests” starts a goal: DGC keeps going, turn after turn, until it is done." },
+      { id: "steps", icon: "list-unordered", head: "The steps, as it works", text: "A turn's plan shows as steps that tick off one by one." },
+      { id: "links", icon: "link-external", head: "A peek at a link, a tidy list", text: "Point at a link in a chat to see its page. Archive finished sessions, and bring them back any time." },
+    ] },
+    { scene: "also", hue: "neutral", title: "Also new", go: { to: "settings", label: "Open Settings" }, rows: [
+      { id: "picker", icon: "layers", head: "One model picker", text: "Every model you've added, in one place, for Chat, Work and Pips." },
+      { id: "auto", icon: "shield", head: "Auto that stays out of your way", text: "Everyday steps just run. A risky one stops and says why; your yes lets it go." },
+      { id: "settings", icon: "settings", head: "Settings by asking", text: "Say “use 8 Pip runs at once”, and it changes, with Undo in the chat." },
+    ] },
   ];
-  // The last slide is a list: at most three lines, the first three that have shipped. Payments is slide 2's.
-  // (18 Nov: the model picker shipped, 8a40f6b1; auto mode's safety check, the commit after this one.)
-  const ALSO = [
-    { id: "picker", icon: "layers", head: "One model picker", text: "Every model you've added, in one place, for Chat, Work and Pips." },
-    { id: "auto", icon: "shield", head: "Auto that stays out of your way", text: "Everyday steps just run. A risky one stops and says why; your yes lets it go." },
-    { id: "settings", icon: "settings", head: "Settings by asking", text: "Say “use 8 Pip runs at once”, and it changes, with Undo in the chat." },
-    { id: "fallback", icon: "arrow-swap", head: "A fallback model everywhere", text: "A backup model you chose takes over when yours can't answer." },
-    { id: "incognito", icon: "eye-closed", head: "Incognito chats", text: "A chat that is never saved, listed or remembered." },
-    { id: "browser", icon: "globe", head: "Your Browser", text: "Sign in once in your own Chrome; each Pip works in its own tab.", ships: false },
-  ];
-  const ids = (shipped) => (Array.isArray(shipped) ? shipped.filter((id) => typeof id === "string") : []);
-  const line = ({ id, icon, head, text }) => ({ id, icon, head, text });
-  const shown = (extra) => (row) => row.ships !== false || extra.includes(row.id);
-  /** "Also new": the first three lines that have shipped (`shipped`: ids of `ships: false` lines that have since). */
-  function alsoNew(shipped) { return ALSO.filter(shown(ids(shipped))).slice(0, 3).map(line); }
-  /** The slides: its scene, its hue, its title, its action ({to, label} or null) and its rows ({id, icon, head, text}). */
-  function slides(shipped) {
-    const extra = ids(shipped);
-    return SLIDES.map((s) => ({ scene: s.scene, hue: s.hue, title: s.title, go: s.go ? { ...s.go } : null, rows: s.also ? alsoNew(extra) : s.rows.filter(shown(extra)).map(line) }));
+  /** The slides: its scene, its hue, its title, its action ({to, label}) and its rows ({id, icon, head, text}). */
+  function slides() {
+    return SLIDES.map((s) => ({ scene: s.scene, hue: s.hue, title: s.title, go: s.go ? { ...s.go } : null, rows: s.rows.map(({ id, icon, head, text }) => ({ id, icon, head, text })) }));
   }
 
-  // ---- the pictures: stills of DGC's own pages, made of their own parts ------------------------------------------------
+  // ---- the pictures: stills of DGC's own things, made of their own parts -----------------------------------------------
   // Each scene is drawn with the parts the real pages draw with: a Pip's face from the faces' renderer
   // (window.PipConcepts.plush, the same sprite the Pips list, Home and the dock use), a session's or a widget's mark
-  // (window.DgcMarks), a file's sheet (window.DgcFileSheet), a folder's icon (window.DgcFolderPick), the icons
-  // (window.DgcIcons), the answers' row (window.DgcIconActions), the queued message's row (window.DgcMessageQueue), and
-  // Home's cards, the Library's tabs and rows and the menus in their own classes and stylesheets. A Pip's computer's
-  // apps are its own icons (media/pips/apps), from where the page already loads the extension's files. The scene is
-  // laid out at a fixed 640 × 360, as on a page, and the whole picture is scaled to its frame, so it is a still of the
-  // page at every width. Nothing in it can be pressed or reached by Tab: its controls are drawn as plain words (asPicture()).
+  // (window.DgcMarks), a file's sheet (window.DgcFileSheet), the icons (window.DgcIcons), Your Browser's halo
+  // (media/icons/browser-halo), Home's cards, the Library's rows, a comment's thread (media/shared/comments.css), a
+  // link's preview card (media/shared/linkpreview.css), a turn's steps (Work's own marks, lent by the page) and the one
+  // family of buttons, each in its own classes and stylesheets. A Pip's computer's apps are its own icons
+  // (media/pips/apps), from where the page already loads the extension's files; so are the canvas's artboards, pictures
+  // of a real design's own boards (media/whatsnew). A checklist's items and an artboard's frame live in the artifact's
+  // own page, whose stylesheet the side bar doesn't load: they are drawn here to the same measures (media/artifact.css
+  // .ck-*, media/artifactDesign.css), with the shared tick, sheet and buttons.
   //
-  // Each scene is drawn at its last frame (what reduced motion shows), and says how it gets there: `moves(A)` with the
-  // steps below, on one 6 s loop. Everything that moves fades out together near the loop's end, and the story starts again.
+  // A scene is laid out at a fixed size, as on a page, and the whole picture is scaled to its frame: 480 × 270 in the
+  // wide form (two parts side by side), 288 × 216 in the narrow one, where only the part that tells the story is drawn
+  // (a part marked wn-w is the wide form's alone, wn-n the narrow one's), so its words stay readable in a 290 px side
+  // bar. Nothing in it can be pressed or reached by Tab: its controls are drawn as plain words (asPicture()).
+  //
+  // Each scene is drawn at its last frame (what reduced motion shows), and says how it gets there: `moves(A, narrow)`
+  // with the steps below, on one 6 s loop. Everything that moves fades out together near the loop's end, and the
+  // story starts again.
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
   const box = (cls, ...kids) => { const n = el("div", cls); for (const k of kids) if (k) n.append(k); return n; };
   const span = (cls, ...kids) => { const n = el("span", cls); for (const k of kids) if (k) n.append(typeof k === "string" ? document.createTextNode(k) : k); return n; };
@@ -110,7 +112,6 @@
       s.append(...n.childNodes); n.replaceWith(s);
     }
     for (const n of [node, ...node.querySelectorAll("[id], [tabindex], [title], [contenteditable]")]) { n.removeAttribute("id"); n.removeAttribute("tabindex"); n.removeAttribute("title"); n.removeAttribute("contenteditable"); }
-    for (const n of [...node.querySelectorAll(".dgc-ia-said")]) n.remove();
     return node;
   }
   const KINDS = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"];
@@ -120,9 +121,8 @@
     try { m = P ? P.markup({ index: KINDS.indexOf(kind), name: kind[0].toUpperCase() + kind.slice(1) }, state, `wn-face-${++faces}`, { includeStyles: false }) : ""; } catch { m = ""; }
     return m; };
   const mark = (kind, palette, moving = false) => root.DgcMarks?.of?.(kind, palette, { moving, id: `wn-${kind}-${palette}` }) || "";
-  const sheet = (what, name) => { try { return root.DgcFileSheet ? (name ? root.DgcFileSheet.forFile(what, name) : root.DgcFileSheet.html(what)) : ""; } catch { return ""; } };
+  const sheet = (what, small = false) => { let m = ""; try { m = root.DgcFileSheet ? root.DgcFileSheet.html(what) : ""; } catch { m = ""; } return small ? m.replace('class="dgc-sheet"', 'class="dgc-sheet dgc-sheet-sm"') : m; };
   const glyph = (name, size = 16) => root.DgcIcons?.html?.(name, { size }) || "";
-  const folder = (path, size) => { const m = root.DgcFolderPick?.folderMark?.(path) || ""; return size ? m.replace('class="folder-icon ', `style="--folder-size:${size}px" class="folder-icon `) : m; };
   // The extension's media folder, from where this script (or the Pips bundle) was loaded: a Pip's computer's apps.
   const here = (typeof document !== "undefined" && document.currentScript?.src) || "";
   const mediaUrl = (path) => {
@@ -130,143 +130,147 @@
     const own = here || scripts.find((s) => /\/media\/shared\/whatsnew\.js(?:[?#]|$)/.test(s)), bundle = scripts.find((s) => /\/dist\/[A-Za-z]+\.js(?:[?#]|$)/.test(s));
     try { return own ? new URL(`../${path}`, own).href : bundle ? new URL(`../media/${path}`, bundle).href : ""; } catch { return ""; }
   };
-  /** The dropdowns' own chevron (the Project Folder button's, which the Library's filters wear too). */
-  const chevron = () => { try { const t = document.createElement("template"); t.innerHTML = root.DgcFolderPick?.buttonHtml?.({ said: "-" }) || ""; return t.content.querySelector(".dgc-folder-chevron")?.outerHTML || ""; } catch { return ""; } };
   const app = (name) => { const i = el("img", "wn-app"); i.alt = ""; const src = mediaUrl(`pips/apps/${name}.png`); if (src) i.src = src; return i; };
 
   // Home's cards (media/shared/homecards.css): a card, its head, its rows.
-  const card = (kind, ...kids) => { const c = el("section", `hc-card hc-${kind}`); c.dataset.card = kind; c.dataset.form = "m"; for (const k of kids) if (k) c.append(k); return c; };
+  const card = (kind, ...kids) => { const [name, ...more] = kind.split(" "); const c = el("section", `hc-card hc-${name}${more.length ? " " + more.join(" ") : ""}`); c.dataset.card = name; c.dataset.form = "m"; for (const k of kids) if (k) c.append(k); return c; };
   const head = (title, ...more) => box("hc-ch", span("hc-ct", title), ...more);
-  /** A row of a card: its icon (one of DGC's parts, as markup, or a node), its name, its line, and what ends it. */
+  /** A row of a card: its icon (one of DGC's parts, as markup, or a node), its name, its line (words, or a node), and what ends it. */
   const row = (icon, name, meta, end) => { const li = span("hc-li"); const ico = typeof icon === "string" ? part("span", "hc-ico", icon) : span("hc-ico", icon);
-    li.append(ico, span("hc-tx", typeof name === "string" ? span("hc-nm", name) : name, span("hc-meta", meta))); if (end) li.append(end); return li; };
+    li.append(ico, span("hc-tx", typeof name === "string" ? span("hc-nm", name) : name, typeof meta === "string" ? span("hc-meta", meta) : meta)); if (end) li.append(end); return li; };
   const list = (...rows) => box("hc-list", ...rows);
+  /** One of the button family, with its glyph (a picture of it: asPicture() makes it plain words). */
+  const btn = (cls, word, icon) => { const b = el("button", `dgc-btn small ${cls}`.trim()); b.type = "button"; if (icon) b.insertAdjacentHTML("afterbegin", glyph(icon, 14)); b.append(word); return b; };
+  /** What you sent in a chat, as Work draws it. */
+  const sent = (words) => { const m = box("msg user wn-said", box("bubble", box("prompt-text"))); m.querySelector(".prompt-text").textContent = words; return m; };
 
   const SCENES = {
-    // One list of Pips, the faces as they are: they arrive one by one; Scout is chosen, and what it has of its own ticks
-    // in beside it: its chat, its computer (Browser, Files, Terminal) and its copy of a folder.
-    "pips-list": () => {
+    // Your Pips, the faces as they are; Scout is chosen, and what it has of its own ticks in beside it: its chat, its
+    // computer (its Browser, Files and Terminal, by their own icons) and how much it asks.
+    pips: () => {
       const core = span("hc-nm", "Core "); core.append(span("hc-star", "★"));
-      const rows = [row(face("core"), core, "Ready when you are"), row(face("scout"), "Scout", "2 waiting for you", span("hc-cnt", "2")),
-        row(face("lens"), "Lens", "Checked lime_tiles · 1h"), row(face("quill"), "Quill", "Morning brief at 8:00")];
+      const rows = [row(face("core"), core, "Ready when you are"), row(face("scout"), "Scout", "Checking lime_tiles"), row(face("quill"), "Quill", "Morning brief at 8:00")];
       const chosen = el("i", "wn-sel"); rows[1].prepend(chosen);
-      const apps = span("wn-apps", app("browser"), app("files"), app("terminal"));
-      const own = [row(glyph("comment-discussion", 16), "Its own chat", "Says what it found, sends files"),
-        row(app("browser"), "Its own computer", "Browser, Files and Terminal", apps), row(folder("/home/me/projects/lime_tiles", 20), "Its own copy", "of lime_tiles, to work in")];
-      const mine = card("wn-own", box("hc-ch", part("span", "hc-ico wn-head-face", face("scout")), span("hc-ct", "Scout"), span("hc-cap", "Personal")), list(...own));
-      return { nodes: [card("pips", head("Pips", span("hc-sp"), span("hc-lnk", "All Pips")), list(...rows)), mine],
-        moves(A) { rows.forEach((r, i) => A.arrive(r, 0.3 + i * 0.3, { dy: 10 })); A.arrive(chosen, 1.6, { dy: 0 }); A.arrive(mine, 1.9, { dx: -14, dy: 0 });
-          own.forEach((n, i) => A.arrive(n, 2.3 + i * 0.3, { dy: 8 })); A.press(rows[1], 1.55); } };
+      const own = [row(glyph("comment-discussion", 16), "Its own chat", "Says what it found"),
+        row(glyph("vm", 16), "Its own computer", span("wn-apps", app("browser"), app("files"), app("terminal"))),
+        row(glyph("shield", 16), "Ask me first", "Asks before it sends")];
+      const mine = card("wn-own", box("hc-ch", part("span", "hc-ico wn-head-face", face("scout")), span("hc-ct", "Scout")), list(...own));
+      return { nodes: [card("pips wn-w", head("Pips"), list(...rows)), mine],
+        moves(A, narrow) { const t = narrow ? 0.3 : 1.9;
+          rows.forEach((r, i) => A.arrive(r, 0.3 + i * 0.3, { dy: 10 })); A.arrive(chosen, 1.6, { dy: 0 }); A.press(rows[1], 1.55);
+          A.arrive(mine, t, { dx: narrow ? 0 : -14, dy: narrow ? 10 : 0 }); own.forEach((n, i) => A.arrive(n, t + 0.5 + i * 0.5, { dy: 8 })); } };
     },
-    // Your folder, copied into the Pip's own computer, inside the wall (amber, the colour of "this asks you"): a file
-    // crosses into it; what would leave it asks.
-    wall: () => {
-      const file = (name, meta) => row(sheet("", name), name, meta);
-      const mine = [file("orders.py", "Python · 2h"), file("gst/rules.py", "Python · 1d"), file("README.md", "Markdown · 3d")];
-      const copies = [file("orders.py", "a copy"), file("gst/rules.py", "a copy"), file("README.md", "a copy")];
-      const travel = file("orders.py", "copying…"); travel.classList.add("wn-travel"); mine[0].append(travel);
-      const glow = el("i", "wn-glow"), asks = span("wn-arrow back", "asks"); asks.prepend(glow);
-      return { nodes: [card("wn-folder", box("hc-ch", part("span", "hc-ico", folder("/home/me/projects/lime_tiles", 20)), span("hc-ct", "lime_tiles"), span("hc-cap", "Your folder")), list(...mine)),
-        box("wn-cross", span("wn-arrow", "copy"), asks),
-        card("wn-boxed", box("hc-ch", part("span", "hc-ico wn-head-face", face("scout")), span("hc-ct", "Scout's computer")), list(...copies))],
-        moves(A) { A.travel(travel, 0.5, { to: "var(--wn-cross)", dur: 1.3 }); copies.forEach((n, i) => A.arrive(n, 1.8 + i * 0.25, { dy: 8 })); A.pulse(glow, 2.9); } };
+    // Your Browser: your own tabs, then a Pip's tab, with its face and the dock's words while it works there. Beside
+    // it, the sites your Pips may use.
+    browser: () => {
+      const live = span("hc-livedot");
+      const tabs = [row(glyph("globe", 16), "Flights to Lisbon", "Your tab · signed in"), row(glyph("globe", 16), "Mail", "Your tab · signed in"), row(face("pulse"), "Ava's tab", "Ava is working in it", live)];
+      const mine = card("wn-yb", box("hc-ch", part("span", "hc-ico", '<span class="halo wn-halo" aria-hidden="true"><i></i><i></i><i></i></span>'), span("hc-ct", "Your Browser")), list(...tabs));
+      const site = (name, who, tag) => { const li = span("hc-li wn-site", span("hc-tx", span("yb-site-name", name), span("hc-meta", who))); if (tag) li.append(span("yb-site-tag", tag)); return li; };
+      const sites = [site("mail.example", "Every Pip"), site("shop.example", "Ava"), site("bank.example", "No Pip", "Bank")];
+      return { nodes: [mine, card("wn-sites wn-w", head("Sites Pips can use"), list(...sites))],
+        moves(A) { A.arrive(tabs[0], 0.3); A.arrive(tabs[1], 0.6); A.arrive(tabs[2], 1.4, { dx: -12, dy: 0 }); A.pulse(live, 1.9);
+          sites.forEach((s, i) => A.arrive(s, 2.8 + i * 0.35)); } };
     },
-    // The level, in the menu a Pip's prompt box opens: it moves from Ask me first to Approve for me. And what the Pip
-    // found, said in its words, waits on Home under Needs you, with its face.
-    levels: () => {
-      const levels = (on) => { const m = box("dgc-menu dgc-menu-rows wn-levels"); m.setAttribute("role", "presentation");
-        for (const [label, sub] of [["Ask me first", "Asks before it submits or sends"], ["Approve for me", "Asks before it pays or posts"], ["Do it all", "Does the whole job"]]) {
-          const r = span("dgc-menu-row"); r.setAttribute("aria-checked", String(label === on));
-          r.append(span("dgc-menu-words", span("dgc-menu-label", label), span("dgc-menu-sub", sub)), part("span", "dgc-menu-check", glyph("check", 14) || "✓"));
-          m.append(r);
-        } return m; };
-      const was = levels("Ask me first"), now = levels("Approve for me"); was.classList.add("was");
-      const pick = box("wn-pick", was, now);
-      const title = el("strong", "dgc-card-title"); "March totals round down".split(" ").forEach((w, i) => { if (i) title.append(" "); title.append(span("wn-word", w)); });
-      const chips = el("ul", "dgc-card-chips"); for (const c of ["Why: rounding", "+4 −2"]) { const li = el("li", "dgc-chip"); li.append(span("", c)); chips.append(li); }
-      const answers = part("div", "dgc-card-actions", root.DgcIconActions?.html?.([{ label: "Review", primary: true }, { label: "Apply" }]) || "");
-      const hub = el("section", "dgc-card dgc-card-thin dgc-hub-card"); hub.dataset.source = "personal"; hub.dataset.group = "needs";
-      hub.append(box("dgc-card-head", part("span", "dgc-card-icon dgc-card-face", face("lens", "waiting_approval")), box("dgc-card-words", title, span("dgc-card-sub", "Lens · Pip · now"))), chips, answers);
-      const needs = card("needs", box("dgc-hub hc-hub", box("dgc-hub-group", box("dgc-hub-head", (() => { const h = el("h2"); h.append("Needs you", span("dgc-hub-n", "1")); return h; })(), span("dgc-hub-link", "View all")), box("dgc-hub-cards", hub))));
-      needs.querySelector(".dgc-hub").dataset.hub = "needs"; needs.querySelector(".dgc-hub-group").dataset.group = "needs";
-      return { nodes: [pick, needs],
-        moves(A) { A.swap(was, now, 0.9, 0.35); A.arrive(hub, 1.5, { dy: 10 });
-          let t = 1.9; for (const w of title.querySelectorAll(".wn-word")) { A.arrive(w, t, { dy: 0, dur: 0.14 }); t += 0.12; }
-          A.arrive(chips, t + 0.15, { dy: 6 }); A.arrive(answers, t + 0.45, { dy: 6 }); } };
+    // A comment on part of a doc: what you said, DGC's wording as a suggestion, Accept, and it says so as the doc's
+    // words change.
+    comments: () => {
+      const OLD = "The rollout will be done in several careful stages.", NEW = "We roll out in stages.";
+      const para = (words, cls) => { const p = el("p", "wn-doc-p" + (cls ? " " + cls : "")); p.append("We ship on Friday. ", el("mark", "wn-pick", words), " Support is ready."); return p; };
+      const was = para(OLD, "was"), now = para(NEW);
+      const doc = card("wn-doc wn-w", box("hc-ch", part("span", "hc-ico", sheet("doc", true)), span("hc-ct", "Launch plan")), box("wn-doc-body", was, now));
+      const mine = el("li", "dgc-cm-msg"); mine.dataset.by = "you";
+      mine.append(box("dgc-cm-msg-top", span("dgc-cm-who", "You")), el("p", "dgc-cm-text", "Shorter, please."));
+      const yes = btn("primary", "Accept"), sug = el("li", "dgc-cm-sug"); sug.dataset.state = "open";
+      // (Accept and Reject, and what takes their place once it is accepted: one place, as a tab's two states are.)
+      const acts = box("dgc-cm-sug-acts was", yes, btn("", "Reject")), kept = span("dgc-cm-sug-state", "Accepted · version 2");
+      sug.append(box("dgc-cm-sug-words", el("del", "dgc-cm-was", OLD), el("ins", "dgc-cm-now", NEW)), box("wn-sug-end", acts, kept));
+      const msgs = el("ol", "dgc-cm-msgs"), sugs = el("ul", "dgc-cm-sugs"); msgs.append(mine); sugs.append(sug);
+      const thread = box("dgc-cm-thread wn-thread", msgs, sugs);
+      return { nodes: [doc, thread],
+        moves(A, narrow) { A.arrive(thread, 0.4, { dx: narrow ? 0 : 12, dy: narrow ? 10 : 0 }); A.arrive(mine, 0.9); A.arrive(sug, 2.0); A.press(yes, 3.5); A.swap(acts, kept, 3.8); A.swap(was, now, 3.8); } };
     },
-    // Home's own cards settle into the bento: Needs you, Running now (a session at work), Notes, Token usage, whose
-    // days fill in.
-    cards: () => {
-      const needs = card("needs", head("Needs you", span("hc-cnt", "2"), span("hc-sp"), span("hc-lnk", "View all")),
-        list(row(face("scout", "waiting_approval"), "Scout", "2 things are waiting for you"), row(mark("work", "saffron"), "Plan the release notes", "Wants your okay · Work")));
-      const running = card("running", head("Running now", span("hc-livedot"), span("hc-sp")), list(row(mark("work", "azure", true), "Fix the login redirect", "Work · Running · 5 messages")));
-      const tick = part("span", "wn-check on", glyph("check", 12));
-      const note = card("note", head("Notes", span("hc-sp"), span("hc-lnk", "Open Notes")),
-        box("wn-todo", tick, span("", "Book the ferry")), box("wn-todo", el("span", "wn-check"), span("", "Pack chargers")));
-      const days = [5, 3, 0, 4, 2, 6, 3, 7, 5, 2, 4, 6, 3, 5].map((on) => { const c = span("hc-col"); for (let k = 0; k < 8; k++) c.append(el("i", "hc-cell" + (k < on ? " on" : k === on ? " cap" : ""))); return c; });
-      const plot = box("hc-plot", ...days);
-      const token = card("token", box("hc-ch", span("hc-tx", span("hc-ct", "Token usage"), span("hc-cap", "Daily · last 14 days")), span("hc-badge", "Tokens")), box("hc-chart", plot));
-      const cards = [needs, running, token, note];
-      return { nodes: [box("hc-grid wn-bento", ...cards)],
-        moves(A) { cards.forEach((c, i) => A.arrive(c, 0.2 + i * 0.25, { dx: 6, dy: 12, s: 0.97 })); days.forEach((d, i) => A.grow(d, 1.4 + i * 0.06)); A.arrive(tick, 2.8, { dy: 0, s: 0.4 }); } };
+    // The canvas, with a real design DGC drew on it (a bakery's landing page, from a user test: its desktop and phone
+    // artboards as pictures, media/whatsnew): each artboard is drawn from the top down while you watch, desktop then
+    // phone; a comment lands on the desktop one, and its headline changes (the picture of that board before the comment
+    // gives way to the one after: what the comment really changed). In the narrow form, the desktop artboard alone.
+    canvas: () => {
+      const pic = (name, cls) => { const i = el("img", "wn-board-pic" + (cls ? " " + cls : "")); i.alt = ""; const src = mediaUrl(`whatsnew/${name}.webp`); if (src) i.src = src; return i; };
+      const before = pic("canvas-desktop-before", "was"), after = pic("canvas-desktop"), covers = [el("i", "wn-cover"), el("i", "wn-cover")];
+      const pin = part("span", "wn-pin", glyph("comment", 12));
+      // (Each named as the canvas names it: the artboard's own title, then its size.)
+      const board = (cls, title, size, ...kids) => box("wn-board " + cls, span("wn-board-name", span("wn-board-title", title), " ", span("wn-board-size", size)), box("wn-board-frame", ...kids));
+      const d = board("desktop", "Desktop home", "1440 × 900", after, before, covers[0], pin), p = board("phone wn-w", "Phone", "390 × 844", pic("canvas-phone"), covers[1]);
+      const bar = box("wn-canvas-bar wn-w", part("span", "hc-ico", sheet("design", true)), span("hc-ct", "Bakery Landing Page"), span("hc-sp"), btn("", "Play", "play"), btn("", "Download", "download"));
+      return { nodes: [box("wn-canvas", bar, box("wn-boards", d, p))],
+        moves(A, narrow) { A.arrive(d, 0.2, { dy: 6 }); A.reveal(covers[0], 0.6, narrow ? 1.8 : 1.3); A.arrive(p, 1.9, { dy: 6 }); A.reveal(covers[1], 2.2, 1.1);
+          A.arrive(pin, 3.6, { dy: 0, s: 0.4, dur: 0.3 }); A.swap(before, after, 4.2, 0.5); } };
     },
-    // The Library: its tab changes from Artifacts to Widgets, Kind is set to Chart, and the rows filter.
-    library: () => {
-      const TABS = [["artifacts", "Artifacts", "browser"], ["widgets", "Widgets", "symbol-misc"], ["images", "Images", "file-media"], ["videos", "Videos", "device-camera-video"], ["files", "Files", "files"]];
-      const tabs = (on) => { const t = box("lib-tabs"); for (const [id, word, ic] of TABS) { const b = span("lib-tab", part("span", `lib-tab-icon codicon codicon-${ic}`, ""), span("lib-tab-word", word)); b.setAttribute("aria-selected", String(id === on)); t.append(b); } return t; };
-      const tabsWas = tabs("artifacts"), tabsNow = tabs("widgets"); tabsWas.classList.add("was");
-      const libRow = (icon, name, by, when, cls) => { const r = el("li", "lib-row" + (cls ? " " + cls : "")); r.append(part("span", `lib-row-thumb ${icon.startsWith("<span class=\"dgc-sheet") ? "lib-row-sheet" : "lib-row-mark"}`, icon),
-        span("lib-row-main", span("lib-row-name", name), span("lib-row-meta", span("lib-row-by", span("lib-row-pre", "made "), "by "), span("lib-row-maker", by), span("lib-row-when", ` · ${when}`))), part("span", "lib-row-more", glyph("more"))); return r; };
-      const small = (m) => m.replace('class="dgc-sheet"', 'class="dgc-sheet dgc-sheet-sm"');
-      const before = [libRow(small(sheet("page")), "Q3 plan", "Scout", "40m", "was"), libRow(small(sheet("sheet")), "Trip costs", "Chat", "2h", "was"), libRow(small(sheet("slides")), "Launch deck", "Work", "1d", "was")];
-      const after = [libRow(mark("widget", "azure"), "Token usage by day", "Chat", "15m"), libRow(mark("widget", "peach"), "Trip budget calculator", "Chat", "5h", "out"),
-        libRow(mark("widget", "fern"), "Weekly sales", "Lens", "1d", "up"), libRow(mark("widget", "iris"), "Daily cost", "Work", "2d", "up")];
-      [...before, ...after].forEach((r, i) => { r.style.gridRow = String((i < 3 ? i : i - 3) + 1); });
-      const filter = (v) => { const f = span("dgc-folder lib-filter", span("dgc-folder-k", "Kind"), span("dgc-folder-v", v)); f.insertAdjacentHTML("beforeend", chevron()); return f; };
-      const kindWas = filter("All"), kindNow = filter("Chart"); kindWas.classList.add("was");
-      const lib = box("dgc-lib wn-lib", box("lib-bar", span("lib-search wn-ph", "Search widgets")), box("wn-tabs", tabsWas, tabsNow),
-        box("lib-filters", box("wn-kind", kindWas, kindNow)), (() => { const ul = el("ul", "lib-list wn-lib-rows"); ul.append(...before, ...after); return ul; })());
-      return { nodes: [lib],
-        moves(A) { before.forEach((r) => A.leave(r, 1.1, { to: "0px -6px" })); A.swap(tabsWas, tabsNow, 1.2);
-          A.arrive(after[0], 1.5, { dy: 8 }); A.arrive(after[1], 1.7, { dy: 8, until: 3.0 }); A.arrive(after[2], 1.9, { dy: 8 });
-          A.swap(kindWas, kindNow, 2.6);
-          for (const r of after.slice(2)) A.move(r, 3.15, { from: "0px 0px", to: "var(--wn-up)", dur: 0.4, after: r === after[3] ? 0 : 1.9 }); } };
+    // A checklist: its items, each ticked in turn as the bar fills; beside it, what done means for one, and its proof.
+    checklist: () => {
+      // (An item that gets done in the story: its tick, and its status before and after in one place.)
+      const item = (title, status, done) => { const on = part("i", "wn-ck-on", glyph("check", 12)), li = el("li", "wn-ck-item"), was = span("wn-ck-chip was", "Testing"), now = span("wn-ck-chip", status);
+        li.dataset.status = status; li.append(span("wn-ck-tick", done ? on : null), span("wn-ck-title", title), done ? span("wn-two", was, now) : now); return { li, on, was, now }; };
+      const items = [item("Fix the totals", "Done", true), item("Add the tests", "Done", true), item("Check it live", "Testing", false)];
+      const ul = el("ul", "wn-ck-list"); ul.append(...items.map((i) => i.li));
+      const fill = el("i", "wn-ck-fill");
+      const sum = span("hc-cap wn-ck-sum", "2 of 3 done");
+      const main = card("wn-ck", box("hc-ch", part("span", "hc-ico", sheet("checklist", true)), span("hc-ct", "Release 2.4"), span("hc-sp"), sum), box("wn-ck-bar", fill), ul);
+      const line = (label, words, cls) => box("wn-ck-line", span("wn-ck-label", label), span(cls, words));
+      const lines = [line("Done means", "Every total has a test.", "wn-ck-words"), line("Proof", "pytest: 212 passed", "wn-ck-words wn-ck-proof")];
+      const detail = card("wn-ck-detail wn-w", head("Add the tests"), ...lines);
+      return { nodes: [main, detail],
+        moves(A) { items.forEach((i, k) => A.arrive(i.li, 0.3 + k * 0.25)); [1.4, 2.4].forEach((t, k) => { A.arrive(items[k].on, t, { dy: 0, s: 0.4, dur: 0.25 }); A.swap(items[k].was, items[k].now, t, 0.25); });
+          A.fill(fill, [[1.4, 0.5], [2.4, 1]]); A.arrive(sum, 2.5, { dy: 0 }); A.arrive(detail, 2.9, { dx: -10, dy: 0 }); lines.forEach((n, k) => A.arrive(n, 3.3 + k * 0.4, { dy: 6 })); } };
     },
-    // Work's sessions, with their marks: one is archived (Archived counts it) and the list closes up; then the message
-    // waiting to go next, in its own row, is edited.
-    work: () => {
-      const archive = part("span", "hc-btn hc-icon wn-act", glyph("archive", 16));
-      const done = row(mark("work", "lagoon"), "Fix the login redirect", "Done · 12 messages", archive); done.classList.add("out");
-      const rest = [["saffron", "Invoice totals", "Wants your okay · 7 messages", "1h"], ["fern", "Release notes", "Open in a tab · 9 messages", "5h"], ["iris", "Weekly report", "4 messages", "1d"]]
-        .map(([p, name, meta, age]) => { const r = row(mark("work", p), name, meta, span("hc-age", age)); r.classList.add("up"); return r; });
-      const was = span("wn-count was", "3"), now = span("wn-count", "4"), count = span("hc-lnk hc-more wn-counts", "Archived (", span("wn-n", was, now), ")");
-      const work = card("work", box("hc-ch", span("hc-ct", "Work sessions"), span("hc-cap", "lime_tiles"), span("hc-sp"), part("span", "hc-btn hc-solid hc-new-btn", `${glyph("add", 14)}New`)), box("hc-list wn-slots", done, ...rest), count);
-      const ol = el("ol", "wn-queue-list"); let edit = null;
-      if (root.DgcMessageQueue?.render) {
-        try { root.DgcMessageQueue.render(ol, [{ id: "wn-queued", text: "Also update the changelog", title: "" }], { steer() {}, edit() {}, remove() {}, draft: () => false }); } catch { ol.replaceChildren(); }
-        edit = asPicture(ol).querySelector('[data-queue-role="edit"]');
-      }
-      const queued = card("wn-queue", ol);
-      return { nodes: [work, queued],
-        moves(A) { A.arrive(archive, 0.5, { dy: 0, dur: 0.25 }); A.press(archive, 0.95); A.move(done, 1.2, { from: "0px 0px", to: "var(--wn-away)", dur: 0.6, fade: true });
-          A.swap(was, now, 1.9);
-          for (const r of rest) A.move(r, 2.25, { from: "0px 0px", to: "var(--wn-up)", dur: 0.45 });
-          A.arrive(queued, 3.0, { dy: 10 }); if (edit) A.press(edit, 3.9); } };
+    // Home's own cards settle, the week's bars fill in; the Library's rows arrive, and one gets its star.
+    "home-library": () => {
+      const needs = card("needs", head("Needs you", span("hc-cnt", "1")), list(row(face("scout", "waiting_approval"), "Scout", "Wants your okay")));
+      const days = [5, 3, 6, 4, 7, 5, 6].map((on) => { const c = span("hc-col"); for (let k = 0; k < 8; k++) c.append(el("i", "hc-cell" + (k < on ? " on" : k === on ? " cap" : ""))); return c; });
+      const token = card("token", box("hc-ch", span("hc-ct", "Token usage")), box("hc-chart", box("hc-plot", ...days)));
+      const star = part("span", "lib-row-more wn-star", glyph("unfavorite", 14));
+      const libRow = (icon, name, by, when, end) => { const r = el("li", "lib-row"); r.append(part("span", `lib-row-thumb ${icon.startsWith("<span class=\"dgc-sheet") ? "lib-row-sheet" : "lib-row-mark"}`, icon),
+        span("lib-row-main", span("lib-row-name", name), span("lib-row-meta", span("lib-row-by", "by "), span("lib-row-maker", by), span("lib-row-when", ` · ${when}`))), end || part("span", "lib-row-more", glyph("more"))); return r; };
+      const rows = [libRow(sheet("page", true), "Q3 plan", "Scout", "40m", star), libRow(sheet("sheet", true), "Trip costs", "Chat", "2h"), libRow(mark("widget", "fern"), "Weekly sales", "Work", "1d")];
+      const ul = el("ul", "lib-list wn-lib-rows"); ul.append(...rows);
+      const lib = box("dgc-lib wn-lib", box("wn-lib-head", part("span", "hc-ico", glyph("library", 16)), span("hc-ct", "Library")), ul);
+      return { nodes: [box("wn-home wn-w", needs, token), lib],
+        moves(A, narrow) { const t = narrow ? 0.3 : 1.7;
+          A.arrive(needs, 0.2, { dy: 12, s: 0.97 }); A.arrive(token, 0.5, { dy: 12, s: 0.97 }); days.forEach((d, i) => A.grow(d, 0.9 + i * 0.08));
+          A.arrive(lib, t, { dx: narrow ? 0 : 12, dy: narrow ? 10 : 0 }); rows.forEach((r, i) => A.arrive(r, t + 0.4 + i * 0.3)); A.arrive(star, t + 2, { dy: 0, s: 0.4, dur: 0.3 }); } };
+    },
+    // Work: a goal typed as /goal, a link's preview card, and the turn's steps ticking off as it works.
+    work: (lend) => {
+      const said = sent("/goal fix the failing tests");
+      const link = box("dgc-linkcard wn-link", box("dgc-linkcard-top", part("span", "dgc-linkcard-icon", glyph("globe", 14)), span("dgc-linkcard-site", "docs.example.com")),
+        box("dgc-linkcard-words", box("dgc-linkcard-title", "Running the tests"), box("dgc-linkcard-desc", "One file, or all of them.")));
+      // (A step that gets done in the story: its ring and its check, its words before and after, each in one place.)
+      const step = (label, status, mk) => { const li = el("li", "todo"), done = status === "done", mark = (m, cls) => part("span", "wn-mark" + cls, lend?.planMark?.(m, true) || "");
+        const was = [mark("next", " was"), span("todo-label wn-todo was", label)], now = [mark(mk, ""), span("todo-label", label)]; li.dataset.status = status; li.dataset.mark = mk;
+        li.append(box("todo-row", span("todo-markbox wn-two", done ? was[0] : null, now[0]), span("todo-text wn-two", done ? was[1] : null, now[1]))); return { li, was, now }; };
+      const steps = [step("Find the failing tests", "done", "done"), step("Fix the rounding", "done", "done"), step("Running the suite", "in_progress", "doing")];
+      const ol = el("ol", "todos-list"); ol.append(...steps.map((s) => s.li));
+      const fill = el("span", "todos-fill wn-fill");
+      const plan = box("todos-card wn-plan", box("todos-head", span("todos-trigger", span("todos-words", span("todos-title", "Tasks"), span("todos-sum", "2 of 3 done")))), span("todos-track", fill), box("todos-body", ol));
+      return { nodes: [box("wn-chat wn-w", said, link), plan],
+        moves(A, narrow) { A.arrive(said, 0.3, { dx: 16, dy: 0 }); A.arrive(plan, narrow ? 0.3 : 1.1, { dy: 10 });
+          const t = narrow ? 0.7 : 1.5; steps.forEach((s, i) => A.arrive(s.li, t + i * 0.3, { dy: 6 }));
+          [t + 1.2, t + 2].forEach((at, k) => { A.swap(steps[k].was[0], steps[k].now[0], at, 0.25); A.swap(steps[k].was[1], steps[k].now[1], at, 0.25); }); A.fill(fill, [[t + 1.2, 0.5], [t + 2, 1]]);
+          A.arrive(link, 4.1, { dy: 8 }); } };
     },
     // A setting changed by asking, in a Work chat: what you sent, and the quiet line the change leaves, with Undo. And
-    // two more of what is new.
-    settings: (lend) => {
-      const said = box("msg user wn-said", box("bubble", box("prompt-text", el("span", "", "Use 8 Pip runs at once"))));
-      said.querySelector(".prompt-text").textContent = "Use 8 Pip runs at once";
+    // three more of what is new.
+    also: (lend) => {
+      const said = sent("Use 8 Pip runs at once");
       const line = box("sys sys-marked setting-change"); line.dataset.state = "changed";
       const ic = lend?.icon?.("sliders-horizontal"); if (ic) line.insertAdjacentHTML("afterbegin", ic);
       line.append(span("setting-change-text", span("setting-change-words", "Changed Pip runs at once from 4 to 8")), span("link setting-change-undo", "Undo"));
-      const more = [row(glyph("arrow-swap", 16), "A fallback model", "Takes over when yours can't answer"), row(glyph("eye-closed", 16), "An incognito chat", "Never saved, listed or remembered")];
-      const also = card("wn-also", head("Also new"), list(...more));
-      const chat = box("wn-chat", said, line);
-      return { nodes: [chat, also],
-        moves(A) { A.arrive(said, 0.4, { dx: 16, dy: 0 }); A.arrive(line, 1.4, { dy: 8 }); if (line.firstElementChild?.tagName === "svg") A.arrive(line.firstElementChild, 1.7, { dy: 0, s: 0.4 });
-          A.arrive(also, 2.4, { dy: 10 }); more.forEach((r, i) => A.arrive(r, 2.7 + i * 0.3, { dy: 6 })); } };
+      const more = [row(glyph("arrow-swap", 16), "A fallback model", "When yours can't answer"), row(glyph("eye-closed", 16), "An incognito chat", "Never saved or listed"),
+        row(glyph("download", 16), "Pictures in a chat", "Download or save them")];
+      const also = card("wn-also", head("And more"), list(...more));
+      return { nodes: [box("wn-chat wn-w", said, line), also],
+        moves(A, narrow) { A.arrive(said, 0.4, { dx: 16, dy: 0 }); A.arrive(line, 1.4, { dy: 8 }); if (line.firstElementChild?.tagName === "svg") A.arrive(line.firstElementChild, 1.7, { dy: 0, s: 0.4 });
+          const t = narrow ? 0.3 : 2.4; A.arrive(also, t, { dy: 10 }); more.forEach((r, i) => A.arrive(r, t + 0.4 + i * (narrow ? 0.6 : 0.3), { dy: 6 })); } };
     },
   };
 
@@ -290,23 +294,6 @@
         const from = { opacity: 0, translate: `${dx}px ${dy}px`, scale: `${s}` }, to = { opacity: 1, translate: "0px 0px", scale: "1" };
         run(node, [{ ...from, offset: 0 }, { ...from, offset: at(t), easing: EASE }, { ...to, offset: at(t + dur) }, { ...to, offset: at(until) }, { ...gone(to), offset: at(until + 0.35) }, { ...gone(to), offset: 1 }]);
       },
-      /** There from the start; goes at `t` (faded, moved by `to`). Its last frame: gone. */
-      leave(node, t, { to = "0px 6px", dur = 0.4 } = {}) {
-        const here = { opacity: 1, translate: "0px 0px" };
-        run(node, [{ ...gone(here), offset: 0 }, { ...here, offset: at(0.25) }, { ...here, offset: at(t), easing: EASE }, { opacity: 0, translate: to, offset: at(t + dur) }, { opacity: 0, translate: to, offset: 1 }]);
-      },
-      /** There from the start (or from `after`); moves from `from` to `to` at `t`, and stays; `fade`: it fades as it lands. */
-      move(node, t, { from, to, dur = 0.5, fade = false, after = 0 } = {}) {
-        const a = { opacity: 1, translate: from }, b = { opacity: fade ? 0 : 1, translate: to };
-        run(node, [{ ...gone(a), offset: 0 }, { ...gone(a), offset: at(after) }, { ...a, offset: at(after + 0.25) }, { ...a, offset: at(t), easing: EASE },
-          ...(fade ? [{ opacity: 1, translate: to, offset: at(t + dur * 0.75) }] : []), { ...b, offset: at(t + dur) }, { ...b, offset: at(END) }, { ...gone(b), offset: at(END + 0.35) }, { ...gone(b), offset: 1 }]);
-      },
-      /** Appears, crosses by `to`, and is gone at the other side (a file crossing the wall). Its last frame: gone. */
-      travel(node, t, { to, dur = 1.2 } = {}) {
-        const here = { opacity: 0, translate: "0px 0px" };
-        run(node, [{ ...here, offset: 0 }, { ...here, offset: at(t - 0.25) }, { opacity: 1, translate: "0px 0px", offset: at(t), easing: "cubic-bezier(.45,0,.25,1)" },
-          { opacity: 1, translate: `${to} 0px`, offset: at(t + dur) }, { opacity: 0, translate: `${to} 0px`, offset: at(t + dur + 0.3) }, { opacity: 0, translate: `${to} 0px`, offset: 1 }]);
-      },
       /** Lights up at `t`, breathes twice, and stays lit. */
       pulse(node, t) {
         run(node, [{ opacity: 0, offset: 0 }, { opacity: 0, offset: at(t), easing: EASE }, { opacity: 1, offset: at(t + 0.4) }, { opacity: 0.4, offset: at(t + 0.9) }, { opacity: 1, offset: at(t + 1.4) },
@@ -316,6 +303,19 @@
       grow(node, t) {
         run(node, [{ opacity: 1, scale: "1 0", offset: 0 }, { opacity: 1, scale: "1 0", offset: at(t), easing: EASE }, { opacity: 1, scale: "1 1", offset: at(t + 0.5) }, { opacity: 1, scale: "1 1", offset: at(END) },
           { opacity: 0, scale: "1 1", offset: at(END + 0.35) }, { opacity: 0, scale: "1 0", offset: at(END + 0.4) }, { opacity: 1, scale: "1 0", offset: at(END + 0.45) }, { opacity: 1, scale: "1 0", offset: 1 }]);
+      },
+      /** A cover that draws back, from the top down, off what is under it at `t` (an artboard drawn while you watch),
+       *  and is over it again for the next loop once all has faded. Its last frame: gone. */
+      reveal(node, t, dur = 1.2) {
+        const on = { scale: "1 1" }, off = { scale: "1 0" };
+        run(node, [{ ...on, offset: 0 }, { ...on, offset: at(t), easing: "cubic-bezier(.45,0,.25,1)" }, { ...off, offset: at(t + dur) }, { ...off, offset: at(END + 0.35) }, { ...on, offset: at(END + 0.4) }, { ...on, offset: 1 }]);
+      },
+      /** A bar that fills in steps: at each [t, part] it grows to that part of its full length, and stays. */
+      fill(node, steps) {
+        const frames = [{ opacity: 1, scale: "0 1", offset: 0 }]; let last = 0;
+        for (const [t, v] of steps) { frames.push({ opacity: 1, scale: `${last} 1`, offset: at(t), easing: EASE }, { opacity: 1, scale: `${v} 1`, offset: at(t + 0.5) }); last = v; }
+        frames.push({ opacity: 1, scale: `${last} 1`, offset: at(END) }, { opacity: 0, scale: `${last} 1`, offset: at(END + 0.35) }, { opacity: 0, scale: "0 1", offset: at(END + 0.4) }, { opacity: 1, scale: "0 1", offset: at(END + 0.45) }, { opacity: 1, scale: "0 1", offset: 1 });
+        run(node, frames);
       },
       /** One place, two states: `a` gives way to `b` at `t`, and at the loop's end `b` gives way to `a` again (a tab, a
        *  count, a chosen level: one of the two is always there). */
@@ -331,10 +331,16 @@
   }
 
   // ---- the dialog ---------------------------------------------------------------------------------------------------
-  /** `lend`: what the page lends the pictures of its own (`icon(name)`: Work's own glyphs, as its chat draws them). */
-  function mount(layer, { onSeen, onGo, release = "0.52", icon: pageIcon } = {}) {
-    let list = slides(), at = 0, back = null, moving = [], story = null, faced = null;
-    const lend = { icon: typeof pageIcon === "function" ? (name) => { try { return String(pageIcon(name) || ""); } catch { return ""; } } : null };
+  // The picture's two forms: the card's width where the narrow one gives way to the wide one, and the size each is laid out at.
+  const WIDE_FROM = 400, FORMS = { wide: 480, narrow: 288 };
+  /** `icon(name)`, `planMark(mark, running)`: what the page lends the pictures of its own (Work's own glyphs and a
+   *  step's mark, as its chat draws them). `can(to)`: whether a slide's action has somewhere to go here (false: the
+   *  slide keeps its words and shows no action). */
+  function mount(layer, { onSeen, onGo, release = "0.52", icon: pageIcon, planMark, can } = {}) {
+    let list = slides(), at = 0, back = null, moving = [], story = null, faced = null, form = "";
+    const lent = (fn) => (typeof fn === "function" ? (...args) => { try { return String(fn(...args) || ""); } catch { return ""; } } : null);
+    const lend = { icon: lent(pageIcon), planMark: lent(planMark) };
+    const offered = (go) => { if (!go) return false; if (typeof can !== "function") return true; try { return can(go.to) !== false; } catch { return true; } };
     const icon = (name, size) => { const I = root.DgcIcons; if (!I?.node) return null; try { return I.node(name, { size }, document); } catch { return null; } };
     const dialog = box("wn-dialog dgc-dialog");
     const picture = el("div", "wn-picture"), stage = el("div", "wn-stage");
@@ -380,13 +386,19 @@
     function play() {
       stop();
       if (layer.hidden || still() || !story?.moves) return;
-      try { story.moves(animator(moving)); } catch { stop(); }
+      try { story.moves(animator(moving), form === "narrow"); } catch { stop(); }
       if (hidden()) for (const a of moving) a.pause();
     }
     // The window hidden: the story waits, and so do the parts' own lives (a face's breath and blink, a session's mark).
     const onVisible = () => { stage.classList.toggle("wn-paused", hidden()); for (const a of moving) { try { if (hidden()) a.pause(); else a.play(); } catch { /* gone */ } } };
-    // The still is laid out at 640 × 360, as on a page, and scaled to the picture's width.
-    const fit = () => { const w = picture.clientWidth; if (w > 0) picture.style.setProperty("--wn-k", String(w / 640)); };
+    // The still is laid out at its form's own size, as on a page, and scaled to the picture's width. A side bar dragged
+    // across the two forms' border starts the story again in the other one.
+    const fit = () => {
+      const w = picture.clientWidth; if (!(w > 0)) return;
+      const next = w < WIDE_FROM ? "narrow" : "wide", changed = next !== form;
+      form = next; picture.dataset.form = form; picture.style.setProperty("--wn-k", String(w / FORMS[form]));
+      if (changed && story && !layer.hidden) play();
+    };
     const sized = typeof ResizeObserver === "function" ? new ResizeObserver(fit) : null;
     sized?.observe(picture);
     // The faces breathe, blink and look at the pointer as they do everywhere (media/pips/plush.js, with its own styles).
@@ -404,19 +416,21 @@
     function paint() {
       const slide = list[at], last = at === list.length - 1;
       picture.dataset.scene = slide.scene; picture.dataset.hue = slide.hue;
-      story = SCENES[slide.scene] ? SCENES[slide.scene](lend) : { nodes: [] };
-      for (const n of story.nodes) asPicture(n);
+      story = null;                                                 // (fit() below plays nothing of the slide before)
+      const scene = SCENES[slide.scene] ? SCENES[slide.scene](lend) : { nodes: [] };
+      for (const n of scene.nodes) asPicture(n);
       // (In Home's own frame, .dgc-home: its cards' colours and corners are Home's tokens.)
-      stage.replaceChildren(box("wn-glass", box("wn-scene dgc-home wn-scene-" + slide.scene, ...story.nodes)));
+      stage.replaceChildren(box("wn-glass", box("wn-scene dgc-home wn-scene-" + slide.scene, ...scene.nodes)));
       stage.classList.toggle("wn-paused", hidden());
       fit();
+      story = scene;
       kicker.textContent = `What's new in DGC ${release}`;
       words(slide);
       dots.replaceChildren(...list.map((s, i) => { const d = el("button", "wn-dot" + (i === at ? " on" : "")); d.type = "button"; d.dataset.at = String(i);
         d.setAttribute("aria-label", `Slide ${i + 1} of ${list.length}: ${s.title}`); if (i === at) d.setAttribute("aria-current", "step"); return d; }));
       step.textContent = `${at + 1} of ${list.length}`;
-      go.hidden = !slide.go;
-      go.textContent = slide.go ? slide.go.label : "";
+      go.hidden = !offered(slide.go);
+      go.textContent = go.hidden ? "" : slide.go.label;
       next.textContent = last ? "Done" : "Next";
       play();
     }
@@ -452,14 +466,14 @@
     }
     dots.addEventListener("click", (e) => { const d = e.target.closest?.(".wn-dot"); if (d) { goTo(Number(d.dataset.at)); dots.querySelector(".wn-dot.on")?.focus(); } });
     close.addEventListener("click", () => shut(true));
-    go.addEventListener("click", () => { const place = list[at]?.go?.to; if (place) shut(true, place); });
+    go.addEventListener("click", () => { const place = offered(list[at]?.go) ? list[at].go.to : ""; if (place) shut(true, place); });
     next.addEventListener("click", () => { if (at === list.length - 1) shut(true); else { goTo(at + 1); next.focus(); } });
 
     return {
-      /** Opens it on the first slide. `shipped`: ids of `ships: false` lines that have shipped since. */
+      /** Opens it on the first slide. */
       open(options = {}) {
         if (typeof options.release === "string" && /^\d+\.\d+(\.\d+)?$/.test(options.release)) release = options.release;
-        list = slides(options.shipped); at = 0;
+        list = slides(); at = 0;
         if (layer.hidden) back = document.activeElement;
         layer.hidden = false;
         faces();
@@ -479,5 +493,5 @@
     };
   }
 
-  root.DgcWhatsNew = { mount, slides, alsoNew };
+  root.DgcWhatsNew = { mount, slides };
 })();
