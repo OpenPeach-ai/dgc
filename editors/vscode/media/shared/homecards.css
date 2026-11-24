@@ -113,6 +113,9 @@ body.vscode-high-contrast .dgc-home, body.vscode-high-contrast-light .dgc-home, 
 .hc-livedot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .hc-newmark { flex: none; padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, var(--text) 12%, transparent); color: var(--text-strong); font: var(--w-semi) 10px/1.2 var(--sans); letter-spacing: .02em; }
 .hc-cnt { flex: none; box-sizing: border-box; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 6px; background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); font: var(--w-semi) 10.5px/18px var(--sans); text-align: center; font-variant-numeric: tabular-nums; }
+/* (A count said in words, "4 more": tighter, so it is whole beside its card's name in the narrowest side bar.) */
+.hc-cnt.hc-cnt-words { padding: 0 3px; font-weight: var(--w-med); letter-spacing: -.01em; }
+.hc-lbl:has(> .hc-cnt-words) { gap: 3px; }
 .hc-ico { flex: none; display: grid; place-items: center; width: 22px; height: 22px; line-height: 0; }
 .hc-ico > * { max-width: 100%; max-height: 100%; }
 .hc-ico > [data-mark] { --size: 20px; width: 20px; height: 20px; }
@@ -421,7 +424,11 @@ button.hc-mtile:hover { border-color: var(--hair-strong); background: color-mix(
 .hc-tile-pic { flex: none; display: grid; place-items: center; width: 44px; height: 44px; line-height: 0; }
 .hc-tile-pic > [data-mark] { --size: 36px; width: 36px; height: 36px; }
 .hc-tile-pic > .dgc-sheet { width: 31px; height: 40px; }
-.hc-tile-pic .dgc-sheet .dgc-sheet-tag { font-size: 7px; }
+/* A kind's tag is never wider than its tile ("DESIGN" and "SLIDES" were: user test 2, H5): a size smaller on the
+   31 px tile, and none on the smallest tiles (22 px and under), as on a row's 17 px mark; the tile's own drawing and
+   the line under its name say the kind there. */
+.hc-tile-pic .dgc-sheet .dgc-sheet-tag { right: -3px; padding: 1px 3px; font-size: 6px; letter-spacing: .02em; }
+.hc-stack[data-per="4"] .hc-tile-pic .dgc-sheet .dgc-sheet-tag, .hc-card[data-form="s"] .hc-tile-pic .dgc-sheet .dgc-sheet-tag { display: none; }
 .hc-tile-tx { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .hc-tile-t { overflow: hidden; color: var(--text-strong); font: var(--w-semi) 12.5px/1.25 var(--sans); text-overflow: ellipsis; white-space: nowrap; }
 .hc-tile-s { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--hc-quiet); font-size: var(--t-xs); line-height: 1.3; }

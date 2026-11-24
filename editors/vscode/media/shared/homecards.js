@@ -45,7 +45,7 @@
   const CARDS = {
     needs: { name: "Needs you", line: "What waits for you: approvals, questions, Pip cards", group: "Now" },
     running: { name: "Running now", line: "Sessions, goals and chats at work", group: "Now" },
-    recent: { name: "Recent", line: "Work, chats and Pips together, what is new first", group: "Lists", large: true },
+    recent: { name: "Recent", line: "Work, chats and Pips together, newest first", group: "Lists", large: true },
     work: { name: "Work sessions", line: "This list’s sessions, running ones marked", group: "Lists" },
     chats: { name: "Chats", line: "Your chats, newest first", group: "Lists" },
     pips: { name: "Pips", line: "Core first, then the others and what waits", group: "Lists" },
@@ -315,7 +315,10 @@
         + `${r.provider ? `<i class="hc-model-d">·</i><span class="hc-model-p">${esc(r.provider)}</span>` : ""}${Number.isFinite(r.share) ? `<i class="hc-model-d">·</i><span class="hc-model-s">${r.share}%</span>` : ""}</span>`;
     }
     function recentCard(form, d, tight) {
-      const fresh = (d.news || []).map((r) => ({ ...r, fresh: true })), rows = [...fresh, ...(d.recent || [])];
+      // One list, newest first (user test round 2, H7): what is new keeps its New mark where its time puts it, so an
+      // old unread item never pushes today's work off the card.
+      const fresh = (d.news || []).map((r) => ({ ...r, fresh: true }));
+      const rows = [...fresh, ...(d.recent || [])].map((r, k) => ({ r, k })).sort((a, b) => (Number(b.r.at) || 0) - (Number(a.r.at) || 0) || a.k - b.k).map((x) => x.r);
       if (form === "s") {
         const r = rows[0];
         return `<span class="hc-lbl">Recent${fresh.length ? `<span class="hc-newmark">New${fresh.length > 1 ? ` · ${fresh.length}` : ""}</span>` : ""}</span>${r ? `<span class="hc-ico hc-ico-s">${r.icon || ""}</span><span class="hc-mid hc-grow${r.fresh ? " hc-b" : ""}">${esc(r.name)}</span><span class="hc-sub hc-cut">${esc(r.meta || "")}${r.age ? ` · ${esc(r.age)}` : ""}</span>` : '<span class="hc-grow"></span><span class="hc-sub">Nothing yet</span>'}`;
@@ -412,7 +415,8 @@
           + (r.exists === false ? "" : `<button type="button" class="hc-here" data-here="${esc(r.folder)}" title="New work here" aria-label="New work in ${esc(r.name)}">${PLUS}</button>`
             + (x.pinned ? ((on) => `<button type="button" class="hc-pin" data-pin-folder="${esc(r.folder)}" aria-pressed="${on}" title="${on ? "Unpin from the dock" : "Pin to the dock"}" aria-label="${on ? "Unpin from the dock" : "Pin to the dock"}: ${esc(r.name)}">${pinSvg(on)}</button>`)(!!x.pinned(r.folder)) : "")) + "</div>"; };
       const shown = rows.slice(0, most), rest = rows.length - shown.length;
-      if (form === "s") return `<span class="hc-lbl">Folders${rest > 0 ? `<span class="hc-cnt">+${rest}</span>` : ""}</span><span class="hc-tiles hc-tiles-1">${shown.map(tile).join("")}</span>`;
+      // (The small card shows one folder: how many more there are is said in words, "3 more", never a bare "+3".)
+      if (form === "s") return `<span class="hc-lbl">Folders${rest > 0 ? `<span class="hc-cnt hc-cnt-words" title="${rest} more ${rest === 1 ? "folder" : "folders"}: open the card to see ${rest === 1 ? "it" : "them"}">${rest} more</span>` : ""}</span><span class="hc-tiles hc-tiles-1">${shown.map(tile).join("")}</span>`;
       return `${headOf("Folders", "", rest > 0 ? `<span class="hc-cap">+${rest} more</span>` : "")}<div class="hc-tiles">${shown.map(tile).join("")}</div>`;
     }
     function clockCard(form) {

@@ -102,13 +102,13 @@ test("Pips API 104: a saved provider's model, its own window; This Pip's model g
   // Their fallback, from a row's ⋯.
   await press(x, x.p.conn(`provider:${PIP_KEYED}`));
   await press(x, x.p.more("claude-opus-5-5"));
-  assert.deepEqual(x.p.choices().map((b) => b.textContent), ["Use as fallback"]);
+  assert.deepEqual(x.p.choices().map((b) => b.textContent), ["Use as the sub-agents’ fallback"]);
   await press(x, x.p.choices()[0]);
   assert.deepEqual(x.agents().at(-1), { pip_id: GST, fallback: { provider: PIP_KEYED, model: "claude-opus-5-5" } });
   assert.equal(x.page(), null, "the ⋯ never opens the page");
   assert.deepEqual(x.p.pills(), [["claude-opus-5-5", "Fallback"]]);
   await press(x, x.p.more("claude-opus-5-5"));
-  assert.deepEqual(x.p.choices().map((b) => b.textContent), ["Stop using as fallback"]);
+  assert.deepEqual(x.p.choices().map((b) => b.textContent), ["Stop using as the sub-agents’ fallback"]);
   await press(x, x.p.choices()[0]);
   assert.deepEqual(x.agents().at(-1), { pip_id: GST, fallback: { provider: "", model: "" } });
   assert.deepEqual(x.p.pills(), []);

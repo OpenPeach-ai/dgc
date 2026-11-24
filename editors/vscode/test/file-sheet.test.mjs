@@ -16,7 +16,7 @@ const S = w.DgcFileSheet, css = read("media/shared/filesheet.css");
 
 test("what DGC makes names its kind; a file is named by its ending, which is the word on its tab", () => {
   const of = (what, name) => { const k = S.of(what, name); return [k.kind, k.tag]; };
-  assert.deepEqual([of("page"), of("doc"), of("slides"), of("sheet"), of("dashboard")], [["page", "Page"], ["doc", "Doc"], ["slides", "Slides"], ["sheet", "Sheet"], ["dashboard", "Board"]]);
+  assert.deepEqual([of("page"), of("doc"), of("slides"), of("sheet"), of("dashboard")], [["page", "Page"], ["doc", "Doc"], ["slides", "Slides"], ["sheet", "Sheet"], ["dashboard", "Dash"]]);
   assert.deepEqual(of("doc", "Notes v1.2"), ["doc", "Doc"], "a title that ends like a file is still what DGC made");
   assert.deepEqual([of("docx", "review.docx"), of("xlsx"), of("pptx"), of("pdf"), of("csv"), of("md", "notes.md")], [["doc", "DOCX"], ["sheet", "XLSX"], ["slides", "PPTX"], ["pdf", "PDF"], ["csv", "CSV"], ["md", "MD"]]);
   assert.deepEqual([of("image", "map.jpeg"), of("png"), of("video", "clip.mp4"), of("code", "auth/redirect.ts"), of("code"), of("document", "data.json"), of("file", "site.zip")],

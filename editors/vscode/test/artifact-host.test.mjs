@@ -78,6 +78,11 @@ test("the capability, checked, and the Output chip's field: only a choice other 
   assert.equal(art.outputChoice("slides", OFFER), "slides");
   assert.equal(art.outputChoice("poster", OFFER), "", "only the protocol's choices");
   assert.equal(art.outputChoice("dashboard", { ...OFFER, outputs: ["auto", "document"] }), "", "only what this process offers");
+  // A checklist and a design are chosen like the rest, from a DGC that offers them; an older one is never sent either.
+  for (const kind of ["checklist", "design"]) {
+    assert.equal(art.outputChoice(kind, { ...OFFER, outputs: [...OFFER.outputs, "checklist", "design"] }), kind);
+    assert.equal(art.outputChoice(kind, OFFER), "", "a DGC that doesn't offer it");
+  }
 });
 
 test("a panel asks for the artifact with its content, then its own page, and shows DGC's layout of it", async () => {

@@ -3,7 +3,7 @@
   "specVersion": "1.5",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-23T20:59:15Z",
+    "timestamp": "2026-11-24T01:39:22Z",
     "component": {
       "type": "library",
       "name": "dgc-sdk",
@@ -80,7 +80,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "92899a0710f0fb05ea216af13b5e115a04e3ce58fe3bb6ad6755ab0318aaaade"
+          "content": "599d12eacefaddfbb3ce674e333c1ab45f8f7c843eed83b526c97e13adad2637"
         }
       ]
     },
@@ -135,7 +135,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "544befa72596cb64d81bfc986bac8ca48c3d98e1a4abb75d3b9ffa134b714bad"
+          "content": "a81dff8731142af1ecf9c242b81b6e660f9ff2ed1d43a3a2aa1ca547c4aa29e0"
         }
       ]
     },
@@ -223,7 +223,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "8483ffea202513f8acce52df418977ac20ad6dec7bb76967d20a8f587f058668"
+          "content": "ed9b7ecfcf02314be556da24f3e4b67c0b847276045b8d489c39167628bb13ec"
         }
       ]
     },
@@ -289,7 +289,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "b0ea055d881e2629649acd3ee67a72b7f28cd579f54cfb5036cfbc871fe5a539"
+          "content": "554a13de920949fcb3488ff2b379a2f5a73a5a4b963b915145c89b86c029c160"
         }
       ]
     },
@@ -333,7 +333,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "5d249fb14d6920390e7e6da870ef56ef2893bde22761846f43e1e4e7b48807b6"
+          "content": "320ea78e8f27c7d0df305f25a3018307996b0bb5d2ea6b1c63a41236eaacef46"
         }
       ]
     },
@@ -410,7 +410,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "24741ff206eabfbfcf6fea34586bc3cfcb220bf2a1023860f5d82775fb74e9f6"
+          "content": "f64712e0297aa27747d950a0532ca363ce1cb3dce7c812debd01142b670b8786"
         }
       ]
     },
@@ -476,7 +476,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "f0d32db9529ec6127eb265ab1e62ae1226969ea1473fb383ec1c229409dea82a"
+          "content": "f3bded476a895c1012e6e8a850cd344e2f5a883462b0edc84483cbcac0b6fed4"
         }
       ]
     },

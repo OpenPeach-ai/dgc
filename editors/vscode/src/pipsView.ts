@@ -460,7 +460,7 @@ const PIPS_BOOT_MARK = '<div class="pips-loading" role="status" aria-label="Load
 
 /** What a Pips page is told as it is written: `favicons`, dgc.linkFavicons as it stood (left out: off); `chat`, the Pip
  *  conversation this page is the editor tab of ("Open in editor"), '' for the Pip's first. */
-export type PipsPage = { favicons?: boolean; chat?: { pip: string; conversation: string } };
+export type PipsPage = { favicons?: boolean; chat?: { pip: string; conversation: string; name?: string; pip_type?: string } };
 export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', markdownUri = '', cardsUri = '', cardsStyleUri = '', videoUri = '', codiconUri = '', page: PipsPage = {}): string {
   // img-src: `https:` is what lets a favicon load beside a link (a reply's, and one the user sent), the same allowance
   // Work's page makes, and only while dgc.linkFavicons is on: off, the policy itself keeps any icon from leaving for
@@ -469,7 +469,10 @@ export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', mark
   // only (src/markdown.ts, faviconUrl). The page reads the same setting from its body (data-link-favicons).
   const favicons = page?.favicons === true;
   const chat = page?.chat && /^pip_[A-Za-z0-9]{1,64}$/.test(page.chat.pip) && /^(?:conv_[0-9a-f]{32})?$/.test(page.chat.conversation) ? page.chat : undefined;
-  const says = ` data-link-favicons="${favicons ? 'on' : 'off'}"${chat ? ` data-pip-chat="${attr(chat.pip)}" data-pip-conversation="${attr(chat.conversation)}"` : ''}`;
+  // (Its Pip's name and kind too: the page keeps them in its saved state, so the tab can come back after a reload.)
+  const known = chat && typeof chat.name === 'string' && chat.name && typeof chat.pip_type === 'string' && /^[a-z]{1,16}$/.test(chat.pip_type)
+    ? ` data-pip-name="${attr(chat.name.slice(0, 120))}" data-pip-type="${attr(chat.pip_type)}"` : '';
+  const says = ` data-link-favicons="${favicons ? 'on' : 'off'}"${chat ? ` data-pip-chat="${attr(chat.pip)}" data-pip-conversation="${attr(chat.conversation)}"${known}` : ''}`;
   // frame-src: only a plugin's card (MCP Apps), at the loopback address DGC's backend serves it from.
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:${favicons ? ' https:' : ''}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};${codiconUri ? ` font-src ${attr(cspSource)};` : ''} media-src blob:;${cardsUri ? ' frame-src http://127.0.0.1:* http://localhost:*;' : ''}">${codiconUri ? `<link rel="stylesheet" href="${attr(codiconUri)}">` : ''}<link rel="stylesheet" href="${attr(styleUri)}">${cardsStyleUri ? `<link rel="stylesheet" href="${attr(cardsStyleUri)}">` : ''}<title>DGC Pips</title></head><body${says}><main id="app">${PIPS_BOOT_MARK}</main><div id="review-root"></div>${cardsUri ? `<script src="${attr(cardsUri)}"></script>` : ''}${videoUri ? `<script src="${attr(videoUri)}"></script>` : ''}${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
 }
@@ -933,15 +936,16 @@ export class PipsEditor implements vscode.Disposable {
    *  Pips page on this bridge, so it is there on any DGC that has Pips (one before several conversations, Pips API 79,
    *  has one chat a Pip: "{Pip name} · Chat"). Its title is a first word on it: the page says what it shows once it has
    *  read it from DGC (pipsChatShown), and the title follows. */
-  openChat(pip: ChatPip, conversation?: ChatConversation): void {
-    const conv = this.apiVersion >= CONVERSATIONS_API && conversation ? conversation.id : '';
+  openChat(pip: ChatPip, conversation?: ChatConversation, restored?: vscode.WebviewPanel): void {
+    // (A tab handed back after a reload keeps the conversation it showed: this bridge may not have heard DGC's API yet.)
+    const conv = (restored || this.apiVersion >= CONVERSATIONS_API) && conversation ? conversation.id : '';
     const key = `${pip.id}#${conv}`;
     const open = this.chats.get(key);
-    if (open) { open.panel.reveal(vscode.ViewColumn.Active); return; }
+    if (open) { if (restored) restored.dispose(); open.panel.reveal(vscode.ViewColumn.Active); return; }
     const title = chatTitle(pip.name, this.apiVersion >= CONVERSATIONS_API ? conversation?.title : undefined);
-    const panel = vscode.window.createWebviewPanel('dgc.pipChat', title, vscode.ViewColumn.Active, {
-      enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.extensionUri],
-    });
+    const options = { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.extensionUri] };
+    const panel = restored || vscode.window.createWebviewPanel('dgc.pipChat', title, vscode.ViewColumn.Active, options);
+    if (restored) { try { restored.webview.options = options; } catch { /* as it was */ } }
     const tab: { panel: vscode.WebviewPanel; pip: ChatPip; conversation: string; face?: string } = { panel, pip, conversation: conv };
     this.chats.set(key, tab);
     // Its tab wears its face (16 Nov), as a computer's tab wears its Portal: the character DGC last said it wears, else
@@ -957,8 +961,18 @@ export class PipsEditor implements vscode.Disposable {
     panel.onDidChangeViewState(() => panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible, focused: focused() }));
     try { const watch = vscode.window.onDidChangeWindowState?.(() => { void panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible, focused: focused() }); }); if (watch) panel.onDidDispose(() => watch.dispose()); } catch { /* an editor that does not say */ }
     panel.webview.onDidReceiveMessage(message => this.receive(message, surface()));
-    panel.webview.html = this.pageHtml(panel, { pip: pip.id, conversation: conv });
+    panel.webview.html = this.pageHtml(panel, { pip: pip.id, conversation: conv, name: pip.name, pip_type: pip.pip_type });
     this.connect();
+  }
+  /** A Pip chat's tab the editor hands back after a window reload (user test round 2, R1), with the state its page kept:
+   *  that Pip and conversation again, as "Open in editor" made it. Anything it can't trust, or a second copy of a tab
+   *  already open, is closed. */
+  restoreChat(panel: vscode.WebviewPanel, state: any): void {
+    const kept = state && typeof state === 'object' ? state.pipChatTab : undefined;
+    const pip = chatPip(kept && { id: kept.pip, name: kept.name, pip_type: kept.pip_type }, true);
+    const conversation = kept && typeof kept.conversation === 'string' && /^(?:conv_[0-9a-f]{32})?$/.test(kept.conversation) ? kept.conversation : null;
+    if (!pip || conversation === null) { panel.dispose(); return; }
+    this.openChat(pip, conversation ? { id: conversation } : undefined, panel);
   }
   /** A chat tab's icon: its Pip's face. Set only when the face changes (an editor draws a tab again when its icon is set). */
   private wearFace(tab: { panel: vscode.WebviewPanel; pip: ChatPip; face?: string }, body: unknown): void {
@@ -1001,7 +1015,7 @@ export class PipsEditor implements vscode.Disposable {
     if (tab.panel.title !== title) tab.panel.title = title;
   }
   /** The Pips page's document for one of this bridge's tabs, its favicons as dgc.linkFavicons stands now. */
-  private pageHtml(panel: vscode.WebviewPanel, chat?: { pip: string; conversation: string }): string {
+  private pageHtml(panel: vscode.WebviewPanel, chat?: { pip: string; conversation: string; name?: string; pip_type?: string }): string {
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
     const media = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', name)).toString();
     let favicons = true;

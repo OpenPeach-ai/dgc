@@ -1,5 +1,5 @@
 // A goal's end, and a session's goal history, in Work (0.52, asked 12 Nov). When a goal ends (done, blocked, or stopped
-// by a new goal or a clear), one quiet line under its turn: "Goal done · 2 h 14 min · 1.8M tokens · 7 cycles"; the same
+// by a new goal or a clear), one quiet line under its turn: "Goal done · 2 h 14 min · 1.8M tokens · 7 rounds"; the same
 // lines come back after a reload, from goal_runs (ready.capabilities.goal_runs). "/goal-history" in the "/" menu, only
 // on such a DGC, adds a "Goals" pill to the bar above the prompt box: the session's goals newest first, each with how
 // it ended, when, its time and tokens, and Trace for the turns between its start and its end.
@@ -49,7 +49,7 @@ test("a goal that ends leaves one quiet line under its turn: how it ended, its t
   x.event({ type: "goal_runs", runs: [record] });
   assert.equal(x.lines().length, 0, "not in the middle of the turn");
   x.end("t1");
-  assert.deepEqual(x.lines().map(text), ["Goal done · 2 h 14 min · 1.8M tokens · 7 cycles"]);
+  assert.deepEqual(x.lines().map(text), ["Goal done · 2 h 14 min · 1.8M tokens · 7 rounds"]);
   const line = x.lines()[0];
   assert.equal(line.previousElementSibling, under(x.v.doc.querySelector("#log .msg.dgc")), "under that turn");
   assert.equal(line.nextElementSibling, null, "the last thing in the chat");
@@ -65,7 +65,7 @@ test("blocked and stopped say so; a goal replaced or cleared is stopped", () => 
   x.turn("t1"); x.end("t1");
   x.event(goal("g1", "blocked", { elapsed: 125, tokens: 52_400, cycles: 3 }));
   x.event({ type: "goal_runs", runs: [run("g1", "blocked", { started_at: now() - 125, ended_at: now() + 1, elapsed_seconds: 125, tokens: 52_400, cycles: 3 })] });
-  assert.deepEqual(x.lines().map(text), ["Goal blocked · 2 min · 52.4k tokens · 3 cycles"]);
+  assert.deepEqual(x.lines().map(text), ["Goal blocked · 2 min · 52.4k tokens · 3 rounds"]);
   const y = chat();
   y.event(goal("g1", "active"));
   y.turn("t1"); y.end("t1");
@@ -73,7 +73,7 @@ test("blocked and stopped say so; a goal replaced or cleared is stopped", () => 
   y.event(goal("g2", "active", { text: "Another goal" }));
   assert.equal(y.asked(), before + 1, "a new goal in its place: the old one ended");
   y.event({ type: "goal_runs", runs: [run("g1", "stopped", { started_at: now() - 45, ended_at: now() + 1, elapsed_seconds: 45, tokens: 950, cycles: 1 }), run("g2", "active", { name: "Another goal", started_at: now() })] });
-  assert.deepEqual(y.lines().map(text), ["Goal stopped · 45 s · 950 tokens · 1 cycle"], "the goal still running has no end line");
+  assert.deepEqual(y.lines().map(text), ["Goal stopped · 45 s · 950 tokens"], "the goal still running has no end line");
   const z = chat();
   z.event(goal("g1", "paused"));
   const cleared = z.asked();
@@ -93,7 +93,7 @@ test("a goal already ended when the window opened says nothing new by itself, an
   old.event(goal("g1", "completed", { elapsed: 754, tokens: 20_500, cycles: 2 }));
   old.end("t1");
   assert.equal(old.asked(), 0, "an older DGC has no goal_runs");
-  assert.deepEqual(old.lines().map(text), ["Goal done · 12 min · 20.5k tokens · 2 cycles"], "the line is still said, from what goal_changed told");
+  assert.deepEqual(old.lines().map(text), ["Goal done · 12 min · 20.5k tokens · 2 rounds"], "the line is still said, from what goal_changed told");
 });
 
 test("a window that opens on a goal already running (a session that ran with no window) still says its end", () => {
@@ -108,14 +108,14 @@ test("a window that opens on a goal already running (a session that ran with no 
   assert.equal(x.asked(), before + 1, "the page asks DGC for the session's goals");
   x.event({ type: "goal_runs", runs: [run("g1", "completed", { started_at: now() - 643, ended_at: now() + 1, elapsed_seconds: 643, tokens: 66_015, cycles: 1 })] });
   x.end("t1");
-  assert.deepEqual(x.lines().map(text), ["Goal done · 10 min · 66k tokens · 1 cycle"]);
+  assert.deepEqual(x.lines().map(text), ["Goal done · 10 min · 66k tokens"]);
   const old = chat({ goalRuns: false });
   old.v.send({ type: "state", state: { model: "qwen3.8:27b", mode: "default", think: "off",
     goal: { id: "g1", text: "Ship the release", status: "active", elapsed_seconds: 600 } } });
   old.turn("t1");
   old.event(goal("g1", "completed", { elapsed: 643, tokens: 66_015, cycles: 1 }));
   old.end("t1");
-  assert.deepEqual(old.lines().map(text), ["Goal done · 10 min · 66k tokens · 1 cycle"], "an older DGC: from what goal_changed told");
+  assert.deepEqual(old.lines().map(text), ["Goal done · 10 min · 66k tokens"], "an older DGC: from what goal_changed told");
   const done = chat();
   done.v.send({ type: "state", state: { model: "qwen3.8:27b", mode: "default", think: "off",
     goal: { id: "g1", text: "Ship the release", status: "completed", elapsed_seconds: 60 } } });
@@ -139,7 +139,7 @@ test("after a reload the same lines come back, each under the turn its goal ende
     run("g3", "active", { name: "Third", started_at: T + 2000 })] });
   const replies = [...x.v.doc.querySelectorAll("#log .msg.dgc")];
   assert.equal(replies.length, 4);
-  assert.deepEqual(x.lines().map(text), ["Goal done · 2 min · 4k tokens · 2 cycles", "Goal blocked · 55 s · 1.2k tokens · 1 cycle"]);
+  assert.deepEqual(x.lines().map(text), ["Goal done · 2 min · 4k tokens · 2 rounds", "Goal blocked · 55 s · 1.2k tokens"]);
   assert.equal(x.lines()[0].previousElementSibling, under(replies[1]), "the first goal ended in the second turn");
   assert.equal(x.lines()[1].previousElementSibling, under(replies[2]), "the second in the third");
   assert.deepEqual(x.v.errors, []);
@@ -183,9 +183,9 @@ test('"/goal-history" is in the "/" menu only on a DGC with goal_runs; it adds a
   assert.equal(pop.hidden, false, "its list is open");
   const rows = [...pop.querySelectorAll(".goal-run")];
   assert.deepEqual(rows.map((row) => text(row.querySelector(".goal-run-name"))), ["Third goal", "Second goal", "First goal"], "newest first");
-  assert.match(text(rows[0].querySelector(".goal-run-facts")), /^Running now · 30 s · 12k tokens · 1 cycle$/);
-  assert.match(text(rows[1].querySelector(".goal-run-facts")), /^Stopped · .+ · 45 s · 950 tokens · 1 cycle$/);
-  assert.match(text(rows[2].querySelector(".goal-run-facts")), /^Done · .+ · 2 h 14 min · 1\.8M tokens · 7 cycles$/);
+  assert.match(text(rows[0].querySelector(".goal-run-facts")), /^Running now · 30 s · 12k tokens$/);
+  assert.match(text(rows[1].querySelector(".goal-run-facts")), /^Stopped · .+ · 45 s · 950 tokens$/);
+  assert.match(text(rows[2].querySelector(".goal-run-facts")), /^Done · .+ · 2 h 14 min · 1\.8M tokens · 7 rounds$/);
   assert.ok(rows.every((row) => row.querySelector("button.goal-run-trace")), "each has Trace");
   assert.equal(rows[2].querySelector("button.goal-run-trace").disabled, true, "none of its turns are in this chat: Trace has nothing to show");
   pop.querySelector("button.goal-runs-hide").click();
@@ -239,4 +239,23 @@ test("a goal's own next turn draws no line; any other resume keeps its words", (
   x.event({ type: "turn_start", turn_id: "t4", prompt: "Goal · turn <b>2</b>", kind: "resume" });
   assert.equal(notes().at(-1), "Resumed the standing goal", "only DGC's own label is shown");
   assert.deepEqual(x.v.errors, []);
+});
+
+// User test round 2, W9: "1 cycle" is not a word a person uses (rounds, and nothing said of a single one), and the
+// message that started a goal looked like any other.
+test("W9: the message that started a goal wears a small Goal mark; any other message has none", () => {
+  const x = chat();
+  const bubbles = () => [...x.v.doc.querySelectorAll("#log .msg.user")].map((m) => ({ words: text(m.querySelector(".bubble")), mark: text(m.querySelector(".goal-mark") || { textContent: "" }), title: m.querySelector(".goal-mark")?.getAttribute("title") || "" }));
+  // Typed, as "/goal …": the turn it starts shows the words, marked.
+  x.event({ type: "turn_start", turn_id: "t1", prompt: "/goal make the billing tests pass, then stop", kind: "prompt" });
+  x.event(goal("g1", "active"));
+  x.event({ type: "text_delta", text: "On it." }); x.event({ type: "stream_end", message_id: "t1:1", phase: "final_answer" }); x.end("t1");
+  // A plain message after it.
+  x.turn("t2"); x.end("t2");
+  const said = bubbles();
+  assert.equal(said.length, 2);
+  assert.equal(said[0].mark, "Goal", `the goal's own message is marked (${JSON.stringify(said[0])})`);
+  assert.match(said[0].title, /started a goal/i);
+  assert.equal(said[1].mark, "", "a message that started none is not");
+  assert.equal(x.v.doc.querySelectorAll("#log .goal-mark").length, 1);
 });

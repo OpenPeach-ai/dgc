@@ -204,7 +204,7 @@ test('Import from GitHub…: a link is checked before DGC is asked; DGC’s refu
  x.click('#review-confirm');x.answer(x.requests('import_pip_source')[2],{setups:cards,name:'Launch crew',left_out:['Reads from connected apps: they name your accounts.']});await x.drain();
  assert.equal(x.dialog(),null,'the dialog closed');
  assert.equal(x.d.querySelector('.notice').textContent,'Imported “Launch crew” from GitHub: 3 new Pips to review. Nothing is created until you approve each one. One is for this project: look under Project. Not included: Reads from connected apps: they name your accounts.');
- const waiting=x.d.querySelector('[aria-label="Needs attention"]');assert.ok(waiting,'the cards show where new Pips wait');assert.match(waiting.textContent,/Create the Pip “Researcher”\?/);assert.match(waiting.textContent,/1 of 2/);
+ const waiting=x.d.querySelector('[aria-label="Needs you"]');assert.ok(waiting,'the cards show where new Pips wait');assert.match(waiting.textContent,/Create the Pip “Researcher”\?/);assert.match(waiting.textContent,/1 of 2/);
  assert.equal(x.requests('accept_pip_setup').length,0,'nothing is approved by importing');
  // Opened again, it starts empty; Escape closes it and asks nothing.
  x.click('#team-import-github');assert.equal(x.d.querySelector('#importLink').value,'');assert.equal(x.alert(),'');
@@ -240,7 +240,7 @@ test('Bring a Grok bot…: DGC’s prompt to copy, then what the bot wrote goes 
  x.answer(x.requests('import_pip_source')[1],{setups:[card],name:'Deal Finder',left_out:notes});await x.drain();
  assert.equal(x.dialog(),null);
  assert.equal(x.d.querySelector('.notice').textContent,'Imported “Deal Finder” from your Grok bot: one new Pip to review. Nothing is created until you approve it. '+notes.join(' '));
- assert.match(x.d.querySelector('[aria-label="Needs attention"]').textContent,/Create the Pip “Deal Finder”\?/);assert.equal(x.requests('accept_pip_setup').length,0);
+ assert.match(x.d.querySelector('[aria-label="Needs you"]').textContent,/Create the Pip “Deal Finder”\?/);assert.equal(x.requests('accept_pip_setup').length,0);
  // Opened again: a new prompt is asked for, the reply's box is empty, and a prompt DGC can't give is said in the dialog.
  x.click('#team-import-grok');assert.equal(x.d.querySelector('#importReply').value,'');assert.equal(x.requests('get_pip_import_prompt').length,2);
  x.answer(x.requests('get_pip_import_prompt')[1],'Pips are switched off on this computer.',false);await x.drain();

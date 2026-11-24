@@ -25,7 +25,7 @@ export const ARTIFACT_TYPES = ["page", "doc", "slides", "sheet", "dashboard", "c
 export const ARTIFACT_EVENTS = ["artifact_items", "artifact_changed", "artifact_detail", "artifact_served", "artifact_exported",
   "artifact_comparison", "artifact_comments"];
 /** The Output chip's choices, in its menu's order; "auto" lets the model choose (and is never sent). */
-export const ARTIFACT_OUTPUTS = ["auto", "document", "slides", "spreadsheet", "page", "dashboard"];
+export const ARTIFACT_OUTPUTS = ["auto", "document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design"];
 const LABELS: Record<string, string> = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page", checklist: "Checklist", design: "Design" };
 export const FORMAT_LABELS: Record<string, string> = {
   docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
@@ -315,24 +315,36 @@ export function artifactDocument(asset: (name: string) => string, cspSource: str
 <div class="art-work" id="art-work"><main class="art-main" id="art-main"><p class="art-empty" id="art-loading">Loading…</p></main>
 <aside class="art-comments" id="art-comments" aria-label="Comments" hidden></aside></div>
 <div class="sr-only" id="art-announce" aria-live="polite"></div>
-${s("media/shared/menu.js")}${s("media/shared/icons.js")}${s("media/shared/dismiss.js")}${s("media/shared/download.js")}${s("media/shared/comments.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifactChecklist.js")}${s("media/artifactDesign.js")}${s("media/artifact.js")}
+${s("media/shared/tip.js")}${s("media/shared/menu.js")}${s("media/shared/icons.js")}${s("media/shared/dismiss.js")}${s("media/shared/download.js")}${s("media/shared/comments.js")}${s("media/sheetRefs.js")}${s("media/artifactSlides.js")}${s("media/artifactSheet.js")}${s("media/artifactChecklist.js")}${s("media/artifactDesign.js")}${s("media/artifact.js")}
 </body></html>`;
 }
 
-/** The present tab: the deck's present mode, framed to fill it, focused so the arrow keys move at once; the deck's
- *  Esc (it posts {type: "dgc-slides", event: "exit"} to its parent) closes the tab. */
+/** The present tab: the deck's present mode, framed to fill it; the deck's Esc (it posts {type: "dgc-slides", event:
+ *  "exit"} to its parent) closes the tab. The arrow keys move at once: the deck is given the keyboard when it loads
+ *  and whenever this page gets it, and a key that still lands on this page (the tab has just opened over another
+ *  panel) is handed on to the deck ({type: "dgc-slides", key}); Esc here leaves by itself. */
 export function presentDocument(url: string, nonce: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; frame-src http://127.0.0.1:* http://localhost:* https:;">
 <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{border:0;width:100%;height:100%;display:block}</style>
 </head><body><iframe id="deck" src="${attr(url)}" sandbox="allow-scripts allow-same-origin" allow="fullscreen" title="Slides"></iframe>
 <script nonce="${nonce}">(()=>{const vscode=acquireVsCodeApi(),deck=document.getElementById('deck');
-deck.addEventListener('load',()=>deck.focus());
+const take=()=>{try{deck.focus();}catch(e){}};
+deck.addEventListener('load',take);addEventListener('focus',take);
+addEventListener('keydown',(e)=>{if(e.altKey||e.ctrlKey||e.metaKey)return;
+if(e.key==='Escape'){e.preventDefault();vscode.postMessage({type:'exit'});return;}
+if(!/^(Arrow(Left|Right|Up|Down)|Page(Up|Down)|Home|End|Enter|Backspace| |n|p|f|F)$/.test(e.key))return;
+e.preventDefault();try{deck.contentWindow.postMessage({type:'dgc-slides',key:e.key},'*');}catch(x){}take();});
 addEventListener('message',(e)=>{if(e.source===deck.contentWindow&&e.data&&e.data.type==='dgc-slides'&&e.data.event==='exit')vscode.postMessage({type:'exit'});});})();</script>
 </body></html>`;
 }
 
 const nonceOf = () => randomBytes(16).toString("base64");
+
+/** A picked part of an artboard, in a word a person uses for it (Ask in chat's reference). */
+const PART_WORDS: Record<string, string> = { h1: "heading", h2: "heading", h3: "heading", h4: "heading", h5: "heading", h6: "heading", p: "text", span: "text", li: "list item", ul: "list", ol: "list",
+  a: "link", button: "button", img: "picture", svg: "picture", picture: "picture", video: "video", input: "field", textarea: "field", select: "menu", label: "label", nav: "menu", table: "table",
+  header: "header", footer: "footer", form: "form", blockquote: "quote" };
 
 /** One artifact in a panel of its own. */
 class ArtifactPanel {
@@ -821,8 +833,28 @@ export class Artifacts implements vscode.Disposable {
     this.openPanel(id, hint.title || LABELS[hint.type] || "Artifact");
   }
 
+  /** Where the next artifact opens: in the editor group that already holds one (its panel, or a document's editor over
+   *  its working file), as a tab there; beside the active editor when none is open. Each Open used to add one more
+   *  column (session | deck | design: user test 2). */
+  private column(): vscode.ViewColumn {
+    for (const one of [...this.panels.values()].reverse()) {
+      const at = one.panel.viewColumn;
+      if (typeof at === "number" && at > 0) return at;
+    }
+    try {
+      for (const group of vscode.window.tabGroups?.all ?? []) {
+        if (typeof group.viewColumn !== "number" || group.viewColumn <= 0) continue;
+        for (const tab of group.tabs ?? []) {
+          const path = (tab.input as any)?.uri?.fsPath;
+          if (typeof path === "string" && this.docFiles.has(this.key(path))) return group.viewColumn;
+        }
+      }
+    } catch { /* an editor without tab groups: beside */ }
+    return vscode.ViewColumn.Beside;
+  }
+
   private openPanel(id: string, title: string): void {
-    const panel = vscode.window.createWebviewPanel(ARTIFACT_PANEL, title, vscode.ViewColumn.Beside, this.options());
+    const panel = vscode.window.createWebviewPanel(ARTIFACT_PANEL, title, this.column(), this.options());
     this.adopt(panel, id);
   }
 
@@ -864,8 +896,8 @@ export class Artifacts implements vscode.Disposable {
     this.remember(view);
     const uri = vscode.Uri.file(file);
     try {
-      if (/\.md$/i.test(file)) await vscode.commands.executeCommand("vscode.openWith", uri, CANVAS_DOC_VIEW, { preview: false, viewColumn: vscode.ViewColumn.Beside });
-      else await vscode.window.showTextDocument(uri, { preview: false, viewColumn: vscode.ViewColumn.Beside });
+      if (/\.md$/i.test(file)) await vscode.commands.executeCommand("vscode.openWith", uri, CANVAS_DOC_VIEW, { preview: false, viewColumn: this.column() });
+      else await vscode.window.showTextDocument(uri, { preview: false, viewColumn: this.column() });
     } catch (err: any) {
       void vscode.window.showWarningMessage(`“${view.title}” couldn't be opened: ${String(err?.message || err)}`);
     }
@@ -908,14 +940,16 @@ export class Artifacts implements vscode.Disposable {
 
   /** Ask in chat about an artboard of a design (or part of one): every chat surface hears it, and the one the design
    *  was made in (Work, a chat, a Pip's chat; Work when it was made elsewhere) puts a reference to it in its prompt
-   *  box. `text` is that reference in words, with the ids the model changes it by. */
+   *  box. `text` is that reference as a person reads it: the artboard, the design, the part by its kind and its
+   *  words; then the two ids the model changes it by. Never a CSS path or an HTML tag: it read as debug output. */
   askInChat(view: ArtifactView, raw: any): void {
     const board = String(raw?.board || "");
     if (view.type !== "design" || !BOARD_ID.test(board)) return;
     const clean = (v: unknown, n: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, n) : "");
     const title = clean(raw.title, 80) || board, tag = clean(raw.tag, 20).replace(/[^a-z0-9-]/g, ""), quote = clean(raw.quote, 160), path = clean(raw.path, 200);
-    const part = tag ? ` · its <${tag}>${quote ? ` “${quote}”` : ""}` : "";
-    const text = `[Artboard “${title}” of the design “${view.title}” (${view.id}, ${board}${path && tag ? `, ${path}` : ""})${part}] `;
+    const kind = PART_WORDS[tag] || "";
+    const part = !tag || !path ? "" : quote ? ` · the ${kind || "part"} “${quote}”` : kind ? ` · the ${kind}` : " · a part of it";
+    const text = `[“${title}” in the design “${view.title}”${part} (${view.id}, ${board})] `;
     const surface = typeof view.origin?.surface === "string" ? String(view.origin.surface) : "";
     this.tell({ type: "artifactAsk", id: view.id, board, title, label: `${title} · ${view.title}`.slice(0, 120), text,
                 surface: surface === "chat" || surface === "pip" ? surface : "work",

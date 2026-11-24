@@ -1411,7 +1411,7 @@ def _format(value):
         from .pip_sources import rules as source_rules_of
         rules_name = source_rules_of(source) if source['mode'] != 'personal' else None
         source_label = ('Current tree with ' + rules_name + ' exclusions; manual requests only'
-                        if source['mode'] == 'current_tree' else 'Personal · no project access' if source['mode'] == 'personal'
+                        if source['mode'] == 'current_tree' else 'No folder · no project files' if source['mode'] == 'personal'
                         else 'Committed ref: ' + row['source_ref'] + ' · ' + rules_name
                         + (' (the original rules: a file over 4 MiB, a link or a source over 64 MiB fails every run;'
                            ' switch with dgc pips propose --source-rules v2)' if rules_name == 'safe_source_v1' else ''))
@@ -1752,7 +1752,7 @@ def _computer_command(config, args):
     if action in ("give", "remove"):
         pip = control({"type": "get_pip", "pip_id": args.pip_id})["pip"]
         if action == "give":
-            print("This gives the Pip its own browser and files, separate from yours. It can read public websites.\n"
+            print("This gives the Pip a computer of its own, with a browser and files, separate from yours. It can read public websites.\n"
                   "Anything that would submit or change something on a website waits for your approval.\n"
                   "It never sees your passwords and cannot reach your local network. A payment waits for your approval like anything else.", file=sys.stderr)
         if not confirm(("Give " if action == "give" else "Remove the computer from ") + pip["name"] + "?"):
@@ -1818,7 +1818,7 @@ def format_digest(digest) -> str:
             facts.append(f"{pip['skipped_unchanged']} skipped, nothing changed")
         if pip["gone_after_change"]:
             facts.append(f"{pip['gone_after_change']} earlier gone after a change")
-        scope = "Personal" if pip["scope"] == "personal" else pip["pip_type"]
+        scope = "no folder" if pip["scope"] == "personal" else pip["pip_type"]
         lines.append(f"{'!' if pip['alert'] else ' '} {pip['name']} ({scope}) — " + (" · ".join(facts) or "no runs"))
         for finding in pip["new_findings"]:
             lines.append(f"    {finding['severity']:<8} {finding['title']} — {finding['path']}:{finding['line']}")
@@ -1854,7 +1854,7 @@ def _import_command(config, args):
     if checked["pip_type"] == "pulse":
         raise RegistryError("unsupported_share", "Import a Pulse Pip in the Pips view, where its commands are reviewed on a setup card.")
     personal = checked.get("scope") == "personal"
-    lines = [f"{checked['name']} ({checked['pip_type']}, {'Personal' if personal else 'this project'})",
+    lines = [f"{checked['name']} ({checked['pip_type']}, {'no folder' if personal else 'this project'})",
              f"Job: {checked['goal']}"]
     for read in (checked.get("web_plan") or {}).get("reads", []):
         lines.append("Web read: " + (read["url"] if read["kind"] == "page" else "search: " + read["query"]))
@@ -1941,7 +1941,7 @@ def _starter_command(config, args):
                   else ("Mondays" if checked["schedule"]["cron"].split()[4] == "1" else "weekdays")
                   + f" at {checked['schedule']['cron'].split()[1].zfill(2)}:{checked['schedule']['cron'].split()[0].zfill(2)} {checked['schedule']['timezone']}"))
     heading = checked["name"] if checked["name"] == spec["title"] else f"{spec['title']}: {checked['name']}"
-    lines = [f"{heading} ({checked['pip_type']}, {'Personal' if personal else 'this project'})",
+    lines = [f"{heading} ({checked['pip_type']}, {'no folder' if personal else 'this project'})",
              f"Runs: {when}", f"Job: {checked['goal']}"]
     if not personal:
         lines.append(f"Reads: the committed source at {checked['source_ref']}. No tests, writes or network.")

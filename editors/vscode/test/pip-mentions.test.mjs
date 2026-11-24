@@ -91,8 +91,9 @@ test('Pip picker labels Personal and Project Pips without changing their referen
  const p=panel(), request=open(p), personal={...row,pip_id:'pip_'+'c'.repeat(32),workspace_id:'ws_'+'d'.repeat(32),name:'Core',pip_type:'core',scope:'personal'};
  answer(p,request,[{...row,workspace_id:WS,scope:'project'},personal]);
  const labels=[...p.doc.querySelectorAll('#pop .pi')].map(e=>e.textContent);
- assert.ok(labels.some(s=>s.includes('Project · v2')));
- assert.ok(labels.some(s=>s.includes('Personal · v2')));
+ assert.ok(labels.some(s=>s.includes('Works in a folder · v2')));
+ assert.ok(labels.some(s=>s.includes('No folder · v2')));
+ assert.ok(!labels.some(s=>/Personal|Project/.test(s)),'one kind of Pip: where it works, never a kind');
 });
 test('connected plugin mention waits for catalog, keeps its logo, and sends plain words',()=>{
  const p=panel(),input=type(p,'Ask @composio');

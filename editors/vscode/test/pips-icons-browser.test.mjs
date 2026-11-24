@@ -105,7 +105,7 @@ async function checkFold(page, { where, colours = "themed" }) {
   let f = await fold(page), m = await painted(page, FOLD);
   assert.deepEqual([f.tag, f.type, f.expanded, f.controls, f.list], ["BUTTON", "button", "true", "attention-list", true], `${where}: the fold is a button, open`);
   assert.equal(f.cards, 1, "one card in view");
-  assert.match(f.heading, /^Needs attention \d+$/, "the heading is its words and its count");
+  assert.match(f.heading, /^Needs you \d+$/, "the heading is its words and its count");
   assert.deepEqual([f.marks, f.drawn], [0, "none,none,none,none"], `${where}: no chevron, no mark of any kind on the heading's line`);
   assert.deepEqual([f.word, f.label], ["Hide", "Hide the cards that need your attention"]);
   assert.ok(m.width >= 20 && m.height >= 16, `${where}: the word has room to be drawn in: ${JSON.stringify(m)}`);
@@ -121,7 +121,7 @@ async function checkFold(page, { where, colours = "themed" }) {
   f = await fold(page); m = await painted(page, FOLD);
   assert.deepEqual([f.expanded, f.list, f.cards, f.controls, f.word, f.label, f.marks], ["false", false, 0, "attention-list", "Show", "Show the cards that need your attention", 0], `${where}: Enter folds it`);
   assert.ok(m.ink >= 30, `${where}: folded, the word paints: ${JSON.stringify(m)}`);
-  assert.match(f.heading, /^Needs attention \d+$/);
+  assert.match(f.heading, /^Needs you \d+$/);
   // Open again with Space.
   await focus(); await page.keyboard.press("Space"); await expanded(page, "true");
   f = await fold(page);

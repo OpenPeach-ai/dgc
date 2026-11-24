@@ -131,6 +131,12 @@ class WorkArtifactTools(unittest.TestCase):
         self.assertEqual(artifact_tools.missing_note("slides", ["slides"]), "")
         self.assertIn("didn't make slides", artifact_tools.missing_note("slides", ["doc"]))
         self.assertEqual(artifact_tools.missing_note("auto", []), "")
+        # A checklist and a design can be chosen for a reply too, as the Library lists them.
+        self.assertIn("make_artifact (type checklist)", artifact_tools.output_line("checklist"))
+        self.assertIn("make_artifact (type design)", artifact_tools.output_line("design"))
+        self.assertEqual(artifact_tools.missing_note("checklist", ["checklist"]), "")
+        self.assertIn("didn't make a checklist", artifact_tools.missing_note("checklist", ["doc"]))
+        self.assertIn("didn't make a design", artifact_tools.missing_note("design", []))
 
 
 if __name__ == "__main__":

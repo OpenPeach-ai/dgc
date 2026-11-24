@@ -111,7 +111,7 @@ test("collapsing the diff on a Pip fix's Allow card leaves it open and undecided
       args: { path: "billing.py", patch: DIFF }, diff: DIFF, summary: "billing.py", suggested_rule: "Edit(billing.py)" });
     const card = s.page.locator('.pip-fix-ask .card[data-request-id="req-fix"]');
     assert.equal(await card.count(), 1, "asked on the fix's card");
-    assert.match(await card.locator(".q").innerText(), /Run apply_patch/);
+    assert.match(await card.locator(".q").innerText(), /Edit billing\.py/);
     await collapseThenAllow(s, card, "req-fix");
     assert.deepEqual(s.errors, []);
   } finally {

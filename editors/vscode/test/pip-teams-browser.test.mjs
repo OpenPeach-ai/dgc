@@ -215,17 +215,17 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     const x = await open(theme, width, { home: true });
     try {
       await x.p.locator(".team-menu > summary").click(); await x.p.locator("#team-import").click();
-      await x.p.waitForSelector('[aria-label="Needs attention"]');
-      await x.p.waitForFunction(() => /Researcher|Writer|Fact check/.test((window.__pipsRoot || document).querySelector('[aria-label="Needs attention"]')?.textContent || ""));
+      await x.p.waitForSelector('[aria-label="Needs you"]');
+      await x.p.waitForFunction(() => /Researcher|Writer|Fact check/.test((window.__pipsRoot || document).querySelector('[aria-label="Needs you"]')?.textContent || ""));
       assert.deepEqual(await sent(x.p, "import_pip_team_file"), [{}], "the page names no file");
-      const m = await x.p.evaluate(() => { const root = window.__pipsRoot || document, n = root.querySelector(".notice"), a = root.querySelector('[aria-label="Needs attention"]'), box = (el) => el.getBoundingClientRect();
+      const m = await x.p.evaluate(() => { const root = window.__pipsRoot || document, n = root.querySelector(".notice"), a = root.querySelector('[aria-label="Needs you"]'), box = (el) => el.getBoundingClientRect();
         return { notice: n.textContent, noticeWhole: n.scrollWidth <= n.clientWidth + 1 && box(n).right <= document.documentElement.clientWidth + 0.5, noticeAbove: box(n).bottom <= box(a).top + 0.5,
           cards: a.textContent, menuOpen: !!root.querySelector(".team-menu[open]"), sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 }; });
       assert.equal(m.notice, "Imported the team “Launch crew”: 3 new Pips to review. Nothing is created until you approve each one. Not included: Reads from connected apps: they name your accounts.");
       assert.ok(m.noticeWhole && m.noticeAbove, "the line is whole, above the cards"); assert.equal(m.menuOpen, false, "the menu closed"); assert.equal(m.sideways, false);
       assert.match(m.cards, /Create the Pip “(Researcher|Writer|Fact check)”\?/); assert.match(m.cards, /of 3/, "the team's three cards, one shown at a time");
       assert.deepEqual(await sent(x.p, "accept_pip_setup"), [], "nothing is approved by importing");
-      checkLayout(await x.p.evaluate(looked, ['[aria-label="Needs attention"]', null]), solid, { filled: ["Review"] });
+      checkLayout(await x.p.evaluate(looked, ['[aria-label="Needs you"]', null]), solid, { filled: ["Review"] });
       await picture(x.p, `imported-team-${theme}-${width}`);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }

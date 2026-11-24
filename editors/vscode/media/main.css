@@ -376,6 +376,8 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 .yb-clear-name { color:var(--text-strong); font:var(--w-med) var(--t-sm)/1.35 var(--sans); }
 .yb-clear-line { color:var(--text-2); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); overflow-wrap:anywhere; }
 .yb-clear-note { margin:0; font-size:var(--t-xs); }
+.yb-clear-done { margin:0; color:var(--text-strong); }   /* done: what was cleared, said in the dialog until Done */
+.yb-clear-after { margin:0; font-size:var(--t-xs); overflow-wrap:anywhere; }
 .yb-clear-error { margin:0; color:var(--err-text); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); overflow-wrap:anywhere; }
 .yb-clear-error[hidden] { display:none; }
 .yb-clear-dialog button.act { border-radius:var(--btn-r, 6px); }
@@ -2353,6 +2355,11 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-f
 body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-fold="folded"]:has(> .prompt-atts)::after { content: none; }
 body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-fold="folded"] > .prompt-fold { opacity: 1; border-color: var(--vscode-contrastBorder, var(--border-strong)); }
 @media (forced-colors: active) { .user .bubble[data-fold="folded"] > .prompt-text { -webkit-mask-image: none; mask-image: none; } .user .bubble[data-fold="folded"]:has(> .prompt-atts)::after { content: none; } .user .bubble[data-fold="folded"] > .prompt-fold { opacity: 1; } .prompt-fold { border-color: ButtonText; background: ButtonFace; color: ButtonText; } .prompt-fold .codicon { color: inherit; } }
+/* A prompt stuck at the top of the transcript (".pinned": see "a pinned prompt looks pinned" below) is one line of its
+   words with an ellipsis, its Show more at the end of that line. In its own place it folds as above. */
+.turn > .msg.user.turn-head.pinned > .bubble > .prompt-text { display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; max-height: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-mask-image: none; mask-image: none; }
+.turn > .msg.user.turn-head.pinned > .bubble > .prompt-text br { display: none; }
+.turn > .msg.user.turn-head.pinned > .bubble > .prompt-fold { position: static; flex: none; margin: 0; }
 /* ---- end long prompts ---------------------------------------------------------------------- */
 
 /* ---- 0.47 pinned prompt ------------------------------------------------------------------------ */
@@ -2410,6 +2417,20 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.tu
 body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.dgc > .msg.user.turn-steer > .bubble { outline: 1px solid var(--vscode-contrastBorder, var(--border-strong)); outline-offset: -1px; }
 @media (forced-colors: active) { #log .turn > .msg.user.turn-head::before, #log .turn > .msg.dgc > .msg.user.turn-steer::before { bottom: calc(-1 * var(--sp-1)); -webkit-mask-image: none; mask-image: none; } #log .turn > .msg.user.turn-head > .bubble, #log .turn > .msg.dgc > .msg.user.turn-steer > .bubble { outline: 1px solid CanvasText; outline-offset: -1px; } }
 /* ---- end 0.47 pinned prompt -------------------------------------------------------------------- */
+
+/* ---- a pinned prompt looks pinned ---------------------------------------------------------------- */
+/* While it is stuck at the top (main.js setPinned marks it .pinned, and only a prompt that pins: never one too tall or
+   one opened to be read), a reader sees that the answer passes under it: one line with an ellipsis (a long prompt's
+   Show more at its end), and the ground ends in a hairline and a soft shadow where it had a fade. In its own place it
+   was indistinguishable from any prompt: with a turn mostly scrolled past, "your message, then the Edited card" read
+   as a reply gone missing. The height it gives up stays in its box as a margin under it (--pin-give), so nothing in
+   the transcript moves when it goes small. In its own place it is not .pinned, and is exactly as above. */
+.turn > .msg.user.turn-head.pinned { margin-bottom: var(--pin-give, 0px); }
+.turn > .msg.user.turn-head.pinned > .bubble { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding-bottom: var(--sp-2); }
+.turn > .msg.user.turn-head.pinned > .bubble:has(> .prompt-text) > .prompt-atts, .turn > .msg.user.turn-head.pinned > .bubble:has(> .prompt-text)::after, .turn > .msg.user.turn-head.pinned > .msg-time { display: none; }
+.turn > .msg.user.turn-head.pinned::before { bottom: calc(-1 * var(--sp-2)); -webkit-mask-image: none; mask-image: none; border-bottom: 1px solid var(--hair-strong, var(--hair)); box-shadow: 0 8px 12px -10px rgba(0, 0, 0, .55); }
+body.vscode-light .turn > .msg.user.turn-head.pinned::before { box-shadow: 0 8px 12px -10px rgba(0, 0, 0, .22); }
+/* ---- end a pinned prompt looks pinned ------------------------------------------------------------ */
 
 /* ---- the prompt rail ------------------------------------------------------------------------- */
 /* The prompt rail (media/promptrail.js), ChatDGC's and the Work chat's: a short tick per prompt in the transcript's
@@ -2677,6 +2698,11 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .am-row:hover .am-meta { color: var(--muted-firm); }   /* (on the lit row the quiet grey read 3.9:1) */
 .am-row .agent-dot { margin-top: 0; }
 .am-face { width: 16px; height: 16px; }
+/* A helper that has finished: its face without its colour (user test 2, W18: one face is a coral triangle, and on a
+   row that said Finished it read as a red warning; red is for errors only). One still working keeps its colour, and
+   so does one that failed or was stopped: its dot is what says so. */
+.am-row:has(> .agent-dot[data-state="finished"]) .am-face { filter: grayscale(1); opacity: .78; }
+@media (forced-colors: active) { .am-row:has(> .agent-dot[data-state="finished"]) .am-face { filter: none; opacity: 1; } }
 .am-pip-float { position: absolute; left: calc(100% + 7px); top: 50%; transform: translateY(-50%);
   width: 18px; height: 18px; z-index: 3; cursor: default; filter: drop-shadow(0 1px 2px #0009); }
 .am-pip-float .dgc-plush { width: 100%; height: 100%; }
@@ -3581,6 +3607,9 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
 
 /* A goal's end ("Goal done · 2 h 14 min · 1.8M tokens · 7 cycles"): one quiet line under its turn, in the muted ink
    that reads at 4.5:1 (the line is a fact to read, not a passing notice). */
+/* The message that started a goal: a small "Goal" over its bubble, at the bubble's side. */
+.msg.user > .goal-mark { display: inline-flex; align-items: center; gap: 4px; align-self: flex-end; margin: 0 2px 3px 0; color: var(--muted-firm, var(--muted)); font: var(--w-med) var(--t-xs)/1.2 var(--sans); }
+.msg.user > .goal-mark > .ic { color: inherit; }
 .sys.goal-end { margin: var(--sp-1) 0 var(--sp-2); color: var(--muted-firm, var(--muted)); font-variant-numeric: tabular-nums; }
 .sys.goal-end > .ic { color: inherit; }
 /* The Goals pill's list ("/goal-history"): a goal a row, its name over how it ended, when, its time and tokens;
@@ -3815,7 +3844,9 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
 .auto-mode-permission > .codicon { font-size: 19px; margin-top: 2px; color: var(--vscode-textLink-foreground, #bdcaff); }
 .auto-mode-permission strong { font-size: 13px; font-weight: 600; }
 .auto-mode-permission p { margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: var(--vscode-descriptionForeground, #a2a6b2); }
-.auto-mode-risk { margin: 18px 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground, #a2a6b2); }
+.auto-mode-check { margin: 18px 0 0; font-size: 12px; line-height: 1.5; color: var(--vscode-descriptionForeground, #a2a6b2); }
+.auto-mode-check strong { font-weight: 600; }
+.auto-mode-risk { margin: 12px 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground, #a2a6b2); }
 .auto-mode-risk strong { color: var(--vscode-errorForeground, #ffacbc); font-weight: 500; }
 .auto-mode-limits { margin: 0; font-size: 11px; color: var(--vscode-descriptionForeground, #a2a6b2); }
 .auto-mode-trust { margin: 12px 0 0; font-size: 12px; color: var(--vscode-editorWarning-foreground, #efc780); }

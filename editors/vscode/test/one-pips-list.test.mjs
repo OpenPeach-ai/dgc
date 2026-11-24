@@ -35,10 +35,11 @@ test('Core stays first even when DGC lists it later, and a Core of a folder is a
  assert.deepEqual(heldOrder(orderPips(listed,{personalId:P,bumps:new Map([['c',2]])}),['core','b','c']).map(v=>v.id),['core','b','c','x'],'held still: the places drawn stay, a new Pip goes to the end');
 });
 
-test('each row says where its Pip works under its name: "Personal", or its folder with the home folder as ~',async()=>{
+test('each row says where its Pip works under its name: "No folder", or its folder with the home folder as ~',async()=>{
  const x=setup();await x.drain();
  const place=id=>x.$(`.pips-one-list [data-job="${id}"] .pip-row-place`);
- assert.equal(place(CORE)?.textContent.trim(),'Personal');assert.equal(place(MORNINGS).textContent.trim(),'Personal');
+ assert.equal(place(CORE)?.textContent.trim(),'No folder');assert.equal(place(MORNINGS).textContent.trim(),'No folder');assert.equal(place(MORNINGS).title,'It works in no folder');
+ assert.doesNotMatch(x.$('.pips-one-list').textContent,/Personal/,'one kind: no row says Personal');
  assert.equal(place(GST).textContent.trim(),'~/code/lime_tiles');assert.equal(place(GST).title,LIME_DIR,'the whole path is the tooltip');
  assert.equal(place(BEDS).textContent.trim(),'~/code/garden');
  const small=x.$(`.pips-one-list [data-job="${GST}"] small`);
@@ -97,7 +98,7 @@ test('the filter line is at the left under the search: All Pips by default, then
  assert.equal(button.querySelector('.dgc-folder-v').textContent,'All Pips');assert.equal(button.getAttribute('aria-haspopup'),'menu');
  button.click();await x.drain();
  const menu=[...x.d.querySelectorAll('.dgc-folder-menu [role="menuitemradio"]')];
- assert.deepEqual(menu.map(r=>r.querySelector('.dgc-menu-label').textContent),['All Pips','Personal','shop','garden','lime_tiles','notes']);
+ assert.deepEqual(menu.map(r=>r.querySelector('.dgc-menu-label').textContent),['All Pips','No folder','shop','garden','lime_tiles','notes']);
  assert.equal(menu[0].getAttribute('aria-checked'),'true');
  menu.find(r=>r.dataset.folder===LIME_DIR).click();await x.drain();
  assert.equal(x.$('#pips-filter .dgc-folder-v').textContent,'lime_tiles');
@@ -110,7 +111,7 @@ test('Personal shows the Pips with no folder; a folder with no Pips says so; a f
  const x=setup();await x.drain();
  const choose=async value=>{x.$('#pips-filter').click();await x.drain();[...x.d.querySelectorAll('.dgc-folder-menu [role="menuitemradio"]')].find(r=>r.dataset.folder===value).click();await x.drain();};
  await choose(PERSONAL);
- assert.equal(x.$('#pips-filter .dgc-folder-v').textContent,'Personal');
+ assert.equal(x.$('#pips-filter .dgc-folder-v').textContent,'No folder');
  assert.deepEqual(x.rows(),[CORE,MORNINGS]);
  await choose(HERE);
  assert.deepEqual(x.rows(),[]);assert.match(x.text(),/No Pips in shop yet\./);
@@ -204,4 +205,15 @@ test('New Pip\'s folder is pre-filled from where you are: the filter\'s folder, 
  assert.equal(newPipFolder(ALL,rows),'','else none: a Personal Pip');
  assert.equal(newPipFolder(PERSONAL,rows,HERE),'','Personal chosen: none, whatever asked');
  assert.equal(newPipFolder(NOTES,rows),'','a folder that is gone is not offered');
+});
+
+// User test, round 2: "Pips ● Start Pips" and "Pips not running" on every row, with no word on what starting does.
+test('Pips not running: one line says what that means and what Start Pips does; running, there is no such line',async()=>{
+ const off=setup({scene:{runner:{online:false,status:'offline'}}});await off.drain();
+ const line=off.$('.runner-why');
+ assert.ok(line,'the line under the header');
+ assert.equal(off.squash(line.textContent),'Your Pips only work while Pips are running: nothing runs on a schedule and no Pip answers until then. Start Pips starts them on this computer.');
+ assert.equal(off.$('#start-runner')?.title,'Start Pips on this computer: they answer in their chats and run their routines');
+ const on=setup();await on.drain();
+ assert.equal(on.$('.runner-why'),null);assert.equal(on.$('#start-runner'),null);
 });

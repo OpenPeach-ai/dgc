@@ -389,3 +389,24 @@ test("today's record: one row per site, newest first, counting each read; yester
   ], now);
   assert.deepEqual(rows.map((r) => [r.host, r.times, r.bytes]), [["openrouter.ai", 2, 405000], ["github.com", 1, 1000]]);
 });
+
+// User test round 2, W19: a page with no description of its own in its head (pytest's documentation) made a card of
+// the site's name and the link's own words again. The page's first paragraph is its description then, from what was
+// already read: nothing more is fetched, and a page with no paragraph worth saying still says nothing.
+test("W19: a page with no description in its head is described by its own first paragraph, from what was read", () => {
+  const page = (body, head = "<title>pytest documentation</title>") => `<!doctype html><html><head>${head}</head><body>${body}</body></html>`;
+  const docs = page(`<nav><p>Home</p><a href="/x">Skip to main content</a></nav><header><p>pytest 8 documentation: quick search and the other versions of these pages</p></header>
+    <main><h1>pytest: helps you write better programs</h1><p>The <code>pytest</code> framework makes it easy to write small, readable tests, and can scale to support complex functional testing for applications &amp; libraries.</p>
+    <p>A second paragraph that is not the description.</p></main><script>var p = "<p>This is in a script and is long enough to be taken for a paragraph of the page</p>";</script>`);
+  const said = lp.parseHead(docs, "https://docs.pytest.example/en/stable/");
+  assert.equal(said.title, "pytest documentation");
+  assert.equal(said.description, "The pytest framework makes it easy to write small, readable tests, and can scale to support complex functional testing for applications & libraries.");
+  // The head's own description always wins.
+  assert.equal(lp.parseHead(page("<p>The pytest framework makes it easy to write small, readable tests for every project.</p>", '<title>t</title><meta name="description" content="Said by the page itself.">'), "https://e.example/").description, "Said by the page itself.");
+  // Nothing worth saying: nothing said. (A menu's words, a cookie line, a paragraph of three words.)
+  assert.equal(lp.parseHead(page("<nav><p>Docs Blog Pricing Sign in and a few more links to fill the line up</p></nav><p>Too short.</p><footer><p>Copyright 2026 Example Inc. All rights reserved, in every country where that means something.</p></footer>"), "https://e.example/").description, "");
+  assert.equal(lp.parseHead(page('<p>We use cookies to make this site work and to see how it is used; accept all cookies or choose.</p>'), "https://e.example/").description, "");
+  // A long first paragraph is cut at a word, with an ellipsis; markup and control characters never come through.
+  const long = lp.parseHead(page(`<p>${"Every loaf is shaped by hand and baked on stone. ".repeat(12)}<b>bold</b><img src=x onerror=alert(1)></p>`), "https://e.example/").description;
+  assert.ok(long.length <= 240 && long.endsWith("…") && !/[<>]/.test(long), long);
+});

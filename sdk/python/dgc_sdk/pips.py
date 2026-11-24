@@ -561,7 +561,7 @@ API113_READS = frozenset({'get_your_browser_lanes'})
 API113_MUTATIONS = frozenset({'seen_your_browser_sites'})
 READ_COMMANDS |= API113_READS
 MUTATION_COMMANDS |= API113_MUTATIONS
-PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard'})
+PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard', 'checklist', 'design'})
 
 
 def _api88_field(command, values) -> bool:

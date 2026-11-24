@@ -200,7 +200,7 @@ test("protocol v14: the approval card gets a summary and a diff, and a denial ca
     "the panel forwards the denial note to the backend");
   const webview = readFileSync(join(here, "../media/main.js"), "utf8");
   assert.match(webview, /ev\.summary/, "the card shows the step summary");
-  assert.match(webview, /renderDiff\(String\(ev\.diff\)\)/, "an edit's diff renders on the card");
+  assert.match(webview, /renderDiff\(String\(ev\.diff\), \{ headers: false \}\)/, "an edit's diff renders on the card");
   assert.match(webview, /reason: b\.dataset\.d === "deny" && note \? note : undefined/, "Deny sends the note");
 });
 

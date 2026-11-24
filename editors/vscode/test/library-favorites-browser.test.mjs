@@ -189,9 +189,9 @@ for (const place of ["side", "tab"]) {
       assert.equal(s.focus, "library-filter-fav", "the keyboard stays on the button");
       await shot(p, `filter-on-${place}`);
       // With the other filters, and with the search.
-      await x.pick("kind", "Docs");
+      await x.pick("kind", "Documents");
       assert.deepEqual((await stars(p)).rows.map((r) => r.key), [DOC]);
-      await x.pick("kind", "Decks");
+      await x.pick("kind", "Slides");
       s = await stars(p);
       assert.deepEqual(s.rows, []); assert.equal(s.status, "No favorites with these filters.");
       await x.pick("kind", "All");

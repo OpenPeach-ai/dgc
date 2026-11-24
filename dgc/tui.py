@@ -7584,7 +7584,7 @@ class TUI:
         elif cmd == "make":
             # The Output chip, typed: this one prompt's reply should make that kind of artifact.
             kind, _, ask = rest.strip().partition(" ")
-            kinds = ("document", "slides", "spreadsheet", "page", "dashboard")
+            kinds = ("document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design")
             if kind not in kinds or not ask.strip():
                 self._flash(f"/make {'|'.join(kinds)} TEXT")
             else:

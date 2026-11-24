@@ -176,7 +176,7 @@ def projection(record):
     """Small source metadata for history/UI/chat; never return a filesystem path."""
     source = from_record(record)
     if source['source_policy']['mode'] == 'personal':
-        return {**source, 'label': 'Personal · no project access', 'identity_kind': 'none', 'identity': None}
+        return {**source, 'label': 'No folder · no project files', 'identity_kind': 'none', 'identity': None}
     current = source['source_policy']['mode'] == 'current_tree'
     return {**source, 'label': 'Current-tree snapshot' if current else 'Committed source',
             'identity_kind': 'snapshot_sha256' if current else 'git_commit',

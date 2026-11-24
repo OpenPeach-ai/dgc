@@ -668,8 +668,8 @@ def checked_output(output):
     if output is None or output in ("", "auto"):
         return None
     if not isinstance(output, str) or output not in OUTPUTS:
-        raise RegistryError("invalid_output", "Choose Document, Slides, Spreadsheet, Page or Dashboard for this reply, "
-                                              "or Auto.")
+        raise RegistryError("invalid_output", "Choose Document, Slides, Spreadsheet, Page, Dashboard, Checklist or Design "
+                                              "for this reply, or Auto.")
     return output
 
 
@@ -869,8 +869,8 @@ YOUR_BROWSER_SIGNED_IN = ("This message is from DGC, not the user. The user says
                           "{where} (reload it if it is already open), then carry on with what they asked. If it still asks "
                           "for a sign-in, tell them in one sentence; never type a password or a code there.")
 YOUR_BROWSER_NOT_ALLOWED = ("This message is from DGC, not the user. The user didn't let you use {site} in Your Browser, so "
-                            "you must not. Carry on with anything else they asked that doesn't need it (your own computer "
-                            "can visit public pages), and tell them in a short message what you couldn't do.")
+                            "you must not. Carry on with anything else they asked that doesn't need it (your computer's "
+                            "browser can visit public pages), and tell them in a short message what you couldn't do.")
 YOUR_BROWSER_NOT_SIGNED_IN = ("This message is from DGC, not the user. The user didn't sign in to {site} in Your Browser. "
                               "Don't ask again in this reply: carry on with anything else they asked, and tell them in a "
                               "short message what you couldn't do without their sign-in.")

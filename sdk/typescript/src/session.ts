@@ -105,7 +105,7 @@ function checkTimeout(timeoutMs: unknown, name = "timeoutMs"): void {
 }
 
 /** Pump-side state of one run. Outcome events for its prompt ids land here, whoever reads them. */
-export const ARTIFACT_OUTPUTS: readonly string[] = ["auto", "document", "slides", "spreadsheet", "page", "dashboard"];
+export const ARTIFACT_OUTPUTS: readonly string[] = ["auto", "document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design"];
 
 export function artifactInfo(row: unknown): ArtifactInfo {
   const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;

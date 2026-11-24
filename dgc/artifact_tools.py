@@ -131,9 +131,13 @@ OUTPUT_LINES = {
             "then say briefly what it does.",
     "dashboard": "The user chose Dashboard for this reply: make one with make_artifact (type dashboard) over the "
                  "data they mean, then say briefly what it shows.",
+    "checklist": "The user chose Checklist for this reply: make one with make_artifact (type checklist), its items "
+                 "the steps of the job, then say briefly what's on it.",
+    "design": "The user chose Design for this reply: make one with make_artifact (type design), its artboards the "
+              "screens they mean, then say briefly what you drew.",
 }
 OUTPUT_TYPES = {"document": "doc", "slides": "slides", "spreadsheet": "sheet", "page": "page",
-                "dashboard": "dashboard"}
+                "dashboard": "dashboard", "checklist": "checklist", "design": "design"}
 
 
 def output_line(output) -> str:
@@ -384,6 +388,14 @@ def run(name: str, args, *, origin: dict, author: str = "DGC", on_change=None, b
                 return drawn.replace("Changed Design", "Made Design", 1) if not drawn.startswith("error") else drawn
         elif name == "edit_artifact":
             aid = str(args.get("id") or "")
+            # One op given as an object, or its fields beside the id, is that one change (user test round 2, D9: a
+            # refused call the model then resent showed in the turn as a failure). Only where it can mean nothing else.
+            if isinstance(args.get("edits"), dict):
+                args = {**args, "edits": [args["edits"]]}
+            elif args.get("edits") is None and args.get("data") is None and args.get("content") is None and isinstance(args.get("op"), str):
+                args = {"id": aid, **({"note": args["note"]} if "note" in args else {}),
+                        **({"title": args["title"]} if isinstance(args.get("title"), str) else {}),
+                        "edits": [{k: v for k, v in args.items() if k not in ("id", "note", "title")}]}
             content = args.get("data") if args.get("data") is not None else args.get("content")
             title = args.get("title") if isinstance(args.get("title"), str) else None
             kind = _kind_of(aid)

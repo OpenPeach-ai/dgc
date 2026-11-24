@@ -113,9 +113,9 @@
 .dgc-mp .dgc-mp-item > .dgc-mp-more { right: 26px; }
 .dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row,
 .dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row { padding-right: 8px; }
-/* While its ⋯ shows, the row's capability marks give it their room, and its Main or Fallback word moves left of it. */
-.dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row .dgc-mp-caps,
-.dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row .dgc-mp-caps { display: none; }
+/* While its ⋯ shows, the row keeps its capability marks (user test 2: they vanished under the pointer): the row's
+   padding makes the ⋯ its room, and the name is what gives way. */
+.dgc-mp .dgc-mp-row.is-tight .dgc-mp-caps { display: none; }
 .dgc-mp .dgc-mp-item:is(:hover, :has(:focus-visible)) > .dgc-mp-row .dgc-mp-check,
 .dgc-mp .dgc-mp-item:has(> .dgc-mp-more[aria-expanded="true"]) > .dgc-mp-row .dgc-mp-check { margin-left: 28px; }
 /* A narrow list: a row that says Main or Fallback gives its capability marks' room to its name. Narrower (a 220 px
@@ -458,7 +458,13 @@ body.vscode-light .dgc-mp-effort-thumb, body.vscode-high-contrast-light .dgc-mp-
 .dgc-mp-effort:hover .dgc-mp-effort-thumb { border-color: color-mix(in srgb, var(--mp-ink) 20%, transparent); }
 .dgc-mp-effort[data-dragging] .dgc-mp-effort-thumb { transform: scale(.95); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, .1), 0 2px 4px -2px rgba(0, 0, 0, .1); }
 .dgc-mp-effort[data-dragging] .dgc-mp-effort-thumb, .dgc-mp-effort[data-dragging] .dgc-mp-effort-fill { transition-duration: 0s; }
-.dgc-mp-think-more > .dgc-mp-think-note { padding: 0 2px; min-height: calc(2 * 1.45 * var(--t-xs, 11px)); }   /* (two lines kept: stepping the levels never moves the picker) */
+/* Thinking's help floats over the foot of the list, on the raised grey: opening it takes no row from the list and
+   never moves the picker (user test 2: it pushed the list down to four rows and touched the card's bottom edge). */
+.dgc-mp-think { position: relative; }
+.dgc-mp-think-more { position: absolute; left: 4px; right: 4px; bottom: calc(100% + 6px); z-index: 4; box-sizing: border-box; padding: 8px 10px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-md, 8px); background: var(--raised, var(--surface2)); box-shadow: var(--lift-1); }
+.dgc-mp-think-more[hidden] { display: none; }
+.dgc-mp-think-more > .dgc-mp-think-note { padding: 0; color: var(--text); }   /* (two lines kept: stepping the levels never moves the picker) */
 @media (prefers-reduced-motion: reduce) {
   .dgc-mp-effort-fill, .dgc-mp-effort-thumb, .dgc-mp-effort-stops, .dgc-mp-effort-stop > i, .dgc-mp-think .dgc-mp-think-now { transition: none; }
   .dgc-mp-effort-stop.is-pop > i { animation: none; }
@@ -471,3 +477,15 @@ body.vscode-light .dgc-mp-effort-thumb, body.vscode-high-contrast-light .dgc-mp-
 }
 body.vscode-high-contrast .dgc-mp-effort, body.vscode-high-contrast-light .dgc-mp-effort { border: 1px solid var(--vscode-contrastBorder, CanvasText); }
 .dgc-mp-think[hidden] { display: none; }
+
+/* ---- Fallback, in sight: one line between the models and Thinking. Its name, the fallback now (or None), and Choose /
+   Change at its right end; while one is being chosen the list's rows are the choices and the line says so. ---- */
+.dgc-mp-fb { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; margin: 4px 0 0; padding: 6px 6px 0; border-top: 1px solid var(--hair); }
+.dgc-mp-fb[hidden] { display: none; }
+.dgc-mp-fb-name { flex: none; font: var(--w-reg) 13px/1.43 var(--sans); color: var(--muted-raised, var(--muted)); }
+.dgc-mp-fb-now { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-med) 13px/1.43 var(--sans); color: var(--text-strong); }
+.dgc-mp-fb-now.is-hint { font-weight: var(--w-reg); color: var(--accent-text); }
+.dgc-mp-fb-acts { flex: none; display: inline-flex; gap: 6px; margin-left: auto; }
+.dgc-mp-fb .dgc-btn.small.wide { width: var(--btn-w-sm-wide); }   /* ("No fallback": the small button's wide size) */
+/* Choosing: a row that can't be the fallback (the main model, another kind of connection) steps back. */
+.dgc-mp.dgc-mp-choosing .dgc-mp-row[aria-disabled="true"] { opacity: .45; }

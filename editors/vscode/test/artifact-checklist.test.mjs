@@ -338,7 +338,7 @@ test("the Library lists it among the artifacts, with its own small sheet and a C
     assert.equal(await x.page.evaluate(() => document.querySelector(".lib-row .lib-row-thumb .dgc-sheet")?.dataset.kind), "checklist", "its own small sheet");
     assert.equal(await x.page.evaluate(() => document.querySelector(".lib-row .lib-row-thumb .dgc-sheet-tag")?.textContent), "List");
     assert.equal(await x.page.evaluate(() => document.querySelectorAll(".lib-row .lib-row-thumb .dgc-sheet .tick").length), 4, "four lines, each with its box");
-    assert.deepEqual((await x.menu("kind")).map((r) => r.label), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards", "Checklists", "Designs"]);
+    assert.deepEqual((await x.menu("kind")).map((r) => r.label), ["All", "Pages", "Spreadsheets", "Documents", "Slides", "Dashboards", "Checklists", "Designs"]);
     await x.pick("kind", "Checklists"); l = await x.lib();
     assert.deepEqual(l.rows.map((r) => r.title), ["Ship the parser"]);
     assert.equal(l.filters[0].value, "Checklists");

@@ -688,6 +688,21 @@ function pickedWords(): Record<string, unknown> | null {
   return { kind: "text", quote: quote.slice(0, MAX_QUOTE), before: doc.textBetween(Math.max(0, from - 160), from, "\n").slice(-80),
            after: doc.textBetween(to, Math.min(doc.content.size, to + 160), "\n").slice(0, 80) };
 }
+/** The page's right margin beside what is picked: from the words' column to the page's edge, where the Comment button
+ *  stands so it lies over none of the words. Null where something of the document reaches into it (a wide table). */
+function marginBeside(rect: { top: number; bottom: number }): { left: number; right: number } | null {
+  const page = document.querySelector(".cv-page") as HTMLElement | null;
+  if (!page || !view) return null;
+  const column = (view.dom as HTMLElement).getBoundingClientRect(), box = page.getBoundingClientRect();
+  const left = column.right + 2, right = box.left + page.clientLeft + page.clientWidth - 2;
+  if (!(right - left > 8)) return null;
+  const y = Math.max(box.top + 1, Math.min(box.bottom - 1, rect.bottom - 12));
+  for (const x of [left + 2, (left + right) / 2, right - 2]) {
+    const hit = document.elementFromPoint(x, y);
+    if (hit && hit !== view.dom && view.dom.contains(hit)) return null;
+  }
+  return { left, right };
+}
 function offerNow(): void {
   if (!notes || !view) return;
   const anchor = view.hasFocus() ? pickedWords() : null;
@@ -695,7 +710,8 @@ function offerNow(): void {
   const { from, to } = view.state.selection;
   try {
     const a = view.coordsAtPos(from), b = view.coordsAtPos(to);
-    notes.offer(anchor, { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) });
+    const rect = { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) };
+    notes.offer(anchor, rect, { clear: marginBeside(rect) });
   } catch { notes.hide(); }
 }
 let marksFor: { doc: any; threads: any[]; set: DecorationSet } | null = null;
@@ -745,6 +761,7 @@ function startComments(): void {
     },
     changed: (n: { open: number; all: number; threads: any[] }) => { paintRail(n); },
   });
+  document.body.dataset.comments = "on";       // (the page keeps a margin wide enough for the Comment button: media/canvas.css)
   railBtn?.addEventListener("click", () => { railChoice = !!railBox.hidden; paintRail({ open: notes.open(), all: notes.threads().length }); });
   document.querySelector(".cv-page")?.addEventListener("scroll", () => requestAnimationFrame(offerNow));
 }

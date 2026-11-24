@@ -67,6 +67,18 @@ class SdkArtifacts(unittest.TestCase):
             self.assertEqual(result.status, "completed")
             self.assertEqual(result.made_artifacts, [])
 
+    def test_checklist_and_design_are_outputs_the_clients_send(self):
+        """The editor offers Checklist and Design as outputs (capabilities.artifacts.outputs): the SDK clients send them
+        instead of refusing them before a DGC that makes them is asked."""
+        from dgc_sdk import chat, pips, session
+        for kind in ("checklist", "design"):
+            self.assertIn(kind, session.OUTPUTS)
+            self.assertIn(kind, pips.PIP_OUTPUTS)
+        self.assertIn('"checklist", "design"', Path(chat.__file__).read_text(encoding="utf-8"))
+        ts = Path(__file__).resolve().parents[1] / "sdk" / "typescript" / "src"
+        for name in ("session.ts", "chat.ts", "pips.ts"):
+            self.assertIn('"design"', (ts / name).read_text(encoding="utf-8"), name)
+
     def test_source_consent_is_version_checked_and_new_fields_are_capability_gated(self):
         from unittest.mock import patch
         store = Store(self.state / "home" / ".dgc" / "artifacts")

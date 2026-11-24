@@ -148,7 +148,7 @@ test("Work: a row's ⋯ makes it the sub-agents' fallback, and the row says Fall
   const more = a.p.more("gpt-oss:120b");
   assert.ok(more, "a ⋯ on a model DGC runs itself");
   more.click();
-  assert.deepEqual(a.p.choices().map((b) => b.textContent), ["Use as fallback"]);
+  assert.deepEqual(a.p.choices().map((b) => b.textContent), ["Use as the sub-agents’ fallback"]);
   a.p.choices()[0].click();
   assert.deepEqual(a.last("setAgentsFallback"), { type: "setAgentsFallback", provider: SPARE, model: "gpt-oss:120b" });
   assert.deepEqual(a.p.pills(), [["gpt-oss:120b", "Fallback"]], "shown at once");
@@ -157,7 +157,7 @@ test("Work: a row's ⋯ makes it the sub-agents' fallback, and the row says Fall
   a.send({ type: "agentsModel", ...AGENTS({ own: true, model: "own-coder", base_url: "https://spare.example/v1", fallback_own: true, fallback_model: "gpt-oss:120b", fallback_base_url: "https://spare.example/v1" }) });
   assert.deepEqual(a.p.pills(), [["gpt-oss:120b", "Fallback"], ["own-coder", "Main"]]);
   a.p.more("gpt-oss:120b").click();
-  assert.deepEqual(a.p.choices().map((b) => b.textContent), ["Stop using as fallback"]);
+  assert.deepEqual(a.p.choices().map((b) => b.textContent), ["Stop using as the sub-agents’ fallback"]);
   a.p.choices()[0].click();
   assert.deepEqual(a.last("setAgentsFallback"), { type: "setAgentsFallback", provider: SPARE, model: "" });
   assert.deepEqual(a.p.pills(), []);

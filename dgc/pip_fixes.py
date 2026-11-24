@@ -446,7 +446,7 @@ def _fix(db, pip_id, fix_id):
 def decide(store, pip_id, fix_id, expected_digest, allow, actor, config=None) -> dict:
     """decide_pip_fix: Allow starts the fix in its own copy; Not now leaves it as it is, and it is not asked again."""
     if actor not in LOCAL:
-        raise RegistryError("forbidden", "Only you can allow a fix, from the Pip's chat, Home or Needs attention.")
+        raise RegistryError("forbidden", "Only you can allow a fix, from the Pip's chat, Home or Needs you.")
     if type(allow) is not bool:
         raise RegistryError("invalid_request", "allow is true or false.")
     registry, db = store.registry, store.db

@@ -2264,6 +2264,8 @@
     ["spreadsheet", "Spreadsheet", "A sheet, formulas and all", "table"],
     ["page", "Page", "One self-contained web page", "browser"],
     ["dashboard", "Dashboard", "Charts over data you allow", "dashboard"],
+    ["checklist", "Checklist", "Steps, ticked off as they are done", "checklist"],
+    ["design", "Design", "Screens drawn on a canvas", "symbol-color"],
   ];
   const outputButton = $("cd-output"), outputMenu = $("cd-output-menu");
   function outputOffered(offer) {
@@ -3503,7 +3505,7 @@
       plugins: mentionData.plugins,
       outputs: artifactsOffer ? OUTPUT_CHOICES.filter(([value]) => !Array.isArray(artifactsOffer.outputs) || !artifactsOffer.outputs.length || artifactsOffer.outputs.includes(value)) : [],
       pips: mentionData.offered ? mentionData.pips.filter((p) => M.PIP_TYPES.includes(p.pip_type)).map((p) => ({ ...p, pip_id: p.id,
-        detail: typeof p.folder === "string" && p.folder ? `Works in ${p.folder}` : "For anything" })) : undefined,
+        detail: typeof p.folder === "string" && p.folder ? `Works in ${p.folder}` : "No folder" })) : undefined,
       pipsLoading: mentionData.loading, pipsError: mentionData.error, pipsEmpty: "No Pips yet",
       files: mentionData.files,
     }),

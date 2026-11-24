@@ -86,7 +86,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       await x.inPips((root) => root.querySelector("#chatText")?.focus()); await x.page.keyboard.type("@Mor");
       await x.waitIn("#chat-pop .pi");
       assert.deepEqual(await x.inPips((root) => [...root.querySelectorAll("#chat-pop .pi")].map((n) => [n.querySelector(".pi-label")?.textContent.trim(), n.querySelector(".pd")?.textContent.trim()])),
-        [["Mornings", "For anything"]]);
+        [["Mornings", "No folder"]]);
       await x.page.keyboard.press("Escape"); for (let i = 0; i < 4; i++) await x.page.keyboard.press("Backspace");
       if (PICTURES) {
         await x.inPips((root) => root.querySelector(".pipjob-from").scrollIntoView({ block: "start" }));

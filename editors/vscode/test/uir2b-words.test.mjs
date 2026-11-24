@@ -55,7 +55,18 @@ test("words: the side bar's Chat tab lists Spaces, and a space's page in ChatDGC
     assert.ok(f.rows.length >= 2 && f.rows.every((r) => /^Open the space .+: \d+ chats?$/.test(r)), JSON.stringify(f.rows));
     assert.equal(f.chats, "Chats", "its chats are still chats");
     assert.doesNotMatch(f.tab, /Project Pips/);
+    // With spaces listed, New space is the heading's button, and there is no second "New space" under it.
+    assert.deepEqual(await h.page.evaluate(() => [document.getElementById("projects-new").hidden, document.querySelectorAll("#projects-list .project-start").length]), [false, 0]);
   } finally { await h.page.close(); }
+  // With no space yet, the one "New space" is the row that says what a space is: the heading's button steps aside.
+  const none = await openHome(browser, { tab: "chat", width: 300 });
+  try {
+    await none.send({ type: "chatdgc_projects", projects: [] });
+    await none.page.waitForSelector("#projects-list .project-start");
+    const g = await none.page.evaluate(() => ({ button: getComputedStyle(document.getElementById("projects-new")).display !== "none" && !document.getElementById("projects-new").hidden,
+      row: [...document.querySelectorAll("#projects-list .project-start")].map((b) => b.textContent.trim()) }));
+    assert.deepEqual(g, { button: false, row: ["New space"] }, "the same button is never there twice");
+  } finally { await none.page.close(); }
   const c = await chat.openChat(browser, { width: 700 });
   try {
     const P = `proj_${"c".repeat(32)}`, project = { id: P, name: "Goa trip", color: "teal", instructions: "", memory: "project", chats: 2, files: [] };

@@ -20,7 +20,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
     return;
   }
   // A remote window (SSH, WSL, a container): its browser is on another computer, so a plugin sign-in waits longer.
-  setEditorEnv({ DGC_EDITOR_REMOTE: vscode.env?.remoteName || undefined });
+  // Which window this is: its own session tabs are never "another DGC window" to each other (dgc/peers.py user_line).
+  setEditorEnv({ DGC_EDITOR_REMOTE: vscode.env?.remoteName || undefined, DGC_EDITOR_WINDOW: vscode.env?.sessionId || undefined });
   // (A download's Save dialog starts in the folder of the last one: src/download.ts.)
   rememberDownloadsIn(context.globalState);
   // A link's preview card keeps what it read for a day in the extension's own folder (src/linkPreview.ts).
@@ -44,6 +45,10 @@ export function activate(context: vscode.ExtensionContext): void | object {
     return tab;
   });
   provider.useSessionsHome(tabs);
+  // A Pip chat's own tab comes back after a window reload, as Work's and ChatDGC's do (user test round 2, R1).
+  context.subscriptions.push(vscode.window.registerWebviewPanelSerializer("dgc.pipChat", {
+    deserializeWebviewPanel: async (panel: vscode.WebviewPanel, state: unknown) => { provider.restorePipChat(panel, state); },
+  }));
   // ChatDGC: chats of their own, in editor tabs, on the side bar's dgc serve; the home lists them.
   const chatdgc = new ChatDGC(context);
   chatdgc.useArtifacts(artifacts);

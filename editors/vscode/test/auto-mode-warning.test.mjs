@@ -90,3 +90,26 @@ test("in a cross-origin frame, as VS Code draws it, the Auto dialog starts at Ca
     assert.deepEqual(said.filter((t) => /autofocus/i.test(t)), []);
   } finally { await page.close(); }
 });
+
+// User test, round 2: the menu said "Approve everything" and the box listed everything DGC could do with no word of the
+// safety check, while What's new said "Everyday steps just run. A risky one stops and says why". One story, three places.
+test("auto says what it does now, in the menu and in the box: everyday steps run, a risky one stops and says why", async () => {
+  const s = await openWork(browser, { width: 360, height: 760 });
+  try {
+    await s.page.click("#btn-mode");
+    const line = await s.page.evaluate(() => [...document.querySelectorAll("#modemenu [data-mode]")].find((r) => r.dataset.mode === "auto")?.textContent || "");
+    assert.match(line, /Everyday steps run; a risky one stops/);
+    assert.doesNotMatch(line, /Approve everything/);
+    await s.page.keyboard.press("Escape");
+    await s.send({ type: "autoModePrompt", requestId: id });
+    const box = await s.page.evaluate(() => { const d = document.querySelector(".auto-mode-dialog");
+      return { intro: d.querySelector("#auto-mode-intro").textContent, check: d.querySelector(".auto-mode-check")?.textContent.replace(/\s+/g, " ").trim() || "",
+        all: d.textContent, fits: d.scrollWidth <= d.clientWidth + 1 }; });
+    assert.match(box.intro, /Everyday steps run without asking\. A risky one stops and says why/);
+    assert.match(box.check, /^The safety check stops a step that/);
+    for (const kind of ["outside your project", "passwords or keys", "deletes", "sends your data out", "changes this computer", "publishes"]) assert.ok(box.check.includes(kind), kind);
+    assert.doesNotMatch(box.all, /malicious/);
+    assert.equal(box.fits, true);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

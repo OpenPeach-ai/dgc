@@ -96,15 +96,15 @@
 }
 .dgc-menu .dgc-menu-choices { display: flex; flex-direction: column; margin: 0 0 2px 30px; padding-left: 6px; border-left: 1px solid var(--hair); }
 .dgc-menu .dgc-menu-choices .dgc-menu-row { min-height: 26px; font-size: var(--t-sm); }
-/* Main and Fallback: small words at the row's end. Main in the accent, Fallback in the red DGC uses when something
-   isn't answering, the colour the prompt box takes while the fallback answers. */
+/* Main and Fallback: small words at the row's end. Main in the accent, Fallback a quiet grey: a fallback that is set is
+   nothing wrong, and red is for errors (the prompt box turns red only while the fallback is the one answering). */
 .dgc-menu .dgc-menu-pill {
   flex: none; margin-left: auto; padding: 0 6px; border: 1px solid var(--hair-strong); border-radius: 999px;
   font: var(--w-med) var(--t-xs)/15px var(--sans); color: var(--muted); white-space: nowrap;
 }
 .dgc-menu .dgc-menu-pill + .dgc-menu-pill { margin-left: 4px; }
 .dgc-menu .dgc-menu-pill-main { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-.dgc-menu .dgc-menu-pill-fallback { color: var(--err-text); border-color: color-mix(in srgb, var(--err) 60%, transparent); }
+.dgc-menu .dgc-menu-pill-fallback { color: var(--muted); border-color: var(--hair-strong); }
 @media (prefers-reduced-motion: no-preference) {
   .dgc-menu:not([hidden]) { animation: dgc-menu-in var(--dur-menu) var(--ease-out); transform-origin: bottom left; }
   .dgc-menu.from-right:not([hidden]), .cf-right .dgc-menu:not([hidden]) { transform-origin: bottom right; }

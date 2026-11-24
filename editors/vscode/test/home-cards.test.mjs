@@ -8,7 +8,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openGrid, DEFAULT, EVERY, usageDays, WEATHER, FOLDERS, LISBON, NOTES } from "./support/home-grid-scene.mjs";
 import { DOCK_SESSIONS } from "./support/dock-scene.mjs";
-import { CHATS } from "./support/home-scene.mjs";
+import { CHATS, homeState } from "./support/home-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -338,7 +338,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       assert.equal(tiles.length, { s: 1, m: 4, l: 5 }[form("folders")], "one tile Small, up to four Medium, up to eight Large");
       assert.equal(tiles[0].name, "shop");
       for (const tile of tiles) assert.ok(tile.icon && (tile.size >= 64 ? tile.label === tile.name : tile.under === tile.name && !tile.label), `a folder's real name is on its tile's label at 64 px and up, under the tile below that (${JSON.stringify(tile)})`);
-      if (form("folders") === "s") assert.match(text("folders"), /\+4/); else assert.match(text("folders"), /14 sessions · 1 Pip/);
+      if (form("folders") === "s") assert.match(text("folders"), /4 more/); else assert.match(text("folders"), /14 sessions · 1 Pip/);
       if (form("folders") === "l") assert.ok(tiles.find((n) => n.name === "old-site").gone && /Not found/.test(text("folders")), "a folder that is gone is dimmed and says Not found");
       assert.match(text("clock"), /\b\d{1,2}:\d{2}\b/); if (form("clock") !== "s") assert.match(text("clock"), /Tokyo/);
       assert.match(text("weather"), /24°/); assert.match(text("weather"), /Lisbon/);
@@ -586,6 +586,27 @@ test("high contrast: every card has a line around it", async (t) => {
   try {
     const lines = await x.page.evaluate(() => [...document.querySelectorAll(".hc-grid > .hc-card")].map((c) => { const s = getComputedStyle(c); return parseFloat(s.borderTopWidth) >= 1 && s.borderTopColor; }));
     assert.ok(lines.length === 5 && lines.every((c) => c && !/rgba\(.*, 0(\.0\d*)?\)$/.test(c)), `each card's border is a solid line (${lines.join(" ")})`);
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+});
+
+test("Recent is newest first: a reply nobody saw days ago keeps its New mark but never hides what you did today", async (t) => {
+  if (skipOrFail(t)) return;
+  // User test round 2, H7: three unread items from days before filled Recent's rows, tagged New, and that day's session
+  // and chat were not on the card at all (new items came first whatever their age, and an unseen reply's age restarted
+  // at every reload).
+  const pad = (n) => String(n).padStart(2, "0"), d = new Date(), stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const sessions = DOCK_SESSIONS.map((s, k) => (k === 0 ? { ...s, when: stamp, running: false } : s));
+  const old = [{ id: DOCK_SESSIONS[3].id, at: new Date(2026, 10, 4, 18, 30).getTime(), preview: "The totals now round half up." }];
+  const x = await openGrid(browser, { width: 460, news: old, sessions, state: homeState("quiet") });
+  try {
+    const rows = await x.page.evaluate(() => [...document.querySelectorAll('.hc-grid .hc-card[data-card="recent"] .hc-li')].filter((r) => r.checkVisibility())
+      .map((r) => ({ key: r.dataset.open, fresh: r.classList.contains("hc-new") })));
+    assert.ok(rows.length >= 2, `Recent shows rows (${JSON.stringify(rows)})`);
+    assert.equal(rows[0].key, `work:${DOCK_SESSIONS[0].id}`, `today's session comes first (${JSON.stringify(rows)})`);
+    const reply = rows.findIndex((r) => r.key === `hub:work:${DOCK_SESSIONS[3].id}`);
+    if (reply >= 0) assert.equal(rows[reply].fresh, true, "the old unseen reply keeps its New mark where it falls");
+    assert.match(await x.page.locator('.hc-grid .hc-card[data-card="recent"] .hc-ch').innerText(), /1 new/, "and the card still says one thing is new");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });

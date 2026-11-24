@@ -824,7 +824,7 @@ export function sourceWithExcludes(value,list){
  const p=sourcePolicy(value);if(p.mode==='personal')throw new Error('Personal Pips have no project source.');
  const next={mode:p.mode,exclusions:'safe_source_v2'};if(list.length)next.exclude=sourceExcludes(list);return sourcePolicy(next);
 }
-export function sourcePolicyLabel(value){try{if(sourcePolicy(value).mode==='personal')return 'Personal · no project access';return sourcePolicy(value).mode==='current_tree'?'Your current files · only when you ask':'Committed code';}catch{return 'Not supported here';}}
+export function sourcePolicyLabel(value){try{if(sourcePolicy(value).mode==='personal')return 'No folder · no project files';return sourcePolicy(value).mode==='current_tree'?'Your current files · only when you ask':'Committed code';}catch{return 'Not supported here';}}
 export function sourceSnapshot(value){
  const integer=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
  if(record(value)&&value.exclusions==='safe_source_v2'){

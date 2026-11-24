@@ -98,7 +98,7 @@ for (const width of [300, 700]) {
       assert.ok(hub.cards.length >= 4, "Home has its cards");
       const heard = /^Home: (\d+) needs? you, (\d+) new$/.exec(tab(bar, "home").label);
       assert.ok(heard, `a screen reader hears which is which (${tab(bar, "home").label})`);
-      assert.equal(Number(heard[1]) + Number(heard[2]), hub.cards.length, "its two counts are every card");
+      assert.ok(Number(heard[1]) + Number(heard[2]) >= hub.cards.length, "its two counts cover every card (a card that stands for two things counts two)");
       assert.equal(tab(bar, "home").count, heard[1], "Home's number is how many need you");
       assert.equal(heard[1], hub.groups.find((g) => g.id === "needs").count, "the Needs you group's own count");
       assert.equal(bar.overflowX, false);
@@ -274,7 +274,8 @@ for (const width of [300, 700]) {
       assert.deepEqual(hub.groups[0].cards.map((c) => c.key), [WORK_WAITS, WORK_NO_WINDOW, PIP_WAITS, PIP_NEW]);
       // What is new: a finished session, a chat's answer, Pips' messages, a Pip's failed run.
       assert.deepEqual(hub.groups[1].cards.map((c) => c.key).sort(), [CHAT_DONE, PIP_FAILED, PIP_READ_1, PIP_READ_2, WORK_DONE].sort());
-      assert.deepEqual([hub.groups[0].count, hub.groups[1].count], ["4", "5"], "each group says how many");
+      // (Mail watch's card stands for 2 things: the number counts the things, as the Pips tab's Needs you does. Four cards, five things.)
+      assert.deepEqual([hub.groups[0].count, hub.groups[1].count], ["5", "5"], "each group says how many: what needs you is counted by the thing, never by the card");
       // Each says where it is from, and what it wants in a sentence.
       assert.match(by[WORK_WAITS].from, /^Plan the 0\.52 release notes · Work · /); assert.equal(by[WORK_WAITS].title, "Wants your okay to go on");
       assert.match(by[WORK_NO_WINDOW].from, /^Nightly export, second try · Work · /); assert.match(by[WORK_NO_WINDOW].title, /running, with no window/); assert.ok(by[WORK_NO_WINDOW].chips.includes("Running the export"));
@@ -283,7 +284,7 @@ for (const width of [300, 700]) {
       assert.match(by[PIP_WAITS].from, /^Mail watch · Pip/); assert.equal(by[PIP_WAITS].title, "2 things are waiting for you"); assert.deepEqual(by[PIP_WAITS].chips, ["Email · 2", "3 new"]);
       assert.match(by[PIP_NEW].from, /^Receipts · New Pip/); assert.equal(by[PIP_NEW].title, "Create the Pip Receipts?"); assert.deepEqual(by[PIP_NEW].chips, ["Gmail · Mondays 9:00"]);
       assert.match(by[PIP_READ_1].from, /^Morning brief · Pip/); assert.equal(by[PIP_READ_1].title, "Five bullets for this morning, each with its link.");
-      assert.match(by[PIP_FAILED].from, /^Billing review · Project Pip/); assert.equal(by[PIP_FAILED].title, "1 run failed");
+      assert.match(by[PIP_FAILED].from, /^Billing review · Pip/); assert.doesNotMatch(Object.values(by).map((c) => c.from).join(" "), /Project Pip|Personal/, "one kind of Pip"); assert.equal(by[PIP_FAILED].title, "1 run failed");
       // Where each is from: a Pip's face, a session's mark (a Voxel for Work, a Mote for Chat).
       assert.deepEqual([WORK_WAITS, WORK_NO_WINDOW, WORK_DONE].map((k) => by[k].who), ["mark:voxel", "mark:voxel", "mark:voxel"], "a Work session's card has its Voxel");
       assert.equal(by[CHAT_DONE].who, "mark:mote", "a chat's card has its Mote");
@@ -310,9 +311,9 @@ for (const width of [300, 700]) {
         assert.ok(a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5, `${a.key} and ${b.key} do not overlap`);
       }
       assert.equal(new Set(cards.map((c) => Math.round(c.left))).size, width === 300 ? 1 : 2, width === 300 ? "one column in a narrow side bar" : "two columns in a wide one");
-      // Home's number counts the four that need you; the five that are new are in its words.
-      assert.equal(tab(await x.tabs(), "home").count, "4");
-      assert.equal(tab(await x.tabs(), "home").label, "Home: 4 need you, 5 new");
+      // Home's number counts the five things that need you (four cards, one of them for two); the five that are new are in its words.
+      assert.equal(tab(await x.tabs(), "home").count, "5");
+      assert.equal(tab(await x.tabs(), "home").label, "Home: 5 need you, 5 new");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
@@ -351,9 +352,9 @@ test("a card's answers: Open, Review, Mark read and Dismiss each do their one th
     await x.page.waitForFunction((key) => !document.querySelector(`.dgc-hub-card[data-key="${key}"]`), PIP_FAILED);
     const seen = (await x.posted("pipsRequest")).filter((m) => m.request.type === "mark_pip_news_seen");
     assert.deepEqual(seen.map((m) => m.request.pip_ids), [[pipId("e")]]);
-    { const h = await x.hub(), needs = h.groups.find((g) => g.id === "needs")?.cards.length || 0, t = tab(await x.tabs(), "home");
+    { const h = await x.hub(), group = h.groups.find((g) => g.id === "needs"), needs = Number(group?.count) || 0, fresh = h.cards.length - (group?.cards.length || 0), t = tab(await x.tabs(), "home");
       assert.equal(t.count, needs ? String(needs) : "", "Home's number is still what needs you");
-      assert.equal(t.label, `Home: ${[needs ? `${needs} ${needs === 1 ? "needs" : "need"} you` : "", h.cards.length - needs ? `${h.cards.length - needs} new` : ""].filter(Boolean).join(", ")}`, "and its words follow the card that went"); }
+      assert.equal(t.label, `Home: ${[needs ? `${needs} ${needs === 1 ? "needs" : "need"} you` : "", fresh ? `${fresh} new` : ""].filter(Boolean).join(", ")}`, "and its words follow the card that went"); }
     // A Pip with things waiting: Review opens it in Pips, on the Pips tab.
     await act(PIP_WAITS, "open");
     await x.page.waitForFunction(() => document.getElementById("pips-host").checkVisibility());
@@ -378,7 +379,7 @@ test("Clear, beside New, clears everything new and leaves what needs you", async
     assert.deepEqual(hub.cards.find((c) => c.key === PIP_WAITS).chips, ["Email · 2"], "its new messages were read too");
     const asked = (await x.posted("pipsRequest")).map((m) => m.request.type);
     assert.ok(asked.includes("mark_pip_news_seen") && asked.filter((a) => a === "mark_pip_read").length === 3, "the Pips' news is dismissed and their messages marked read");
-    assert.equal(tab(await x.tabs(), "home").count, "4");
+    assert.equal(tab(await x.tabs(), "home").count, "5");
   } finally { await x.close(); }
 });
 

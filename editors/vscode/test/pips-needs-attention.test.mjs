@@ -83,7 +83,7 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
  const section=x.d.querySelector('.attention');assert.ok(section,'Needs attention is on the home');
  assert.ok(section.compareDocumentPosition(x.d.querySelector('.simple-home'))&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'above Your Pips');
  // (13 Nov: the heading is words and its count; the fold is the quiet word at the line's end, with no chevron.)
- assert.match(section.querySelector('h2.attention-title').textContent,/^Needs attention\s*3$/);
+ assert.match(section.querySelector('h2.attention-title').textContent,/^Needs you\s*3$/);
  assert.equal(section.querySelector('.attention-head svg, .attention-head .codicon, .attention-fold'),null,'no chevron on the heading');
  assert.deepEqual([section.querySelector('.attention-toggle').textContent,section.querySelector('.attention-toggle').getAttribute('aria-label'),section.querySelector('.attention-toggle').id,section.querySelector('.attention-toggle').getAttribute('aria-controls')],['Hide','Hide the cards that need your attention','attention-toggle','attention-list']);
  assert.equal(section.querySelector('.attention-head').lastElementChild,section.querySelector('.attention-toggle'),'the last thing on the heading\'s line');
@@ -144,7 +144,7 @@ test('a new Pip waiting shows once, as a card in Needs attention, and a link to 
  assert.equal(x.d.querySelectorAll('[data-setup-card]').length,1,'once');
  assert.equal(card.querySelector('.dgc-card-title').textContent,'Create the Pip “Blog writer”?');
  assert.equal(card.querySelector('.dgc-card-sub').textContent,'Draft a post for review.');
- assert.deepEqual([...card.querySelectorAll('.dgc-chip:not(.dgc-chip-more)')].map(c=>c.textContent),['Scout','Personal','Only when you ask']);
+ assert.deepEqual([...card.querySelectorAll('.dgc-chip:not(.dgc-chip-more)')].map(c=>c.textContent),['Scout','No folder','Only when you ask']);
  assert.deepEqual([...card.querySelectorAll('.dgc-card-actions > button')].map(b=>b.textContent),['Review','Reject']);
  assert.equal(x.d.activeElement,card.querySelector('[data-setup]'),'the keyboard is on Review');
  assert.equal(x.d.querySelector(`.attention-row[data-attention="setup:${SETUP}"]`),null,'not a second row beside its card');
@@ -337,7 +337,7 @@ test('View all opens a page of its own with every card, one under another; Back 
  const bar=x.d.querySelector('.pip-topbar');assert.ok(bar,'the Pips view’s own top bar');
  const back=bar.querySelector('#attention-all-back');
  assert.equal(back.getAttribute('aria-label'),'Your Pips');assert.equal(back.title,'Your Pips');
- assert.equal(bar.querySelector('.pip-pill span').textContent,'Needs attention');
+ assert.equal(bar.querySelector('.pip-pill span').textContent,'Needs you');
  assert.equal(bar.querySelector('.attention-all-count').textContent,'9');
  assert.equal(bar.querySelector('.attention-all-count').getAttribute('aria-label'),'9 waiting for you');
  assert.equal(x.d.querySelector('.simple-content').dataset.view,'attention-all');

@@ -179,6 +179,11 @@ _CORE_FIELDS = frozenset({"pid", "proc_start", "kind", "session", "cwd", "projec
                           "git_common_dir", "status", "takeover", "heartbeat", "sessions"})
 
 
+def editor_window() -> str:
+    """The editor window that started this process, as the editor named it (DGC_EDITOR_WINDOW), or ""."""
+    return str(os.environ.get("DGC_EDITOR_WINDOW") or "").strip()[:64]
+
+
 def note_dir(owner) -> Path:
     """The peers folder `owner` (a session, a host, a terminal) writes its note in: the one of the DGC
     home it first wrote in, kept on it. A process has one home, so this changes nothing for a person;
@@ -236,6 +241,11 @@ def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str =
         for key, value in (extra or {}).items():
             if isinstance(key, str) and key not in _CORE_FIELDS and len(key) <= 64:
                 record[key] = value
+        # Which editor window started this process (the editor says so to every `dgc serve` it starts): its own
+        # session tabs are never "another DGC" to the person. A terminal's DGC names none.
+        window = editor_window()
+        if window:
+            record["window"] = window
         if sessions:
             record["sessions"] = [
                 {"session": str(item.get("session") or "")[:4096],
@@ -395,30 +405,44 @@ def _running_a_turn(peer: dict) -> bool:
     return any(str(place.get("status") or "") == "working" for place in _places(peer))
 
 
+def _elsewhere(peer: dict) -> bool:
+    """Whether a peer is somewhere the person would call "another": never a chat of this same process, and never a
+    session tab of the editor window that started this one."""
+    if peer.get("pid") == os.getpid():
+        return False
+    mine = editor_window()
+    return not (mine and str(peer.get("window") or "") == mine)
+
+
 def user_line(peers: list[dict]) -> str:
     """One line for the person. Empty when nothing is worth saying. "Working" only for one running a turn (live test
-    14 Nov: four idle tabs read "4 other DGCs are working in this folder"); one that holds a chat has it open."""
+    14 Nov: four idle tabs read "4 other DGCs are working in this folder"); one that holds a session has it open.
+    Nothing is said of this window's own session tabs (user test 24 Nov: a second tab read "1 other DGC has a chat open
+    in this folder", as if a stranger were in the folder); the model is still told (model_line). A DGC an editor
+    started is "a DGC window"."""
+    peers = [p for p in peers if _elsewhere(p)]
     live = [p for p in peers if p.get("liveness") == "live"]
     unsure = [p for p in peers if p.get("liveness") == "unknown"]
     if not live and not unsure:
         return ""
+    noun = "DGC window" if all(p.get("window") for p in live + unsure) else "DGC"
+
     def count(n: int) -> str:
-        return "1 other DGC" if n == 1 else f"{n} other DGCs"
+        return f"Another {noun}" if n == 1 else f"{n} other {noun}s"
 
     if live and not unsure:
         busy = [p for p in live if _running_a_turn(p)]
         open_ = len(live) - len(busy)
         if not busy:
-            return f"{count(open_)} {'has' if open_ == 1 else 'have'} a chat open in this folder."
+            return f"{count(open_)} {'has' if open_ == 1 else 'have'} a session open in this folder."
         line = f"{count(len(busy))} {'is' if len(busy) == 1 else 'are'} working in this folder"
-        return line + (f", and {open_} more {'has' if open_ == 1 else 'have'} a chat open." if open_ else ".")
+        return line + (f", and {open_} more {'has' if open_ == 1 else 'have'} a session open." if open_ else ".")
     if unsure and not live:
         return f"{count(len(unsure))} may still be working in this folder."
     return (f"{count(len(live))} {'is' if len(live) == 1 else 'are'} working in this folder, "
             f"and {len(unsure)} more may be.")
 
 
-# ---------------------------------------------------------------- takeover ---
 # A refusal with no way out is the whole reason this exists: a window whose editor closed mid-turn
 # holds the session lease forever, because the watchdog that would end an abandoned backend counts
 # "a turn is running" as work worth staying alive for. The registry already knows who is holding

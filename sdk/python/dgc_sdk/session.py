@@ -332,7 +332,7 @@ def _same_command(left: str, right: str) -> bool:
     return " ".join(str(left or "").split()) == " ".join(str(right or "").split())
 
 
-OUTPUTS = ("auto", "document", "slides", "spreadsheet", "page", "dashboard")
+OUTPUTS = ("auto", "document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design")
 API_MODES = ("auto", "ollama", "anthropic", "chat_completions", "responses")
 SESSION_THINKING = ("off", "low", "medium", "high", "xhigh")
 

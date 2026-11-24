@@ -388,3 +388,28 @@ test("the host hands Settings the table with the config, saves both keys only to
   assert.match(panel, /msg\?\.type === "devModeWarned"\) \{[^}]*globalState\.update\(DEV_WARNED_KEY, true\)/s, "the warning shows once in this editor");
   assert.match(panel, /"dev_mode", "dev_limits"[,\]]/, "asked for with the config's other opt-in fields");
 });
+
+// User test, round 2: Dev Mode switched on and then off again, nothing saved, and "Unsaved changes on Dev Mode" stayed.
+test("a change put back is not an unsaved change: the line clears, and comes back with the next real change", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, errors, close } = await open({ ...DEV, dev_mode: false, dev_mode_warned: true });
+  try {
+    const line = () => p.textContent("#save-status");
+    assert.equal(await line(), "");
+    await p.click("#dev_mode");
+    assert.match(await line(), /Unsaved changes on Dev Mode/);
+    await p.click("#dev_mode");
+    assert.equal(await line(), "", "switched back: nothing to save");
+    await p.click("#dev_mode"); await p.waitForSelector("#settings-dev-limits");
+    await p.fill("#dev_limit_pip_computers", "40");
+    await p.fill("#dev_limit_pip_computers", "");
+    await p.click("#dev_mode");
+    assert.equal(await line(), "", "a number typed and taken out again, then the switch back: still nothing to save");
+    await p.click('[data-nav="models"]'); await p.waitForSelector("#fallback_model");
+    await p.fill("#fallback_model", "some-model");
+    assert.match(await line(), /Unsaved changes on Models/);
+    await p.fill("#fallback_model", "");
+    assert.equal(await line(), "", "a box typed in and emptied again");
+    assert.deepEqual(errors, []);
+  } finally { await close(); }
+});

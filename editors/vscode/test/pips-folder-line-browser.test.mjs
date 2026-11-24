@@ -82,7 +82,7 @@ for (const where of ["side", "tab"]) for (const theme of ["dark-modern", "light-
       assert.equal(m.standIn, 0, "no stand-in heading line");
       // The heading comes under it: words and the count, at the left, no button and no mark.
       assert.ok(m.heading, "Needs attention is drawn");
-      assert.deepEqual([m.heading.tag, m.heading.words, m.heading.button, m.heading.marks, m.heading.drawn], ["H2", "Needs attention 1", false, 0, "none,none,none,none"], "a heading in words, with no chevron anywhere on its line");
+      assert.deepEqual([m.heading.tag, m.heading.words, m.heading.button, m.heading.marks, m.heading.drawn], ["H2", "Needs you 1", false, 0, "none,none,none,none"], "a heading in words, with no chevron anywhere on its line");
       assert.ok(m.heading.underPick >= 6, `under the dropdown's line, clear of it: ${m.heading.underPick}`);
       assert.ok(Math.abs(m.heading.left) <= 0.5 && m.heading.countAfterWords >= 0 && m.heading.countAfterWords <= 12, `the heading and its count at the left: ${JSON.stringify(m.heading)}`);
       // The fold: a quiet word at the line's right end.
@@ -140,7 +140,7 @@ for (const where of ["side", "tab"]) for (const [theme, width] of [["dark-modern
       await x.inPips((root) => root.querySelector("#attention-toggle").click()); await said("false"); await settle(x.page);
       let m = await read(x);
       assert.deepEqual([m.fold.words, m.fold.label, m.fold.expanded, m.fold.controls, m.fold.list, m.fold.cards], ["Show", "Show the cards that need your attention", "false", "attention-list", false, 0], "folded: the word says Show");
-      assert.deepEqual([m.heading.words, m.heading.marks, m.heading.drawn], ["Needs attention 1", 0, "none,none,none,none"], "the heading and its count stay, with no mark");
+      assert.deepEqual([m.heading.words, m.heading.marks, m.heading.drawn], ["Needs you 1", 0, "none,none,none,none"], "the heading and its count stay, with no mark");
       assert.ok(m.fold.right >= -0.5 && m.fold.right <= 0.5 && m.fold.sameLine <= 1.5 && m.fold.colour, `the word is where it was: ${JSON.stringify(m.fold)}`);
       assert.ok(Math.abs(m.pick.top - before.pick.top) <= 0.5 && Math.abs(m.pick.left) <= 0.5, "the dropdown has not moved");
       assert.deepEqual(low(await pipsContrast(x.page)), []);
@@ -174,7 +174,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
     try {
       const m = await read(x);
       assert.equal(m.pick, null, "Personal Pips are never filtered");
-      assert.deepEqual([m.heading.tag, m.heading.words, m.heading.button, m.heading.marks, m.heading.drawn], ["H2", "Needs attention 1", false, 0, "none,none,none,none"]);
+      assert.deepEqual([m.heading.tag, m.heading.words, m.heading.button, m.heading.marks, m.heading.drawn], ["H2", "Needs you 1", false, 0, "none,none,none,none"]);
       assert.deepEqual([m.fold.words, m.fold.label, m.fold.expanded, m.fold.colour], ["Hide", "Hide the cards that need your attention", "true", true]);
       assert.ok(m.fold.right >= -0.5 && m.fold.right <= 0.5 && m.fold.sameLine <= 1.5, JSON.stringify(m.fold));
       assert.deepEqual(m.cardTitles, ["Send this morning's brief to the team?"]);
@@ -196,14 +196,14 @@ for (const where of ["side", "tab"]) {
         return { m, seen: seen.sort() }; };
       let c = await cards();
       assert.equal(await asked(), "all");
-      assert.deepEqual([c.m.heading.words, c.m.tabCount, c.seen], ["Needs attention 2", "2", ["Email the planting plan to the allotment group?", "Send the checkout review to the shop team?"]], "All projects: every project's cards");
+      assert.deepEqual([c.m.heading.words, c.m.tabCount, c.seen], ["Needs you 2", "2", ["Email the planting plan to the allotment group?", "Send the checkout review to the shop team?"]], "All projects: every project's cards");
       assert.ok(c.m.fold.viewAll >= 0, "View all, then the fold's word at the very end");
       await choose(x, GARDEN, "garden"); await until(x, (root) => root.querySelector(".attention-count")?.textContent === "1");
       c = await cards();
-      assert.deepEqual([c.m.heading.words, c.m.tabCount, c.seen, c.m.rows], ["Needs attention 1", "1", ["Email the planting plan to the allotment group?"], ["Bed planner"]], "one folder: its own card, its own Pips");
+      assert.deepEqual([c.m.heading.words, c.m.tabCount, c.seen, c.m.rows], ["Needs you 1", "1", ["Email the planting plan to the allotment group?"], ["Bed planner"]], "one folder: its own card, its own Pips");
       await choose(x, HERE, "shop"); await until(x, (root) => /checkout review/.test(root.querySelector(".attention-list")?.textContent || ""));
       c = await cards();
-      assert.deepEqual([c.m.heading.words, c.m.tabCount, c.seen], ["Needs attention 1", "1", ["Send the checkout review to the shop team?"]]);
+      assert.deepEqual([c.m.heading.words, c.m.tabCount, c.seen], ["Needs you 1", "1", ["Send the checkout review to the shop team?"]]);
       // A folder with no Pips workspace: this DGC answers with this window's project's card. None of it shows here.
       await choose(x, NOTES, "notes"); await x.page.waitForTimeout(250); await settle(x.page);
       c = await cards();
@@ -214,7 +214,7 @@ for (const where of ["side", "tab"]) {
       await x.inPips((root) => root.querySelector("#pips-tab-personal").click());
       await until(x, (root) => root.querySelector("#pips-tab-personal")?.getAttribute("aria-selected") === "true" && !!root.querySelector("#attention-toggle"));
       const personal = await read(x);
-      assert.deepEqual([personal.heading.words, personal.cardTitles, personal.tabCount], ["Needs attention 1", ["Send this morning's brief to the team?"], ""]);
+      assert.deepEqual([personal.heading.words, personal.cardTitles, personal.tabCount], ["Needs you 1", ["Send this morning's brief to the team?"], ""]);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });

@@ -2996,14 +2996,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           this.ask({ tab, kind: "action" }, { ...base, op: "run", ...edited });
           return;
         }
-        const { pips, error } = await this.personalPips();
+        const { pips, error } = await this.everyPip();
         if (!pips.length) {
           this.post(tab, { type: "actionIdle", actionId });
-          void vscode.window.showInformationMessage(error || "You have no Personal Pips yet. Make one in Pips, then hand this to it.");
+          void vscode.window.showInformationMessage(error || "You have no Pips yet. Make one in Pips, then hand this to it.");
           return;
         }
         const choice = await vscode.window.showQuickPick(pips.map((p: any) => ({ label: `$(hubot) ${String(p.name || "Pip")}`,
-          description: String(p.goal || "").slice(0, 80), id: String(p.id) })), { placeHolder: "Hand this to one of your Pips" });
+          description: [String(p.folder || "").slice(0, 40), String(p.goal || "").slice(0, 80)].filter(Boolean).join(" · "),
+          id: String(p.id) })), { placeHolder: "Hand this to one of your Pips" });
         if (!choice) { this.post(tab, { type: "actionIdle", actionId }); return; }
         this.ask({ tab, kind: "action" }, { ...base, op: "hand", pip_id: choice.id });
         return;
@@ -3240,8 +3241,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private recentWaiting: ((files: any[]) => void)[] = [];
   private pipsWaiting: ((answer: { pips: any[]; error: string }) => void)[] = [];
 
-  /** Your Personal Pips, for "Hand it to a Pip" (none, and why, when Pips are off or don't answer). */
-  private personalPips(): Promise<{ pips: any[]; error: string }> {
+  /** Every Pip, for "Hand it to a Pip", each with the folder it works in (none, and why, when Pips are off or don't
+   * answer). */
+  private everyPip(): Promise<{ pips: any[]; error: string }> {
     return new Promise((resolve) => {
       const requestId = this.nextId("pips");
       this.requests.set(requestId, { kind: "pips" });

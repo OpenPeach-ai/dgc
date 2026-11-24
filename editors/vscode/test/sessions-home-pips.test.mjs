@@ -95,8 +95,8 @@ test("the Pips that need you and the ones with news are cards on Home, each with
     assert.deepEqual(m.map((c) => c.answers), [["Review"], ["Open"]], "an older DGC keeps no dismiss: one answer each");
     const loaded = await page.evaluate(() => [...document.querySelectorAll("#home-hub .dgc-plush-rig > image:first-child")].every((i) => new URL(i.getAttribute("href"), document.baseURI).pathname === "/ext/media/pips/plush-bodies.webp"));
     assert.equal(loaded, true, "the real faces");
-    assert.equal(await page.evaluate(() => document.getElementById("side-tab-home-count").textContent), "1", "Home's number: the one that needs you");
-    assert.equal(await page.getAttribute("#side-tab-home", "aria-label"), "Home: 1 needs you, 1 new", "the one with news is in its words");
+    assert.equal(await page.evaluate(() => document.getElementById("side-tab-home-count").textContent), "2", "Home's number: the two things that Pip waits on you for");
+    assert.equal(await page.getAttribute("#side-tab-home", "aria-label"), "Home: 2 need you, 1 new", "the one with news is in its words");
     await page.click('#home-hub .dgc-hub-card:has-text("India Market Brief") [data-hub-act="open"]');
     await page.waitForFunction(() => !document.getElementById("pips-host").hidden);
     assert.equal(await page.evaluate(() => document.getElementById("sessions-host").hidden), true, "the Pips view opens in Home's place");

@@ -564,7 +564,7 @@ class PersonalRunFormatTests(unittest.TestCase):
                     "source_policy": {"mode": "personal"}}
         text = pip_cli._format({"run": {"id": "run_" + "a" * 32, "status": "queued", "pip_id": "pip_" + "b" * 32,
                                         "manifest": manifest}})
-        self.assertIn("Personal · no project access", text)
+        self.assertIn("No folder · no project files", text)
         self.assertNotIn("None", text)
 
 

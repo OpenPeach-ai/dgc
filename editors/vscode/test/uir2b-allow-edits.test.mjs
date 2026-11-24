@@ -128,7 +128,8 @@ for (const theme of ["dark", "light"]) for (const width of [300, 440, 700]) {
       assert.equal(f.title, "Always allowed");
       // (Only what is always allowed: a deny is not something Always allow made.)
       assert.deepEqual(f.rows.map((r) => [r.words, r.detail, r.remove, r.label]), [["Always allow edits in this project", ROOT, "Remove", "Remove: Always allow edits in this project"],
-        ["Always allow commands that start with npm test", "Bash(npm test:*)", "Remove", "Remove: Always allow commands that start with npm test"]]);
+        // (Its own line, "Bash(npm test:*)", is no longer shown under the words: user test 2, S7.)
+        ["Always allow commands that start with npm test", "", "Remove", "Remove: Always allow commands that start with npm test"]]);
       for (const r of f.rows) { assert.ok(r.button.right <= r.row.right + 1 && r.button.left >= r.row.left, "Remove is inside its row"); assert.notEqual(r.radius, "999px"); }
       assert.ok(f.sideways <= 0, "the page doesn't scroll sideways");
       await x.page.click("#security-rules [data-rule-remove]");

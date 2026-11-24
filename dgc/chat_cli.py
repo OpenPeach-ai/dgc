@@ -65,7 +65,7 @@ def parser() -> argparse.ArgumentParser:
                    help="an incognito chat: never saved, listed or remembered")
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="attach a file (up to 10)")
     p.add_argument("--json", action="store_true", help="print the reply, list or export as JSON")
-    p.add_argument("--make", choices=("document", "slides", "spreadsheet", "page", "dashboard"),
+    p.add_argument("--make", choices=("document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design"),
                    help="what the reply should make (DGC's Artifact chip); you open it with dgc artifacts open")
     return p
 
@@ -349,7 +349,7 @@ def _repl(client: ChatClient, opened: dict, args, out: TextIO, styled: bool,
                     _export(client, chat_id, rest or None, False, out)
                 elif word == "/make":
                     kind, _, ask = rest.partition(" ")
-                    kinds = ("document", "slides", "spreadsheet", "page", "dashboard")
+                    kinds = ("document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design")
                     if kind not in kinds or not ask.strip():
                         out.write(f"/make {'|'.join(kinds)} TEXT\n")
                     else:

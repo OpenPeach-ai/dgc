@@ -16,7 +16,8 @@ import type { Bridge } from "./wslBridge";
 
 /** What every `dgc serve` this window starts is told about the window (setEditorEnv): DGC_EDITOR_REMOTE names a
  *  remote window's kind (vscode.env.remoteName: ssh-remote, wsl, dev-container…), so a plugin sign-in, whose browser
- *  is then on another computer, waits ten minutes for it instead of two (dgc/mcp.py remote_session). */
+ *  is then on another computer, waits ten minutes for it instead of two (dgc/mcp.py remote_session).
+ *  DGC_EDITOR_WINDOW names the window itself (vscode.env.sessionId), so its own session tabs know each other. */
 const editorEnv: Record<string, string> = {};
 export function setEditorEnv(values: Record<string, string | undefined>): void {
   for (const [key, value] of Object.entries(values)) {

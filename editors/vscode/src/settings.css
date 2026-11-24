@@ -293,11 +293,16 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
 
 /* ---- Narrow tabs ---- */
 @media(max-width:860px){.examples{grid-template-columns:1fr}.example{min-height:0}.hero{flex-wrap:wrap}.hero .actions{margin-left:0}.page-heading{flex-wrap:wrap}.page-heading>.actions{margin-bottom:16px}.directory-grid{grid-template-columns:1fr}.directory-toolbar .search{flex-basis:100%}}
-/* Narrow tabs keep every page reachable in an icon rail. Rows put controls under their words. */
+/* Narrow tabs keep every page reachable. A half-width tab (520 to 620 px) keeps each section's name beside its icon,
+   in a slimmer list (user test 2, S5: twelve icons with no words, each clicked to find Models); under 520 px there is
+   room for the icons alone (a page such as Token usage needs the width), each named on hover. Rows put controls under their words. */
 @media(max-width:620px){
-  .sidebar,.collapsed .sidebar{width:54px}
-  .sidebar nav button,.collapsed .sidebar nav button{padding:0;justify-content:center}
-  .sidebar .nav-text,.sidebar .nav-head{display:none}
+  .sidebar{width:150px;padding:10px 8px}
+  .sidebar nav button{padding:0 6px;gap:7px}
+  .sidebar .nav-head{display:none}
+  .sidebar .nav-text{overflow:hidden;text-overflow:ellipsis}
+  /* (Folded to icons by the reader: it stays folded.) */
+  .collapsed .sidebar{width:54px;padding:12px}.collapsed .sidebar nav button{padding:0;justify-content:center}
   main{padding:10px 12px 0}
   .field{flex-wrap:wrap;gap:8px}.field>span:first-child,.field>.words{flex-basis:100%}
   .field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control,.field>.wait-control,.field>.ctx-combo{width:100%;max-width:none}
@@ -309,6 +314,11 @@ details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;
   .field>.model-choice{width:100%;max-width:none}
   .voice-model{flex-wrap:wrap}.voice-model .actions{width:100%;justify-content:flex-start}
   .voice-installing{grid-template-columns:1fr auto}.voice-installing .voice-said{grid-column:1/-1;grid-row:2}
+}
+@media(max-width:519px){
+  .sidebar,.collapsed .sidebar{width:54px;padding:12px}
+  .sidebar nav button,.collapsed .sidebar nav button{padding:0;justify-content:center}
+  .sidebar .nav-text,.collapsed .sidebar .nav-text{display:none}
 }
 /* ---- Dev Mode: a warning shown once, and a group of limits (each a name, its cost, today's default, a number box) ---- */
 .dev-control{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:none}

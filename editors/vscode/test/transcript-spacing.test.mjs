@@ -1024,6 +1024,11 @@ for (const width of WIDTHS) {
           assert.equal(await bubble.getAttribute("data-fold"), "open");
         }
         await panel.settle(); await toBottom(panel); await panel.settle();
+        // Measured with the prompt in its own place: stuck at the top it is one line, and the room it gives up is a
+        // margin under it (its rhythm in the transcript is its rhythm in place).
+        await panel.page.evaluate(() => { const log = document.getElementById("log"), box = log.querySelectorAll(".turn")[1];
+          log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop += box.getBoundingClientRect().top - log.getBoundingClientRect().top - 40; });
+        await panel.settle();
         const m = await measure(panel);
         assertSpacing(m, `${state} long prompt at ${width}px`);
         assert.deepEqual(around(m, TWELVE), { above: ABOVE_PROMPT, below: BETWEEN_BLOCKS },

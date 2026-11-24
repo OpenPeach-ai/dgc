@@ -505,7 +505,10 @@ test("the main agent's row and card: the chat's name, its model and what is in c
   p.open();
   const root = p.row("root");
   assert.equal(root.querySelector(".am-desc").textContent, "Harden the auth flow");
-  assert.equal(root.querySelector(".am-meta").textContent, "qwen3.8:27b · 464.4k tokens in context");
+  // (Its model last and whole, as on a helper's row; what is in context before it, which gives way whole where the row
+  // is narrow, never cut mid-word: "55.3k t…", user test 2, W18.)
+  assert.equal(root.querySelector(".am-meta").textContent, "464.4k tokens in context · qwen3.8:27b");
+  assert.equal(root.querySelector(".am-meta-where").textContent, "qwen3.8:27b");
   assert.equal(root.querySelector(".agent-dot").dataset.state, "running", "green while the turn runs");
   root.click();
   assert.equal(p.$("agent-card-title").textContent, "Harden the auth flow");

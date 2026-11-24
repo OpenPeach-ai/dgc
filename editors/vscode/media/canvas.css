@@ -47,6 +47,8 @@ body { margin: 0; padding: 0; background: var(--vscode-editor-background); color
 .cv-page { flex: 1; overflow-y: auto; }
 .cv-editor { max-width: 760px; margin: 0 auto; padding: 36px 48px 30vh; }
 @media (max-width: 600px) { .cv-editor { padding: 24px 18px 30vh; } }
+/* (A document with comments keeps a right margin the Comment button's mark fits in, so it never lies over words.) */
+@media (max-width: 600px) { body[data-comments="on"] .cv-editor { padding-right: 40px; } }
 .cv-doc { outline: none; white-space: pre-wrap; word-wrap: break-word; caret-color: var(--cv-accent); }
 .cv-doc > * + * { margin-top: .85em; }
 .cv-doc p { margin: 0; }

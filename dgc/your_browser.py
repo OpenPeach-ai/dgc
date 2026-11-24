@@ -199,8 +199,11 @@ def notice_site(registry, host, *, sso_hosts=(), card_fields: bool = False, path
                                  str(by or "noticed")[:40], now, now))
         else:
             kept = sorted(set(_sso_list(row["sso_hosts"])) | set(hosts))[:MAX_SSO_HOSTS]
-            registry.db.execute("UPDATE your_browser_sites SET used_at=?, sso_hosts=? WHERE site=?",
-                                (now, json.dumps(kept), site))
+            # A site a Pip was let use from its card (added_by "you") has no sign-in DGC knows of: noticed here, it has
+            # one now, and the Sites panel says Sign out for it, not Remove. The person's choice of Pips stays.
+            by_now = str(by or "noticed")[:40] if row["added_by"] == "you" else row["added_by"]
+            registry.db.execute("UPDATE your_browser_sites SET used_at=?, sso_hosts=?, added_by=? WHERE site=?",
+                                (now, json.dumps(kept), by_now, site))
         _drop_sign_out(registry, site)        # signed in again: nothing waits to clear it any more
     return _site(registry, site)
 

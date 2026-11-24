@@ -772,7 +772,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
                # The Output chip (only sent to a backend offering capabilities.artifacts): what this reply should
                # make as an artifact. "auto" or leaving it out lets the model choose.
                "output": _f("string", required=False, enum=("auto", "document", "slides", "spreadsheet", "page",
-                                                          "dashboard")),
+                                                          "dashboard", "checklist", "design")),
                "answers": _NA(False), "pip_references": _A(False),
                "display_mentions": _A(False),
                # Images handed over as files in the backend's spool rather than inlined as base64.
@@ -1725,7 +1725,7 @@ COMMAND_FIELDS.update({
                      "display_mentions": _A(False),
                      # The Output chip, as on `prompt` (only with capabilities.artifacts).
                      "output": _f("string", required=False, enum=("auto", "document", "slides", "spreadsheet",
-                                                                "page", "dashboard")),
+                                                                "page", "dashboard", "checklist", "design")),
                      # Spoken in voice mode: the reply will be read aloud, so it is asked to sound like speech.
                      "voice": _B(False),
                      "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
@@ -1959,7 +1959,7 @@ EVENT_FIELDS.update({
 # link?, canvas?, versions?: [{n, author, at, summary, size}]}.
 ARTIFACT_TYPES = ("page", "doc", "slides", "sheet", "dashboard", "checklist", "design")
 # The Output chip: what the next reply should make. "auto" (or leaving it out) lets the model choose, as before.
-ARTIFACT_OUTPUTS = ("auto", "document", "slides", "spreadsheet", "page", "dashboard")
+ARTIFACT_OUTPUTS = ("auto", "document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design")
 ARTIFACT_OPS = ("made", "changed", "restored", "removed", "refreshed")
 COMMAND_FIELDS.update({
     "artifact_list": {"request_id": _S(), "artifact_type": _f("string", required=False, enum=ARTIFACT_TYPES),

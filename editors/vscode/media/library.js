@@ -38,7 +38,7 @@
   const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
   // The tabs, in his order: id, name, what one of them is called, its icon (a codicon) and its line for a label.
   const TABS = [
-    ["artifacts", "Artifacts", "artifact", "browser", "Artifacts: the pages, sheets, docs, decks, dashboards, checklists and designs DGC made"],
+    ["artifacts", "Artifacts", "artifact", "browser", "Artifacts: the pages, spreadsheets, documents, slides, dashboards, checklists and designs DGC made"],
     ["widgets", "Widgets", "widget", "symbol-misc", "Widgets: ChatDGC's widgets, and the cards a reply drew in Work or a Pip's chat"],
     ["images", "Images", "image", "file-media", "Images: every image DGC made or kept for you"],
     ["videos", "Videos", "video", "device-camera-video", "Videos: every video DGC made for you"],
@@ -46,10 +46,10 @@
   ];
   const TAB_IDS = TABS.map((t) => t[0]);
   // Artifacts' kinds: the filter's word, and the word of an empty list.
-  const A_KINDS = [["", "All", "artifacts"], ["page", "Pages", "pages"], ["sheet", "Sheets", "sheets"], ["doc", "Docs", "docs"], ["slides", "Decks", "decks"], ["dashboard", "Dashboards", "dashboards"], ["checklist", "Checklists", "checklists"], ["design", "Designs", "designs"]];
+  const A_KINDS = [["", "All", "artifacts"], ["page", "Pages", "pages"], ["sheet", "Spreadsheets", "spreadsheets"], ["doc", "Documents", "documents"], ["slides", "Slides", "slides"], ["dashboard", "Dashboards", "dashboards"], ["checklist", "Checklists", "checklists"], ["design", "Designs", "designs"]];
   // The Widgets tab's kinds (decided 16 Nov): the widgets you use again, or the charts a chat's replies drew.
   const W_KINDS = [["", "All", "widgets or charts"], ["widget", "Widgets", "widgets"], ["chart", "Charts", "charts"]];
-  const A_KIND = { doc: "Doc", slides: "Deck", sheet: "Sheet", page: "Page", dashboard: "Dashboard", checklist: "Checklist", design: "Design" };
+  const A_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", page: "Page", dashboard: "Dashboard", checklist: "Checklist", design: "Design" };
   // Files' kinds (ChatDGC's own), and where a file came from.
   const F_KINDS = [["", "All", "files"], ["image", "Images", "images"], ["pdf", "PDFs", "PDFs"], ["document", "Documents", "documents"], ["spreadsheet", "Spreadsheets", "spreadsheets"],
     ["presentation", "Presentations", "presentations"], ["code", "Code", "code files"], ["text", "Pasted text", "pasted text"]];
@@ -76,7 +76,7 @@
   const ITEM_ACTS = [...window.DgcFileMenu.ACTS, ["rename", "Rename…"], ["remove", "Remove…"]];
   // What only a kind has, kept under the eight (by the ids of actions() below).
   const ITEM_MORE = ["chat", "player", "use", "project", "add", "pin"];
-  const A_WORD = { doc: "doc", slides: "deck", sheet: "sheet", page: "page", dashboard: "dashboard", checklist: "checklist", design: "design" };
+  const A_WORD = { doc: "document", slides: "set of slides", sheet: "spreadsheet", page: "page", dashboard: "dashboard", checklist: "checklist", design: "design" };
   const SAID_MS = 2600;     // how long "Path copied" stays
 
   /** Why an item cannot do one of the eight ("" when it can). The host decides again for itself (src/chatdgc.ts
@@ -85,17 +85,17 @@
     const r = item.raw;
     if (item.source === "artifact") {
       const word = A_WORD[r.type] || "artifact", a = /^[aeiou]/.test(word) ? "An" : "A", doc = r.type === "doc", file = doc && typeof r.file === "string" && !!r.file;
-      if (act === "editor") return file ? "" : doc ? "This doc has no file to open yet." : `${a} ${word} opens in DGC's own viewer: it has no file an editor can open.`;
+      if (act === "editor") return file ? "" : doc ? "This document has no file to open yet." : `${a} ${word} opens in DGC's own viewer: it has no file an editor can open.`;
       if (act === "save") return Array.isArray(r.exports) && r.exports.length ? "" : `This DGC has no format to save ${a.toLowerCase()} ${word} in.`;
-      if (act === "copy") return doc ? "" : `Copy takes a doc's text or an image. Use Save a copy… for ${a.toLowerCase()} ${word}.`;
-      if (act === "path" || act === "reveal") return file ? "" : doc ? "This doc has no file yet." : `${a} ${word} is kept inside DGC, not as one file. Save a copy… makes a file.`;
+      if (act === "copy") return doc ? "" : `Copy takes a document's text or an image. Use Save a copy… for ${a.toLowerCase()} ${word}.`;
+      if (act === "path" || act === "reveal") return file ? "" : doc ? "This document has no file yet." : `${a} ${word} is kept inside DGC, not as one file. Save a copy… makes a file.`;
       if (act === "rename") return r.type === "page" ? "A page can't be renamed here yet. Ask DGC to rename it." : "";
       return "";
     }
     if (item.source === "widget") {
       if (act === "editor") return "A widget opens beside its chat: it has no file an editor can open.";
       if (act === "save") return "A widget lives in its chat. Ask ChatDGC to make it a page, then save that.";
-      if (act === "copy") return "Copy takes a doc's text or an image. A widget is neither.";
+      if (act === "copy") return "Copy takes a document's text or an image. A widget is neither.";
       if (act === "path" || act === "reveal") return "A widget is kept inside its chat, not as a file.";
       if (act === "rename") return "A widget keeps the name its chat gave it.";
       return "";
@@ -104,7 +104,7 @@
       // A chart is drawn in its reply: it opens its chat there, and is nothing else by itself.
       if (act === "editor") return "A chart is drawn in its chat: it has no file an editor can open.";
       if (act === "save") return "A chart is saved from its chat: open it there and use the chart's own Save as image.";
-      if (act === "copy") return "Copy takes a doc's text or an image. Open the chart in its chat to copy its numbers.";
+      if (act === "copy") return "Copy takes a document's text or an image. Open the chart in its chat to copy its numbers.";
       if (act === "path" || act === "reveal") return "A chart is kept inside its chat, not as a file.";
       if (act === "rename") return "A chart keeps the title its reply gave it.";
       if (act === "remove") return "A chart is part of its reply: it goes when its chat is deleted.";
@@ -114,7 +114,7 @@
       // What you attached in a Work session: a picture is kept inside the session, a file is where it was, in its project.
       const picture = r.kind === "image";
       if (act === "editor") return picture ? "This picture is kept inside its session. Open shows it; Save a copy… makes a file." : "";
-      if (act === "copy") return picture ? "" : "Copy takes an image or a doc's text. Use Copy path or Save a copy… for this file.";
+      if (act === "copy") return picture ? "" : "Copy takes an image or a document's text. Use Copy path or Save a copy… for this file.";
       if (act === "path" || act === "reveal") return picture ? "This picture is kept inside its session, not as a file. Save a copy… makes a file." : "";
       if (act === "rename") return picture ? "A picture you attached has no name of its own to change." : "This file is your project's: rename it there.";
       if (act === "remove") return "What you attached stays in its session: a session is a record.";
@@ -128,7 +128,7 @@
     }
     const where = r.source === "project" ? "project" : "chat";
     if (act === "editor") return `This file is kept inside its ${where}. Save a copy… to open it in an editor.`;
-    if (act === "copy") return r.type === "image" && r.source !== "project" ? "" : "Copy takes an image or a doc's text. Use Save a copy… for this file.";
+    if (act === "copy") return r.type === "image" && r.source !== "project" ? "" : "Copy takes an image or a document's text. Use Save a copy… for this file.";
     if (act === "path" || act === "reveal") return `This file is kept inside its ${where}, not on its own. Save a copy… makes a file.`;
     if (act === "rename") return "A file keeps the name it was attached with.";
     return "";
@@ -473,7 +473,7 @@
       const button = (id, key, value, tip) => `<button type="button" id="library-filter-${id}" class="dgc-folder lib-filter" data-filter="${id}"${id !== "maker" && value === "All" ? ' data-all="1"' : ""} aria-haspopup="menu" aria-expanded="false" aria-label="${esc(`${key}: ${value}`)}" title="${esc(tip)}">`
         + `<span class="dgc-folder-k">${esc(key)}</span><span class="dgc-folder-v">${esc(value)}</span>${CHEVRON}</button>`;
       let html = "";
-      if (tab === "artifacts") html += button("kind", "Kind", (A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[1], "Show one kind: pages, sheets, docs, decks, dashboards, checklists or designs");
+      if (tab === "artifacts") html += button("kind", "Kind", (A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[1], "Show one kind: pages, spreadsheets, documents, slides, dashboards, checklists or designs");
       // (Kind on Widgets only where this DGC lists charts: with none, every row is a widget.)
       if (tab === "widgets" && state.charts.live) html += button("kind", "Kind", (W_KINDS.find((k) => k[0] === f.kind) || W_KINDS[0])[1], "Show the widgets you use again, or the charts a chat drew");
       if (tab === "files") html += button("kind", "Kind", (F_KINDS.find((k) => k[0] === f.kind) || F_KINDS[0])[1], "Show one kind of file")
@@ -667,7 +667,7 @@
       }
       const who = tab === "files" ? "" : whoWords(tab);
       if (tab === "artifacts") return q ? `No artifact named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || f.maker ? `No ${(A_KINDS.find((k) => k[0] === f.kind) || A_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.`
-        : "Pages, sheets, docs, decks, dashboards, checklists and designs DGC makes for you show here.";
+        : "Pages, spreadsheets, documents, slides, dashboards, checklists and designs DGC makes for you show here.";
       if (tab === "widgets") return q ? `No ${f.kind === "chart" ? "chart" : "widget"} named like “${q}”${f.kind || f.maker ? " with these filters" : ""}.` : f.kind || who ? `No ${(W_KINDS.find((k) => k[0] === f.kind) || W_KINDS[0])[2]}${who ? ` ${who}` : ""} yet.` : state.charts.live ? "Widgets ChatDGC makes for you, the charts its replies draw, and the cards a reply draws in Work or a Pip’s chat, show here."
         : "Widgets ChatDGC makes for you, and the cards a reply draws in Work or a Pip’s chat, show here. A chart in a chat stays in its chat.";
       if (tab === "images") return q ? `No image made from words like “${q}”.` : who ? `No images ${who} yet.` : "Images DGC makes or keeps for you show here.";

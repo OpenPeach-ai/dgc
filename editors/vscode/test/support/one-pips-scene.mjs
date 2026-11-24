@@ -91,7 +91,7 @@ export function makeBackend(o = {}) {
     { folder: "/home/me/code/garden", name: "garden", here: false, exists: true, git: true, sessions: 1, pips: 1, workspace_id: GARDEN, updated_at: ago(90) },
     { folder: "/home/me/code/lime_tiles", name: "lime_tiles", here: false, exists: true, git: !o.plain, sessions: 3, pips: 2, workspace_id: LIME, updated_at: ago(10) },
     { folder: "/home/me/code/notes", name: "notes", here: false, exists: false, git: false, sessions: 1, pips: 0, workspace_id: null, updated_at: ago(9000) }];
-  const runner = { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 }, boxes: { available: true, why: "", ...(o.boxes || {}) } };
+  const runner = { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 }, boxes: { available: true, why: "", ...(o.boxes || {}) }, ...(o.runner || {}) };
   const controls = { version: 1, mode: "read_only", options: { context_size: 8192, thinking: o.thinking || "off" }, options_source: "last_message", inherited_context_size: 1048576, effective_context_size: 8192,
     context_min: 2048, context_max: 32768, thinking_levels: ["off", "low", "medium", "high", "xhigh"], reasoning_control: "provider_dependent", reasoning_note: "n", context_note: "n" };
   const findings = sub ? [

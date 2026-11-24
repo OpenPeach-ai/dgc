@@ -1370,11 +1370,11 @@ test('Agents: sub-agents Run at once takes up to 32 and says plainly what more c
   assert.equal(box.closest('.group').querySelector('h3').textContent,'Sub-agents');
   assert.equal([box.min,box.max,box.step].join(' '),'1 32 1');
   // One line; what more costs is behind its "?".
-  assert.equal(rowHint(box),'Up to 32. Ultra runs 8 unless you set one.');
+  assert.equal(rowHint(box),'How many sub-agents work at once, up to 32.');
   const more=rowDetail(box);
   assert.match(more,/its own copy of the project/);
-  assert.match(more,/cloud APIs rate-limit/);
-  assert.match(more,/OLLAMA_NUM_PARALLEL at once while the rest wait/);
+  assert.match(more,/a cloud service may slow you down when many ask at once/);
+  assert.match(more,/a model on this computer answers only a few at a time while the rest wait/);
   const saves=()=>x.sent.filter(m=>m.type==='saveSettings');
   x.input('#max_parallel_tasks','33');
   x.click('#save');
@@ -1385,9 +1385,9 @@ test('Agents: sub-agents Run at once takes up to 32 and says plainly what more c
   x.message({type:'settingsSaved',ok:true});
   // Under Ultra: what it runs, and that a chosen number (wider than Ultra's 8 too) is kept.
   x.message({type:'event',event:{...x.config,ultra_mode:true,max_parallel_tasks:4}});
-  assert.match(rowSaid(x.d.querySelector('#max_parallel_tasks')),/^Ultra is on, so 8 run\. Set any other number, up to 32, to pin it/);
+  assert.match(rowSaid(x.d.querySelector('#max_parallel_tasks')),/^Ultra is on: 8 work at once\. Set any other number, up to 32, to keep it/);
   x.message({type:'event',event:{...x.config,ultra_mode:true,max_parallel_tasks:20}});
-  assert.match(rowSaid(x.d.querySelector('#max_parallel_tasks')),/^Pinned here; Ultra would run 8\. Set 4 to let Ultra choose/);
+  assert.match(rowSaid(x.d.querySelector('#max_parallel_tasks')),/^Your number is used, not Ultra’s 8\. Set 4 to let Ultra choose/);
 });
 
 test('Models and Agents: providers and advanced controls remain reachable',()=>{

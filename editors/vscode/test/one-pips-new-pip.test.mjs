@@ -27,7 +27,8 @@ test('on All Pips the folder line says "+ Give it a folder": a Pip with no folde
  const x=setup();await x.drain();
  const d=await newPip(x),line=d.querySelector('#new-pip-folder');
  assert.equal(line.querySelector('.dgc-folder-v').textContent,'+ Give it a folder');
- assert.match(x.squash(d.querySelector('.new-pip-folder').textContent),/No folder: it is listed under Personal\./);
+ assert.match(x.squash(d.querySelector('.new-pip-folder').textContent),/No folder yet: give it one any time, from its page\./);
+ assert.doesNotMatch(d.textContent,/Personal|No job form/,'one kind, and no word of a form nobody saw');
  x.type(d.querySelector('#newPipName'),'Travel');
  d.querySelector('#review-confirm').click();await x.drain();
  const made=x.requests('create_pip').at(-1);
@@ -64,7 +65,7 @@ test('one click changes the folder: any folder, no folder, or Add a folder…',a
  let d=await newPip(x);
  d.querySelector('#new-pip-folder').click();await x.drain();
  const menu=[...x.d.querySelectorAll('.dgc-folder-menu .dgc-menu-row')];
- assert.equal(menu[0].querySelector('.dgc-menu-label').textContent,'No folder (Personal)');
+ assert.equal(menu[0].querySelector('.dgc-menu-label').textContent,'No folder');
  assert.ok(menu.some(r=>r.dataset.folderAdd),'Add a folder… is at its end');
  assert.equal(menu.find(r=>r.dataset.folder===LIME_DIR).getAttribute('aria-checked'),'true');
  assert.ok(menu.find(r=>/notes$/.test(r.dataset.folder||'')).disabled,'a folder that is gone can\'t be chosen');

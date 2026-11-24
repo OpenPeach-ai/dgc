@@ -169,7 +169,10 @@ class PipChatOptionsTests(unittest.TestCase):
         with patch('requests.sessions.Session.request', side_effect=AssertionError('No network')):
             controls = options.controls(self.store, self.job['id'], self.cfg)
         self.assertEqual(controls['reasoning_control'], 'instructions')
-        self.assertIn('instruction guidance only', controls['reasoning_note'])
+        # (Plain words behind the picker's "?": user test 2, M3. Never the old jargon.)
+        self.assertIn('No thinking setting here', controls['reasoning_note'])
+        self.assertNotRegex(controls['reasoning_note'], r'native|advertised|instruction guidance|provider mappings')
+        self.assertLessEqual(len(controls['reasoning_note']), 100)
         manifest = self.raw(self.send({'context_size': 8192, 'thinking': 'high'}))
         self.assertEqual(manifest['model_settings']['provider_capabilities'], {'reasoning': False})
 

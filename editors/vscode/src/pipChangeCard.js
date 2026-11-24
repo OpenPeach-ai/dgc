@@ -68,7 +68,7 @@ export function changeCard(proposal,pip){
     else add('app','app',`read from ${server||'a connected app'}`,`Reads from ${server||'an app'}`,words.map(w=>({label:w,icon:'app'})),words.length?words.map(w=>['Reads',w]):[['Reads from',server]]);
   }
   if(differs('computer_plan'))add('computer','computer',d.computer_plan?'get its own computer':'give up its computer',d.computer_plan?'Its own computer':'No computer',
-    d.computer_plan?[{label:'Browser',icon:'web'},{label:'Terminal',icon:'code'},{label:'Files',icon:'doc'}]:[],[['Computer',d.computer_plan?'Its own browser, Terminal and files. Anything it would submit waits for your OK.':'None']]);
+    d.computer_plan?[{label:'Browser',icon:'web'},{label:'Terminal',icon:'code'},{label:'Files',icon:'doc'}]:[],[['Computer',d.computer_plan?'Its computer’s browser, Terminal and files. Anything it would submit waits for your OK.':'None']]);
   if(differs('github_plan')){
     let reads=[];try{reads=(d.github_plan?.reads||[]).map(githubReadLabel);}catch{reads=['GitHub reads this view cannot show'];}
     add('github','code',d.github_plan?'read from GitHub':'stop reading from GitHub',d.github_plan?'GitHub reads':'No GitHub reads',reads.map(r=>({label:r,icon:'code'})),reads.length?reads.map(r=>['GitHub',r]):[['GitHub','None']]);

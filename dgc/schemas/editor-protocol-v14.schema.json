@@ -10949,7 +10949,9 @@
                 "slides",
                 "spreadsheet",
                 "page",
-                "dashboard"
+                "dashboard",
+                "checklist",
+                "design"
               ]
             },
             "answers": {
@@ -16417,7 +16419,9 @@
                 "slides",
                 "spreadsheet",
                 "page",
-                "dashboard"
+                "dashboard",
+                "checklist",
+                "design"
               ]
             },
             "voice": {

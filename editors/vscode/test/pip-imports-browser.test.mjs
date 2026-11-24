@@ -133,15 +133,15 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       // A good link: the dialog closes and the cards wait where new Pips do.
       await x.p.locator("#importLink").fill(`  ${GOOD}  `); await x.p.keyboard.press("Enter");
       await gone(x.p);
-      await x.p.waitForFunction(() => /Researcher|Writer|Fact check/.test((window.__pipsRoot || document).querySelector('[aria-label="Needs attention"]')?.textContent || ""));
+      await x.p.waitForFunction(() => /Researcher|Writer|Fact check/.test((window.__pipsRoot || document).querySelector('[aria-label="Needs you"]')?.textContent || ""));
       assert.deepEqual((await sent(x.p, "import_pip_source")).at(-1), { source: "github", url: GOOD }, "the source and the link, and nothing else");
-      const n = await x.p.evaluate(() => { const root = window.__pipsRoot || document, n = root.querySelector(".notice"), a = root.querySelector('[aria-label="Needs attention"]'), box = (el) => el.getBoundingClientRect();
+      const n = await x.p.evaluate(() => { const root = window.__pipsRoot || document, n = root.querySelector(".notice"), a = root.querySelector('[aria-label="Needs you"]'), box = (el) => el.getBoundingClientRect();
         return { notice: n.textContent, whole: n.scrollWidth <= n.clientWidth + 1 && box(n).right <= document.documentElement.clientWidth + 0.5, above: box(n).bottom <= box(a).top + 0.5, cards: a.textContent, sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 }; });
       assert.equal(n.notice, "Imported “Launch crew” from GitHub: 3 new Pips to review. Nothing is created until you approve each one. Not included: Reads from connected apps: they name your accounts.");
       assert.ok(n.whole && n.above, "the line is whole, above the cards"); assert.equal(n.sideways, false);
       assert.match(n.cards, /Create the Pip “(Researcher|Writer|Fact check)”\?/); assert.match(n.cards, /of 3/, "its three cards, one shown at a time");
       assert.deepEqual(await sent(x.p, "accept_pip_setup"), [], "nothing is approved by importing");
-      checkLayout(await x.p.evaluate(looked, '[aria-label="Needs attention"]'), solid, { filled: ["Review"], page: true });
+      checkLayout(await x.p.evaluate(looked, '[aria-label="Needs you"]'), solid, { filled: ["Review"], page: true });
       await picture(x.p, `imported-github-${theme}-${width}`);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
@@ -188,15 +188,15 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
       checkLayout(await x.p.evaluate(looked, "[role=dialog]"), solid, { filled: ["Import"] });
       await picture(x.p, `grok-reply-${theme}-${width}`);
       await x.p.locator("#review-confirm").click(); await gone(x.p);
-      await x.p.waitForFunction(() => /Deal Finder/.test((window.__pipsRoot || document).querySelector('[aria-label="Needs attention"]')?.textContent || ""));
+      await x.p.waitForFunction(() => /Deal Finder/.test((window.__pipsRoot || document).querySelector('[aria-label="Needs you"]')?.textContent || ""));
       assert.deepEqual((await sent(x.p, "import_pip_source")).at(-1), { source: "grok", text: REPLY }, "the source and what was pasted, and nothing else");
-      const n = await x.p.evaluate(() => { const root = window.__pipsRoot || document, n = root.querySelector(".notice"), a = root.querySelector('[aria-label="Needs attention"]'), box = (el) => el.getBoundingClientRect();
+      const n = await x.p.evaluate(() => { const root = window.__pipsRoot || document, n = root.querySelector(".notice"), a = root.querySelector('[aria-label="Needs you"]'), box = (el) => el.getBoundingClientRect();
         return { notice: n.textContent, whole: n.scrollWidth <= n.clientWidth + 1 && box(n).right <= document.documentElement.clientWidth + 0.5, above: box(n).bottom <= box(a).top + 0.5, cards: a.textContent, sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 }; });
       assert.equal(n.notice, "Imported “Deal Finder” from your Grok bot: one new Pip to review. Nothing is created until you approve it. Its skills in Grok: compare prices, watch fares. Add the ones you want on its page. "
         + "A routine it had: every Monday at 9:00: Check fares to Goa. Add it on its page. Imported from a Grok bot: it arrives with no keys and no app access.");
       assert.ok(n.whole && n.above, "the line is whole, above the card"); assert.equal(n.sideways, false);
       assert.match(n.cards, /Create the Pip “Deal Finder”\?/); assert.deepEqual(await sent(x.p, "accept_pip_setup"), []);
-      checkLayout(await x.p.evaluate(looked, '[aria-label="Needs attention"]'), solid, { filled: ["Review"], page: true });
+      checkLayout(await x.p.evaluate(looked, '[aria-label="Needs you"]'), solid, { filled: ["Review"], page: true });
       await picture(x.p, `imported-grok-${theme}-${width}`);
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }

@@ -287,6 +287,21 @@ function webAddress(value: string, base: string): string {
   if (!text) return "";
   try { const url = new URL(text, base); return url.protocol === "http:" || url.protocol === "https:" ? url.href : ""; } catch { return ""; }
 }
+/** A page that says nothing of itself in its head (no description of any kind): its own first paragraph, from the part
+ *  of the page already read (user test 2, W19: such a page's card repeated the link's words and said no more). Never
+ *  a menu's, a header's or a footer's words, a cookie line, or a paragraph too short to say anything; cut at a word.
+ *  Plain text only: tags are dropped, and what is left goes through the same cleaning as every other word here. */
+function firstParagraph(text: string): string {
+  const body = text.replace(/^[\s\S]*?<body\b[^>]*>/i, "").replace(/<(nav|header|footer|aside|form|button|select|figure|table)\b[\s\S]*?(?:<\/\1\s*>|$)/gi, " ");
+  for (const m of body.matchAll(/<p\b[^>]*>([\s\S]*?)(?:<\/p\s*>|<p\b|<\/(?:div|section|article|main|body)\s*>|$)/gi)) {
+    const said = words(m[1].replace(/<[^>]*>/g, " ").replace(/[<>]/g, " "), 2000);
+    if (said.length < 50 || said.split(" ").length < 8 || /\bcookies?\b|\bjavascript\b|all rights reserved|©/i.test(said)) continue;
+    if (said.length <= 240) return said;
+    const cut = said.slice(0, 239), at = cut.lastIndexOf(" ");
+    return `${(at > 120 ? cut.slice(0, at) : cut).replace(/[\s,;:.]+$/, "")}…`;
+  }
+  return "";
+}
 /** What a page's head says of itself: og:, then twitter:, then <title> and the description, and where its picture and
  *  icon are. Read as text: no script runs, and nothing inside a script, a style or a comment counts. */
 export function parseHead(html: string, base: string): { title: string; description: string; site: string; image: string; icon: string } {
@@ -298,7 +313,7 @@ export function parseHead(html: string, base: string): { title: string; descript
   }
   const first = (...names: string[]) => { for (const n of names) { const v = meta.get(n); if (v) return v; } return ""; };
   const title = words(first("og:title", "twitter:title") || (/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(text)?.[1] ?? ""), 200);
-  const description = words(first("og:description", "twitter:description", "description"), 400);
+  const description = words(first("og:description", "twitter:description", "description"), 400) || firstParagraph(text);
   const site = words(first("og:site_name", "application-name"), 80);
   const image = webAddress(first("og:image:secure_url", "og:image", "og:image:url", "twitter:image", "twitter:image:src"), base);
   // The site's icon: a plain "icon" before any other kind, and one that isn't a drawing before one that is.

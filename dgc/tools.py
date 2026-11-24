@@ -593,7 +593,8 @@ TOOL_SCHEMAS = [
          "limit": {"type": "integer", "description": "How many notes (default 8, max 25)"}}, []),
     # The executor bounds rows/content and requires both fields with row-indexed errors, so the wire
     # schema carries none of that: every keyword here is paid for on every request (prompt gate).
-    _fn("todo", "Replace this prompt's checklist. Do not keep done rows from a previous prompt.",
+    _fn("todo", "Replace your step list for this prompt (shown while you work). A checklist the user asks for is "
+        "make_artifact type checklist. Do not keep done rows from a previous prompt.",
         {"todos": {"type": "array", "items": {"type": "object", "properties": {
             "content": {"type": "string"},
             "status": {"type": "string", "enum": list(TODO_STATUSES)}}}}}, ["todos"]),

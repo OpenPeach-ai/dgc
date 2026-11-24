@@ -3601,7 +3601,7 @@ class Agent(GoalLifecycle):
             # tools that change a Pip still load with use_pips, for their tokens.
             hidden = _PIPS_MUTATION_TOOL_NAMES
         schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in hidden]
-        if getattr(self, "_turn_output", "") in ("document", "slides", "spreadsheet", "dashboard"):
+        if getattr(self, "_turn_output", "") in ("document", "slides", "spreadsheet", "dashboard", "checklist", "design"):
             # The older page tool cannot fulfil a typed Output choice. Leave it available for
             # Auto/Page turns, but don't let its familiar name win over make_artifact here.
             schemas = [tool for tool in schemas if tool.get("function", {}).get("name") != "artifact"]

@@ -6,6 +6,17 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Checklist and Design are outputs a client can ask for** (`capabilities.artifacts.outputs` lists them; `--make
+  checklist` and `/make design` too).
+- **"Hand it to a Pip" offers every Pip**, with the folder it works in, and any of them takes the job (only Pips with
+  no folder were offered).
+- **`edit_artifact` takes one op given without its list** (an object, or its fields beside the id) as that one change,
+  for every kind: the refused call a model then sent again showed in the turn as a failure.
+- **The step list no longer calls itself the user's checklist**: "make a checklist and work through it" makes a
+  checklist you keep.
+- **One kind of Pip in its words** where they still showed: `dgc pips` lists and run details, a run's source ("No
+  folder · no project files"), the starters, the app-event notice.
+
 - **Ask DGC on a comment also reads, in brief, the chat that made the artifact** (a Work session, a ChatDGC chat or a
   Pip's chat): the last few things said, words only, so "use the hotel we picked" finds it. Still a quiet turn of its
   own, never in that chat's history.

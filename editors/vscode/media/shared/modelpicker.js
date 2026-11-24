@@ -39,6 +39,8 @@
 })(typeof window !== "undefined" ? window : null, function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  // A row's action that makes it the fallback (or stops it being one), as each page names it: the main model's, the sub-agents'.
+  const FALLBACK_ACTIONS = ["fallback", "agentsFallback"];
 
   // ---- the marks ------------------------------------------------------------------------------------------------------
   // A connection's mark: its company's, in its own colour, on a 24 box. DGC's own drawings of each (simple, at 18 px),
@@ -384,14 +386,14 @@ void main() {
       + `<div class="dgc-mp-tabs" role="tablist" hidden></div>`
       + `<div class="dgc-mp-main"><div class="dgc-mp-side"><div class="dgc-mp-rail" role="tablist" aria-orientation="vertical" aria-label="Connections"></div><div class="dgc-mp-foot" hidden></div></div>`
       + `<div class="dgc-mp-pane" role="tabpanel"><label class="dgc-mp-search">${glyph("search")}<input type="text" inputmode="search" enterkeyhint="search" class="dgc-mp-q" data-k="q" placeholder="Search models" aria-label="Search models" autocomplete="off" spellcheck="false" aria-controls="${id}-list"></label>`
-      + `<div class="dgc-mp-card"><div class="dgc-mp-head"></div><div class="dgc-mp-list" id="${id}-list" role="listbox" aria-label="Models"></div><div class="dgc-mp-under"></div>`
+      + `<div class="dgc-mp-card"><div class="dgc-mp-head"></div><div class="dgc-mp-list" id="${id}-list" role="listbox" aria-label="Models"></div><div class="dgc-mp-under"></div><div class="dgc-mp-fb" hidden></div>`
       + `<div class="dgc-mp-think"></div><div class="dgc-mp-settings" hidden></div></div></div></div>`
       + `<div class="dgc-mp-page" role="group" hidden></div>`
       + `<div class="dgc-mp-live" role="status" aria-live="polite"></div></div>`;
     const box = layer.firstElementChild;
     const $ = (cls) => box.querySelector(`.dgc-mp-${cls}`);
     const search = $("q");
-    let state = { sel: "", query: "", more: "", typing: "", open: true, asked: false, first: true, custom: false, customText: "", wrong: "", pageKey: "" };
+    let state = { sel: "", query: "", more: "", typing: "", open: true, asked: false, first: true, custom: false, customText: "", wrong: "", pageKey: "", choosing: false };
     let data = view;
 
     const conns = () => (Array.isArray(data.connections) ? data.connections : []);
@@ -404,8 +406,34 @@ void main() {
     /** Which page is showing: "" for the list; another model's page is another page. */
     const pageKeyOf = (p) => (p && typeof p === "object" ? `p:${p.key || p.name || ""}` : "");
 
+    // ---- Fallback, in sight: a line under the models names the fallback and chooses one. It is the rows' own "Use as
+    // fallback" (a row's ⋯), asked without hunting for it: nothing here knows what a page does with it.
+    const fbAct = (row) => (Array.isArray(row.actions) ? row.actions : []).find((a) => FALLBACK_ACTIONS.includes(a.id)) || null;
+    const fbIs = (row) => (Array.isArray(row.pills) ? row.pills : []).some(([, tone]) => tone === "fallback");
+    /** { offered, conn, row }: whether any row can be a fallback, and the row that is one now. */
+    function fbNow() {
+      let offered = false, at = null;
+      for (const c of conns()) { if (c.disabled) continue; for (const r of rowsOf(c)) { if (fbAct(r)) offered = true; if (!at && fbIs(r) && fbAct(r)) at = { conn: c, row: r }; } }
+      return { offered, ...(at || { conn: null, row: null }) };
+    }
+    function paintFallback() {
+      const node = $("fb"), now = fbNow(), show = now.offered && !data.page && conns().length > 0;
+      if (!show) state.choosing = false;
+      node.hidden = !show;
+      box.classList.toggle("dgc-mp-choosing", state.choosing);
+      if (!show) { node.innerHTML = ""; return; }
+      const off = data.locked ? " disabled" : "";
+      const words = state.choosing ? "Pick a model in the list" : now.row ? now.row.name : "None";
+      node.innerHTML = `<span class="dgc-mp-fb-name" title="The model that takes over when the main one can’t answer">Fallback</span>`
+        + `<span class="dgc-mp-fb-now${state.choosing ? " is-hint" : ""}" title="${esc(words)}">${esc(words)}</span>`
+        + `<span class="dgc-mp-fb-acts">` + (state.choosing ? (now.row ? `<button type="button" class="dgc-btn small wide" data-k="fb-none" data-fbnone="1"${off}>No fallback</button>` : "")
+            + `<button type="button" class="dgc-btn small" data-k="fb" data-fb="1">Cancel</button>`
+          : `<button type="button" class="dgc-btn small" data-k="fb" data-fb="1" title="${now.row ? "Choose another fallback, or none" : "Choose the model that takes over when the main one can’t answer"}"${off}>${now.row ? "Change" : "Choose"}</button>`) + `</span>`;
+    }
+
     function rowHtml(conn, row, found) {
-      const key = keyOf(conn, row), on = row.current === true, off = row.disabled === true || data.locked === true;
+      const picks = state.choosing ? fbAct(row) : null;
+      const key = keyOf(conn, row), on = row.current === true, off = row.disabled === true || data.locked === true || (state.choosing && (!picks || picks.disabled === true));
       const caps = (Array.isArray(row.caps) ? row.caps : []).filter((cap) => CAP_WORDS[cap]);
       const marks = (row.cloud ? `<span class="dgc-mp-cap" data-cap="cloud" title="Runs in Ollama’s cloud" role="img" aria-label="Runs in Ollama’s cloud">${glyph("cloud")}</span>` : "")
         + caps.map((cap) => `<span class="dgc-mp-cap" data-cap="${cap}" title="${CAP_WORDS[cap]}" role="img" aria-label="${CAP_WORDS[cap]}">${glyph(cap)}</span>`).join("");
@@ -416,7 +444,7 @@ void main() {
         + `<span class="dgc-menu-words"><span class="dgc-mp-nameline"><span class="dgc-menu-label dgc-mp-name" title="${esc(row.name)}">${esc(row.name)}</span>`
         + `<span class="dgc-mp-check" aria-hidden="true">${on ? glyph("check") : ""}</span></span>${sub ? `<span class="dgc-menu-sub dgc-mp-desc">${esc(sub)}</span>` : ""}</span>`
         + (marks ? `<span class="dgc-mp-caps">${marks}</span>` : "") + pills + `</button>`;
-      const actions = Array.isArray(row.actions) ? row.actions : [];
+      const actions = state.choosing ? [] : Array.isArray(row.actions) ? row.actions : [];   // (choosing: the row itself is the choice)
       if (!actions.length) return button;
       const openNow = state.more === key;
       return `<div class="dgc-menu-item dgc-mp-item" role="presentation">${button}<button type="button" class="dgc-menu-more dgc-mp-more" data-k="m:${esc(key)}" data-more="${esc(key)}" aria-label="More for ${esc(row.name)}" title="More" aria-haspopup="true" aria-expanded="${openNow}" tabindex="-1">${glyph("more")}</button></div>`
@@ -674,7 +702,13 @@ void main() {
       box.setAttribute("aria-label", data.title || "Model");
       layer.dataset.locked = data.locked ? "1" : "";
       if (!connOf(state.sel)) state.sel = (connOf(data.selected) || conns().find((c) => c.current && !c.disabled) || conns().find((c) => !c.disabled) || conns()[0] || { id: "" }).id;
-      paintTabs(); paintRail(); paintPane(); paintThinking(); paintSettings(); paintFoot(); paintPage();
+      paintTabs(); paintRail(); paintFallback(); paintPane(); paintThinking(); paintSettings(); paintFoot(); paintPage();
+      // A row that says Main or Fallback and has to cut its own name gives its capability marks' room to the name
+      // (user test 2: "deepseek-v4.1-flash…" beside its marks and "Main", where the name alone would fit).
+      for (const row of list.querySelectorAll(".dgc-mp-row")) {
+        const name = row.querySelector(".dgc-mp-name");
+        if (name && row.querySelector(".dgc-menu-pill") && row.querySelector(".dgc-mp-caps") && name.scrollWidth > name.clientWidth + 1) row.classList.add("is-tight");
+      }
       const shown = `${data.tab || ""}|${state.query ? "?" : state.sel}`;
       list.dataset.shown = shown;
       const again = key ? byKey(key) : null;
@@ -750,6 +784,13 @@ void main() {
       byKey(`ps:${tokens}`)?.focus();
     }
     box.addEventListener("input", (event) => { if (event.target.classList && event.target.classList.contains("dgc-mp-custom-input")) { state.customText = event.target.value; if (state.wrong) { state.wrong = ""; const line = box.querySelector(".dgc-mp-wrong"); if (line) line.remove(); event.target.setAttribute("aria-invalid", "false"); event.target.removeAttribute("aria-describedby"); } } });
+    /** Thinking's help, put away (its ? says so). */
+    function closeNote() { if (!state.noteOpen) return; state.noteOpen = false; if (effort && data.thinking) moveEffort(data.thinking, effort.at); }
+    // A click anywhere else in the picker puts Thinking's help away, and then does what it would have done.
+    box.addEventListener("click", (event) => {
+      // (Not one on Thinking itself: its words say what each level is while the slider is moved.)
+      if (state.noteOpen && !(event.target.closest && event.target.closest(".dgc-mp-think"))) closeNote();
+    }, true);
     box.addEventListener("click", (event) => {
       const t = event.target.closest ? event.target.closest("button, [data-rail]") : null;
       if (!t || !box.contains(t)) return;
@@ -759,7 +800,15 @@ void main() {
       if (t.dataset.size !== undefined) { if (typeof on.pageWindow === "function") on.pageWindow(Number(t.dataset.size) || 0, { keys: false }); return; }
       if (t.dataset.custom !== undefined) { openCustom(); return; }
       if (t.dataset.save !== undefined) { saveCustom(); return; }
-      if (t.dataset.tab !== undefined) { if (t.dataset.tab !== data.tab && typeof on.tab === "function") on.tab(t.dataset.tab); return; }
+      if (t.dataset.tab !== undefined) { state.choosing = false; if (t.dataset.tab !== data.tab && typeof on.tab === "function") on.tab(t.dataset.tab); return; }
+      if (t.dataset.fb !== undefined) { state.choosing = !state.choosing; state.more = ""; paint(); (state.choosing ? $("list").querySelector('.dgc-mp-row:not([aria-disabled="true"])') : null)?.focus(); if (!state.choosing) byKey("fb")?.focus(); say(state.choosing ? "Pick the fallback model in the list" : ""); return; }
+      if (t.dataset.fbnone !== undefined) {
+        const now = fbNow(), act = now.row ? fbAct(now.row) : null;
+        state.choosing = false;
+        if (act && typeof on.action === "function") on.action(act.id, { connection: now.conn, row: now.row });
+        if (state.open) { paint(); byKey("fb")?.focus(); }
+        return;
+      }
       if (t.dataset.rail !== undefined) { select(t.dataset.rail, { focusRail: true }); return; }
       if (t.dataset.more !== undefined) {
         const key = t.dataset.more;
@@ -779,6 +828,14 @@ void main() {
       }
       if (t.classList.contains("dgc-mp-row")) {
         if (t.getAttribute("aria-disabled") === "true" || !row) return;
+        if (state.choosing) {
+          // The fallback is chosen: the row's own Use as fallback (the one that is the fallback already stays it).
+          const act = fbAct(row), already = fbIs(row);
+          state.choosing = false;
+          if (act && !already && typeof on.action === "function") on.action(act.id, { connection: conn, row });
+          if (state.open) { paint(); byKey("fb")?.focus(); }
+          return;
+        }
         if (typeof on.pick === "function") on.pick(row, conn);
         return;
       }
@@ -812,8 +869,11 @@ void main() {
       const t = event.target, key = event.key;
       if (key === "Escape") {
         event.preventDefault(); event.stopPropagation();
+        // Thinking's help, open: Escape puts that away first (user test 2: it never closed), the focus on its ?.
+        if (state.noteOpen) { closeNote(); box.querySelector(".dgc-mp-think-help")?.focus(); return; }
         if (data.page && state.custom) { closeCustom(); return; }
         if (data.page) { goBack(); return; }
+        if (state.choosing) { state.choosing = false; paint(); byKey("fb")?.focus(); return; }
         if (state.typing) { const back = state.typing; state.typing = ""; paint(); byKey(back)?.focus(); return; }
         if (state.query) { state.query = ""; search.value = ""; paint(); search.focus(); say("Search cleared"); return; }
         close("escape"); return;

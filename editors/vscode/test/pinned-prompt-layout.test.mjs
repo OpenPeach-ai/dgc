@@ -287,7 +287,8 @@ test("a long prompt pins folded; opened it scrolls away while Show less stays in
     }, head);
     assert.equal(folded.fold, "folded");
     assert.ok(folded.pinned && folded.position === "sticky", "pinned, folded");
-    assert.ok(Math.abs(folded.lines - 3) < 0.1, `showing its three lines (${folded.lines})`);
+    // (Stuck, it is one line with its Show more at the end: in its own place it shows its three lines.)
+    assert.ok(Math.abs(folded.lines - 1) < 0.1, `one line while it is stuck (${folded.lines})`);
 
     // Show more on the pinned prompt: it goes back to where it was sent, then opens there.
     await s.page.hover(`${head} > .bubble`);
@@ -783,6 +784,7 @@ for (const [theme, forcedColors] of [["dark-modern", false], ["light-modern", fa
       const m = await s.page.evaluate(async () => {
         const P = window.__pin, block = P.heads()[1].parentElement.querySelector(":scope > .msg.dgc");
         await P.bring(block, -block.offsetHeight / 2);
+        await new Promise((done) => setTimeout(done, 150));        // (the stuck look arrives a moment after the scroll)
         const [head] = P.pinned(), ground = getComputedStyle(head, "::before"), bubble = getComputedStyle(head.querySelector(".bubble"));
         const probe = document.createElement("div");
         probe.style.cssText = "background: var(--surface)";
@@ -790,7 +792,7 @@ for (const [theme, forcedColors] of [["dark-modern", false], ["light-modern", fa
         const surface = getComputedStyle(probe).backgroundColor;
         probe.remove();
         return { bg: ground.backgroundColor, image: ground.backgroundImage, mask: ground.maskImage, bottom: ground.bottom, surface,
-          outline: bubble.outlineStyle, outlineWidth: bubble.outlineWidth };
+          outline: bubble.outlineStyle, outlineWidth: bubble.outlineWidth, edge: ground.borderBottomWidth, shadow: ground.boxShadow };
       });
       const hard = theme === "hc" || forcedColors;
       if (!forcedColors) {
@@ -802,8 +804,9 @@ for (const [theme, forcedColors] of [["dark-modern", false], ["light-modern", fa
         assert.equal(m.bottom, "-4px", "4px under the bubble");
         assert.equal(m.outline, "solid", "and an edge round the pinned prompt");
       } else {
-        assert.match(m.mask, /linear-gradient/, "the answer fades out under it");
-        assert.equal(m.bottom, "-12px");
+        // (While it is stuck the ground ends in a hairline and a soft shadow, where a fade read as nothing at all.)
+        assert.equal(m.mask, "none"); assert.equal(m.edge, "1px", "a hairline under it"); assert.notEqual(m.shadow, "none", "and a soft shadow");
+        assert.equal(m.bottom, "-8px");
         assert.equal(m.outline, "none", "no outline outside high contrast");
       }
       assert.deepEqual(s.errors, []);
@@ -886,10 +889,12 @@ for (const kind of ["image", "file"]) {
       await s.settle();
       const m = await s.page.evaluate(async () => {
         const P = window.__pin, head = P.heads().at(-1), block = head.parentElement.querySelector(":scope > .msg.dgc");
-        await P.bring(block, -block.offsetHeight / 2);
+        // (Its chip is measured in its own place: stuck, the prompt is one line of its words.)
+        await P.bring(head.parentElement, 40); await new Promise((done) => setTimeout(done, 150));
         const chip = head.querySelector(".prompt-att"), tile = chip.querySelector(".image-tile");
-        return { pinned: P.pinned().includes(head), pinOff: head.classList.contains("pin-off"),
-          height: Math.round(chip.getBoundingClientRect().height), tile: tile ? Math.round(tile.getBoundingClientRect().height) : 0,
+        const height = Math.round(chip.getBoundingClientRect().height), tall = tile ? Math.round(tile.getBoundingClientRect().height) : 0;
+        await P.bring(block, -block.offsetHeight / 2);
+        return { pinned: P.pinned().includes(head), pinOff: head.classList.contains("pin-off"), height, tile: tall,
           caption: chip.querySelector(".image-caption")?.textContent || "" };
       });
       assert.equal(m.pinOff, false, "the prompt is short enough to pin");
@@ -937,3 +942,52 @@ test("a pasted image's chip shows its file name, cut to fit", async (t) => {
     assert.equal(chips[1].caption, "PNG · 1920×1080", "a clipboard screenshot has no name of its own: its type and size, as before");
   } finally { await s.page.close(); }
 });
+
+// User test, round 2: after a second message the log sat at its end with the first turn mostly scrolled past, its
+// prompt pinned at the top over the last part of its answer. Pinned, it looked like any prompt in its place, so it
+// read as "your message, then the Edited card": as if the reply were missing. While it is stuck a prompt looks pinned:
+// one line, a hairline and a soft shadow under it; in its own place it is exactly as before.
+const LONG_PROMPT = "Make a one-page document: a welcome note for new tile-shop staff, with the opening hours, who to ask about returns, where the samples are kept and how the till is closed at night.";
+for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 700]) {
+  test(`a pinned prompt looks pinned while it is stuck, and is itself again in its place (${theme}, ${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const s = await openPage({ width, height: 640, theme });
+    try {
+      await chat(s, [LONG_PROMPT, "Then make a 4-slide deck of it."]);
+      const read = () => s.page.evaluate(() => { const P = window.__pin, head = P.heads()[0], bubble = head.querySelector(".bubble"), text = head.querySelector(".prompt-text");
+        const cs = getComputedStyle(text), ground = getComputedStyle(head, "::before"), view = P.log.getBoundingClientRect();
+        return { pinned: head.classList.contains("pinned"), second: P.heads()[1].classList.contains("pinned"), bubble: bubble.getBoundingClientRect().height, line: parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5,
+          text: text.getBoundingClientRect().height, cut: text.scrollWidth > text.clientWidth + 1, ellipsis: cs.textOverflow, edge: ground.borderBottomWidth, shadow: ground.boxShadow,
+          top: head.getBoundingClientRect().top - view.top, turnTop: head.parentElement.getBoundingClientRect().top - view.top, height: P.log.scrollHeight, wide: document.documentElement.scrollWidth > innerWidth,
+          whole: text.textContent.length }; });
+      await s.page.evaluate(() => window.__pin.scrollTo(0));
+      await s.settle();
+      const rest = await read();
+      assert.equal(rest.pinned, false, "at the top, in its own place: not pinned");
+      assert.ok(rest.text > rest.line * 1.5 || width > 600, "its words wrap there");
+      assert.deepEqual([rest.edge, rest.shadow], ["0px", "none"], "no edge under it in its place");
+      // Scrolled so the first turn's top is above the view, its answer under the prompt.
+      await s.page.evaluate(async () => { const P = window.__pin, block = P.heads()[0].parentElement.querySelector(":scope > .msg.dgc"); await P.bring(block, -block.offsetHeight / 2); });
+      await s.settle();
+      const stuck = await read();
+      assert.ok(stuck.turnTop < 0, "its turn's top is above the view");
+      assert.equal(stuck.pinned, true, "the prompt is marked pinned");
+      assert.equal(stuck.second, false, "only the one that is stuck");
+      assert.ok(stuck.text <= stuck.line * 1.4, `one line tall (${stuck.text}px of a ${stuck.line}px line)`);
+      assert.deepEqual([stuck.cut, stuck.ellipsis], [true, "ellipsis"], "the rest of it behind an ellipsis");
+      assert.ok(stuck.bubble < rest.bubble || rest.text <= rest.line * 1.4, "smaller than in its place");
+      assert.equal(stuck.edge, "1px", "a hairline under it"); assert.notEqual(stuck.shadow, "none", "and a soft shadow");
+      assert.ok(Math.abs(stuck.top - rest.top) <= 1, "on the same rest line");
+      assert.equal(stuck.height, rest.height, "nothing in the log moved when it went small: the transcript is as tall as before");
+      assert.equal(stuck.wide, false);
+      if (process.env.SHOTS) await s.page.screenshot({ path: `${process.env.SHOTS}/pinned-${theme.replace("-modern", "")}-${width}.png` });
+      // Back at the top it is exactly as it was.
+      await s.page.evaluate(() => window.__pin.scrollTo(0));
+      await s.settle();
+      const back = await read();
+      assert.deepEqual([back.pinned, back.bubble, back.text, back.edge, back.height], [false, rest.bubble, rest.text, "0px", rest.height]);
+      if (process.env.SHOTS) await s.page.screenshot({ path: `${process.env.SHOTS}/pinned-rest-${theme.replace("-modern", "")}-${width}.png` });
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  });
+}

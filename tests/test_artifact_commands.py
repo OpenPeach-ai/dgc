@@ -69,6 +69,10 @@ class ArtifactCommandsTest(unittest.TestCase):
         caps = CAPABILITY["artifacts"]
         self.assertEqual(set(caps["types"]), {"page", "doc", "slides", "sheet", "dashboard", "checklist", "design"})
         self.assertIn("slides", caps["outputs"])
+        self.assertEqual(caps["outputs"], ["auto", "document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design"],
+                         "every kind the Library lists can be chosen for a reply: a checklist and a design too")
+        from dgc.editor_protocol import ARTIFACT_OUTPUTS
+        self.assertEqual(list(ARTIFACT_OUTPUTS), caps["outputs"], "the commands take what the capability offers")
         self.assertEqual(caps["exports"]["slides"], ["pptx", "pdf", "html"])
 
     def test_list_and_get_with_content(self):

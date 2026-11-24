@@ -402,3 +402,64 @@ test("one-line rows are one height, with or without capability marks, on every c
   assert.ok([...seen.keys()].some((k) => k.endsWith("(marks)")) && [...seen.keys()].some((k) => !k.endsWith("(marks)")), "both kinds were measured");
   assert.ok(Math.max(...heights) - Math.min(...heights) <= 1, `one height: ${JSON.stringify(Object.fromEntries(seen))}`);
 });
+
+// ---- Fallback, in sight (user test, round 2): nothing said "fallback" until a row was pointed at and its ⋯ opened, and
+// the Fallback tag was red, the colour of an error. A line under the models names the fallback and chooses one; the tag
+// is a quiet grey.
+const fallbackView = async (page, { set = "" } = {}) => page.evaluate(`(() => { const v = ${(await import("./support/model-picker-scene.mjs")).sampleView(3)};
+  const rows = v.connections[2].sections.flatMap((s) => s.rows);
+  rows.forEach((r, i) => { const main = i === 0, fb = r.value === ${JSON.stringify(set)};
+    Object.assign(r, { current: main, pills: ${JSON.stringify(!!set)} ? (main ? [["Main", "main"]] : fb ? [["Fallback", "fallback"]] : []) : [],
+      actions: [...(main ? [] : [{ id: "main", label: "Use as main" }]), { id: "fallback", label: fb ? "Stop using as fallback" : "Use as fallback", disabled: main }] }); });
+  v.selected = "ollama";
+  if (window.picker && window.picker.isOpen()) { window.view = { ...window.view, ...v }; window.picker.update(window.view); } else window.openPicker(v);
+  return rows.map((r) => r.value); })()`);
+const fallbackLine = (page) => page.evaluate(() => { const line = document.querySelector(".dgc-mp-fb");
+  return !line || line.hidden ? null : { name: line.querySelector(".dgc-mp-fb-name").textContent, now: line.querySelector(".dgc-mp-fb-now").textContent,
+    buttons: [...line.querySelectorAll("button")].map((b) => b.textContent.trim()), choosing: document.querySelector(".dgc-mp").classList.contains("dgc-mp-choosing") }; });
+
+test("Fallback has a line of its own under the models: it names the fallback, and Choose picks one from the list", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const width of [300, 700]) {
+    const made = await pickerPage(browser, { width });
+    t.after(() => made.context.close());
+    const page = made.page;
+    const values = await fallbackView(page);
+    assert.deepEqual(await fallbackLine(page), { name: "Fallback", now: "None", buttons: ["Choose"], choosing: false }, `${width}px: in sight with none set`);
+    const fits = await page.evaluate(() => { const line = document.querySelector(".dgc-mp-fb").getBoundingClientRect(), card = document.querySelector(".dgc-mp-card").getBoundingClientRect(), b = document.querySelector(".dgc-mp-fb button");
+      return { inside: line.left >= card.left - 0.5 && line.right <= card.right + 0.5, radius: getComputedStyle(b).borderTopLeftRadius, cut: b.scrollWidth > b.clientWidth + 1 }; });
+    assert.deepEqual(fits, { inside: true, radius: "6px", cut: false }, `${width}px: inside the card, the buttons' corner, its word whole`);
+    await page.click(".dgc-mp-fb button");
+    const choosing = await fallbackLine(page);
+    assert.deepEqual([choosing.now, choosing.buttons, choosing.choosing], ["Pick a model in the list", ["Cancel"], true]);
+    assert.equal(await page.evaluate(() => document.querySelector('.dgc-mp-row[aria-selected="true"]').getAttribute("aria-disabled")), "true", "the main model can't be its own fallback");
+    await page.click(`.dgc-mp-row[data-value="${values[2]}"]`);
+    const last = (await picked(page)).at(-1);
+    assert.deepEqual([last[0], last[1], last[2].row.value], ["action", "fallback", values[2]], "the row's own Use as fallback, with no ⋯");
+    assert.equal((await picked(page)).some((p) => p[0] === "pick"), false, "and the main model is not changed");
+    assert.equal((await fallbackLine(page)).choosing, false);
+    // The page answers with the fallback set: the line names it, and its tag is a quiet grey, never the errors' red.
+    await fallbackView(page, { set: values[2] });
+    assert.deepEqual(await fallbackLine(page), { name: "Fallback", now: values[2], buttons: ["Change"], choosing: false });
+    const tag = await page.evaluate(() => { const probe = document.createElement("i"); probe.style.color = "var(--err-text)"; document.querySelector(".dgc-mp").append(probe);
+      const red = getComputedStyle(probe).color, muted = (probe.style.color = "var(--muted)", getComputedStyle(probe).color); probe.remove();
+      const cs = getComputedStyle(document.querySelector(".dgc-mp-row .dgc-menu-pill-fallback")); return { red, color: cs.color, muted, radius: cs.borderTopLeftRadius }; });
+    assert.notEqual(tag.color, tag.red, "not red: red is for errors");
+    assert.equal(tag.color, tag.muted, "the quiet grey"); assert.equal(tag.radius, "6px", "a tag with the buttons' corner, never a pill");
+    // Change offers No fallback; Escape leaves the choosing, and the picker stays.
+    await page.click(".dgc-mp-fb button");
+    assert.deepEqual((await fallbackLine(page)).buttons, ["No fallback", "Cancel"]);
+    await page.keyboard.press("Escape");
+    assert.deepEqual([(await fallbackLine(page)).choosing, await page.evaluate(() => window.picker.isOpen())], [false, true]);
+    await page.click(".dgc-mp-fb button");
+    await page.click(".dgc-mp-fb button");                              // No fallback
+    const off = (await picked(page)).at(-1);
+    assert.deepEqual([off[0], off[1], off[2].row.value], ["action", "fallback", values[2]], "the fallback row's own Stop using as fallback");
+  }
+});
+
+test("a picker whose rows offer no fallback has no Fallback line", async (t) => {
+  if (skipOrFail(t)) return;
+  const { page } = await scene(t, { width: 440 });
+  assert.equal(await fallbackLine(page), null);
+});

@@ -16,6 +16,9 @@
   const SOURCES = [["all", "All"], ["work", "Work"], ["chat", "Chat"], ["personal", "Personal Pips"], ["project", "Project Pips"]];
   const GROUPS = [["needs", "Needs you"], ["new", "New"]];
   const FIRST = 8;                 // cards a group shows before "Show N more"
+  /** How many things wait in these cards: a card counts the things it stands for (`waiting`, a Pip's card with two
+   *  cards of its own counts two), one where it doesn't say. Only the cards that need you count. */
+  const waiting = (cards) => (Array.isArray(cards) ? cards : []).reduce((n, c) => n + (c && c.group === "needs" ? Math.max(1, Number(c.waiting) || 1) : 0), 0);
 
   /**
    * The hub in `host`.
@@ -27,7 +30,7 @@
    *   onAct(key, act)   a card's answer was chosen: act is an action's id ("open", "read", "dismiss" ...)
    *   onClear(keys)     Clear, beside "New": the cards it covers (what is shown)
    *   onMore()          "N more need you": where the rest are; onPips(): "More Pips may have news": your Pips
-   *   onCount(total)    how many cards there are in all, whatever is shown (the Home tab's number)
+   *   onCount(total)    how many cards there are in all, whatever is shown
    *   onDraw(host)      after a redraw: the page starts its faces and blobs moving
    * update({ cards, more, partial, notes }) draws.
    *   cards: [{ key, source, group: "needs" | "new", who: { html }, from, title, chips, actions: [{ id, label, primary?, title? }], label }]
@@ -127,13 +130,13 @@
         const more = group === "needs" ? Number(state.more) || 0 : 0, FIRST = most();
         if (!all.length && !more && !always) continue;
         const cut = open.has(group) || all.length <= FIRST ? all : all.slice(0, FIRST);
-        html += `<section class="dgc-hub-group" data-group="${group}" aria-labelledby="dgc-hub-h-${group}"><div class="dgc-hub-head"><h2 id="dgc-hub-h-${group}">${name}<span class="dgc-hub-n"${all.length + more ? "" : " hidden"}>${all.length + more}</span></h2>`
+        html += `<section class="dgc-hub-group" data-group="${group}" aria-labelledby="dgc-hub-h-${group}"><div class="dgc-hub-head"><h2 id="dgc-hub-h-${group}">${name}<span class="dgc-hub-n"${all.length + more ? "" : " hidden"}>${(group === "needs" ? waiting(all) : all.length) + more}</span></h2>`
           + (group === "new" && all.length ? `<button type="button" class="dgc-hub-link dgc-hub-clear" title="Clear what is new here. What needs you stays.">Clear</button>` : "")
           + (always && onViewAll && all.length ? `<button type="button" class="dgc-hub-link dgc-hub-viewall" title="Open all of it">View all</button>` : "") + `</div>`
           + (!all.length && !more && empty ? `<p class="dgc-hub-empty">${esc(empty)}</p>` : "")
           + `<div class="dgc-hub-cards">${cut.map(cardHtml).join("")}</div>`
           + (cut.length < all.length ? `<button type="button" class="dgc-hub-link dgc-hub-rest" data-group="${group}" title="Show the rest of these here">Show ${all.length - cut.length} more</button>` : "")
-          + (more ? `<button type="button" class="dgc-hub-link dgc-hub-more" title="Open Needs attention in Pips">${more} more ${more === 1 ? "needs" : "need"} you · Open in Pips</button>` : "")
+          + (more ? `<button type="button" class="dgc-hub-link dgc-hub-more" title="Open Needs you in Pips">${more} more ${more === 1 ? "needs" : "need"} you · Open in Pips</button>` : "")
           + (group === "new" && state.partial ? `<button type="button" class="dgc-hub-link dgc-hub-all" title="Open your Pips">More Pips may have news · Open Pips</button>` : "")
           + `</section>`;
       }
@@ -189,5 +192,5 @@
     };
   }
 
-  root.DgcHub = Object.freeze({ create, SOURCES });
+  root.DgcHub = Object.freeze({ create, SOURCES, waiting });
 })();

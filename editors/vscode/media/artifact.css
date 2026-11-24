@@ -161,11 +161,19 @@ body.vscode-light .art-now { color: var(--link); }
   .sl-preview { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); }
 }
 @media (max-width: 640px) {
+  /* A narrow tab (half the window): the slides are one strip that scrolls sideways, the chosen slide's picture comes
+     next, then its form. So a slide is in sight as the panel opens, and stays in sight with its comments under it. */
   .sl { display: flex; flex-direction: column; overflow-y: auto; }
-  .sl-side { flex: none; max-height: 196px; border-right: 0; border-bottom: 1px solid var(--border); }
-  .sl-fields { flex: none; overflow: visible; padding: var(--sp-3); }
-  .sl-preview { flex: none; border-left: 0; border-top: 1px solid var(--border); }
-  .sl-frame { height: 320px; flex: none; }
+  .sl-side { flex: none; flex-direction: row; align-items: center; overflow: visible; padding: var(--sp-2); border-right: 0; border-bottom: 1px solid var(--border); }
+  .sl-list { flex: 1; min-width: 0; flex-direction: row; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; padding: 1px; }
+  .sl-item { flex: none; width: 150px; box-sizing: border-box; }
+  .sl-item.drop-before::before, .sl-item.drop-after::after { top: var(--sp-1); bottom: var(--sp-1); width: 2px; height: auto; right: auto; left: -2px; }
+  .sl-item.drop-after::after { left: auto; right: -2px; }
+  .sl-add { flex: none; align-self: center; }
+  .sl-add > span:not(.codicon):not(.art-glyph) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .sl-fields { flex: none; order: 2; overflow: visible; padding: var(--sp-3); }
+  .sl-preview { flex: none; order: 1; border-left: 0; border-bottom: 1px solid var(--border); }
+  .sl-frame { height: min(320px, 58vw); min-height: 0; flex: none; }
   .art-head { padding: var(--sp-2) var(--sp-3); }
   .art-toolbar { padding: var(--sp-2) var(--sp-3); }
   /* Narrow: a button keeps its icon and its name for a screen reader; Save and Allow keep their words. */
@@ -278,6 +286,12 @@ body.vscode-light .art-now { color: var(--link); }
 .art-btn-quiet, .art-btn-quiet:is(:hover, :active):not(:disabled) { border: 0; background: transparent; transform: none; font-weight: var(--w-reg); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--btn-line-hover); }
 .art-btn-quiet:hover:not(:disabled) { text-decoration-color: currentColor; }
 .art-version-actions .art-btn { height: var(--btn-h-sm); }
+/* (Versions' actions are the small button, each with its edge: where the box is too narrow for a version's words
+   beside them, they go under the words.) */
+.art-version { flex-wrap: wrap; }
+.art-version-words { flex: 1 1 150px; }
+.art-version-actions { margin-left: auto; align-items: center; }
+.art-version-actions .art-btn { display: inline-flex; align-items: center; gap: 2px; }
 @media (forced-colors: active) { .art-btn { border-color: CanvasText; } .art-btn-primary, .art-source[data-allowed="false"] .art-btn { forced-color-adjust: none; border-color: ButtonText; background: ButtonText; color: ButtonFace; } }
 
 /* ---- a checklist (media/artifactChecklist.js): how far along, then an item a card: its tick box, title and status

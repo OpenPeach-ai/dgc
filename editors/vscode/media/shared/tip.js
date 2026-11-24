@@ -44,7 +44,7 @@
     shell.appendChild(node);
     // (`extra`: words cut with "…" under the pointer, said under the control's own label; `own`: the label of a box
     // that has none of its own, only words that are cut.)
-    let timer = 0, warm = 0, target = null, lifted = "", watching = null, lastKey = "", alive = 0, extra = "", own = "";
+    let timer = 0, warm = 0, target = null, lifted = "", watching = null, lastKey = "", alive = 0, extra = "", own = "", byPointer = false, realPointer = false, clickedAt = null;
 
     const labelOf = (el) => (el.getAttribute("title") || el.dataset.tip || "").trim();
     const find = (event) => {
@@ -103,7 +103,7 @@
       const label = mine || (el === target && lifted) || labelOf(el);
       if (!label || el.closest("[hidden]")) { hide(); return; }
       hide();
-      target = el; extra = more; own = mine;
+      target = el; extra = more; own = mine; byPointer = !instant;
       timer = view.setTimeout(() => {
         if (target !== el || !el.isConnected) return;
         if (el.classList.contains("is-sliding")) return;       // a long name sliding in a menu shows itself whole
@@ -111,19 +111,26 @@
         if (!instant && !own) { lift(el); watch(el); }
         paint(el, extra ? `${words}\n${extra}` : words);
         // A control the page took away while its label was up (a list drawn again) takes its label with it.
-        alive = view.setInterval(() => { if (!el.isConnected || !el.getClientRects().length) hide(); }, 400);
+        // And so does one the pointer is no longer on, however it left (out of the page, under a panel that opened over
+        // it: user test 2, a label stood for minutes). Asked only where a real pointer has moved in the page, and never
+        // of words that lie under their own card (those are not what is hovered).
+        alive = view.setInterval(() => { if (!el.isConnected || !el.getClientRects().length || (byPointer && !own && realPointer && target === el && !el.matches(":hover"))) hide(); }, 400);
       }, instant ? 0 : Date.now() - warm < WARM_MS ? 0 : delayMs);
     }
     // Words cut with "…" say the whole of themselves to a pointer that rests on them (the layout audit, 0.52): under
     // the label of the control they are in when it has one that does not say them, as a label of their own otherwise.
+    const moved = (e) => { if (e.isTrusted) realPointer = true; if (clickedAt && Math.hypot(e.clientX - clickedAt.x, e.clientY - clickedAt.y) > 3) clickedAt = null; };
     const over = (e) => {
+      // What was just clicked and drawn again where the pointer still rests (a filter, a star) gets no label over it.
+      if (clickedAt && Math.hypot(e.clientX - clickedAt.x, e.clientY - clickedAt.y) <= 3) { hide(); return; }
       const found = find(e), cut = cutUnder(scope, e.clientX, e.clientY, view);
       if (found) { const said = found === target && lifted ? lifted : labelOf(found); show(found, false, cut && (found.contains(cut.el) || cut.el.contains(found)) && !said.includes(cut.words.slice(0, 24)) ? cut.words : ""); }
       else if (cut) show(cut.el, false, "", cut.words);
       else hide();
     };
     const leave = (e) => { if (!e.relatedTarget) hide(); };            // the pointer left the page
-    const down = () => hide();
+    const down = (e) => { hide(); clickedAt = Number.isFinite(e.clientX) ? { x: e.clientX, y: e.clientY } : null; };
+    const gone = () => hide();                                           // (the page's own edge, where no element is left)
     const focus = (e) => {
       const found = find(e);
       // Only focus the Tab key brought: a label on every click is noise, and so is one on the control focus is put
@@ -142,6 +149,9 @@
     scope.addEventListener("dgc-said", said, true);
     scope.addEventListener("pointerover", over);
     scope.addEventListener("pointerout", leave);
+    scope.addEventListener("pointermove", moved, { capture: true, passive: true });
+    doc.documentElement.addEventListener("mouseleave", gone);
+    scope.addEventListener("wheel", scrolled, { capture: true, passive: true });
     scope.addEventListener("pointerdown", down, true);
     scope.addEventListener("focusin", focus);
     scope.addEventListener("focusout", hide);
@@ -152,7 +162,8 @@
       hide(); node.remove();
       scope.removeEventListener("pointerover", over); scope.removeEventListener("pointerout", leave); scope.removeEventListener("pointerdown", down, true);
       scope.removeEventListener("focusin", focus); scope.removeEventListener("focusout", hide); doc.removeEventListener("keydown", key, true);
-      scope.removeEventListener("scroll", scrolled, true); view.removeEventListener("blur", hide); scope.removeEventListener("dgc-said", said, true);
+      scope.removeEventListener("scroll", scrolled, true); view.removeEventListener("blur", hide);
+      scope.removeEventListener("pointermove", moved, { capture: true }); doc.documentElement.removeEventListener("mouseleave", gone); scope.removeEventListener("wheel", scrolled, { capture: true }); scope.removeEventListener("dgc-said", said, true);
     } };
   }
 

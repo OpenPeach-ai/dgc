@@ -225,12 +225,12 @@ test("words: where a Pip works, never a kind of Pip", async (t) => {
   if (skipOrFail(t)) return;
   const x = await open();
   try {
-    const kinds = /\b(Personal|Project) Pips?\b/i;
+    const kinds = /\bPersonal\b|\bProject Pips?\b/i;
     assert.doesNotMatch(await x.inPips((root) => root.querySelector(".pips-one").textContent), kinds, "the list");
-    assert.equal(await x.inPips((root, id) => root.querySelector(`.pips-one-list [data-job="${id}"] .pip-row-place`).textContent.trim(), MORNINGS), "Personal");
+    assert.equal(await x.inPips((root, id) => root.querySelector(`.pips-one-list [data-job="${id}"] .pip-row-place`).textContent.trim(), MORNINGS), "No folder");
     await x.click("#simple-new"); await x.waitIn("#review-root .dialog");
     const dialog = await x.inPips((root) => { const d = root.querySelector("#review-root .dialog"); return d.textContent + " " + [...d.querySelectorAll("[title]")].map((n) => n.title).join(" "); });
-    assert.doesNotMatch(dialog, kinds, "New Pip says nothing of kinds"); assert.match(dialog, /No folder: it is listed under Personal\./, "with no folder, it says where it will be");
+    assert.doesNotMatch(dialog, kinds, "New Pip says nothing of kinds"); assert.match(dialog, /No folder yet: give it one any time, from its page\./, "with no folder, it says so and what can be done");
     await x.page.keyboard.press("Escape"); await x.page.waitForTimeout(200);
     // In a Pip's chat, the @ list says where each other Pip works.
     await x.openPip(GST); await type(x, "@"); await x.waitIn("#chat-pop [role=option]"); await x.page.keyboard.press("Enter"); await x.page.waitForTimeout(300);
@@ -245,6 +245,6 @@ test("words: where a Pip works, never a kind of Pip", async (t) => {
   const y = await open();
   try {
     await y.openPip(MORNINGS); await toPage(y);
-    assert.match(await y.inPips((root) => root.querySelector(".pip-folder-where")?.textContent || ""), /^Personal/, "\"Works in: Personal\"");
+    assert.match(await y.inPips((root) => root.querySelector(".pip-folder-where")?.textContent || ""), /^No folder/, "\"Works in: No folder\"");
   } finally { await y.close(); }
 });

@@ -45,7 +45,7 @@
     if (more) out.append(el("span", "pw-more", ` and ${more} more`));
     return out;
   }
-  const DIFFERENT = "A Pip now tells you what it finds in its own chat, not in a Work session. What needs you is on Home and under Needs attention here. All your Pips start at Ask me first.";
+  const DIFFERENT = "A Pip now tells you what it finds in its own chat, not in a Work session. What needs you is on Home and under Needs you here. All your Pips start at Ask me first.";
 
   // ---- the pop-up -------------------------------------------------------------------------------------------------
   function mount(layer, { onSeen, onOpenPip } = {}) {

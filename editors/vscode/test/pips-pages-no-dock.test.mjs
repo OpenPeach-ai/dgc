@@ -135,7 +135,7 @@ for (const [width, theme] of [[300, "dark-modern"], [700, "light-modern"]]) {
       for (const how of ["click", "Enter", "Escape"]) {
         await press(x, "#attention-view-all"); await inRoot(x, ".attention-all"); await x.settle();
         const all = await now(x.page);
-        assert.equal(all.title, "Needs attention");
+        assert.equal(all.title, "Needs you");
         alone(all, list, "View all");
         assert.equal(all.focusId, "attention-all-back", "focus is on its back arrow");
         if (how === "Escape") { await x.page.keyboard.press("Escape"); await gone(x, ".attention-all"); await inRoot(x, "[data-job]"); await x.settle(); withBoth(await now(x.page), list, "the list, by Escape"); }

@@ -225,8 +225,26 @@ function unsavedLine() {
     if (!pages.length) return dirty.size ? 'Unsaved changes' : '';
     return 'Unsaved changes on ' + (pages.length === 1 ? pages[0] : pages.slice(0, -1).join(', ') + ' and ' + pages.at(-1));
 }
-function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus = unsavedLine(); if ($('save-status'))
-    $('save-status').textContent = saveStatus; }
+/** What DGC has saved for a key, as applyConfig puts it in the draft; undefined for a key it can't say that of. */
+function savedValue(key) {
+    if (!config) return undefined;
+    if (key === 'dev_mode' || key === 'dev_mode_tools') return config[key] === true;
+    if (key === 'dev_limits') return devLimitsOf(config.dev_limits);
+    if (key === 'search_provider') return config.search || 'duckduckgo';
+    if (key === 'subagent_context_size') return Number(config.subagent_context_size) > 0 ? String(config.subagent_context_size) : '';
+    if (key === 'think' || !(key in defaults)) return undefined;
+    return key.endsWith('api_key') ? '' : config[key] ?? defaults[key];
+}
+const sameValue = (a, b) => a === b || (a !== null && b !== null && typeof a === 'object' && typeof b === 'object' ? JSON.stringify(a) === JSON.stringify(b) : String(a ?? '') === String(b ?? '') && typeof a !== 'boolean' && typeof b !== 'boolean');
+// A change put back to what DGC has saved is no change: "Unsaved changes" goes with it (Dev Mode switched on and off
+// again kept saying it had unsaved changes).
+function setDraft(key, value) {
+    draft[key] = value;
+    const saved = savedValue(key);
+    if (saved !== undefined && sameValue(value, saved)) dirty.delete(key); else dirty.add(key);
+    saveStatus = unsavedLine();
+    if ($('save-status')) $('save-status').textContent = saveStatus;
+}
 function applyConfig(ev) {
     config = ev;
     draft.subscription_engines = Array.isArray(ev.subscription_engines) ? ev.subscription_engines : [];

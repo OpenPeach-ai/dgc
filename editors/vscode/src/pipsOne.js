@@ -71,21 +71,21 @@ export function heldOrder(ordered, held) {
   return [...held.map(id => by.get(id)).filter(Boolean), ...ordered.filter(p => !seen.has(p.id))];
 }
 
-/** Where a Pip works, for its row: "Personal", or its folder as the lists show it (the home folder as ~), with the whole
+/** Where a Pip works, for its row: "No folder", or its folder as the lists show it (the home folder as ~), with the whole
  *  path for its tooltip. `folderOf(workspace_id)` is the folder row DGC listed for a project, or null. */
 export function placeOf(pip, { personalId = '', folderOf = () => null, nameOf = () => '' } = {}) {
   if (!pip || typeof pip.workspace_id !== 'string' || !WORKSPACE.test(pip.workspace_id)) return { kind: 'unknown', shown: '', full: '', missing: false };
-  if (pip.workspace_id === personalId) return { kind: 'personal', shown: 'Personal', full: 'Personal: it works in no folder', missing: false };
+  if (pip.workspace_id === personalId) return { kind: 'personal', shown: 'No folder', full: 'It works in no folder', missing: false };
   const row = folderOf(pip.workspace_id);
   if (row) return { kind: 'folder', shown: row.shown || row.folder, full: row.folder, name: row.name || '', missing: row.exists === false };
   const name = nameOf(pip.workspace_id);
   return { kind: 'folder', shown: name || 'A folder on this computer', full: name || '', name, missing: false };
 }
 
-/** What the filter line's button says: "All Pips", "Personal", or the folder's own name. */
+/** What the filter line's button says: "All Pips", "No folder", or the folder's own name. */
 export function filterWords(filter, folders = []) {
   if (filter === ALL) return 'All Pips';
-  if (filter === PERSONAL) return 'Personal';
+  if (filter === PERSONAL) return 'No folder';
   const row = folders.find(r => r.folder === filter);
   return row?.name || String(filter).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'All Pips';
 }

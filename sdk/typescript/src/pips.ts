@@ -316,7 +316,7 @@ export type PipMutationParams = {
   run_pip: { idempotency_key: string; pip_id: string; expected_version?: number; expected_lifecycle_revision?: number; expected_plan_digest?: string };
   send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[]; files?: { name: string; data: string }[]; display_mentions?: unknown[];
     spooled_images?: { name: string; media_type: string }[]; spooled_files?: { name: string; spool: string }[]; conversation_id?: string; reply_to?: string;
-    output?: "auto" | "document" | "slides" | "spreadsheet" | "page" | "dashboard"; questions?: boolean };
+    output?: "auto" | "document" | "slides" | "spreadsheet" | "page" | "dashboard" | "checklist" | "design"; questions?: boolean };
   answer_pip_questions: { pip_id: string; message_id: string; idempotency_key?: string;
     answers?: Record<string, { selected?: number[]; other?: string }>; dismissed?: true; chat_options?: PipChatOptions };
   introduce_pip: { pip_id: string };
@@ -1539,7 +1539,7 @@ export class Pips {
       if ((this.caps.pips_api_version as number) < 100) {
         throw new DGCUnsupportedError("Asking a Pip's reply for a document, deck, sheet, page or dashboard (output) requires a runtime advertising Pips API 100 or newer");
       }
-      if (!["auto", "document", "slides", "spreadsheet", "page", "dashboard"].includes(values.output as string)) {
+      if (!["auto", "document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design"].includes(values.output as string)) {
         throw new DGCConfigError("output is auto, document, slides, spreadsheet, page or dashboard");
       }
     }

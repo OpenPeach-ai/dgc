@@ -291,7 +291,7 @@ test("the lines: what isn't true at this commit is left out (ships: false), and 
   } finally { await x.close(); }
 });
 
-test("the logo line: the CLI's version and What's new at its far right, small, on Home and the Library; a click asks for the news", async (t) => {
+test("the logo line: the CLI's version and What's new at its far right, small, on every tab of the side bar; a click asks for the news", async (t) => {
   if (!browser) { if (process.env.DGC_REQUIRE_CHROMIUM === "1") assert.fail("Chromium could not start"); t.skip("no Chromium"); return; }
   for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 240, 260, 300, 440]) {
     const x = await openHome(browser, { width, height: 600, theme });
@@ -333,11 +333,17 @@ test("the logo line: the CLI's version and What's new at its far right, small, o
       assert.equal(look.grey, true, "grey only, never the accent");
       await link.click();
       assert.deepEqual((await x.posted("whatsNewShow")).length, 1);
-      // Not where the line holds a session's own (its name and model): the Work tab.
-      await x.page.evaluate(() => document.getElementById("side-tab-work")?.click());
-      await x.page.waitForTimeout(150);
-      const onWork = await x.page.evaluate(() => !!document.getElementById("side-tab-work"));
-      if (onWork) assert.equal(await link.isVisible(), false, "the Work tab's line is the session's");
+      // The same line on every tab of the side bar (user test, round 2: "where did What's new go?" on Work): there the
+      // line holds nothing of a session's, so the link stays at its far right, clear of the logo.
+      for (const tab of ["work", "chat", "library", "home"]) {
+        const there = await x.page.evaluate((id) => { const b = document.getElementById(`side-tab-${id}`); if (!b || b.hidden || !b.getClientRects().length) return false; b.click(); return true; }, tab);
+        if (!there) continue;
+        await x.page.waitForTimeout(150);
+        assert.equal(await link.isVisible(), true, `${tab}: What's new stays on the logo line (${theme} ${width})`);
+        const at = await x.page.evaluate(() => { const r = (n) => n.getBoundingClientRect(); const l = r(document.getElementById("phead-news")), h = r(document.getElementById("phead")), logo = r(document.querySelector("#phead .pm"));
+          return { right: h.right - l.right, clear: l.left >= logo.right, wide: document.documentElement.scrollWidth > innerWidth }; });
+        assert.ok(at.right <= 14 && at.clear && !at.wide, `${tab}: at the far right, never over the logo, nothing runs off (${theme} ${width}: ${JSON.stringify(at)})`);
+      }
     } finally { await x.close(); }
   }
 });

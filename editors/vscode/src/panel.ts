@@ -9931,6 +9931,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     else if (asker.kind === "chatdgc") this.chatdgc?.open(asker.id);
     else this.openPipsEditor({ pip: asker.id });
   }
+  /** A Pip chat's tab handed back after a window reload: kept by the bridge every Pip chat's tab is on. */
+  restorePipChat(panel: vscode.WebviewPanel, state: unknown): void {
+    this.ensurePipsTab().restoreChat(panel, state);
+  }
   /** The bridge the Pips tab and every Pip chat's own tab are on, connected. */
   private ensurePipsTab(): PipsEditor {
     if (!this.pipsTab) {
@@ -11614,9 +11618,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const action = needsTrust ? "Trust and enable" : "Enable auto";
       const result = await vscode.window.showWarningMessage("Turn on Auto mode?", {
         modal: true,
-        detail: "DGC can read, create, edit, or delete files, including outside your project; run commands, install software, "
-          + "and change settings with your account’s permissions; and send data or use enabled plugins. "
-          + "Mistakes or malicious instructions can cause data loss or expose private information. "
+        detail: "Everyday steps run without asking. A risky one stops and says why: writing or deleting outside your project, "
+          + "reading passwords or keys, deleting a folder or throwing work away, sending your data out, changing this "
+          + "computer’s setup, or publishing. Everything else DGC can do with your account’s permissions it does: files, "
+          + "commands, the internet and enabled plugins. The check can miss a step: a mistake or a hidden instruction "
+          + "can still lose data or expose private information. "
           + "Your deny and ask rules and sandbox restrictions still apply. Switch back to Default at any time."
           + (needsTrust ? " This also trusts the current workspace." : ""),
       }, action);
@@ -12258,7 +12264,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div id="cbox" data-mode="default">
     <div id="attachments" aria-label="Attached context"></div>
-    <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><div id="input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></div></div>
+    <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><div id="input" class="is-empty" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></div></div>
     <div id="cfooter">
       <div class="cf-left">
       <div class="picker add-picker">

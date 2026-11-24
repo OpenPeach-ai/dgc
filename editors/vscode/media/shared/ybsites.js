@@ -4,7 +4,8 @@
 // and says).
 //
 // Your Browser is the person's own Google Chrome. A site joins the list when they sign in to it there themselves (DGC
-// notices it) or when they Allow a Pip's "use this site in Your Browser?" card. Each site is used by every Pip ("All
+// notices it) or when they Allow a Pip's "use this site in Your Browser?" card. A site let from a card has no sign-in
+// DGC knows of (added_by "you"): its words never say "your sign-in", and it is removed, not signed out of. Each site is used by every Pip ("All
 // Pips"), by only the Pips they tick ("Some Pips"), or by none until they choose ("No Pips"; a bank or payment site
 // starts there). Sign out takes a site off the list and clears its sign-in in Your Browser. Nothing here is a Pip's say:
 // the panel shows what DGC answers and asks DGC for what the person clicks, one site at a time.
@@ -25,7 +26,7 @@
   const pipOf = (p) => (record(p) && PIP.test(String(p.pip_id)) ? { pip_id: String(p.pip_id), name: words(p.name, 120) || "A Pip" } : null);
   function siteOf(s) {
     if (!record(s) || !SITE.test(String(s.site)) || !["all", "chosen"].includes(s.mode)) return null;
-    return { site: String(s.site), shown: words(s.shown, 300) || String(s.site), mode: s.mode, money: s.money === true, fresh: s.new === true,
+    return { site: String(s.site), shown: words(s.shown, 300) || String(s.site), mode: s.mode, money: s.money === true, fresh: s.new === true, signedIn: s.added_by !== "you",
              pips: s.mode === "chosen" && Array.isArray(s.pips) ? s.pips.map(pipOf).filter(Boolean).slice(0, MAX_PIPS) : [] };
   }
   /** get_your_browser's answer, as these pages use it: the sites (each with its Pips), every Pip that may be chosen, and
@@ -48,8 +49,8 @@
   /** The one line under a site in the panel: who may use the person's sign-in there. */
   function who(site) {
     const c = choice(site);
-    if (c === "all") return "Every Pip may use your sign-in here, each in its own tab.";
-    if (c === "some") return `Only ${names(site.pips)} may use your sign-in here.`;
+    if (c === "all") return site.signedIn ? "Every Pip may use your sign-in here, each in its own tab." : "Every Pip may use this site, each in its own tab.";
+    if (c === "some") return site.signedIn ? `Only ${names(site.pips)} may use your sign-in here.` : `Only ${names(site.pips)} may use this site.`;
     return site.money ? "No Pip yet. It’s a bank or payment site: a Pip that needs it asks you first."
       : "No Pip yet: a Pip that needs it asks you first in its chat.";
   }
@@ -89,7 +90,7 @@
     dialog.className = "yb-sites-dialog dgc-dialog";
     dialog.setAttribute("aria-labelledby", `${id}-title`);
     dialog.innerHTML = `<div class="yb-sites-body"><h2 id="${id}-title" tabindex="-1">Sites Pips can use</h2>
-      <p class="yb-sites-intro">The sites you’re signed in to in Your Browser. A Pip works there in its own tab with your sign-in, only on the sites you let it use; anywhere else it asks you first in its chat.</p>
+      <p class="yb-sites-intro">The sites your Pips may use in Your Browser. A Pip works there in its own tab, with your sign-in where you have one, only on the sites you let it use; anywhere else it asks you first in its chat.</p>
       <p class="yb-sites-status" role="status">Loading…</p><ul class="yb-sites-list" hidden></ul>
       <p class="yb-sites-waiting" hidden></p><p class="yb-sites-error" role="alert" hidden></p><p class="yb-sites-hide yb-sites-said" role="status"></p></div>
       <div class="yb-sites-buttons"><button type="button" class="dgc-btn yb-sites-done">Done</button></div>`;
@@ -98,7 +99,7 @@
     // (What a change did, said for a reader: the row itself already shows it.)
     const said = dialog.querySelector(".yb-sites-said"), say = (text) => { said.textContent = ""; said.textContent = text; };
     // (``some``: a site the person just set to Some Pips shows its Pips to tick before any is ticked.)
-    const state = { sites: [], pips: [], waiting: [], some: new Set(), confirm: "", busy: new Set(), errors: new Map() };
+    const state = { sites: [], pips: [], waiting: [], some: new Set(), confirm: "", busy: new Set(), errors: new Map() }, removed = new Set();
     // (A site and a control's key are plain letters, digits, dots and dashes: safe in a selector as they are.)
     const rowOf = (site) => (SITE.test(site) ? list.querySelector(`li[data-site="${site}"]`) : null);
     const siteNamed = (site) => state.sites.find((s) => s.site === site);
@@ -110,16 +111,18 @@
       const tags = (s.fresh ? '<span class="yb-site-tag">New</span>' : "") + (s.money ? '<span class="yb-site-tag">Bank or payment</span>' : "");
       const confirm = state.confirm === s.site;
       const fail = state.errors.get(s.site) || "";
+      // Sign out only where there is a sign-in: a site let from a Pip's card is removed.
+      const out = s.signedIn ? "Sign out" : "Remove", outOf = s.signedIn ? `Sign out of ${s.site}` : `Remove ${s.site}`;
       return `<div class="yb-site-top"><span class="yb-site-name" title="${esc(s.site)}">${esc(s.shown)}</span>${tags}`
-        + (confirm ? "" : `<button type="button" class="dgc-btn small yb-site-out" data-k="out" aria-label="Sign out of ${esc(s.site)}"${off}>Sign out</button>`) + "</div>"
-        + (confirm ? `<div class="yb-site-confirm" role="group" aria-label="Sign out of ${esc(s.site)}"><p>Sign out of ${esc(s.site)}? No Pip can use it, and Your Browser clears your sign-in there.</p>`
-            + `<div class="yb-site-confirm-buttons"><button type="button" class="dgc-btn small" data-k="keep"${off}>Keep</button><button type="button" class="dgc-btn small danger" data-k="out-yes"${off}>Sign out</button></div></div>` : "")
+        + (confirm ? "" : `<button type="button" class="dgc-btn small yb-site-out" data-k="out" aria-label="${esc(outOf)}"${off}>${out}</button>`) + "</div>"
+        + (confirm ? `<div class="yb-site-confirm" role="group" aria-label="${esc(outOf)}"><p>${esc(s.signedIn ? `Sign out of ${s.site}? No Pip can use it, and Your Browser clears your sign-in there.` : `Remove ${s.site}? No Pip can use it until you allow it again.`)}</p>`
+            + `<div class="yb-site-confirm-buttons"><button type="button" class="dgc-btn small" data-k="keep"${off}>Keep</button><button type="button" class="dgc-btn small danger" data-k="out-yes"${off}>${out}</button></div></div>` : "")
         + `<div class="yb-site-modes" role="radiogroup" aria-label="Which Pips may use ${esc(s.site)}">${MODES.map(([value, label]) =>
             `<label class="yb-site-mode"><input type="radio" name="${id}-m${at}" value="${value}" data-k="mode-${value}"${c === value ? " checked" : ""}${off}><span>${label}</span></label>`).join("")}</div>`
         + (c === "some" ? `<fieldset class="yb-site-pips"><legend class="yb-sites-hide">Pips that may use ${esc(s.site)}</legend>${pips.length
             ? pips.map((p) => `<label class="yb-site-pip"><input type="checkbox" value="${esc(p.pip_id)}" data-k="pip-${esc(p.pip_id)}"${ticked.has(p.pip_id) ? " checked" : ""}${off}><span>${esc(p.name)}</span></label>`).join("")
             : '<p class="yb-site-line">No Pips on this computer yet.</p>'}</fieldset>` : "")
-        + `<p class="yb-site-line">${esc(c === "some" && !s.pips.length ? "Tick the Pips that may use your sign-in here." : who(s))}</p>`
+        + `<p class="yb-site-line">${esc(c === "some" && !s.pips.length ? (s.signedIn ? "Tick the Pips that may use your sign-in here." : "Tick the Pips that may use this site.") : who(s))}</p>`
         + `<p class="yb-site-error" role="alert"${fail ? "" : " hidden"}>${esc(fail)}</p>`;
     }
     /** Draw one site's row again, the keys staying on the control they were on. */
@@ -138,8 +141,10 @@
       for (const s of state.sites) paintRow(s.site);
       status.textContent = state.sites.length ? "" : "No sites yet. Sign in to a site in Your Browser and it shows here, for you to choose which Pips may use it.";
       status.hidden = !status.textContent;
-      waiting.hidden = !state.waiting.length;
-      waiting.textContent = state.waiting.length ? `Signing out of ${state.waiting.join(", ")}: Your Browser clears your sign-in there as soon as it runs.` : "";
+      // (A site removed here that had no sign-in is not one being signed out of.)
+      const leaving = state.waiting.filter((site) => !removed.has(site));
+      waiting.hidden = !leaving.length;
+      waiting.textContent = leaving.length ? `Signing out of ${leaving.join(", ")}: Your Browser clears your sign-in there as soon as it runs.` : "";
     }
     /** Ask DGC for one site's change; its row is off until DGC answers, then drawn from what it says. */
     function change(site, fields) {
@@ -157,12 +162,14 @@
     function signOut(site) {
       if (state.busy.has(site)) return;
       state.busy.add(site); state.errors.delete(site); paintRow(site);
+      const had = siteNamed(site)?.signedIn !== false;
       ask("sign_out_your_browser_site", { site }).then(() => {
         state.busy.delete(site); state.confirm = "";
+        if (!had) removed.add(site);
         state.sites = state.sites.filter((s) => s.site !== site);
         if (!state.waiting.includes(site)) state.waiting.push(site);
         paint();
-        say(`Signed out of ${site}.`);
+        say(had ? `Signed out of ${site}.` : `Removed ${site}.`);
         (list.querySelector('[data-k="out"]') || dialog.querySelector(".yb-sites-done")).focus();
       }, (problem) => {
         state.busy.delete(site); state.errors.set(site, String(problem?.message || "Your Browser couldn’t sign out of that site. Try again.").slice(0, 400)); paintRow(site);

@@ -10,6 +10,7 @@
 //   time: while it is unanswered a newer one waits, and only the newest waits (the ones between are on Home and in
 //   their chats). It shows when the first is answered or dismissed, or after the time the editor itself keeps a
 //   notification on screen.
+// - One that waited its turn is not shown if its artifact was opened in a tab meanwhile.
 // - Not for the person's own doing (their edit, a restore, a removal, a refresh, this window's own save), nor for one
 //   that is already open in a tab, nor for one that opens by itself beside the chat showing it.
 //
@@ -25,7 +26,9 @@ const ON_SCREEN_MS = 15_000;
 const MAX_TITLE = 80;
 
 /** One thing made: `key` and `version` say which (once each), `open` opens it. */
-export interface MadeNotice { key: string; version: number; title: string; updated: boolean; open: () => void }
+export interface MadeNotice { key: string; version: number; title: string; updated: boolean; open: () => void;
+  /** True once it is on screen in a tab of its own: asked again when its turn comes, after it has waited. */
+  showing?: () => boolean }
 /** What the pop-up needs of the artifacts: opening one, and whether one is on screen already. */
 export interface NoticeHub { open(id: string, hint?: any): void; showing(id: string): boolean }
 
@@ -95,11 +98,10 @@ export class ArtifactNotice {
     const version = Number.isSafeInteger(view.version) && view.version > 0 ? view.version : 1;
     if (!this.fresh(view.id, version)) { return; }
     // On screen already, or about to be without anyone asking: its tab shows it. (Marked as offered all the same.)
-    let shown = false;
-    try { shown = this.hub?.showing(view.id) === true || this.opensByItself?.(message) === true; } catch { shown = false; }
-    if (shown) { return; }
     const hub = this.hub;
-    this.show({ key: view.id, version, title: view.title, updated: op === "changed" || version > 1, open: () => hub?.open(view.id, view) });
+    const showing = (): boolean => { try { return hub?.showing(view.id) === true || this.opensByItself?.(message) === true; } catch { return false; } };
+    if (showing()) { return; }
+    this.show({ key: view.id, version, title: view.title, updated: op === "changed" || version > 1, open: () => hub?.open(view.id, view), showing });
   }
 
   /** Anything else a turn made that has its own way to open. */
@@ -131,6 +133,10 @@ export class ArtifactNotice {
     this.onScreen = undefined;
     const next = this.waiting;
     this.waiting = undefined;
-    if (next) { this.show(next); }
+    // One that waited is asked again: opened meanwhile (from its card, from the Library), its tab already shows the
+    // change, and a notification would only cover the dock and the prompt box (user test 2).
+    let opened = false;
+    try { opened = next?.showing?.() === true; } catch { opened = false; }
+    if (next && !opened) { this.show(next); }
   }
 }

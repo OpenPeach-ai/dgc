@@ -41,7 +41,7 @@ test('which Pip is offered which: Give to a Pip for anything, Remove to a folder
 test('a Pip for anything: Give it a folder… at the end of "Works in" on its page, and in its ⋯ menu with the folder glyph',async()=>{
  const x=setup();await page(x,MORNINGS);
  const row=x.$('.pip-place-part .pip-page-row');
- assert.equal(x.squash(row.querySelector('.pip-folder-where').textContent),'Personal: it works in no folder');
+ assert.equal(x.squash(row.querySelector('.pip-folder-where').textContent),'No folder');
  assert.equal(row.lastElementChild.textContent,'Give it a folder…','at the row\'s end');
  assert.equal(row.querySelector('#pip-give-folder').className,'quiet pip-folder-move');
  const item=x.$('.pip-topbar .pip-menu [data-give-folder]');
@@ -104,7 +104,7 @@ test('remove its folder: what stays and what changes, then it is a Pip for anyth
  dialog.querySelector('#review-confirm').click();await x.drain();
  assert.deepEqual(x.requests('remove_pip_folder').at(-1),{type:'remove_pip_folder',pip_id:ERP});
  assert.equal(x.$('.pip-folder-parts'),null);
- assert.equal(x.squash(x.$('.pip-place-part .pip-folder-where').textContent),'Personal: it works in no folder');
+ assert.equal(x.squash(x.$('.pip-place-part .pip-folder-where').textContent),'No folder');
  assert.ok(x.$('.pip-place-part #pip-give-folder'),'Give it a folder… again');
  assert.match(x.text(),/ERP daily audit is a Pip for anything again\./);
 });

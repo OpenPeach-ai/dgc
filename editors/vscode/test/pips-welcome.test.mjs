@@ -190,7 +190,7 @@ test("the words: the title, nothing was lost, each folder's Pips, the Personal o
   assert.deepEqual(rows(layer), [
     ["GST watchdog · ERP daily audit", "Were Project Pips in lime_tiles. Now each has its own computer and reads your files as they are, not only what is committed."],
     ["Mornings · Garden notes", "Were Personal Pips. Nothing changes for them."],
-    ["What is different", "A Pip now tells you what it finds in its own chat, not in a Work session. What needs you is on Home and under Needs attention here. All your Pips start at Ask me first."],
+    ["What is different", "A Pip now tells you what it finds in its own chat, not in a Work session. What needs you is on Home and under Needs you here. All your Pips start at Ask me first."],
     ["Mornings", "was on Do it all. It keeps what that meant before; choose Do it all again to let it do more."],
   ]);
   assert.equal(words(layer.querySelector(".pw-full")), "Mornings was on Do it all. It keeps what that meant before; choose Do it all again to let it do more.", "read as one sentence");
@@ -208,7 +208,7 @@ test("names and counts are the user's own: one Pip in the singular, more than th
   assert.deepEqual(rows(s.layer()), [
     ["GST watchdog, ERP daily audit and 4 more", "Were Project Pips in lime_tiles. Now each has its own computer and reads your files as they are, not only what is committed."],
     ["Bed planner", "Was a Project Pip in garden. Now it has its own computer and reads your files as they are, not only what is committed."],
-    ["What is different", "A Pip now tells you what it finds in its own chat, not in a Work session. What needs you is on Home and under Needs attention here. All your Pips start at Ask me first."],
+    ["What is different", "A Pip now tells you what it finds in its own chat, not in a Work session. What needs you is on Home and under Needs you here. All your Pips start at Ask me first."],
   ], "no Personal row, no Do it all row");
   const personal = page();
   personal.openTab(); personal.welcome({ had_pips: true, folders: [], personal: [MORNINGS], do_it_all: [MORNINGS, GARDEN] });

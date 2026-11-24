@@ -171,6 +171,17 @@ class Changing(Base):
         self.assertEqual(self.html(aid, "b1"), before)
         self.assertEqual(service.view(aid)["versions"][-1]["summary"], "Changed “Phone”")
 
+    def test_one_op_given_without_its_list_is_still_that_change(self):
+        # User test round 2, D9: the model sent one op as an object (or beside the id) instead of a list of one; the call
+        # failed, the turn showed a red "failed edit artifact", and the model sent it again. The meaning is plain: do it.
+        aid = self.make()
+        out = self.run_tool("edit_artifact", {"id": aid, "edits": {"op": "change", "board": "b1", "html": DESKTOP}})
+        self.assertTrue(out.startswith("Changed Design"), out)
+        self.assertIn("Roasted on Mill Street", artifact_store.store().read_file(aid, "boards/b1.html").decode())
+        out = self.run_tool("edit_artifact", {"id": aid, "op": "change", "board": "b2", "html": PHONE})
+        self.assertTrue(out.startswith("Changed Design"), out)
+        self.assertEqual(service.view(aid)["version"], 3, "two changes, two versions; neither was taken for a read")
+
     def test_an_exact_edit_must_find_its_words_once(self):
         aid = self.drawn()
         out = self.edit(aid, {"op": "change", "board": "b2", "edits": [{"find": "nowhere", "replace": "x"}]})

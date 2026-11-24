@@ -634,7 +634,7 @@ test("ChatDGC already leaves its scrollbar room: your bubble and its time stay c
 });
 
 // A number means something needs you, and it is Needs attention's; a dot means there's something new to read (approved
-// 2026-11-07: "Personal 5" sat beside "Needs attention 2"). One data set: a Personal Pip with a handoff waiting and two new
+// 2026-11-07: "Personal 5" sat beside "Needs you 2"). One data set: a Personal Pip with a handoff waiting and two new
 // messages, one with only a new message, a setup card with no Pip, and a project Pip with a review waiting and a new run post.
 const NOTES = "pip_" + "e".repeat(32), HANDOFF = "handoff_" + "f".repeat(32), SETUP = "setup_" + "9".repeat(32);
 const notes = { ...base, id: NOTES, workspace_id: P, pip_type: "quill", name: "Garden notes", goal: "Keep my garden notes.", source_policy: { mode: "personal" } };

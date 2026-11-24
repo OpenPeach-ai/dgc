@@ -309,7 +309,7 @@ test('Import team…: the host picks and reads the file; the cards wait with the
  const cards=[setupCard('1','Researcher'),setupCard('2','Writer')];x.state.setups=cards;
  x.answer(request,{setups:cards,name:'Launch crew',left_out:['Reads from connected apps: they name your accounts.']});await x.drain();
  assert.match(x.d.body.textContent,/Imported the team “Launch crew”: 2 new Pips to review\. Nothing is created until you approve each one\. Not included: Reads from connected apps: they name your accounts\./);
- const waiting=x.d.querySelector('[aria-label="Needs attention"]');assert.ok(waiting,'the cards show where new Pips wait');
+ const waiting=x.d.querySelector('[aria-label="Needs you"]');assert.ok(waiting,'the cards show where new Pips wait');
  assert.match(waiting.textContent,/Create the Pip “Researcher”\?/);assert.match(waiting.textContent,/1 of 2/,'both of the team’s cards wait, one shown at a time');
  assert.equal(x.requests('accept_pip_setup').length,0,'nothing is approved by importing');
  // Closing the open dialog changes nothing; a file DGC can't read says so in DGC's words.

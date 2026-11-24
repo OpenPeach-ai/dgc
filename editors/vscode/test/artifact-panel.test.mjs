@@ -600,3 +600,20 @@ test("three-column dashboards stack their cards in a narrow extension panel", as
     assert.ok(wide[1].x > wide[0].x);
   } finally { await s.page.close(); }
 });
+
+// User test, round 2: Esc did not close Versions once the keyboard had left it (a click on the deck, on the page).
+test("Escape closes Versions wherever the keyboard is, and gives the keyboard back to its button", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openPanel(browser, { kind: "slides" });
+  try {
+    for (const leave of [false, true]) {
+      await s.page.click("#art-versions");
+      assert.equal(await s.page.evaluate(() => document.getElementById("art-versions-panel").hidden), false);
+      if (leave) await s.page.evaluate(() => { document.activeElement.blur(); });       // the keyboard is on nothing in the panel now
+      await s.page.keyboard.press("Escape");
+      assert.deepEqual(await s.page.evaluate(() => [document.getElementById("art-versions-panel").hidden, document.getElementById("art-versions").getAttribute("aria-expanded"), document.activeElement.id]),
+        [true, "false", "art-versions"], leave ? "with the keyboard outside the panel" : "with the keyboard in the panel");
+    }
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

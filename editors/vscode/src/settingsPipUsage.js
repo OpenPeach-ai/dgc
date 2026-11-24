@@ -159,7 +159,7 @@ export function createPipUsage(root, vscode, shared = {}) {
       const tr = node('tr');
       const name = node('th', 'usage-model');
       name.setAttribute('scope', 'row');
-      const where = p.scope === 'personal' ? 'Personal' : String(p.project || 'project').slice(0, 120);
+      const where = p.scope === 'personal' ? 'no folder' : String(p.project || 'a folder').slice(0, 120);
       const notes = p.status === 'paused' ? 'paused' : p.status === 'archived' ? 'archived' : p.status === 'removed' ? 'removed' : '';
       const line = node('span', 'usage-clip usage-name');
       line.append(node('span', 'usage-head', String(p.name || 'Pip').slice(0, 120)));

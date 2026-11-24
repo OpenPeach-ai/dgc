@@ -206,3 +206,45 @@ test("the side bar's Pips hand Open in editor to whoever keeps the tabs", () => 
   h.editor.openChat(PIP, { id: GOA, title: "Trip to Goa" });
   assert.equal(chats(h)[0].title, "Shopper · Trip to Goa");
 });
+
+test("a Pip's chat tab comes back after a window reload: its page keeps whose it is, and the host takes the tab back", async () => {
+  // User test round 2, R1: after Developer: Reload Window, Work, chats and artifact tabs came back, a Pip's chat tab did not.
+  const h = host();
+  h.editor.receive({ type: "pipsOpenChat", pip: PIP, conversation: { id: GOA, title: "Trip to Goa" } });
+  const first = chats(h)[0];
+  assert.match(first.webview.html, new RegExp(`data-pip-name="Shopper" data-pip-type="scout"`), "its page knows its Pip's name and kind, to keep");
+  // The page keeps whose tab it is in its saved state (what the editor hands back after a reload).
+  const { JSDOM } = await import("jsdom");
+  const { client } = await import("./support/pip-chat-scene.mjs");
+  const dom = new JSDOM(first.webview.html.replace(/<script[^>]*src=[^>]*><\/script>/g, ""), { runScripts: "outside-only", pretendToBeVisual: true });
+  const saved = [];
+  dom.window.HTMLCanvasElement.prototype.getContext = () => null;
+  dom.window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState: (v) => saved.push(v) });
+  try {
+    const page = await client();
+    dom.window.eval(`${page.markdown}\n;globalThis.DgcMarkdown = DgcMarkdown;`);
+    dom.window.eval(page.js);
+    // (Read across the page's own realm as plain data.)
+    assert.deepEqual(JSON.parse(JSON.stringify(saved.at(-1)?.pipChatTab ?? null)), { pip: PIP.id, conversation: GOA, name: "Shopper", pip_type: "scout" }, "kept in its state");
+  } finally { dom.window.close(); }
+  // A fresh window: the editor hands the tab back with that state, and the host takes it over.
+  const after = host();
+  const restored = { id: "dgc.pipChat", title: "Shopper · Trip to Goa", revealed: 0, posted: [], closed: [], visible: true, options: null,
+    webview: { cspSource: "https://csp.test", html: "", options: {}, asWebviewUri: (u) => ({ toString: () => "https://csp.test/" + u.path }), postMessage: (m) => { restored.posted.push(m); return Promise.resolve(true); }, onDidReceiveMessage: () => ({ dispose() {} }) },
+    reveal() { restored.revealed++; }, onDidDispose: (f) => { restored.closed.push(f); }, onDidChangeViewState() {}, dispose() { restored.gone = true; for (const f of restored.closed) f(); } };
+  after.editor.restoreChat(restored, { pipChatTab: { pip: PIP.id, conversation: GOA, name: "Shopper", pip_type: "scout" } });
+  assert.equal(restored.gone, undefined, "kept");
+  assert.match(restored.webview.html, new RegExp(`data-pip-chat="${PIP.id}" data-pip-conversation="${GOA}"`), "its page is the same chat again");
+  assert.equal(restored.webview.options.enableScripts, true);
+  after.editor.receive({ type: "pipsOpenChat", pip: PIP, conversation: { id: GOA, title: "Trip to Goa" } });
+  assert.equal(chats(after).length, 0, "asked for again: no second tab");
+  assert.equal(restored.revealed, 1, "the restored one comes forward");
+  // Nothing it can trust, or a second copy of a tab already open: closed.
+  for (const bad of [undefined, {}, { pipChatTab: { pip: "../x", conversation: GOA, name: "Shopper", pip_type: "scout" } },
+    { pipChatTab: { pip: PIP.id, conversation: "conv_nope", name: "Shopper", pip_type: "scout" } }, { pipChatTab: { pip: PIP.id, conversation: GOA, name: "Shopper", pip_type: "robot" } },
+    { pipChatTab: { pip: PIP.id, conversation: GOA, name: "Shopper", pip_type: "scout" } }]) {
+    const p = { ...restored, gone: undefined, closed: [], webview: { ...restored.webview, html: "" }, dispose() { p.gone = true; } };
+    after.editor.restoreChat(p, bad);
+    assert.equal(p.gone, true, `closed: ${JSON.stringify(bad)}`);
+  }
+});

@@ -161,7 +161,10 @@ test("the totals sit beside the title, and Open diff is the last action", () => 
   assert.match(mainCss, /\.ts-heading \{[^}]*flex-direction: row/, "side by side, as in the user's reference card");
   const actions = [...card.querySelectorAll(".ts-actions > button")].map((b) => b.className.split(" ").find((c) => c.startsWith("ts-")));
   assert.deepEqual(actions, ["ts-undo", "ts-fold", "ts-review"]);
-  assert.equal(card.querySelector(".ts-review").textContent.trim(), "Open diff");
+  // (It opens every change this session made, not this reply's alone: its words say so. User test round 2, W10.)
+  assert.equal(card.querySelector(".ts-review").textContent.trim(), "Session changes");
+  assert.equal(card.querySelector(".ts-review").title, "Open everything this session changed, file by file");
+  assert.ok(card.querySelector(".ts-review").classList.contains("wide"), "the wide button: its words fit (seen cut live)");
   assert.equal(card.querySelector(".ts-folder-row"), null, "one file is one row");
   assert.equal(card.querySelector(".ts-row .path-dir").textContent, "src/", "with its folder dimmed before its name");
 });

@@ -41,7 +41,7 @@ from .artifact_store import ArtifactError, Store
 
 # The Output chip's choices, and the type each makes. "auto" leaves the choice to the model.
 OUTPUTS = {"auto": None, "document": "doc", "slides": "slides", "spreadsheet": "sheet", "page": "page",
-           "dashboard": "dashboard"}
+           "dashboard": "dashboard", "checklist": "checklist", "design": "design"}
 EXPORTS = {"doc": ("docx", "pdf", "md"), "slides": ("pptx", "pdf", "html"), "sheet": ("xlsx", "csv"),
            "dashboard": ("pdf", "html"), "page": ("docx", "pdf", "html", "zip"), "checklist": ("md", "html", "pdf"),
            # A design: png is one artboard's picture (the export names the board); zip is every artboard's picture.

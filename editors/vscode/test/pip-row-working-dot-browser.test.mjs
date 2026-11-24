@@ -41,7 +41,7 @@ const measure = (pip) => {
   return { state: row.dataset.state, label: (row.querySelector(".pip-row-copy small")?.textContent || "").trim(), row: { left: r.left, right: r.right, top: r.top, bottom: r.bottom }, dot,
     dotInk: dot ? after.backgroundColor : "", pin: box(slot.querySelector(".job-pin")) || box(slot.querySelector(".job-more")), open: box(slot.querySelector(".job-open")), count: box(slot.querySelector(".pip-row-marks-live .pip-row-count") || row.querySelector(".pip-row-marks:not(.pip-row-room) .pip-row-count") || slot.querySelector(".pip-row-count")),
     read: box(read), readWord: box(word), newDot: box(slot.querySelector(".pip-row-marks-live .pip-new-dot") || slot.querySelector(".pip-new-dot")),
-    words: c.right - parseFloat(getComputedStyle(copy).paddingRight), sideways: document.documentElement.scrollWidth > innerWidth + 1,
+    words: c.right - parseFloat(getComputedStyle(copy).paddingRight), wordsLeft: c.left, sideways: document.documentElement.scrollWidth > innerWidth + 1,
     sizes: ["job-pin", "job-open", "job-more"].map((k) => { const n = slot.querySelector("." + k); if (!seen(n)) return null; const b = n.getBoundingClientRect(); return [Math.round(b.width) + (k === "job-more" ? 4 : 0), Math.round(b.height), parseFloat(getComputedStyle(n).borderTopLeftRadius)]; }).filter(Boolean) };
 };
 const overlap = (a, b) => !!a && !!b && a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
@@ -57,6 +57,8 @@ function clear(m, what, { controls }) {
     if (!b) continue;
     assert.equal(overlap(m.dot, b), false, `${what}: the ${name} never lies on the working dot (dot ${m.dot.left}–${m.dot.right}, ${name} ${b.left}–${b.right})`);
     if (name === "pin" || name === "Open in editor") assert.ok(b.right <= m.dot.left - 2, `${what}: the ${name} stands beside the dot, to its left (${b.right} / ${m.dot.left})`);
+    // (In a side bar under 300 px what waits is a number on the face's corner, before the words: user test 2, P1.)
+    if (name === "number" && b.right <= m.wordsLeft + 0.5) continue;
     assert.ok(m.words <= b.left + 0.5, `${what}: the row's words end before the ${name} (${m.words} / ${b.left})`);
   }
   const names = Object.keys(parts).filter((k) => parts[k]);

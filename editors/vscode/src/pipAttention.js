@@ -195,14 +195,14 @@ export function attentionMarkup(page, {esc, face, expanded = false, now = Date.n
   // cards show, "Show" while they are folded. The word is the fold's one button, and it has a name of its own (its id):
   // a redraw makes the button anew, and the page puts the keyboard back on it by that name (render in pipsClient.js),
   // so Enter or Space on it leaves the focus where it was, on a button that now says the new state (aria-expanded).
-  const title = `<h2 class="attention-title">Needs attention <span class="attention-count">${n(total)}</span></h2>`;
+  const title = `<h2 class="attention-title">Needs you <span class="attention-count">${n(total)}</span></h2>`;
   const toggle = `<button type="button" class="attention-toggle" id="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list"`
     + ` aria-label="${expanded ? 'Hide' : 'Show'} the cards that need your attention">${expanded ? 'Hide' : 'Show'}</button>`;
   // "View all" (asked 12 Nov): quiet words on the heading line, before the fold's word, when two or more wait and the
   // section is open. It opens the page that lists every one (attentionAllMarkup).
   const link = viewAll && many ? `<button type="button" class="attention-all-link" id="attention-view-all" data-attention-all="1" aria-label="${esc(`View all ${n(count)} that need you`)}">View all</button>` : '';
   const head = `<div class="attention-head">${title}${link}${toggle}</div>`;
-  return `<section class="attention" aria-label="Needs attention">${head}`
+  return `<section class="attention" aria-label="Needs you">${head}`
     + `<div class="attention-carousel${many ? '' : ' single'}" id="attention-list" role="group" aria-label="What needs you, one card at a time"${shown ? '' : ' hidden'}`
     + (shown ? ` data-at="${index}" data-count="${count}" data-first="${esc(all[0].key)}" data-last="${esc(all[count - 1].key)}"` : '') + '>'
     + (many ? arrow('prev', index - 1) : '') + `<ul class="attention-list attention-stage">${card || ''}</ul>` + (many ? arrow('next', index + 1) : '') + foot
@@ -219,7 +219,7 @@ export function attentionAllMarkup(page, {esc, face, now = Date.now(), busy = fa
   const gone = c => c.setup !== undefined && !!rejected?.(c.setup ? c.setup.id : c.item.card);
   const count = Math.max(0, (page?.total || 0) + all.length - listed.length - all.filter(gone).length);
   const said = (error ? `<p class="notice error" role="alert">${esc(error)}</p>` : '');
-  if (!all.length) return {count: 0, html: `<section class="attention attention-all" aria-label="Needs attention, all of it">${said}<div class="attention-all-empty"><p role="status">Nothing needs you right now.</p>`
+  if (!all.length) return {count: 0, html: `<section class="attention attention-all" aria-label="Needs you, all of it">${said}<div class="attention-all-empty"><p role="status">Nothing needs you right now.</p>`
     + `<button type="button" class="dgc-btn wide" id="attention-all-done" data-attention-all-back="1">Back to your Pips</button></div></section>`};
   const rows = all.map((c, index) => { const attrs = ` data-attention-index="${index}"`;
     if (c.setup === undefined) return rowMarkup(c.item, c.key, {esc, face, now, busy, answers, held, tail: `-${c.item.card}`, attrs, place});
@@ -228,7 +228,7 @@ export function attentionAllMarkup(page, {esc, face, now = Date.now(), busy = fa
       + `<button type="button" class="dgc-btn small attention-undo" id="attention-undo-${esc(id)}" data-undo-reject="${esc(id)}" aria-label="Undo: rejected ${esc(c.title)}" title="Take that back. Nothing was sent yet.">Undo</button></li>`;
     return `<li class="attention-item attention-card" data-attention-key="${esc(c.key)}"${attrs}>${setupCard({setup: c.setup, item: c.item})}</li>`; }).join('');
   const cut = (page?.truncated ? `<p class="muted attention-cut">The newest ${listed.length} of ${n(page.total)}. Each Pip’s chat has the rest.</p>` : '') + (more ? `<p class="muted attention-cut">${esc(more)}</p>` : '');
-  return {count, html: `<section class="attention attention-all" aria-label="Needs attention, all of it">${said}<ul class="attention-list attention-all-list" aria-label="${esc(`${n(count)} ${count === 1 ? 'needs' : 'need'} you`)}">${rows}</ul>${cut}</section>`};
+  return {count, html: `<section class="attention attention-all" aria-label="Needs you, all of it">${said}<ul class="attention-list attention-all-list" aria-label="${esc(`${n(count)} ${count === 1 ? 'needs' : 'need'} you`)}">${rows}</ul>${cut}</section>`};
 }
 
 /** The chat card a row points at, for scrolling to it once the chat has drawn it. */

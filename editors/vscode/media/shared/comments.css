@@ -8,6 +8,9 @@
 .dgc-cm-add:hover:not(:disabled) { background: var(--raised, var(--surface2)); border-color: var(--btn-line-hover); }
 .dgc-cm-add[hidden], .dgc-cm-compose[hidden] { display: none; }
 .dgc-cm-add > svg { flex: none; }
+/* (In a narrow margin: its mark alone, a square of the button's height; its words are its label and its hover text.) */
+.dgc-cm-add.mark-only { min-width: 0; width: var(--btn-h); padding: 0; }
+.dgc-cm-add.mark-only > .dgc-cm-words { display: none; }
 .dgc-cm-compose { position: fixed; z-index: 61; box-sizing: border-box; width: min(340px, calc(100vw - 16px)); margin: 0;
   display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border-strong);
   border-radius: var(--r-lg); background: var(--raised, var(--surface2)); color: var(--text); box-shadow: var(--lift-2, var(--lift-1)); }
@@ -58,6 +61,7 @@ body.vscode-light .dgc-cm-where, body.vscode-high-contrast-light .dgc-cm-where {
 .dgc-cm-msg-top { display: flex; align-items: baseline; gap: var(--sp-2); }
 .dgc-cm-who { color: var(--text-strong); font: var(--w-semi) var(--t-xs)/1.3 var(--sans); }
 .dgc-cm-when { color: var(--faint); font-size: var(--t-xs); }
+.dgc-cm-code { padding: 1px 4px; border-radius: var(--r-sm, 4px); background: var(--code-bg, var(--surface2)); color: var(--text-strong); font: var(--w-reg) .92em/1.4 var(--mono); overflow-wrap: anywhere; }
 .dgc-cm-text { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
 .dgc-cm-gist { margin: 0; color: var(--muted); font-size: var(--t-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dgc-cm-msg[data-kind="change"] .dgc-cm-text { color: var(--muted); font-size: var(--t-xs); }

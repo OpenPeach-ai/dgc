@@ -1,4 +1,5 @@
-// A deck's editor, in the artifact panel (media/artifact.js): the slides down the left, to pick, drag or move with the
+// A deck's editor, in the artifact panel (media/artifact.js): the slides down the left (one strip across the top in a
+// narrow panel), to pick, drag or move with the
 // keyboard; the chosen slide's layout and every field it shows; the theme; Present; and DGC's own page of the deck as
 // the preview, the saved version's. Saving sends the whole deck as the user's version (artifact_update, base_version),
 // with only the fields each layout shows, the way dgc/artifact_slides.py's normalize takes them.
@@ -91,6 +92,9 @@
     function rowTitle(s, i) {
       return s.title || s.subtitle || s.quote?.text || (s.left?.heading ? `${s.left.heading} / ${s.right?.heading || ""}` : "") || `Slide ${i + 1}`;
     }
+    // (In a narrow panel the list is one strip, left to right: media/artifact.css. A drop is then judged across.)
+    const strip = () => getComputedStyle(list).flexDirection === "row";
+    const pastHalf = (e, item) => (strip() ? e.offsetX > item.offsetWidth / 2 : e.offsetY > item.offsetHeight / 2);
     function paintList() {
       list.replaceChildren(...deck.slides.map((s, i) => {
         const item = el("li", "sl-item");
@@ -109,7 +113,7 @@
         item.addEventListener("dragend", () => { item.classList.remove("dragging"); for (const n of list.children) n.classList.remove("drop-before", "drop-after"); });
         item.addEventListener("dragover", (e) => {
           e.preventDefault();
-          const after = e.offsetY > item.offsetHeight / 2;
+          const after = pastHalf(e, item);
           for (const n of list.children) n.classList.remove("drop-before", "drop-after");
           item.classList.add(after ? "drop-after" : "drop-before");
         });
@@ -117,13 +121,20 @@
           e.preventDefault();
           const from = Number(e.dataTransfer.getData("text/plain"));
           if (!Number.isInteger(from)) return;
-          let to = i + (e.offsetY > item.offsetHeight / 2 ? 1 : 0);
+          let to = i + (pastHalf(e, item) ? 1 : 0);
           if (from < to) to -= 1;
           move(from, to);
         });
         return item;
       }));
       list.setAttribute("aria-activedescendant", `sl-item-${sel}`);
+      // The strip keeps the chosen slide in sight (the list's own sideways scroll only: the page stays where it is).
+      const chosen = list.children[sel];
+      if (chosen && strip()) {
+        const left = chosen.offsetLeft - list.offsetLeft, right = left + chosen.offsetWidth;
+        if (left < list.scrollLeft) list.scrollLeft = Math.max(0, left - 8);
+        else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth + 8;
+      }
     }
     function choose(i, focus) {
       sel = Math.max(0, Math.min(deck.slides.length - 1, i));
@@ -394,8 +405,10 @@
         list = el("ol", "sl-list"); list.setAttribute("role", "listbox"); list.setAttribute("aria-label", "Slides: arrow keys to choose, Alt+arrow keys to move");
         list.addEventListener("keydown", (e) => {
           if (e.target.closest(".sl-item") === null) return;
-          if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) { e.preventDefault(); move(sel, sel + (e.key === "ArrowUp" ? -1 : 1)); return; }
-          if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); choose(sel + (e.key === "ArrowUp" ? -1 : 1), true); }
+          // (Left and right too: the list is a strip in a narrow panel.)
+          const back = e.key === "ArrowUp" || e.key === "ArrowLeft", on = e.key === "ArrowDown" || e.key === "ArrowRight";
+          if (e.altKey && (back || on)) { e.preventDefault(); move(sel, sel + (back ? -1 : 1)); return; }
+          if (back || on) { e.preventDefault(); choose(sel + (back ? -1 : 1), true); }
           else if (e.key === "Home") { e.preventDefault(); choose(0, true); }
           else if (e.key === "End") { e.preventDefault(); choose(deck.slides.length - 1, true); }
           else if (e.key === "Enter") { e.preventDefault(); fields.querySelector("select,input,textarea")?.focus(); }

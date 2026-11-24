@@ -164,7 +164,7 @@ test("blocked tasks get their own mark and do not count as done", () => {
   ] } });
   const rows = [...doc.querySelectorAll("#tasks-list li.todo")];
   assert.deepEqual(rows.map(r => r.dataset.status), ["done", "blocked", "in_progress", "cancelled", "pending", "pending"]);
-  assert.deepEqual(rows.map(r => r.querySelector(".todo-mark").dataset.mark), ["done", "blocked", "doing", "cancelled", "next", "later"]);
+  assert.deepEqual(rows.map(r => r.querySelector(".todo-mark").dataset.mark), ["done", "blocked", "doing", "cancelled", "next", "next"]);
   assert.equal(rows[1].getAttribute("aria-label"), "Wait for the API key, Blocked");
   assert.equal(doc.getElementById("tasks-count").textContent, "1 of 6 done", "blocked and in-progress items are still open");
   assert.doesNotMatch(doc.getElementById("tasksbar").innerHTML, /undefined/);
@@ -1122,7 +1122,7 @@ test("goal review exposes saved evidence, bounded editing, and keyboard focus", 
   doc.getElementById("goal-review-button").click();
   assert.equal(doc.getElementById("goal-review").hidden, false);
   assert.equal(posted.at(-1).type, "reviewGoal");
-  assert.match(doc.getElementById("goal-review-body").textContent, /3 cycles/);
+  assert.match(doc.getElementById("goal-review-body").textContent, /3 rounds/);
   assert.match(doc.getElementById("goal-review-body").textContent, /Build passed/);
   assert.equal(doc.getElementById("goal-review-body").querySelectorAll("script").length, 0);
   doc.getElementById("goal-review").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -2336,7 +2336,15 @@ test("the approval card shows what the step will do, and Deny carries the note b
           suggested_rule: "Edit(app.py)", choices: ["once", "always", "deny"] });
   const card = doc.querySelector('.card[data-request-id="p1"]');
   assert.ok(card, "the request card exists");
-  assert.match(card.textContent, /Run edit_file/, "the card names the tool");
+  // (User test 2, W15: its title is what it does to which file, "Edit app.py", never the tool's own name; and the diff
+  // under it is the lines themselves, without the "--- a/… +++ b/… @@" lines a patch file carries.)
+  assert.match(card.querySelector(".card-title, .t, h3, .title")?.textContent || card.textContent, /Edit app\.py/, "the card says what it does, to which file");
+  assert.doesNotMatch(card.textContent, /Run edit_file|edit_file/, "never the tool's own name");
+  {
+    const shown = card.parentElement.querySelector(".diff") || card.querySelector(".diff");
+    assert.doesNotMatch(shown.querySelector(".dbody, .diff-body, pre, code")?.textContent ?? shown.textContent.replace("app.py", ""), /--- a\/|\+\+\+ b\/|@@ -1,2/, "no patch headers among the lines");
+    assert.match(shown.textContent, /return a \+ b/);
+  }
   assert.match(card.textContent, /app\.py/, "the card shows the step summary");
   assert.doesNotMatch(card.textContent, /old_string/, "raw JSON args are not what the user approves against");
   const diff = card.parentElement.querySelector(".diff, [class*='diff']") || card.querySelector(".diff, [class*='diff']");
@@ -4928,9 +4936,9 @@ test("the model picker's thinking note sits behind its ?, which opens it in plac
   const note = () => doc.querySelector(".dgc-mp-think-note"), help = () => doc.querySelector(".dgc-mp-think-help");
   const shown = () => !note().closest(".dgc-mp-think-more").hidden;
   assert.equal(p.open(), true);
-  assert.match(note().textContent, /^Off turns thinking off\./);
+  assert.match(note().textContent, /^More thinking: slower, better on hard work\. Off answers at once\./);
   assert.equal(shown(), false, "behind its ? at first");
-  assert.match(help().title, /^Off turns thinking off\./, "and the ?'s hover label says it");
+  assert.match(help().title, /^More thinking: slower, better on hard work\./, "and the ?'s hover label says it");
   assert.equal(help().getAttribute("aria-expanded"), "false");
   help().click();
   assert.equal(shown(), true, "the whole note, in place");

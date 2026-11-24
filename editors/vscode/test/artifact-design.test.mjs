@@ -324,7 +324,7 @@ test("open an artboard: pick a part, restyle it in the panel, change its words i
   let frame = await scene.frameOf("b1");
   await frame.locator("h1").click();
   await page.waitForFunction(() => /Part/.test(document.querySelector(".dz-props h2")?.textContent || ""));
-  assert.match(await page.locator(".dz-part").innerText(), /^<h1> Coffee worth waking up for/);
+  assert.match(await page.locator(".dz-part").innerText(), /^Heading · Coffee worth waking up for/);
   const size = page.locator(".dz-field", { hasText: "Font size" }).locator("input");
   assert.equal(await size.inputValue(), "72");
   await shot(page, "part-picked-dark-1280");
@@ -478,6 +478,14 @@ test("a comment points at an artboard or a part of it; Ask in chat names it; a t
   assert.equal(added.ask, true);
   await page.locator(".dz-acts [data-act='ask']").click();
   assert.equal((await scene.posted("askChat"))[0].path, "h1#headline");
+  // DGC changes that headline (a comment's answer): Ask in chat quotes the words it has now, never the ones picked.
+  await resend(scene, (d) => { d.state.boards.b1 = d.state.boards.b1.replace("Coffee worth waking up for", "Slow mornings, good coffee"); d.content.boards.find((b) => b.id === "b1").rev += 1; });
+  await scene.clearPosted();
+  await scene.ed((d) => { if (d.state().sel?.id !== "b1") d.select({ kind: "board", id: "b1" }); });
+  await page.locator(".dz-acts [data-act='ask']").click();
+  const again = (await scene.posted("askChat"))[0];
+  assert.notEqual(again.quote, "Coffee worth waking up for", "never the old words");
+  if (again.path) assert.equal(again.quote, "Slow mornings, good coffee");
   // A thread's place: the canvas goes to its artboard and picks the part.
   await page.keyboard.press("Escape");
   await scene.ed((d) => { d.leaveInside(); d.select(null); });
@@ -705,7 +713,21 @@ test("the extension's side: the design is a kind of its own, and the canvas's ch
   panel.say({ type: "askChat", kind: "artboard", board: "b2", title: "Sign in", path: "button#go", tag: "button", quote: "Sign in" });
   const ask = told.find((m) => m.type === "artifactAsk");
   assert.equal(ask.surface, "work");
-  assert.equal(ask.text, `[Artboard “Sign in” of the design “Coffee landing” (${view.id}, b2, button#go) · its <button> “Sign in”] `);
+  // Short, in words a person reads: the artboard, the design, the part by its kind and its words; then the two ids the
+  // model changes it by. No CSS path and no HTML tag.
+  assert.equal(ask.text, `[“Sign in” in the design “Coffee landing” · the button “Sign in” (${view.id}, b2)] `);
+  assert.doesNotMatch(ask.text, /button#go|<button>|nth-of-type/);
+  told.length = 0;
+  panel.say({ type: "askChat", kind: "artboard", board: "b2", title: "Sign in", path: "section#top > div > div:nth-of-type(1) > h1", tag: "h1", quote: "Slow loaves,honest crumb." });
+  assert.equal(told.find((m) => m.type === "artifactAsk").text, `[“Sign in” in the design “Coffee landing” · the heading “Slow loaves,honest crumb.” (${view.id}, b2)] `);
+  told.length = 0;
+  panel.say({ type: "askChat", kind: "artboard", board: "b2", title: "Sign in" });
+  assert.equal(told.find((m) => m.type === "artifactAsk").text, `[“Sign in” in the design “Coffee landing” (${view.id}, b2)] `);
+  told.length = 0;
+  panel.say({ type: "askChat", kind: "artboard", board: "b2", title: "Sign in", path: "div.hero", tag: "div" });
+  assert.equal(told.find((m) => m.type === "artifactAsk").text, `[“Sign in” in the design “Coffee landing” · a part of it (${view.id}, b2)] `);
+  told.length = 0;
+  panel.say({ type: "askChat", kind: "artboard", board: "b2", title: "Sign in", path: "button#go", tag: "button", quote: "Sign in" });
   assert.equal(ask.label, "Sign in · Coffee landing");
   panel.say({ type: "askChat", kind: "artboard", board: "nope" });
   assert.equal(told.filter((m) => m.type === "artifactAsk").length, 1);

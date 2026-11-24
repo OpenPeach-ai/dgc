@@ -93,7 +93,7 @@ export type ChatSendOptions = {
   /** For the whole reply (default: the client's `replyTimeoutMs`); past it the reply is stopped. `null`: none. */
   timeoutMs?: number | null;
   /** CLI 0.50+: what the reply should make, as DGC's Output chip asks; the reply's `artifacts` hold it. */
-  output?: "auto" | "document" | "slides" | "spreadsheet" | "page" | "dashboard";
+  output?: "auto" | "document" | "slides" | "spreadsheet" | "page" | "dashboard" | "checklist" | "design";
   /** CLI 0.51+: where your box drew its `@` marks, `{start, kind, label, identity}` with `kind` plugin, artifact, pip,
    *  skill, template, file or command, so the sent message shows them again when the chat is reopened. For display only,
    *  and marks that don't fit the text are dropped: the model reads the text, so write the names there too. */
@@ -440,7 +440,7 @@ export class Chat {
       command.study = options.study;
     }
     if (options.output !== undefined && options.output !== "auto") {
-      if (!["document", "slides", "spreadsheet", "page", "dashboard"].includes(options.output)) {
+      if (!["document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design"].includes(options.output)) {
         throw new DGCConfigError("output must be auto, document, slides, spreadsheet, page or dashboard");
       }
       if (!record(this.chats.capabilities().artifacts).version) {

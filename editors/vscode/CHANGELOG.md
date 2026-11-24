@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Checklist and Design are outputs** in Work's Output chip and `@` menu, ChatDGC's menu and a Pip's `@` outputs,
+  beside Document, Slides, Spreadsheet, Page and Dashboard.
+- **A pinned prompt looks pinned**: once its turn has scrolled past, it is one line with an ellipsis and an edge, so
+  the answer is seen passing under it (a queued second turn made the first reply look missing).
+- **Model picker**: the Fallback tag is quiet grey (red is for errors) and a Fallback line shows None or the model,
+  with Choose or Change, under the models.
+- **Auto mode says what it does**: "Everyday steps run; a risky one stops", in the menu and in the box that turns it
+  on.
+- **One kind of Pip in its words**: "No folder" or the folder it works in, never "Personal" or "Project Pip"; "Needs
+  you" everywhere; Home counts things, not cards.
+- **"Hand it to a Pip"** on a ChatDGC card offers every Pip, with the folder it works in (it listed only Pips with no
+  folder).
+- **Home's Recent is newest first**; what is new keeps its New mark where its time puts it (old unread items filled
+  the card and hid what you did today).
+- **A Pip's chat tab comes back after a window reload**, as Work's and ChatDGC's do.
+- **"(step 4)" in a Pip's reply opens What it saw at that step.**
+- **The Edited card's last button says "Session changes"**: it opens everything the session changed, file by file.
+- **A reopened session's empty box shows its placeholder** after a window reload.
+- **Sites Pips can use**: a site you allowed from a card says "may use this site" with Remove; Clear browsing data
+  says it's done and what it cleared. Present takes the arrow keys and Esc at once; Esc closes Versions; What's new is
+  on every tab's logo line; "Unsaved changes" clears when a change is put back.
+
 - **Settings › Dev Mode › Work on a subscription uses DGC's tools** (off by default, with a plain warning the first
   time it is turned on): Claude Code or Codex is Work's model only, and DGC's tools, permissions and helpers do the
   work. A chat on it steers while it works (Enter to steer) and shows DGC's context window, as on any model.

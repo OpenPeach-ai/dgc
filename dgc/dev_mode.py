@@ -32,15 +32,15 @@ LIMITS = (
     Limit("pip_computers", 3, 3, "Computers per Pip",
           "Each running computer: about 0.5 to 1 GB of memory and a browser.", "pip_computer.computers_limit"),
     Limit("work_helpers", 4, 32, "Work helpers at once",
-          "Each helper is its own checkout of the project and its own stream of model requests: disk and rate limits "
-          "add up.", "ultra.worker_limit"),
+          "Each helper works in its own copy of the project and makes its own model requests: disk space and how fast "
+          "your model service answers add up.", "ultra.worker_limit"),
     Limit("helper_depth", 1, 8, "How deep Work helpers may nest",
           "Each level can start helpers of its own: the number of agents multiplies with each level.",
           "agent.max_subagent_depth"),
-    Limit("troupe_agents", 400, 400, "Agents one troupe may start",
-          "Each agent is a model call, often with its own worktree: model load and disk add up.", "troupe.MAX_AGENTS"),
-    Limit("troupe_items", 200, 200, "Items one troupe may take",
-          "Each item is at least one agent's work.", "troupe.MAX_ITEMS"),
+    Limit("troupe_agents", 400, 400, "Helpers one background team may start",
+          "Each helper is a model call, often with its own copy of the project: model load and disk space add up.", "troupe.MAX_AGENTS"),
+    Limit("troupe_items", 200, 200, "Items one background team may take",
+          "Each item is at least one helper's work.", "troupe.MAX_ITEMS"),
     Limit("monitors_per_chat", 4, 4, "Monitors per chat",
           "Each is a process DGC watches; its output can wake the chat.", "monitors.MAX_MONITORS_PER_OWNER"),
     Limit("monitors_per_dgc", 16, 16, "Monitors per DGC",
@@ -59,7 +59,7 @@ LIMITS = (
     Limit("pip_project_copy_mb", 200, 200, "A project's copy on a Pip's computer (MB)",
           "A bigger copy takes longer to make and holds more of this machine's disk.", "pip_project_copies.copy_limit"),
     Limit("pip_queue", 20, 20, "Pip runs waiting at once",
-          "Each waiting run holds its inputs in the Pips registry until it starts.", "pips.max_queue"),
+          "Each waiting run keeps what it was given on this computer's disk until it starts.", "pips.max_queue"),
     # How much one turn holds
     Limit("tool_shell_output", 30000, 30000, "Shell output the model sees (characters)",
           "Every character goes into the model's context: more tokens each turn.", "tools.MAX_BASH_OUT"),
@@ -81,7 +81,7 @@ LIMITS = (
     Limit("pip_routines", 10, 10, "Routines per Pip",
           "Each routine can start a run on its schedule: more model calls.", "pip_routines.max_routines"),
     Limit("pip_conversations", 500, 500, "Conversations per Pip (archived included)",
-          "Each keeps its messages in the Pips registry on disk.", "pip_conversations.MAX_CONVERSATIONS"),
+          "Each keeps its messages on this computer's disk.", "pip_conversations.MAX_CONVERSATIONS"),
     # (Money: each Pip's daily dollar limit is yours to set on its page; the 3-a-day count is retired, 13 Nov.)
 )
 _BY_NAME = {limit.name: limit for limit in LIMITS}

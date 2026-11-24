@@ -248,7 +248,7 @@ test("a Work artifact is the shared card: a sheet of its kind with its name on a
       "a click on its name opens it");
     assert.equal(await card.locator(".dgc-doc-open").getAttribute("aria-label"), "Open Q3 plan", "the keyboard and a reader get Open, by name");
     // Every kind has its own sheet and tab: a page, a document, a sheet and a dashboard are told apart at a glance.
-    const made = [["page", "Page", "rgb(234, 88, 12)"], ["doc", "Doc", "rgb(37, 99, 235)"], ["sheet", "Sheet", "rgb(5, 150, 105)"], ["dashboard", "Board", "rgb(8, 145, 178)"]];
+    const made = [["page", "Page", "rgb(234, 88, 12)"], ["doc", "Doc", "rgb(37, 99, 235)"], ["sheet", "Sheet", "rgb(5, 150, 105)"], ["dashboard", "Dash", "rgb(8, 145, 178)"]];
     for (const [i, [type]] of made.entries()) await s.send({ type: "artifact_changed", artifact: { ...DECK, id: "ar_" + String(i + 5).repeat(16), type, title: `A ${type}` }, op: "made", surface: "work" });
     const tabs = await s.page.locator(".artifact-card .dgc-sheet").evaluateAll((ns) => ns.slice(1).map((n) => [n.dataset.kind, n.querySelector(".dgc-sheet-tag").textContent, getComputedStyle(n.querySelector(".dgc-sheet-tag")).backgroundColor]));
     assert.deepEqual(tabs, made);
@@ -282,4 +282,30 @@ test("in a 300 px side bar the card is the sheet, the name, the line and the dow
     assert.equal((await s.posted("artifactOpen")).length, 1, "a click on its sheet opens it");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+// User test, round 2: the Library names checklists and designs, and neither could be chosen for a reply.
+test("the Artifact menu and the @ list offer Checklist and Design with a DGC that offers them, and only then", async (t) => {
+  if (skipOrFail(t)) return;
+  const newer = { artifacts: { ...OFFER, outputs: [...OFFER.outputs, "checklist", "design"] } };
+  const s = await openWork({ capabilities: newer });
+  try {
+    await s.page.click("#btn-output");
+    assert.deepEqual(await s.page.locator("#outputmenu [data-output]").evaluateAll((rows) => rows.map((r) => [r.dataset.output, r.querySelector("span:nth-of-type(2)").textContent])),
+      [["auto", "Auto"], ["document", "Document"], ["slides", "Slides"], ["spreadsheet", "Spreadsheet"], ["page", "Page"], ["dashboard", "Dashboard"], ["checklist", "Checklist"], ["design", "Design"]]);
+    await s.page.click('#outputmenu [data-output="design"]');
+    assert.equal(await s.page.locator("#output-label").textContent(), "Artifact: Design");
+    assert.equal(await s.page.locator("#btn-output").getAttribute("aria-label"), "Artifact: Design. This message makes a design");
+    await s.page.click("#input");
+    await s.page.keyboard.type("A landing page for a bakery");
+    await s.page.keyboard.press("Enter");
+    assert.equal((await prompts(s)).at(-1).output, "design");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+  const older = await openWork();
+  try {
+    await older.page.click("#btn-output");
+    assert.deepEqual(await older.page.locator("#outputmenu [data-output]").evaluateAll((rows) => rows.map((r) => r.dataset.output)),
+      ["auto", "document", "slides", "spreadsheet", "page", "dashboard"], "an older DGC keeps its five");
+  } finally { await older.page.close(); }
 });

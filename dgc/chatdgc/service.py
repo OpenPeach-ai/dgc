@@ -1814,16 +1814,6 @@ class ChatService:
             raise ChatEngineError(str((response.get("error") or {}).get("message") or "Pips didn't answer.")[:300])
         return response.get("result") or {}
 
-    def _personal_pips(self) -> list[dict]:
-        found = self._pips_call({"type": "list_workspaces"})
-        personal = next((w for w in found.get("workspaces") or [] if w.get("kind") == "personal"), None)
-        if personal is None:
-            return []
-        rows = self._pips_call({"type": "list_pips", "workspace_id": personal["id"], "order": "recent", "limit": 50})
-        return [{"id": p["id"], "name": p.get("name") or "Pip", "goal": str(p.get("goal") or "")[:200],
-                 "pip_type": str(p.get("pip_type") or "")}
-                for p in rows.get("pips") or [] if p.get("status") != "archived"]
-
     def _every_pip(self) -> list[dict]:
         """Every Pip a chat may hand a job (dgc/pip_jobs.py), none archived, with where it works (`folder`, "" for a Pip
         for anything): for this box's @, as the side bar lists them."""
@@ -1840,15 +1830,20 @@ class ChatService:
                         "folder": "" if place.get("kind") == "personal" else str(place.get("name") or "")[:80]})
         return out
 
+    def _hand_list(self) -> list[dict]:
+        """The Pips "Hand it to a Pip" offers: every Pip @ names (one kind; a Pip in a folder takes a job too), with
+        `folder` only where it works in one."""
+        return [{"id": p["id"], "name": p["name"], "goal": p["goal"], **({"folder": p["folder"]} if p["folder"] else {})}
+                for p in self._every_pip()]
+
     def _pips(self, cmd: dict) -> None:
-        """Your Personal Pips, for "Hand it to a Pip"."""
+        """Every Pip, for "Hand it to a Pip"."""
         try:
-            pips = self._personal_pips()
+            pips = self._hand_list()
         except Exception as exc:                      # noqa: BLE001 -- Pips off, or the runner can't start: said
             self.emit("chatdgc_pips", request_id=cmd["request_id"], pips=[], error=" ".join(str(exc).split())[:300])
             return
-        self.emit("chatdgc_pips", request_id=cmd["request_id"],
-                  pips=[{key: p[key] for key in ("id", "name", "goal")} for p in pips])
+        self.emit("chatdgc_pips", request_id=cmd["request_id"], pips=pips)
 
     def _mentions(self, cmd: dict) -> None:
         """What this box can name with @: the plugins a reply can use, and every Pip (0.52: a chat reaches every Pip,
@@ -1872,19 +1867,16 @@ class ChatService:
         if not named:
             return []
         try:
-            known = {p["id"]: p for p in self._personal_pips()}
+            known = {p["id"]: p for p in self._every_pip()}
         except Exception:                             # noqa: BLE001 -- the name and type are still true
             known = {}
-        try:
-            where = {p["id"]: p.get("folder") or "" for p in self._every_pip()}
-        except Exception:                             # noqa: BLE001 -- where it works unread: said without it
-            where = {}
+        where = {pip_id: p.get("folder") or "" for pip_id, p in known.items()}
         return [{"name": mark["label"], "type": mark["pip_type"], "goal": known.get(mark["identity"], {}).get("goal", ""),
                  **({"folder": where[mark["identity"]]} if where.get(mark["identity"]) else {})}
                 for mark in named]
 
     def _hand(self, conversation_id, message_id, action_id, pip_id) -> dict:
-        pip = next((p for p in self._personal_pips() if p["id"] == pip_id), None)
+        pip = next((p for p in self._hand_list() if p["id"] == pip_id), None)
         if pip is None:
             raise ChatEngineError("That Pip isn't one of yours now.")
         text = self.engine.pip_message(conversation_id, message_id, action_id)

@@ -424,7 +424,7 @@ class Chat:
                 raise DGCConfigError("study must be True or False")
             command["study"] = study
         if output is not None and output != "auto":
-            if output not in ("document", "slides", "spreadsheet", "page", "dashboard"):
+            if output not in ("document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design"):
                 raise DGCConfigError("output must be auto, document, slides, spreadsheet, page or dashboard")
             if not isinstance(self._chats._session.capabilities.get("artifacts"), Mapping):
                 raise DGCUnsupportedError("This DGC CLI can't make artifacts; update it (dgc update).")

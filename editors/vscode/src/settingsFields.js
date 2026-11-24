@@ -13,15 +13,16 @@ function keepAliveChoices(current) {
  *  "?" (each sub-agent is its own copy of the project, cloud APIs rate-limit, a local Ollama queues the rest). */
 export function parallelHint(c) {
     const pinned = Number(c.max_parallel_tasks ?? 4) !== 4;
-    if (c.ultra_mode !== true) return "Up to 32. Ultra runs 8 unless you set one.";
-    return pinned ? "Pinned here; Ultra would run 8." : "Ultra is on, so 8 run.";
+    // (Plain words, user test 2, S4: "Up to 32. Ultra runs 8 unless you set one." told a new user nothing to act on.)
+    if (c.ultra_mode !== true) return "How many sub-agents work at once, up to 32.";
+    return pinned ? "Your number is used, not Ultra’s 8." : "Ultra is on: 8 work at once.";
 }
 export function parallelMore(c) {
     const pinned = Number(c.max_parallel_tasks ?? 4) !== 4;
-    const ultra = c.ultra_mode !== true ? "1 runs them one at a time."
-        : pinned ? "Set 4 to let Ultra choose." : "Set any other number, up to 32, to pin it.";
-    return `${ultra} More costs more: each one is its own copy of the project, cloud APIs rate-limit, and a local `
-        + "Ollama runs only its OLLAMA_NUM_PARALLEL at once while the rest wait.";
+    const ultra = c.ultra_mode !== true ? "1 runs them one at a time. With Ultra it is 8, unless you set a number here."
+        : pinned ? "Set 4 to let Ultra choose." : "Set any other number, up to 32, to keep it.";
+    return `${ultra} More costs more: each helper works in its own copy of the project, a cloud service may slow you `
+        + "down when many ask at once, and a model on this computer answers only a few at a time while the rest wait.";
 }
 // Remembered across redraws: which "Advanced" and "Another host" disclosures are open.
 const OPEN = new Set();
@@ -106,6 +107,12 @@ export function contextSizeShown(c) {
     return served && chosen > served ? served : (c?.context_size ?? "");
 }
 
+/** A saved provider's name as its row shows it. Ollama's app on this computer is saved as "Ollama (local)"; with a model
+ *  that runs in Ollama's cloud (":cloud", "-cloud") the row doesn't call it local. The saved name itself is unchanged. */
+export function shownProviderName(row) {
+    const name = String(row?.name || "");
+    return /^Ollama \(local\)$/i.test(name) && /[:-]cloud$/i.test(String(row?.model || "")) ? "Ollama" : name;
+}
 // Settings → Dev Mode: the user's own switch for DGC's Dev Mode tools (config key dev_mode_tools), and its one quiet line.
 export const DEV_TOOLS_NAME = "Let DGC change Dev Mode settings";
 export const DEV_TOOLS_LINE = "When you ask, DGC can change these limits itself (it says what it changed, with Undo). It can never turn on Dev Mode.";
@@ -192,8 +199,8 @@ export function renderFields(section, main, config, providers, ui) {
                     "Pictures and videos in a reply, in Work, ChatDGC and a Pip's chat. Folded, each block is one line you click to open. Folding or opening one reply's pictures yourself holds for that reply. Saved at once, for this editor.")
                 + field("Prompt suggestions", "Suggests what to ask next.", bool("suggest", c.suggest !== false),
                     "A grey suggestion in the message box after a reply; Tab or → takes it.")
-                + field("Wake on monitors", "A monitor's output starts a short turn.", bool("monitor_wake", c.monitor_wake !== false),
-                    "When a background monitor prints something, DGC starts a short turn to look at it."))
+                + field("Wake on output", "DGC looks when a watched command prints.", bool("monitor_wake", c.monitor_wake !== false),
+                    "DGC can keep a command running in the background and watch what it prints: a log, a build, a test run. On: each time it prints, DGC starts a short turn to read it and tell you if it matters. Off: it only reads it when you ask."))
             // The dock at the foot of DGC's side bar: the editor's own settings (dgc.dock.*), saved at once.
             + group("Dock", field("Show the dock", "On every screen of the side bar.", sel("dock_show", [["always", "Always"], ["hover", "When I point at the bottom"], ["never", "Never"]], ["hover", "never"].includes(c.dock_show) ? c.dock_show : "always"),
                     "Always: the dock has its own room at the foot of the side bar. When I point at the bottom: it rises over the page when the pointer reaches the bottom edge, and drops away about a second after it leaves. Never: no dock; what you pinned is kept. Saved at once, for this editor.")
@@ -292,7 +299,7 @@ export function renderFields(section, main, config, providers, ui) {
                 ? `<span class="provider-default-only">Default</span>`
                 : `<label class="provider-default-check"><input type="checkbox" data-provider-default="${escapeHtml(row.id)}" aria-label="Make ${escapeHtml(row.name)} the default"${isDefault ? " checked" : ""}>Default</label>`;
             const picker = isDefault || choosing ? defaultModelPicker(row, current) : "";
-            return `<div class="field provider-row${picker ? " with-default-model" : ""}"><span class="words"><span class="name-line"><span class="name">${escapeHtml(row.name)}</span></span><span class="hint">${hint}</span></span><span class="host-control">${choice}${picker}${extra.buttons}<button type="button" class="secondary" data-provider-remove="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.name)}">Remove</button></span></div>`;
+            return `<div class="field provider-row${picker ? " with-default-model" : ""}"><span class="words"><span class="name-line"><span class="name">${escapeHtml(shownProviderName(row))}</span></span><span class="hint">${hint}</span></span><span class="host-control">${choice}${picker}${extra.buttons}<button type="button" class="secondary" data-provider-remove="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.name)}">Remove</button></span></div>`;
         }).join("");
         // The default from before saved providers: its key is only DGC's, so it isn't one of them, and it is still the default.
         const direct = ui.directProvider;
@@ -560,7 +567,8 @@ export function renderFields(section, main, config, providers, ui) {
             // part of Save.
             + group("Always allowed", ui.rules == null ? '<div class="row-line rule-line"><span class="words"><span class="hint" role="status">Reading the rules from DGC…</span></span></div>'
                 : !ui.rules.length ? '<div class="row-line rule-line"><span class="words"><span class="hint">Nothing yet. Always allow on a card adds a rule here.</span></span></div>'
-                : ui.rules.map((row, i) => `<div class="row-line rule-line"><span class="words"><span class="name">${escapeHtml(row.words)}</span>${row.detail && row.detail !== row.words ? `<span class="hint rule-detail">${escapeHtml(row.detail)}</span>` : ""}</span>`
+                : ui.rules.map((row, i) => `<div class="row-line rule-line"><span class="words"><span class="name">${escapeHtml(row.words)}</span>${/* (Words only: a rule's own line, "Write(/home/…/totals.py)", is not shown under them. User test 2, S7. A project's folder is.) */
+                    row.detail && row.detail !== row.words && !(row.rules || []).includes(row.detail) ? `<span class="hint rule-detail">${escapeHtml(row.detail)}</span>` : ""}</span>`
                     + `<button type="button" class="secondary" data-rule-remove="${i}" title="Remove this rule: DGC asks again" aria-label="Remove: ${escapeHtml(row.words)}">Remove</button></div>`).join(""),
                 "What DGC does without asking, because you chose Always allow on a card. Remove one and it asks again.", "security-rules")
             + saveBar;

@@ -248,7 +248,7 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui, providers = (
         const more = 'Spread sub-agents and Pips across the computers on your network that run models. Each helper\'s model requests go to that computer and carry the same project text the main model sees; its tools still run here. Add only computers you trust. An http:// address on another network isn\'t encrypted.';
         const row = '<div class="field router-switch"><span class="words"><span class="name-line"><label class="name" for="router-on">Use my other computers</label>'
             + ui.infoButton('router-on', 'DGC Router') + '</span>'
-            + '<span class="hint">Sub-agents and Pips on other computers.</span>'
+            + '<span class="hint">Uses the models on your other computers.</span>'
             + ui.detail('router-on', esc(more)) + '</span>'
             + switchHTML(enabled, 'Use my other computers', 'id="router-on" data-router-switch', S.switching || !S.status) + '</div>';
         const failed = S.notes.get('router') ? `<p class="router-note${S.notes.get('router').error ? ' error' : ''}" role="status">${esc(S.notes.get('router').text)}</p>` : '';

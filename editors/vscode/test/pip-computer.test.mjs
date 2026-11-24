@@ -217,7 +217,7 @@ test('Stop asks the supervisor to stop; a proposal review says what changes abou
  x.answer(x.requests('stop_pip_computer')[0],{pip_id:pipId,stopping:true});await x.drain();
  assert.match(x.d.body.textContent,/Stopping the computer/);
  x.click('[data-tab=revisions]');x.click('[data-proposal=proposal-2]');
- const dialog=x.d.querySelector('[role=dialog]').textContent;assert.match(dialog,/Computer nowIts own browser, Terminal and files/);assert.match(dialog,/Computer afterNone/);
+ const dialog=x.d.querySelector('[role=dialog]').textContent;assert.match(dialog,/Computer nowIts computer’s browser, Terminal and files/);assert.match(dialog,/Computer afterNone/);
 });
 
 test('a run that used its computer shows how much, and what it saw one screenshot at a time',async()=>{

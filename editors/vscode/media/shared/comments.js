@@ -71,7 +71,7 @@
     const field = el("textarea", "dgc-cm-field"); field.rows = 3; field.maxLength = MAX_TEXT;
     field.placeholder = "Comment, or ask DGC to change it…"; field.setAttribute("aria-label", "Your comment");
     const boxActs = el("div", "dgc-cm-compose-acts");
-    const cancel = button("dgc-btn small text", "Cancel", () => closeBox(true));
+    const cancel = button("dgc-btn small", "Cancel", () => closeBox(true));
     const save = button("dgc-btn small", "Comment", () => send(false), { title: "Keep the comment; DGC answers when you ask it" });
     const ask = button("dgc-btn small primary", "Ask DGC", () => send(true), { title: "Comment, and have DGC answer or make the change (Ctrl+Enter)" });
     boxActs.append(cancel, save, ask);
@@ -83,9 +83,24 @@
     });
     doc.body.append(box);
     let boxFrom = null;
-    function place(node, rect, gap = 6, beside = false) {
+    function place(node, rect, gap = 6, beside = false, clear = null) {
       const vw = doc.documentElement.clientWidth, vh = doc.documentElement.clientHeight;
       node.style.left = "0px"; node.style.top = "0px";
+      if (node === add) add.classList.remove("mark-only");
+      // `clear`: a band of the page with no words in it (a document's margin), from x `left` to `right`. The button
+      // stands in it, level with the end of what is picked, so it lies over none of the words (user test 2: it hid
+      // the first letters of the next line). Its word shows where the band has room, its mark alone where not.
+      if (node === add && clear && Number.isFinite(clear.left) && Number.isFinite(clear.right)) {
+        const room = Math.min(vw - 2, clear.right) - clear.left;
+        if (room < node.offsetWidth + 8) add.classList.add("mark-only");
+        const w = node.offsetWidth, h = node.offsetHeight;
+        if (room >= w + 4) {
+          node.style.left = `${Math.round(clear.left + Math.min(8, (room - w) / 2))}px`;
+          node.style.top = `${Math.round(Math.max(8, Math.min(vh - h - 8, rect.bottom - h + 3)))}px`;
+          return;
+        }
+        add.classList.remove("mark-only");
+      }
       const w = node.offsetWidth, h = node.offsetHeight;
       if (beside && rect.right + gap + w <= vw - 8) {
         // (Beside a cell, not over the one under it.)
@@ -129,13 +144,21 @@
     });
 
     /** What is picked now, and where on the page (the button stands by its lower right). Null: nothing picked. */
-    function offer(anchor, rect, { beside = false } = {}) {
+    function offer(anchor, rect, { beside = false, clear = null } = {}) {
       if (locked || !anchor || !rect) { hide(); return; }
       offered = { anchor, rect };
       add.hidden = false;
-      place(add, rect, 4, beside);
+      place(add, rect, 4, beside, clear);
     }
     function hide() { add.hidden = true; offered = null; }
+
+    /** A comment's words into `node`: `code` between backticks is drawn as code (a model writes file names so); all
+     *  else is plain text, never markup. */
+    function words(node, text) {
+      const parts = String(text).split(/`([^`\n]+)`/);
+      parts.forEach((part, i) => { if (!part) return; node.append(i % 2 ? el("code", "dgc-cm-code", part) : doc.createTextNode(part)); });
+      return node;
+    }
 
     // ---- the rail
     function act(op, thread, extra = {}) { said = ""; opts.post({ type: "comments", op, thread: thread.id, ...extra }); }
@@ -144,7 +167,7 @@
       const li = el("li", "dgc-cm-msg"); li.dataset.by = by; li.dataset.kind = String(m.kind || "");
       const top = el("div", "dgc-cm-msg-top");
       top.append(el("span", "dgc-cm-who", by === "you" ? "You" : "DGC"), el("span", "dgc-cm-when", when(m.at)));
-      li.append(top, el("p", "dgc-cm-text", String(m.text || "")));
+      li.append(top, words(el("p", "dgc-cm-text"), String(m.text || "")));
       return li;
     }
     function suggestion(thread, s) {
@@ -183,7 +206,7 @@
         else if (e.key === "Escape") { e.preventDefault(); replying = ""; paint(); }
       });
       const acts = el("div", "dgc-cm-acts");
-      acts.append(button("dgc-btn small text", "Cancel", () => { replying = ""; paint(); }),
+      acts.append(button("dgc-btn small", "Cancel", () => { replying = ""; paint(); }),
                   button("dgc-btn small", "Reply", () => go(false)),
                   button("dgc-btn small primary", "Ask DGC", () => go(true), { title: "Reply, and have DGC answer (Ctrl+Enter)" }));
       form.addEventListener("submit", (e) => { e.preventDefault(); go(true); });
@@ -206,7 +229,7 @@
       if (quote && !resolved) li.append(el("blockquote", "dgc-cm-quote", String(quote)));
       const messages = Array.isArray(thread.messages) ? thread.messages : [];
       if (resolved) {
-        li.append(el("p", "dgc-cm-text dgc-cm-gist", String(messages[0]?.text || "").slice(0, 160)));
+        li.append(words(el("p", "dgc-cm-text dgc-cm-gist"), String(messages[0]?.text || "").slice(0, 160)));
       } else {
         const list = el("ol", "dgc-cm-msgs");
         list.append(...messages.map(message));

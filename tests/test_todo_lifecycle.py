@@ -127,6 +127,15 @@ class TodoLifecycleTests(unittest.TestCase):
 
     # --- one canonical list -------------------------------------------------------------------
 
+    def test_the_step_list_never_calls_itself_the_users_checklist(self):
+        # User test round 2, W3: "Make a checklist for this small job, then work through it" got the step list (shown while
+        # the turn works, then folded), described to the model as "this prompt's checklist", not a checklist the user keeps.
+        from dgc import tools
+        todo = next(s for s in tools.TOOL_SCHEMAS if s["function"]["name"] == "todo")["function"]["description"]
+        self.assertNotIn("prompt's checklist", todo)
+        self.assertIn("make_artifact", todo, "it says where a checklist the user asked for goes")
+        self.assertLess(len(todo), 220, "short: every tool's words are paid for on every request")
+
     def test_printed_todo_json_is_repaired_by_a_real_tool_call(self):
         import json
         initial = [{"content": "Write fixture", "status": "in_progress"}]

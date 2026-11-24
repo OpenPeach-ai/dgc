@@ -15,6 +15,10 @@
   const A = (window.DgcArtifact = window.DgcArtifact || { editors: {} });
   const GAP_X = 80, GAP_Y = 120, MIN_ZOOM = 0.03, MAX_ZOOM = 4, MIN_SIDE = 100, MAX_W = 4000, MAX_H = 20000;
   const SNAP_PX = 7;                 // how close, on screen, an edge snaps to another frame's
+  // A picked part, in a word a person uses for it (as Ask in chat's reference says it: src/artifacts.ts).
+  const PART_WORDS = { h1: "Heading", h2: "Heading", h3: "Heading", h4: "Heading", h5: "Heading", h6: "Heading", p: "Text", span: "Text", li: "List item", ul: "List", ol: "List",
+    a: "Link", button: "Button", img: "Picture", svg: "Picture", picture: "Picture", video: "Video", input: "Field", textarea: "Field", select: "Menu", label: "Label", nav: "Menu", table: "Table",
+    header: "Header", footer: "Footer", form: "Form", blockquote: "Quote", section: "Section", div: "Box", em: "Text", strong: "Text", b: "Text", i: "Text", small: "Text" };
   const LIVE_MAX = 10;               // live frames at once; the rest show their picture
   const LIVE_MIN_PX = 100;           // a frame narrower than this on screen shows its picture
   const PICTURE_MAX = 320 * 1024;    // an artboard larger than this has no picture (its frame shows its name)
@@ -144,7 +148,9 @@
     const ownText = (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.data.trim());
     function info(el) {
       const cs = getComputedStyle(el);
+      // (words: as they read on the page, a line break a space; text: as the file has them, which a reference is checked against.)
       return { path: path(el), tag: el.tagName.toLowerCase(), text: el.textContent.replace(/\s+/g, " ").trim().slice(0, 300), editable: ownText(el),
+               words: String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 300),
                near: near(el), rect: box(el.getBoundingClientRect()),
                styles: { color: cs.color, background: cs.backgroundColor, fontSize: cs.fontSize, fontWeight: cs.fontWeight,
                          padding: cs.paddingTop, gap: cs.rowGap === "normal" ? "" : cs.rowGap, radius: cs.borderTopLeftRadius,
@@ -351,7 +357,10 @@
     const boardOf = (id) => index.boards.find((b) => b.id === id);
     const noteOf = (id) => index.notes.find((n) => n.id === id);
     const onPage = () => index.boards.filter((b) => b.page === pageId);
+    const overflow = new Map();              // board id -> its page's height, where that is more than the artboard shows
     const heightOf = (b) => (b.fit === "page" && measured.has(b.id) ? Math.max(b.h, measured.get(b.id)) : b.h);
+    // (While it plays, an artboard taller than the panel is as tall as the panel shows: its page scrolls inside it.)
+    const shownHeight = (b) => (play?.board === b.id && play.h ? Math.min(heightOf(b), play.h) : heightOf(b));
     const rectOf = (b) => ({ x: b.x, y: b.y, w: b.w, h: heightOf(b) });
     const tweakKey = (b) => JSON.stringify((b.tweaks || []).map((t) => [t.name, t.value]));
     const glyph = (action, codicon) => window.DgcIcons?.node?.(action, { size: 14 }) || U.icon(codicon || action);
@@ -379,7 +388,7 @@
     // (In a narrow panel the panel beside is a sheet under the canvas, one line until it is opened: the canvas is
     // what is left above it, so what is fitted is never under the sheet.)
     const narrow = () => !!window.matchMedia?.("(max-width: 560px)").matches;
-    let sheetOpen = false;
+    let sheetOpen = false, sheetByHand = false;      // (byHand: the reader folded or opened it; a pick then leaves it be)
     const size = () => ({ w: stage.clientWidth, h: stage.clientHeight });
     function setView(next, quiet, fitted = false) {
       following = fitted;
@@ -399,6 +408,24 @@
     }
     const padFor = (s) => Math.round(clamp(Math.min(s.w, s.h) * 0.07, 14, 56));
     function fitAll() { const s = size(); setView(fitView(everything(), s.w, s.h, padFor(s)), false, true); }
+    /** All of an artboard is in the canvas as it shows now. */
+    function inView(b) {
+      const s = size(), left = b.x * view.k + view.x, top = b.y * view.k + view.y;
+      return left >= 0 && top >= 0 && left + b.w * view.k <= s.w && top + heightOf(b) * view.k <= s.h;
+    }
+    /** Play's view of an artboard: across the panel, at 100% where it fits and never past it (the canvas's own zoom is
+     *  for arranging: at 30% a page played is 3 px text, user test 2), its top under the Play bar. Taller than the panel
+     *  shows, it is as tall as the panel there, and its page scrolls inside it to its end. */
+    function playFit() {
+      const b = play && boardOf(play.board);
+      if (!b) return;
+      // (Under the Play bar, with room for the artboard's own name above its frame.)
+      const s = size(), pad = 8, top = (playBar.hidden ? 44 : Math.max(44, playBar.offsetTop + playBar.offsetHeight)) + 30;
+      const k = clamp(Math.min(1, (s.w - 2 * pad) / b.w), MIN_ZOOM, MAX_ZOOM);
+      play.h = Math.max(MIN_SIDE, Math.floor((s.h - top - pad) / k));
+      boardNode(b);
+      setView({ x: Math.round((s.w - b.w * k) / 2 - b.x * k), y: Math.round(top - b.y * k), k });
+    }
     function focusBoard(id, most = 1) {
       const b = boardOf(id);
       if (!b) return;
@@ -477,24 +504,43 @@
         short.setAttribute("aria-hidden", "true");
         name.append(title, short, dims);
         const face = U.el("div", "dz-face"), shield = U.el("div", "dz-shield");
-        root.append(name, face, shield);
+        // "More below": the page is longer than the artboard shows (user test 2: a landing page cut at 900 px read as
+        // unfinished). On the bottom edge, where it is cut, at a size to read at any zoom; a click shows the whole page.
+        const more = U.el("button", "dz-more"); more.type = "button"; more.hidden = true;
+        more.append(U.icon("chevron-down"), U.el("span", "", "More below"));
+        more.addEventListener("pointerdown", (e) => e.stopPropagation());
+        more.addEventListener("dblclick", (e) => e.stopPropagation());
+        more.addEventListener("click", (e) => { e.stopPropagation(); showWhole(b.id); });
+        root.append(name, face, shield, more);
         for (const h of ["n", "e", "s", "w", "ne", "se", "sw", "nw"]) { const g = U.el("i", "dz-handle"); g.dataset.handle = h; root.append(g); }
-        n = { root, name, title, short, dims, face, shield, key: "", token: "", frame: null, loads: 0 };
+        n = { root, name, title, short, dims, face, shield, more, key: "", token: "", frame: null, loads: 0 };
         nodes.set(b.id, n);
         world.append(root);
         title.addEventListener("dblclick", (e) => { e.stopPropagation(); renameInPlace(title, boardOf(b.id)?.title || "", 80, (t) => send([{ op: "rename", board: b.id, title: t }], `Renamed ${t}.`)); });
       }
       const h = heightOf(b);
-      n.root.style.left = `${b.x}px`; n.root.style.top = `${b.y}px`; n.root.style.width = `${b.w}px`; n.root.style.height = `${h}px`;
+      n.root.style.left = `${b.x}px`; n.root.style.top = `${b.y}px`; n.root.style.width = `${b.w}px`; n.root.style.height = `${shownHeight(b)}px`;
+      const cut = b.state === "ready" && b.fit !== "page" && overflow.has(b.id) && play?.board !== b.id && inside !== b.id;
+      n.more.hidden = !cut; n.more.disabled = locked;
+      if (cut) { n.more.title = `“${b.title}” shows the first ${h} px of a longer page. ${locked ? "Play it to scroll." : "Click to show the whole page."}`; n.more.setAttribute("aria-label", `More below. ${n.more.title}`); }
       n.root.dataset.state = b.state === "ready" ? "ready" : "drawing";
       n.root.dataset.selected = String(sel?.kind === "board" && sel.id === b.id);
       n.root.dataset.inside = String(inside === b.id);
       n.root.dataset.playing = String(play?.board === b.id);
       n.root.setAttribute("role", "group");
-      n.root.setAttribute("aria-label", `Artboard ${b.title}, ${b.w} by ${h}${b.state === "ready" ? "" : ", not drawn yet"}`);
+      n.root.setAttribute("aria-label", `Artboard ${b.title}, ${b.w} by ${h}${b.state === "ready" ? "" : ", not drawn yet"}${cut ? ", more of its page is below" : ""}`);
       n.title.textContent = b.title;
       n.dims.textContent = `${b.w} × ${h}${b.fit === "page" ? " · whole page" : ""}${b.interactive ? " · interactive" : ""}`;
       return n;
+    }
+    /** The artboard as tall as its page (a whole-page artboard from now on): one change, which Versions can undo. */
+    function showWhole(id) {
+      const b = boardOf(id), tall = overflow.get(id);
+      if (!b || locked || !tall) return;
+      b.fit = "page"; measured.set(id, clamp(tall, MIN_SIDE, MAX_H)); overflow.delete(id);
+      boardNode(b); nodes.get(id).key = ""; labels(); scheduleFrames(); placeFloats();
+      send([{ op: "resize", board: id, w: b.w, h: b.h, x: b.x, y: b.y, fit: "page" }], `${b.title} shows its whole page now.`);
+      U.post({ type: "designMeasured", board: id, h: measured.get(id) });
     }
     /** Each artboard's name as it fits over its frame at this zoom: whole, else its first whole words, else none (the
      *  one selected or under the pointer shows whole, over its neighbours). Its size is said only where both fit. */
@@ -660,6 +706,12 @@
       if (!hit || hit[1].token !== m.token) return;
       const id = hit[0], b = boardOf(id), n = hit[1];
       if (!b) return;
+      if ((m.ev === "size" || m.ev === "ready" || m.ev === "changed") && Number.isFinite(m.height) && b.fit !== "page" && play?.board !== id) {
+        // A fixed artboard whose page is longer than it shows says so ("More below"). (Not asked while it plays: its
+        // frame is then as short as the panel.)
+        const tall = Math.round(m.height), cut = tall > b.h + 8;
+        if (cut ? overflow.get(id) !== tall : overflow.has(id)) { if (cut) overflow.set(id, tall); else overflow.delete(id); boardNode(b); }
+      }
       if ((m.ev === "size" || m.ev === "ready" || m.ev === "changed") && Number.isFinite(m.height) && b.fit === "page") {
         const tall = clamp(Math.round(m.height), MIN_SIDE, MAX_H);
         if (measured.get(id) !== tall) {
@@ -676,7 +728,13 @@
         wheel({ deltaX: Number(m.dx) || 0, deltaY: Number(m.dy) || 0, ctrlKey: !!m.ctrl, clientX: r.left + (Number(m.x) || 0) * view.k, clientY: r.top + (Number(m.y) || 0) * view.k,
                 preventDefault() {}, shiftKey: false }, sr);
       } else if ((m.ev === "pick" || m.ev === "editing") && m.pick && typeof m.pick === "object") {
-        picked = cleanPick(m.pick); paintProps(); placeFloats(); U.offerComment(null);
+        picked = cleanPick(m.pick);
+        // In a narrow panel its properties open with the pick (they are why a part is picked), unless the reader has
+        // folded them by hand; the artboard stays in sight above them.
+        const opens = narrow() && !sheetOpen && !sheetByHand;
+        if (opens) sheetOpen = true;
+        paintProps(); placeFloats(); U.offerComment(null);
+        if (opens) requestAnimationFrame(() => { if (inside === id && !inView(b)) focusBoard(id); });
       } else if (m.ev === "changed" && typeof m.html === "string" && m.html.length <= 500_000) {
         if (m.pick && typeof m.pick === "object") picked = cleanPick(m.pick);
         const note = m.note === "Edited text" ? "Edited text" : "Restyled";
@@ -698,7 +756,7 @@
       const text = (v, n) => (typeof v === "string" ? v.slice(0, n) : "");
       const s = p.styles && typeof p.styles === "object" ? p.styles : {};
       const r = p.rect && typeof p.rect === "object" ? p.rect : {};
-      return { path: text(p.path, 600), tag: text(p.tag, 20).replace(/[^a-z0-9-]/g, ""), text: text(p.text, 300), near: text(p.near, 200), editable: p.editable === true,
+      return { path: text(p.path, 600), tag: text(p.tag, 20).replace(/[^a-z0-9-]/g, ""), text: text(p.text, 300), words: text(p.words, 300), near: text(p.near, 200), editable: p.editable === true,
                rect: { left: Number(r.left) || 0, top: Number(r.top) || 0, right: Number(r.right) || 0, bottom: Number(r.bottom) || 0 },
                styles: { color: text(s.color, 40), background: text(s.background, 40), fontSize: text(s.fontSize, 12), fontWeight: text(s.fontWeight, 8),
                          padding: text(s.padding, 12), gap: text(s.gap, 12), radius: text(s.radius, 12), flex: s.flex === true } };
@@ -753,9 +811,9 @@
       const b = boardOf(play.board);
       if (b.page !== pageId) { pageId = b.page; paint(); }
       stage.dataset.play = "1";
+      paintPlayBar(); playFit();
       for (const x of onPage()) boardNode(x);
-      focusBoard(b.id);
-      frames(); paintActs(); paintProps(); paintPlayBar(); placeFloats();
+      frames(); paintActs(); paintProps(); placeFloats();
       setTimeout(() => nodes.get(b.id)?.frame?.focus(), 60);
     }
     function stopPlay() {
@@ -797,11 +855,25 @@
       if (!b) return null;
       const a = { kind: "artboard", board: b.id, title: b.title };
       if (withPick && inside === b.id && picked && picked.path && picked.path !== "body") {
+        // The part's words as the artboard has them now: what was picked may have been changed since (a comment's
+        // answer, an edit from the chat), and a reference must never quote the old words. Gone: the artboard alone.
+        const now = pickedNow(b.id);
+        if (now === null) return a;
         a.path = picked.path; a.tag = picked.tag;
-        if (picked.near && picked.near !== picked.text) a.near = picked.near;
-        if (picked.text) a.quote = picked.text.slice(0, 280);
+        if (picked.near && picked.near !== picked.text && now === picked.text) a.near = picked.near;
+        if (now) a.quote = now.slice(0, 280);
       }
       return a;
+    }
+    /** The picked part's words in the artboard's page as it is now ("" for none; null when the part is no longer there).
+     *  Read from the page's own text, never run: a parsed document with no window. */
+    function pickedNow(id) {
+      const html = pages[id];
+      if (typeof html !== "string" || !html) return picked.text || "";
+      try {
+        const el = new DOMParser().parseFromString(html, "text/html").querySelector(picked.path);
+        return el && el.tagName.toLowerCase() === picked.tag ? el.textContent.replace(/\s+/g, " ").trim() : null;
+      } catch { return picked.text || ""; }
     }
     function boardDownloads(b, from) {
       const ask = (format) => { window.DgcDownload?.ask(from); U.post({ type: "export", format, board: b.id }); };
@@ -834,7 +906,8 @@
       const playBtn = iconButton("play", `Play “${b.title}”`, () => startPlay(b.id), "play");
       const open = iconButton("edit", inside === b.id ? "Close it (Escape)" : "Open it to pick and change its parts (Enter)", () => (inside === b.id ? leaveInside(true) : enterInside(b.id)), "edit");
       open.setAttribute("aria-pressed", String(inside === b.id));
-      const ask = iconButton("comment-discussion", "Ask in chat about this", () => { const a = anchorOf(); U.post({ type: "askChat", ...a }); U.announce("Added to the chat's prompt box."); }, "comment-discussion");
+      // (Ask in chat puts a reference to this in the chat's prompt box, as an @ there does: the @ is its mark. Comment, beside it, keeps the speech bubble.)
+      const ask = iconButton("mention", "Ask in chat about this", () => { const a = anchorOf(); U.post({ type: "askChat", ...a }); U.announce("Added to the chat's prompt box."); }, "mention");
       ask.dataset.act = "ask";
       const comment = iconButton("comment", "Comment on this", (btn) => U.askComment(anchorOf(), btn.getBoundingClientRect()));
       comment.dataset.act = "comment"; comment.hidden = !U.commentsOn();
@@ -892,7 +965,7 @@
       const b = sel?.kind === "board" ? boardOf(sel.id) : null;
       props.hidden = !b || !!play;
       stage.dataset.props = props.hidden ? "" : "1";
-      if (props.hidden) { props.replaceChildren(); sheetOpen = false; return; }
+      if (props.hidden) { props.replaceChildren(); sheetOpen = false; sheetByHand = false; return; }
       const keepFocus = props.contains(document.activeElement) ? document.activeElement?.dataset?.key : "";
       const head = U.el("div", "dz-props-head");
       const sheet = narrow();
@@ -904,7 +977,7 @@
         more.setAttribute("aria-expanded", String(sheetOpen)); more.setAttribute("aria-controls", "dz-props-body");
         more.title = sheetOpen ? "Hide its properties" : "Show its properties"; more.setAttribute("aria-label", more.title);
         more.append(U.icon(sheetOpen ? "chevron-down" : "chevron-up"));
-        more.addEventListener("click", () => { sheetOpen = !sheetOpen; paintProps(); props.querySelector(".dz-sheet-toggle")?.focus(); });
+        more.addEventListener("click", () => { sheetOpen = !sheetOpen; sheetByHand = true; paintProps(); props.querySelector(".dz-sheet-toggle")?.focus(); });
         head.append(more);
       }
       const close = U.el("button", "art-icon"); close.type = "button"; close.title = "Close"; close.setAttribute("aria-label", "Close the panel");
@@ -916,7 +989,9 @@
       if (inside === b.id && picked) {
         const s = picked.styles, px = (v) => Math.round(parseFloat(v) || 0);
         const style = (prop, value) => tell(b.id, { cmd: "style", prop, value });
-        body.append(U.el("p", "dz-part", `<${picked.tag}>${picked.text ? ` ${picked.text.slice(0, 70)}${picked.text.length > 70 ? "…" : ""}` : ""}`));
+        // What it is, in a word a person uses, then its words as they read ("Heading · Slow loaves, honest crumb.").
+        const said = picked.words || picked.text;
+        body.append(U.el("p", "dz-part", `${PART_WORDS[picked.tag] || "Part"}${said ? ` · ${said.slice(0, 70)}${said.length > 70 ? "…" : ""}` : ""}`));
         if (picked.editable) body.append(U.el("p", "dz-hint", "Double-click its words to change them."));
         body.append(field("Text colour", colorBox(hexOf(s.color), (v) => style("color", v), "Text colour")),
                     field("Background", colorBox(hexOf(s.background) || "#ffffff", (v) => style("background-color", v), "Background colour")),
@@ -1190,7 +1265,7 @@
         window.addEventListener("keyup", (e) => { if (e.key === " ") { space = false; delete stage.dataset.space; } });
         window.addEventListener("blur", () => { space = false; delete stage.dataset.space; });
         window.addEventListener("message", fromFrame);
-        new ResizeObserver(() => { if (following && !play && !inside && !drag) fitAll(); placeFloats(); scheduleFrames(); }).observe(stage);
+        new ResizeObserver(() => { if (following && !play && !inside && !drag) fitAll(); if (play) playFit(); placeFloats(); scheduleFrames(); }).observe(stage);
         window.matchMedia?.("(max-width: 560px)").addEventListener?.("change", () => paintProps());
         paint();
         // It opens on the artboard it says to, else on everything.

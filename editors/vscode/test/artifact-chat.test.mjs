@@ -136,9 +136,9 @@ test("the Library's Artifacts tab: only when offered, newest first, by kind and 
     assert.ok((await s.posted("artifactList")).length >= 1);
     await s.send({ type: "artifacts", items: [...ITEMS].reverse() });
     assert.deepEqual(await libNames(s), ["Q3 plan", "Home budget", "Store sales", "Tip calculator", "Launch notes"], "newest change first");
-    assert.match(await s.page.locator("#library-list .lib-row-meta").first().textContent(), /^made in Chat · \S+ · Deck · version 3$/);
+    assert.match(await s.page.locator("#library-list .lib-row-meta").first().textContent(), /^made in Chat · \S+ · Slides · version 3$/);
     await s.page.click("#library-filter-kind"); await s.page.waitForSelector(".dgc-pop .dgc-menu-row");
-    assert.deepEqual(await s.page.locator(".dgc-pop .dgc-menu-label").allTextContents(), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards", "Checklists", "Designs"]);
+    assert.deepEqual(await s.page.locator(".dgc-pop .dgc-menu-label").allTextContents(), ["All", "Pages", "Spreadsheets", "Documents", "Slides", "Dashboards", "Checklists", "Designs"]);
     await s.page.keyboard.press("Escape"); await s.page.waitForTimeout(200);
     await libPick(s, "maker", "Work");
     assert.deepEqual(await libNames(s), ["Home budget", "Tip calculator"]);
@@ -249,4 +249,18 @@ test("ChatDGC's artifact and file cards are the shared card, and a click anywher
     assert.deepEqual((await rows()).map((r) => r[0]), ["slides", "sheet", "dashboard", "page", "doc"], "what DGC made: a sheet for each kind");
     assert.deepEqual(lib.errors, []);
   } finally { await lib.page.close(); }
+});
+
+test("ChatDGC's Artifact menu offers Checklist and Design with a DGC that offers them", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openChat(browser);
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "artifacts", offered: { ...OFFER, outputs: [...OFFER.outputs, "checklist", "design"] } });
+    await s.page.click("#cd-output");
+    assert.deepEqual(await s.page.locator("#cd-output-menu [data-output]").evaluateAll((r) => r.map((n) => n.dataset.output)),
+      ["auto", "document", "slides", "spreadsheet", "page", "dashboard", "checklist", "design"]);
+    await s.page.click('#cd-output-menu [data-output="checklist"]');
+    assert.equal(await s.page.locator("#cd-output-label").textContent(), "Artifact: Checklist");
+  } finally { await s.page.close(); }
 });

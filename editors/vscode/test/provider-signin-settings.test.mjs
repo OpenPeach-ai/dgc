@@ -173,3 +173,15 @@ test('OpenAI and the plan share an address, and saving one never hides the other
  assert.ok(choices().includes('chatgpt'),'the plan can still be added');
  assert.ok(!choices().includes('openai'));
 });
+
+// User test, round 2: "Ollama (local) · deepseek-v4.1-flash:cloud". The app is on this computer; a :cloud model runs in
+// Ollama's cloud, so the row doesn't call it local. Its saved name is unchanged (the remove button still names it).
+test('Ollama with a cloud model is not called local on its row; with a model that runs here it still is',()=>{
+ const x=setup();
+ const show=model=>{x.message({type:'providerProfiles',defaultId:OLL,profiles:[{id:OLL,kind:'native',name:'Ollama (local)',base_url:'http://localhost:11434/v1',model,api_mode:'auto'}]});
+  x.click('[data-nav=models]');return [...x.d.querySelectorAll('.provider-row .name')].map(n=>n.textContent);};
+ assert.deepEqual(show('qwen3.8:32b'),['Ollama (local)']);
+ assert.deepEqual(show('deepseek-v4.1-flash:cloud'),['Ollama']);
+ assert.deepEqual(show('qwen3.8:480b-cloud'),['Ollama']);
+ assert.match(x.d.querySelector('.provider-row').textContent,/deepseek|qwen3\.8:480b-cloud/,'its model is still on the row');
+});

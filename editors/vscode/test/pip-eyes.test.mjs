@@ -181,6 +181,29 @@ test('a chat reply that used its computer offers What it saw…, as a task\'s re
  assert.match(x.d.body.textContent,/Used its computer: 4 steps/);assert.ok(x.d.querySelector('#computer-timeline'));
 });
 
+test('a step a reply names, "(step 2)", is a link that opens What it saw at that step',async()=>{
+ // User test round 2, P8: "(step 1)" in a Pip's replies meant nothing to a user: the Pip is told to name its steps so the
+ // user can see them in What it saw, and nothing led there.
+ const run={id:RUN,pip_id:PID,status:'succeeded',created_at:'2026-10-20T10:00:00Z',manifest:{run_kind:'conversation',job_version:1},result:{text:'Done.',computer:{calls:2,held:[]}}};
+ const said=(id,role,text)=>({id,pip_id:PID,workspace_id:PW,role,text,run_id:RUN,status:'succeeded',model:'deepseek-v4.1-flash:cloud',created_at:'2026-10-20T10:00:00Z'});
+ const reply='The tee costs £12 (step 2). In code it stays as it is: `(step 1)`.';
+ const x=pips({runs:[run],overrides:{list_pip_messages:()=>({pip_id:PID,workspace_id:PW,messages:[said('m1','user','Price of my tee?'),said('m2','assistant',reply)],next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls})}});
+ await x.drain();x.click(`[data-job="${PID}"]`);await x.drain();
+ const refs=[...x.d.querySelectorAll('[data-step-run]')];
+ assert.deepEqual(refs.map(r=>[r.dataset.stepRun,r.dataset.step,r.textContent]),[[RUN,'2','step 2']],'one link, for the step in its words; none in code');
+ assert.match(refs[0].title,/What it saw/);
+ x.click(`[data-step-run="${RUN}"][data-step="2"]`);await flush();
+ const list=x.requests('list_pip_computer_frames')[0];
+ assert.equal(list?.request.run_id,RUN,'What it saw, for that reply\'s run');
+ x.answer(list,{run_id:RUN,frames:[{frame:'0001.jpg',label:'open https://tees.example/',url:'https://tees.example/',at:'t'},{frame:'0002.jpg',label:'Read the price',url:'https://tees.example/tee',at:'t'}]});await flush();
+ assert.equal(x.requests('get_pip_computer_frame')[0]?.request.frame,'0002.jpg','opened at step 2');
+ assert.equal(x.d.querySelector('#computer-timeline-status').textContent,'2 of 2');
+ // A DGC before What it saw: plain words.
+ const old=pips({apiVersion:41,runs:[run],overrides:{list_pip_messages:()=>({pip_id:PID,workspace_id:PW,messages:[said('m2','assistant',reply)],next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls})}});
+ await old.drain();old.click(`[data-job="${PID}"]`);await old.drain();
+ assert.equal(old.d.querySelectorAll('[data-step-run]').length,0);
+});
+
 test('validators: a pointer and How it sees, exactly as the CLI sends them',()=>{
  const m=model;
  assert.deepEqual(m.pipComputerPointer({kind:'click_at',x:1,y:2,seq:3,at:'t'}),{kind:'click_at',x:1,y:2,seq:3});

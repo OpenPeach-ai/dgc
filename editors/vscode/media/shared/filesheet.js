@@ -9,7 +9,9 @@
   if (root.DgcFileSheet) return;
 
   // The kinds DGC really makes or shows, and the word on each one's tab. The tab's colour is the kind's, in the CSS.
-  const KINDS = { page: "Page", doc: "Doc", slides: "Slides", sheet: "Sheet", dashboard: "Board", checklist: "List", design: "Design", pdf: "PDF", md: "MD", csv: "CSV",
+  // A tab has room for a short word: it is the kind's own word or the start or end of it (Doc of Document, Sheet of
+  // Spreadsheet, Dash of Dashboard, List of Checklist), never another word for it ("Board" beside "Dashboard").
+  const KINDS = { page: "Page", doc: "Doc", slides: "Slides", sheet: "Sheet", dashboard: "Dash", checklist: "List", design: "Design", pdf: "PDF", md: "MD", csv: "CSV",
     img: "PNG", video: "MP4", code: "Code", json: "JSON", zip: "ZIP", file: "File" };
   // A file's ending, or what DGC calls it (an artifact's type, a made file's format, a Library file's type), to its kind.
   // An ending that has its own name on the tab keeps it ("DOCX" on a document's sheet, "JPG" on a picture's).

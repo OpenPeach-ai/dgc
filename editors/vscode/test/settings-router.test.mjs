@@ -114,7 +114,7 @@ test("with the Router off, Sub-agents and Pips are today's fields, and the switc
   const sw = x.d.getElementById("router-on");
   assert.equal(sw.getAttribute("aria-checked"), "false");
   assert.match(sw.closest(".field").textContent, /Use my other computers/);
-  assert.equal(sw.closest(".field").querySelector(".hint").textContent, "Sub-agents and Pips on other computers.");
+  assert.equal(sw.closest(".field").querySelector(".hint").textContent, "Uses the models on your other computers.");
   assert.match(sw.closest(".field").querySelector(".detail").textContent, /Spread sub-agents and Pips across the computers on your network that run models/);
   assert.equal(x.d.querySelector(".router-systems"), null, "no Systems list while it is off");
   sw.click();

@@ -110,8 +110,13 @@ test("clicking the pill opens the plan: Tasks, n of m done, a progress bar, and 
   assert.equal(w.$("tasks-list").tagName, "OL");
   assert.deepEqual(w.labels(bar), ["Read the settings store", "Write the v2 to v3 migration", "Tests for both directions",
     "Update the changelog", "Publish to the marketplace", "Skipped step", "Hostile status"]);
-  // The next step is a plain circle; the ones after it are dashed (an inherited key is not a status).
-  assert.deepEqual(w.marks(bar), ["done", "doing", "next", "later", "blocked", "cancelled", "later"]);
+  // One mark to a state (user test 2, W4: a plain ring for the next step and a dashed one for those after it were two
+  // looks for one state, "to do", with nothing to say which was which). Every step still to do is the plain ring (an
+  // inherited key is not a status), and each mark says its state in words when pointed at.
+  assert.deepEqual(w.marks(bar), ["done", "doing", "next", "next", "blocked", "cancelled", "next"]);
+  assert.deepEqual(w.rows(bar).map((li) => li.querySelector(".todo-markbox").getAttribute("title")),
+    ["Done", "In progress", "To do", "To do", "Blocked", "Cancelled", "To do"]);
+  assert.equal(bar.querySelectorAll('.todo-ring[stroke-dasharray]').length, 0, "no dashed ring");
   assert.deepEqual(w.rows(bar).map((li) => li.dataset.status),
     ["done", "in_progress", "pending", "pending", "blocked", "cancelled", "pending"]);
   assert.deepEqual(w.rows(bar).map((li) => li.getAttribute("aria-label")), [
@@ -168,7 +173,7 @@ test("a plan in the conversation is one card per turn, updated in place, never a
   assert.equal(card.getAttribute("aria-label"), "Tasks");
   assert.equal(card.closest(".msg.dgc"), w.doc.querySelector("#log .msg.dgc"), "inside the turn");
   assert.equal(card.querySelector(".todos-sum").textContent, "1 of 5 done");
-  assert.deepEqual(w.marks(card), ["done", "doing", "next", "later", "blocked"]);
+  assert.deepEqual(w.marks(card), ["done", "doing", "next", "next", "blocked"]);
   w.event({ type: "tool_call", call_id: "r1", name: "read_file", args: { path: "a.ts" }, summary: "a.ts" });
   w.event({ type: "tool_result", call_id: "r1", name: "read_file", output: "ok", is_error: false, is_diff: false });
   // The step finishes and the next starts: the same card changes.

@@ -154,7 +154,7 @@ for (const place of ["side", "tab"]) {
     try {
       const filters = async () => (await x.lib()).filters.map((f) => [f.id, f.key, f.value]);
       assert.deepEqual(await filters(), [["kind", "Kind", "All"], ["maker", "By", "Anyone"]]);
-      assert.deepEqual((await x.menu("kind")).map((r) => r.label), ["All", "Pages", "Sheets", "Docs", "Decks", "Dashboards", "Checklists", "Designs"]);
+      assert.deepEqual((await x.menu("kind")).map((r) => r.label), ["All", "Pages", "Spreadsheets", "Documents", "Slides", "Dashboards", "Checklists", "Designs"]);
       await x.page.keyboard.press("Escape"); await x.rest(200);
       const makers = await x.menu("maker");
       assert.deepEqual(makers.slice(0, 4).map((r) => r.label), ["Anyone", "Work", "Chat", "Pips"]);
@@ -185,14 +185,14 @@ for (const place of ["side", "tab"]) {
       const tide = l.rows[0];
       assert.equal(tide.thumb, "sheet"); assert.equal(tide.by, "made by"); assert.equal(tide.maker, "Tile checker"); assert.equal(tide.when, "40m"); assert.equal(tide.makerIs, "BUTTON");
       assert.equal(l.rows.find((r) => r.title === "Tip calculator").meta.startsWith("made in Work"), true, "no name: the kind only");
-      await x.pick("kind", "Sheets"); l = await x.lib();
-      assert.deepEqual(l.rows.map((r) => r.title), ["Acme sales sheet"]); assert.equal(l.filters[0].value, "Sheets");
+      await x.pick("kind", "Spreadsheets"); l = await x.lib();
+      assert.deepEqual(l.rows.map((r) => r.title), ["Acme sales sheet"]); assert.equal(l.filters[0].value, "Spreadsheets");
       await x.pick("kind", "All"); await x.pick("maker", "Pips"); l = await x.lib();
       assert.deepEqual(l.rows.map((r) => r.title), ["Tide pool walk, Saturday", "Store sales"]);
       await x.pick("maker", "Tile checker"); l = await x.lib();
       assert.deepEqual(l.rows.map((r) => r.title), ["Tide pool walk, Saturday"]); assert.equal(l.filters[1].value, "Tile checker");
-      await x.pick("kind", "Decks"); l = await x.lib();
-      assert.equal(l.rows.length, 0); assert.equal(l.status, "No decks made by Tile checker yet.");
+      await x.pick("kind", "Slides"); l = await x.lib();
+      assert.equal(l.rows.length, 0); assert.equal(l.status, "No slides made by Tile checker yet.");
       assert.deepEqual(x.errors, []);
     } finally { await x.close(); }
   });
@@ -518,8 +518,8 @@ test("side 170 px: a filter is one word: its key while it is on All (“Kind”,
   try {
     const words = () => x.page.evaluate(() => [...document.querySelectorAll("#library-filters .lib-filter")].map((b) => b.innerText.trim()));
     assert.deepEqual(await words(), ["Kind", "Anyone"]);
-    await x.pick("kind", "Sheets"); assert.deepEqual(await words(), ["Sheets", "Anyone"]);
-    await x.pick("maker", "Fix totals"); assert.deepEqual(await words(), ["Sheets", "Fix totals"]);
+    await x.pick("kind", "Spreadsheets"); assert.deepEqual(await words(), ["Spreadsheets", "Anyone"]);
+    await x.pick("maker", "Fix totals"); assert.deepEqual(await words(), ["Spreadsheets", "Fix totals"]);
     await x.libTab("files"); assert.deepEqual(await words(), ["Kind", "From"]);
     await x.pick("origin", "Uploaded"); assert.deepEqual(await words(), ["Kind", "Uploaded"]);
     const l = await x.lib();

@@ -99,7 +99,9 @@ NOTICE = ("Your Browser: the user's own Google Chrome on this computer, where th
           "on them. You never see, type or ask for the user's passwords or codes: when a site needs them signed in, use "
           "sign_in and stop; DGC asks them to sign in themselves, in their own window, and you carry on once they have. "
           "A submit there waits for the user as on your own computer, and a payment always waits for the user's yes. "
-          "What you send there is in the user's Sent to the web log under your name.")
+          "What you send there is in the user's Sent to the web log under your name. Speaking to the user, keep the "
+          'two browsers apart by name, the same two names every time: "Your Browser" for theirs, and "my computer\'s '
+          'browser" for the one on your own computer; never "your browser", "my own browser" or "my browser".')
 
 SITE_REFUSED = ("Not opened: {host} isn't one of the sites the user lets you use in Your Browser ({sites}). DGC shows "
                 "them a card below your reply asking whether you may use {site} there: it is there, and it is how they "

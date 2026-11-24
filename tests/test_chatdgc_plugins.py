@@ -603,6 +603,35 @@ class OnTheWire(PluginChat):
         self.assertEqual(message["idempotency_key"], f"chatdgc-{card['id']}", "sent once, however often it's asked")
         self.assertIn("I want this done repeatedly", message["text"])
 
+    def test_hand_it_to_a_pip_offers_every_pip_and_a_folder_pip_takes_the_job(self):
+        # One kind of Pip: the card's "Hand it to a Pip" lists what @ lists, a Pip that works in a folder too.
+        chat, reply = self.say("Every week.", {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",
+                                                                          "arguments": {"title": "Weekly"}, "recurring": True})]},
+                               {"parts": ["Card."]})
+        card = reply["actions"][0]
+        sent = []
+        ava, ben = "pip_" + "a" * 32, "pip_" + "b" * 32
+        pips = {"list_workspaces": {"workspaces": [{"id": "ws_" + "p" * 32, "kind": "personal"},
+                                                   {"id": "ws_" + "q" * 32, "kind": "project", "name": "lime_tiles"}]},
+                "list_pips": {"pips": [{"id": ava, "name": "Ava", "goal": "Plans", "status": "active", "workspace_id": "ws_" + "p" * 32},
+                                       {"id": ben, "name": "Ben", "goal": "Tiles", "status": "active", "workspace_id": "ws_" + "q" * 32},
+                                       {"id": "pip_" + "c" * 32, "name": "Old", "status": "archived", "workspace_id": "ws_" + "q" * 32}]},
+                "send_pip_message": {"message": {"id": "m1"}}}
+        def answer(request):
+            sent.append(request)
+            if request["type"] == "list_pips" and request.get("workspace_id"):      # as the runner answers it
+                return {"pips": [p for p in pips["list_pips"]["pips"] if p["workspace_id"] == request["workspace_id"]]}
+            return pips[request["type"]]
+        self.service._pips_call = answer
+        self.service.dispatch({"type": "chatdgc_pips", "request_id": "p2"})
+        self.assertEqual(self.wait_for("chatdgc_pips", request_id="p2")["pips"],
+                         [{"id": ava, "name": "Ava", "goal": "Plans"}, {"id": ben, "name": "Ben", "goal": "Tiles", "folder": "lime_tiles"}])
+        self.service.dispatch({"type": "chatdgc_action", "request_id": "a3", "conversation_id": chat["id"],
+                               "message_id": reply["id"], "action_id": card["id"], "op": "hand", "pip_id": ben})
+        handed = self.wait_for("chatdgc_action", request_id="a3")["action"]
+        self.assertEqual((handed["status"], handed["pip"]["name"]), ("handed", "Ben"))
+        self.assertEqual([r["pip_id"] for r in sent if r["type"] == "send_pip_message"], [ben])
+
     def test_stop_cancels_a_sent_cards_continuation(self):
         chat, reply = self.say("Lunch.", {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",
                                                                       "arguments": {"title": "Lunch"}})]},

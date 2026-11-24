@@ -15,7 +15,7 @@ export function ybPipSitesMarkup(value, {esc, busy = false, error = '', pipId = 
   const off = busy ? ' disabled' : '';
   const name = esc(pipName);
   const head = `<section class="pip-page-group" aria-label="Sites in Your Browser"><h3 class="pip-page-label">Sites in Your Browser${infoTip('pipYbSitesSays', 'Sites in Your Browser',
-    `The sites you’re signed in to in Your Browser that ${name} may use with your sign-in, in its own tab there. Anywhere else, it asks you first in its chat.`)}</h3>`;
+    `The sites ${name} may use in Your Browser, in its own tab there, with your sign-in where you have one. Anywhere else, it asks you first in its chat.`)}</h3>`;
   if (!value) return `${head}${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
   const Y = sites(), {mine, others} = Y.forPip(value.sites, pipId);
   const money = s => (s.money ? ' · Bank or payment' : '');
@@ -32,8 +32,8 @@ export function ybPipSitesMarkup(value, {esc, busy = false, error = '', pipId = 
     + `<button type="button" class="quiet pill" data-yb-pip-add="${esc(s.site)}"${off}>Let ${name} use it</button></li>`;
   return head
     + (mine.length ? `<ul class="pip-page-list">${mine.map(row).join('')}</ul>`
-      : `<p class="pip-page-empty">None yet. When ${name} needs a site you’re signed in to in Your Browser, its chat asks you.</p>`)
-    + (others.length ? `<h3 class="pip-page-label">Other sites you’re signed in to</h3><ul class="pip-page-list">${others.map(other).join('')}</ul>` : '')
+      : `<p class="pip-page-empty">None yet. When ${name} needs a site in Your Browser, its chat asks you.</p>`)
+    + (others.length ? `<h3 class="pip-page-label">Other sites in Your Browser</h3><ul class="pip-page-list">${others.map(other).join('')}</ul>` : '')
     + `<div class="pip-page-row static"><button type="button" class="quiet pill" data-yb-sites-all="1"${off}>All sites…</button></div>`
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '') + '</section>';
 }

@@ -86,7 +86,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     await all(x);
     const v = await x.p.evaluate(page);
     assert.equal(v.home, false, "a page of its own: the list of Pips is not on it");
-    assert.equal(v.backLabel, "Your Pips"); assert.equal(v.title, "Needs attention"); assert.equal(v.count, "12");
+    assert.equal(v.backLabel, "Your Pips"); assert.equal(v.title, "Needs you"); assert.equal(v.count, "12");
     assert.ok(v.back.width >= 24 && v.back.height >= 24 && v.back.left < v.titleBox.left, "the back button at the bar's left");
     assert.ok(v.countBox.width > 0 && v.countBox.left >= v.titleBox.right && inside(v.countBox, v.bar), "the count beside the title, in sight at this width");
     assert.ok(apart(v.back, v.titleBox), "the title clear of the back button");

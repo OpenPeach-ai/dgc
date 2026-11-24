@@ -120,3 +120,31 @@ test("the placeholder still disappears once there is something to send", async (
   assert.equal(shown.empty, false);
   assert.ok(shown.content === "none" || shown.content === "normal", `placeholder still drawn: ${shown.content}`);
 });
+
+test("an empty box shows its placeholder from the start, also in a session reopened with its turns", async (t) => {
+  if (skipOrFail(t)) return;
+  // Seen live (24 Nov): after a window reload, a reopened Work session's empty box had no placeholder; nothing had
+  // marked it empty, because only a change to the box did.
+  const { html } = panelHtml();
+  const box = /<div id="input"[^>]*>/.exec(html)?.[0] || "";
+  assert.match(box, /class="[^"]*\bis-empty\b/, "the box starts marked empty, before any script has run");
+  const page = await composer();
+  const state = () => page.evaluate(() => {
+    const input = document.getElementById("input");
+    return { empty: input.classList.contains("is-empty"), text: input.value,
+      content: getComputedStyle(input, "::before").content };
+  });
+  const fresh = await state();
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: {
+    type: "history", complete: true, items: [
+      { kind: "user", text: "Make a one-page supplier brief." },
+      { kind: "assistant", text: "I wrote supplier-brief.md." }] } } })));
+  await page.waitForTimeout(150);
+  const reopened = await state();
+  await page.close();
+  for (const [name, s] of [["fresh", fresh], ["reopened", reopened]]) {
+    assert.equal(s.text, "", `${name}: nothing typed`);
+    assert.equal(s.empty, true, `${name}: the empty box is marked empty`);
+    assert.match(s.content, /Ask DGC to build, fix or explain/, `${name}: its placeholder shows`);
+  }
+});

@@ -73,11 +73,39 @@ class PeerRegistryTest(unittest.TestCase):
             self.assertEqual(peers.working([record]), [record], record)
         # Live test 14 Nov: four idle tabs read "4 other DGCs are working in this folder". One that holds a chat but
         # runs no turn has it open; "working" is for one running a turn.
+        other = 4242                                    # (another process: this one's own chats are never spoken of)
+        talked, busy, one_busy = dict(talked, pid=other), dict(busy, pid=other + 1), dict(one_busy, pid=other + 2)
         self.assertEqual(peers.user_line(peers.working([dict(talked, liveness="live")])),
-                         "1 other DGC has a chat open in this folder.")
+                         "Another DGC has a session open in this folder.")
         self.assertEqual(peers.user_line([dict(busy, liveness="live"), dict(talked, liveness="live")]),
-                         "1 other DGC is working in this folder, and 1 more has a chat open.")
-        self.assertEqual(peers.user_line([dict(one_busy, liveness="live")]), "1 other DGC is working in this folder.")
+                         "Another DGC is working in this folder, and 1 more has a session open.")
+        self.assertEqual(peers.user_line([dict(one_busy, liveness="live")]), "Another DGC is working in this folder.")
+        self.assertEqual(peers.user_line([dict(talked, liveness="live"), dict(talked, pid=other + 3, liveness="live")]),
+                         "2 other DGCs have a session open in this folder.")
+
+    def test_this_windows_own_tabs_are_never_spoken_of_and_another_window_is_named_a_window(self):
+        # A second session tab of the same editor window read "1 other DGC has a chat open in this folder": it sounded
+        # like a stranger in the folder. The person hears nothing of their own window's tabs; the model is still told.
+        saved = self.home / "saved.json"; saved.write_text("{}")
+        with patch.dict(os.environ, {"DGC_EDITOR_WINDOW": "window-a"}):
+            path = peers.announce(kind="serve", session=str(saved), cwd="/w", project_root="/w")
+            self.assertEqual(json.loads(path.read_text())["window"], "window-a", "a note says which window started it")
+            tab = dict(self.note(session=str(saved), pid=4242, window="window-a"), liveness="live")
+            away = dict(self.note(session=str(saved), pid=4243, window="window-b"), liveness="live")
+            sibling = {"pid": os.getpid(), "chat": "c2", "liveness": "live", "project_root": "/w"}
+            self.assertEqual(peers.user_line([tab]), "", "this window's own tab")
+            self.assertEqual(peers.user_line([sibling]), "", "another chat of this same process")
+            self.assertIn("1 other DGC agent", peers.model_line([tab]), "the model still knows it is not alone")
+            self.assertEqual(peers.user_line([tab, away]), "Another DGC window has a session open in this folder.")
+            self.assertEqual(peers.user_line([dict(away, status="working")]), "Another DGC window is working in this folder.")
+            self.assertEqual(peers.user_line([away, dict(away, pid=4244)]),
+                             "2 other DGC windows have a session open in this folder.")
+        with patch.dict(os.environ, {"DGC_EDITOR_WINDOW": ""}):
+            path = peers.announce(kind="tui", session=str(saved), cwd="/w", project_root="/w")
+            self.assertNotIn("window", json.loads(path.read_text()), "a terminal's DGC names no window")
+            path.unlink()                                   # (this process's own note: not left for the next test)
+            self.assertEqual(peers.user_line([tab]), "Another DGC window has a session open in this folder.",
+                             "seen from a terminal, an editor's tab is another window")
 
     def test_a_relative_session_name_is_not_taken_as_proof(self):
         # Only an absolute path to a file that is not there proves the chat has nothing saved.
@@ -243,7 +271,7 @@ class PeerRegistryTest(unittest.TestCase):
 
     def test_the_user_line_counts_correctly(self):
         self.assertEqual(peers.user_line([{"liveness": "live"}]),
-                         "1 other DGC is working in this folder.")
+                         "Another DGC is working in this folder.")
         self.assertEqual(peers.user_line([{"liveness": "live"}] * 2),
                          "2 other DGCs are working in this folder.")
 

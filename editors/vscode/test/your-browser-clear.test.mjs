@@ -31,9 +31,9 @@ after(async () => { await browser?.close(); });
 
 const waitFor = (page, fn, arg) => page.waitForFunction(fn, arg, { timeout: 15000 });
 const requests = (page, type) => page.evaluate((t) => window.__requests.filter((r) => r.type === t), type);
-const ready = (recent = {}) => ({ ...homeState(), browser: { recent: { links: [{ url: "https://news.example.org/", title: "News", host: "news.example.org" }], open: false, available: true, reason: "", install: null, ...recent } } });
-async function sideBar(width, theme, recent, api = 112) {
-  const x = await openDock(browser, { width, height: 760, theme, api, state: ready(recent) });
+const ready = (recent = {}, more = {}) => ({ ...homeState(), browser: { recent: { links: [{ url: "https://news.example.org/", title: "News", host: "news.example.org" }], open: false, available: true, reason: "", install: null, ...recent }, ...more } });
+async function sideBar(width, theme, recent, api = 112, more = {}) {
+  const x = await openDock(browser, { width, height: 760, theme, api, state: ready(recent, more) });
   await waitFor(x.page, () => /Your Browser/.test(document.querySelector('#dgc-dock .dgc-dock-item[data-key="browser"]')?.getAttribute("aria-label") || ""));
   return x;
 }
@@ -127,9 +127,32 @@ test("the button asks DGC for exactly what was ticked, then says what was cleare
     await x.page.click("dialog.yb-clear-dialog .yb-clear-go");
     await waitFor(x.page, () => window.__requests.some((r) => r.type === "clear_your_browser"));
     assert.deepEqual((await requests(x.page, "clear_your_browser"))[0], { type: "clear_your_browser", history: true, sign_ins: true, passwords: false });
-    await waitFor(x.page, () => !document.querySelector("dialog.yb-clear-dialog"));
-    await waitFor(x.page, () => /Cleared: browsing history, sign-ins\./.test(document.querySelector("#dgc-dock .dgc-dock-tip")?.textContent || ""));
+    // It says it is done, in the dialog the person is looking at (a note on the dock went by unseen), until Done.
+    await waitFor(x.page, () => !!document.querySelector("dialog.yb-clear-dialog .yb-clear-done"));
+    const done = await x.page.evaluate(() => { const d = document.querySelector("dialog.yb-clear-dialog");
+      return { title: d.querySelector("h2").textContent, said: d.querySelector(".yb-clear-done").textContent, role: d.querySelector(".yb-clear-done").getAttribute("role"),
+        boxes: d.querySelectorAll(".yb-clear-kind").length, buttons: [...d.querySelectorAll("button")].filter((b) => b.getBoundingClientRect().height > 0).map((b) => b.textContent), focus: document.activeElement?.textContent }; });
+    assert.deepEqual(done, { title: "Browsing data cleared", said: "Cleared: browsing history, sign-ins.", role: "status", boxes: 0, buttons: ["Done"], focus: "Done" });
     await waitFor(x.page, (n) => window.__requests.filter((r) => r.type === "get_your_browser_recent").length > n, asked);
+    await x.page.keyboard.press("Enter");
+    await waitFor(x.page, () => !document.querySelector("dialog.yb-clear-dialog"));
+  } finally { await x.close(); }
+});
+
+test("with Your Browser open and a Pip's tab in it, it says before and after that the tab closes with it", async (t) => {
+  if (skipOrFail(t)) return;
+  const PIP = "pip_" + "a".repeat(32);
+  const lanes = [{ pip_id: PIP, name: "Baker prices", working: false }];
+  const x = await sideBar(300, "dark-modern", { open: true, lanes }, 113, { lanes });
+  try {
+    await openClear(x);
+    await waitFor(x.page, () => /Pip/.test(document.querySelector("dialog.yb-clear-dialog .yb-clear-note")?.textContent || ""));
+    assert.equal(await x.page.evaluate(() => document.querySelector("dialog.yb-clear-dialog .yb-clear-note").textContent), "Your Browser closes for a moment and opens again. A Pip’s tab there closes with it.");
+    await x.page.click("dialog.yb-clear-dialog .yb-clear-go");
+    await waitFor(x.page, () => !!document.querySelector("dialog.yb-clear-dialog .yb-clear-done"));
+    const d = await x.page.evaluate(() => { const d = document.querySelector("dialog.yb-clear-dialog"); return { said: [...d.querySelectorAll(".yb-clear-done, .yb-clear-after")].map((n) => n.textContent), wide: d.scrollWidth > d.clientWidth + 1 || document.documentElement.scrollWidth > innerWidth }; });
+    assert.deepEqual(d.said, ["Cleared: browsing history.", "Your Browser opened again. A Pip’s tab there closed with it: the Pip opens a new one when it next works there."]);
+    assert.equal(d.wide, false, "it fits a 300 px side bar");
   } finally { await x.close(); }
 });
 

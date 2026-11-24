@@ -133,7 +133,7 @@ class RoutineOnAnEventTests(EventWorld, unittest.TestCase):
         other = self.send(event="order.cancelled")
         self.assertEqual((other["queued"], other["no_routine"], other["pips"]), (0, True, []))
         self.assertEqual(other["notice"], "No Pip has a routine for order.cancelled from the shop app, so nothing was "
-                                          "queued. Add one in a Personal Pip's Settings, Routines: When my app sends an event.")
+                                          "queued. Add one in a Pip's Settings, Routines: When my app sends an event.")
         self.assertEqual(self.tick(), {})
         self.assertEqual(self.registry.db.execute("SELECT payload FROM pip_app_events").fetchone()[0], "",
                          "a payload nothing waits for is never kept")

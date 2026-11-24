@@ -1,5 +1,5 @@
 // A Work chat whose goal just ended (0.52): the prompt, two finished turns, the one quiet line under the last ("Goal
-// done · 2 h 14 min · 1.8M tokens · 7 cycles"), and, with `list`, the "Goals" pill "/goal-history" adds to the bar and
+// done · 2 h 14 min · 1.8M tokens · 7 rounds"), and, with `list`, the "Goals" pill "/goal-history" adds to the bar and
 // its list open: three goals, newest first. Shared by goal-history-browser.test.mjs and render-goal-history.mjs.
 // Not a *.test.mjs file.
 import { readFileSync } from "node:fs";
@@ -10,7 +10,7 @@ const media = new URL("../../media/", import.meta.url);
 const traceJs = readFileSync(new URL("trace.js", media), "utf8"), traceCss = readFileSync(new URL("trace.css", media), "utf8");
 
 export const NOW = Date.UTC(2026, 10, 12, 9, 0, 0), T = NOW / 1000;
-export const END_LINE = "Goal done · 2 h 14 min · 1.8M tokens · 7 cycles";
+export const END_LINE = "Goal done · 2 h 14 min · 1.8M tokens · 7 rounds";
 export const RUNS = [
   { id: "g1", name: "Find why the nightly export is slow and fix the slowest query", status: "blocked", started_at: T - 90000, ended_at: T - 86000, elapsed_seconds: 3120, tokens: 412000, cycles: 4 },
   { id: "g2", name: "Rename the watering helpers", status: "stopped", started_at: T - 40000, ended_at: T - 39955, elapsed_seconds: 45, tokens: 950, cycles: 1 },

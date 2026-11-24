@@ -227,6 +227,14 @@ class Noticing(LaneBase):
         self.signed_in(self.person, host="shop.cardstore-online.com", card=True, path="/account")
         self.assertEqual(self.site("cardstore-online.com")["mode"], "chosen", "a card field in the sign-in: a payment site")
 
+    def test_a_site_let_from_a_pips_card_says_you_until_the_person_signs_in_there(self):
+        granted = your_browser.allow_pip_site(self.registry, "tide-tables.org", self.ava["id"], "editor-user")
+        self.assertEqual((granted["added_by"], granted["new"]), ("you", False), "allowed from a card: no sign-in is known")
+        self.signed_in(self.person, host="www.tide-tables.org", title="Tide tables")
+        site = self.site("tide-tables.org")
+        self.assertEqual(site["added_by"], "noticed", "signed in there since: the list says so")
+        self.assertEqual((site["mode"], [p["pip_id"] for p in site["pips"]]), ("chosen", [self.ava["id"]]), "their choice stays")
+
     def test_nothing_on_this_computer_or_the_network_and_nothing_a_page_did_by_itself(self):
         for host in ("127.0.0.1", "router.lan", "localhost", "nas.local"):
             self.signed_in(self.person, host=host)

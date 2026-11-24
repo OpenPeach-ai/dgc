@@ -219,7 +219,7 @@ def _hhmm(stamp) -> str:
 def _notice(answer, online) -> str:
     app = pip_sdk_apps.phrase(answer["app"])
     if answer["no_routine"]:
-        return (f"No Pip has a routine for {answer['event']} from {app}, so nothing was queued. Add one in a Personal Pip's "
+        return (f"No Pip has a routine for {answer['event']} from {app}, so nothing was queued. Add one in a Pip's "
                 "Settings, Routines: When my app sends an event.")
     running = [p for p in answer["pips"] if p["outcome"] in ("queued", "busy")]
     if not answer["queued"]:

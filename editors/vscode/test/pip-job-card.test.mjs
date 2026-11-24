@@ -189,7 +189,7 @@ test("Work draws the card from ask_pip's answer (live and on a reload), and the 
   const chat = read("media/chatdgc.js");
   assert.match(chat, /card\.kind === "pip_job"\) return pipJobNode\(card\)/);
   assert.match(chat, /pipjob_\[0-9a-f\]\{32\}/);
-  assert.match(chat, /detail: typeof p\.folder === "string" && p\.folder \? `Works in \$\{p\.folder\}` : "For anything"/, "every Pip, with where it works");
+  assert.match(chat, /detail: typeof p\.folder === "string" && p\.folder \? `Works in \$\{p\.folder\}` : "No folder"/, "every Pip, with where it works");
   assert.match(read("media/mentions.js"), /if \(pipsOffered && query\) for \(const p of \(source\.pips \|\| \[\]\)\.filter\(\(row\) => String\(row\.name \|\| ""\)\.toLowerCase\(\)\.includes\(query\)\)/,
     "ChatDGC's and a Pip's chat's @ list a Pip by its name too");
 });

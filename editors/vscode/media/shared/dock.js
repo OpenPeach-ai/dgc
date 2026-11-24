@@ -73,6 +73,7 @@
     let pointer = null;                    // the pointer's x over the dock, or null
     let named = null;                      // the button whose name shows
     let nameTimer = 0, nameFor = null;     // the button a resting pointer is about to name
+    let noteTimer = 0, notedKey = "";      // the tile a note stands on, in its name's place, for a while (note())
     let cur = [], vel = [], frame = 0, last = 0;
     let up = false, dropTimer = 0, inBand = false;
     let drag = null;                       // a press on a pinned item: { key, button, id, x0, y0, x, y, from, to, active, tx }
@@ -88,6 +89,9 @@
       if (sig === drawn) return;
       drawn = sig;
       const focused = bar.contains(doc.activeElement) ? keyOf(doc.activeElement) || "+" : "";
+      // The tile whose name is up, and the one a resting pointer is about to name: each is a new button after this
+      // drawing, and keeps its name (user test 2: once the dock was in use, and drew itself often, names stopped coming).
+      const idOf = (b) => (b ? keyOf(b) || (b.dataset.add ? "+" : "") : ""), wasNamed = idOf(named), wasDue = idOf(nameFor), noted = !!notedKey && notedKey === wasNamed;
       if (stop === null || (stop !== "+" && ![...items, ...fixed].some((item) => item.key === stop))) stop = items[0]?.key || fixed[0]?.key || null;
       const tile = (item, always) => {
         // (A new message nobody has read: a small dot on the tile's top-right corner, never a number. What waits for your
@@ -109,7 +113,11 @@
         + (items.length ? "" : '<span class="dgc-dock-empty">Pin Pips and sessions here</span>');
       buttons = [...bar.querySelectorAll(".dgc-dock-item")];
       cur = buttons.map(() => size); vel = buttons.map(() => 0);
+      const again = (id) => (id ? buttons.find((b) => idOf(b) === id) || null : null);
+      const wasWords = tip.querySelector("span").textContent;
       named = null; tip.hidden = true;
+      if (nameFor) nameFor = again(wasDue);
+      if (wasNamed && again(wasNamed)) { name(again(wasNamed)); if (noted && named) { tip.querySelector("span").textContent = wasWords; notedKey = wasNamed; } }
       o.onDraw?.(bar);
       if (focused) (buttons.find((b) => (keyOf(b) || "+") === focused) || buttons[Math.min(buttons.length - 1, Math.max(0, items.length - 1))])?.focus({ preventScroll: true });
       host.dataset.fixed = String(fixed.length);
@@ -255,6 +263,7 @@
     function name(button) {
       if (!button && nameTimer) { view.clearTimeout(nameTimer); nameTimer = 0; nameFor = null; }
       if (button === named) { placeTip(); return; }
+      notedKey = "";
       if (named) named.removeAttribute("aria-describedby");
       named = button || null;
       const item = named ? itemOf(named) : null;
@@ -412,7 +421,6 @@
     }
     /** A few words on an item, shown in its name's place for a while and said to a screen reader (Your Browser couldn't
      *  open, and why). */
-    let noteTimer = 0;
     function note(key, words) {
       const button = buttons.find((b) => keyOf(b) === key), item = button ? itemOf(button) : null;
       if (!button || !item || !words || !size) return;
@@ -422,7 +430,8 @@
       tip.querySelector("b").textContent = item.title; tip.querySelector("span").textContent = String(words);
       tip.hidden = false; button.setAttribute("aria-describedby", tip.id); placeTip();
       say(`${item.title}: ${words}`);
-      noteTimer = view.setTimeout(() => { if (named === button) name(null); }, 8000);
+      notedKey = key;
+      noteTimer = view.setTimeout(() => { noteTimer = 0; if (notedKey === key) name(null); }, 8000);
     }
     function dispose() {
       doc.removeEventListener("pointermove", onMove); doc.documentElement.removeEventListener("pointerleave", onLeave);

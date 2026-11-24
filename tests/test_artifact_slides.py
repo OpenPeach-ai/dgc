@@ -404,6 +404,9 @@ class Page(unittest.TestCase):
         for key in ("ArrowRight", "ArrowLeft", "Escape", "requestFullscreen"):
             self.assertIn(key, page)
         self.assertNotRegex(page, r"\son[a-z]+\s*=")
+        # The tab that frames the deck may hold the keyboard itself for a moment: it hands the key on, and only it may.
+        self.assertIn("addEventListener('message'", page)
+        self.assertIn("e.source!==window.parent", page, "a key is taken from the frame around it only")
         made_up = slides.render_html(self.deck, mode="present")
         nonce = re.search(r'<script nonce="([^"]+)"', made_up).group(1)
         self.assertIn(f"'nonce-{nonce}'", made_up, "a nonce is made when none is given")

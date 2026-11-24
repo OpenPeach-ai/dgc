@@ -1522,7 +1522,7 @@ test("a plugin card's choices go by id; Hand it to a Pip asks which Pip, and a p
   assert.equal(sent.filter((c) => c.type === "chatdgc_action").length, 1, "only a real card id goes");
   panel.say({ type: "actionDismiss", messageId: MSG(2), actionId: act });
   assert.equal(last("chatdgc_action").op, "dismiss");
-  // Hand it to a Pip: your Personal Pips, then the one chosen.
+  // Hand it to a Pip: every Pip (one kind; a Pip in a folder too), then the one chosen.
   world.pick = `pip_${"b".repeat(32)}`;
   panel.say({ type: "actionHand", messageId: MSG(2), actionId: act });
   await tick();
@@ -1542,6 +1542,11 @@ test("a plugin card's choices go by id; Hand it to a Pip asks which Pip, and a p
   chat.onEvent({ type: "chatdgc_pips", request_id: last("chatdgc_pips").request_id, pips: [], error: "Pips are disabled in this profile." });
   await tick(); await tick();
   assert.match(world.infos.at(-1), /Pips are disabled/, "no Pips: it says why");
+  panel.say({ type: "actionHand", messageId: MSG(2), actionId: act });
+  await tick();
+  chat.onEvent({ type: "chatdgc_pips", request_id: last("chatdgc_pips").request_id, pips: [] });
+  await tick(); await tick();
+  assert.equal(world.infos.at(-1), "You have no Pips yet. Make one in Pips, then hand this to it.", "one kind of Pip in its words");
 });
 
 test("dictation: each tab's box speaks for itself to the window's dictation; a closed or reloaded tab lets go of its recording", async () => {

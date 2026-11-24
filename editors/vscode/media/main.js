@@ -1006,8 +1006,9 @@
     const end = el("span", "session-end");
     const age = el("span", "session-age"); age.textContent = sessionAge(item.when);
     age.title = [item.when, plural(count, "message")].filter(Boolean).join(" · ");
-    // While it runs, the purple dot stands where its age was.
-    if (running) { age.hidden = true; end.append(liveDot(item.windowless ? "Running, no window" : "Running")); }
+    // While it runs, the purple dot stands where its age was. Not while it waits for an okay: the row then says that
+    // alone ("Wants your okay" with a Running dot was two states at once: user test 2, W21; what needs you wins).
+    if (running && item.waiting !== true) { age.hidden = true; end.append(liveDot(item.windowless ? "Running, no window" : "Running")); }
     const actions = el("span", "session-actions");
     const open = sessionButton("session-open", window.DgcIcons.codicon("open-in-editor"), open_);
     open.title = elsewhere ? `Open in an editor tab here. It keeps working in ${item.projectName || "its own folder"}.` : "Open in an editor tab";
@@ -1647,7 +1648,9 @@
     const dialog = document.createElement("dialog");
     dialog.className = "new-session-dialog yb-clear-dialog dgc-dialog";
     dialog.setAttribute("aria-labelledby", "yb-clear-title");
-    const notes = [yb.open ? "Your Browser closes for a moment and opens again." : "",
+    // (A Pip's tab there closes with it: said before, and again once it is done.)
+    const pipTabs = yb.open && yb.lanes.length > 0;
+    const notes = [yb.open ? `Your Browser closes for a moment and opens again.${pipTabs ? ` ${yb.lanes.length === 1 ? "A Pip’s tab" : "Your Pips’ tabs"} there ${yb.lanes.length === 1 ? "closes" : "close"} with it.` : ""}` : "",
       yb.account ? "Chrome is signed in to a Google account in Your Browser: if its sync is on, your account keeps its own copy." : ""].filter(Boolean);
     dialog.innerHTML = `<div class="new-session-body"><h2 id="yb-clear-title">Clear browsing data</h2>
       <fieldset class="yb-clear-kinds"><legend class="yb-clear-legend">What to clear</legend>${YB_KINDS.map((k) => `<label class="yb-clear-kind"><input type="checkbox" name="${k.id}"${k.on ? " checked" : ""}><span class="yb-clear-words"><span class="yb-clear-name">${esc(k.name)}</span><span class="yb-clear-line">${esc(k.line)}</span></span></label>`).join("")}</fieldset>
@@ -1664,10 +1667,20 @@
       go.dataset.busy = "1"; go.disabled = true; go.textContent = "Clearing…"; error.hidden = true;
       for (const box of boxes) box.disabled = true;
       // (Closing Chrome, clearing and opening it again takes some seconds: DGC itself waits up to a minute.)
+      const wasOpen = yb.open, tabs = pipTabs ? yb.lanes.length : 0;
       ybAsk("clear_your_browser", Object.fromEntries(YB_KINDS.map((k) => [k.id, t.includes(k.id)])), 70000).then((said) => {
-        ybCloseClear();
         const done = YB_KINDS.filter((k) => (Array.isArray(said?.cleared) ? said.cleared : t).includes(k.id)).map((k) => k.name.toLowerCase());
-        dock?.note?.("browser", `Cleared: ${done.join(", ") || "nothing"}.`);
+        // It says it is done where the person is looking, and stays until Done: Chrome closing and opening again takes
+        // the eye, and a note on the dock went by unseen (user test, round 2).
+        if (ybClearing?.dialog === dialog) {
+          delete go.dataset.busy;
+          const after = wasOpen || said?.reopened === true ? `Your Browser opened again.${tabs ? ` ${tabs === 1 ? "A Pip’s tab there closed with it: the Pip opens a new one" : "Your Pips’ tabs there closed with it: each Pip opens a new one"} when it next works there.` : ""}` : "";
+          dialog.querySelector(".new-session-body").innerHTML = `<h2 id="yb-clear-title">Browsing data cleared</h2><p class="new-session-intro yb-clear-done" role="status">${esc(`Cleared: ${done.join(", ") || "nothing"}.`)}</p>${after ? `<p class="new-session-intro yb-clear-after">${esc(after)}</p>` : ""}`;
+          dialog.querySelector(".new-session-buttons").innerHTML = `<button type="button" class="act primary yb-clear-ok">Done</button>`;
+          const ok = dialog.querySelector(".yb-clear-ok");
+          ok.onclick = () => ybCloseClear();
+          ok.focus();
+        }
         if (done.length) { yb.links = t.includes("history") ? [] : yb.links; ybPaint(); }
         yb.asked = 0; ybRecent();
       }, (problem) => {
@@ -1685,7 +1698,7 @@
     boxes[0].focus();
     setTimeout(() => { if (ybClearing?.dialog === dialog && !dialog.contains(document.activeElement)) boxes[0].focus(); }, 0);
   }
-  /** Sites Pips can use (Pips API 113): the one panel of every site you're signed in to in Your Browser and which Pips
+  /** Sites Pips can use (Pips API 113): the one panel of every site on Your Browser's list and which Pips
       may use it (media/shared/ybsites.js, the same one a Pip's page opens). Opening it is looking: the dock's "N new" goes. */
   function ybSitesOpen() {
     if (!ybOffered() || yb.api < YB_SITES_API || !window.DgcYbSites) return;
@@ -2014,6 +2027,9 @@
     if (!box || !list) return;
     box.hidden = !chatsAvailable || !!homeQuery;
     $("chats-sub").hidden = box.hidden || !projects.length;
+    // With no space yet the list's own "New space" row is the way in (it says what a space is): the heading's button,
+    // the same thing again right above it, steps aside until there is a space.
+    if ($("projects-new")) $("projects-new").hidden = !projects.length;
     if (box.hidden) return;
     // Drawn again only when something changed: the home refreshes after every turn, and a redraw replaces the
     // buttons under a pointer, so a click that lands mid-redraw would be lost.
@@ -2271,8 +2287,9 @@
       const id = String(n?.id || ""), at = Number(n?.at);
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !Number.isFinite(at) || (workSeen.get(id) ?? -Infinity) >= at) continue;
       const had = workReplies.get(id);
-      if (!had || had.at < at) { workReplies.set(id, { at, preview: typeof n.preview === "string" ? n.preview.slice(0, 300) : "" }); hubNews.work[id] = Date.now(); }
-      else if (hubNews.work[id] === undefined) hubNews.work[id] = Date.now();
+      // (Its time is the reply's own, never when this page heard of it: an old reply heard again after a reload is not new now.)
+      if (!had || had.at < at) { workReplies.set(id, { at, preview: typeof n.preview === "string" ? n.preview.slice(0, 300) : "" }); hubNews.work[id] = at; }
+      else if (hubNews.work[id] === undefined) hubNews.work[id] = had.at;
     }
     // In front in its own tab: seen.
     for (const item of items) if (item.watched === true && (hubNews.work[item.id] !== undefined || workReplies.has(item.id))) {
@@ -2378,10 +2395,10 @@
     }
     for (const c of pipModel?.cards || []) {
       const age = chatAge(c.at), review = c.kind === "setup" || c.kind === "waiting";
-      const card = { key: c.key, source: c.scope, group: c.group, at: Date.parse(c.at) || 0, who: { html: hubFace(c) },
-        // (A Project Pip's card names its project, when the list says it: the Project Folder dropdown shows every folder's.)
-        from: [c.kind === "setup" && c.name === "New Pip" ? "" : c.name, c.kind === "setup" ? "New Pip" : c.scope === "project" ? "Project Pip" : "Pip", c.scope === "project" && projectFolders && c.project ? c.project : "", age].filter(Boolean).join(" · "), title: c.title, chips: c.chips,
-        // (Narrow: its name and how old, then its name alone; never "Billing review · Project Pip · s…".)
+      const card = { key: c.key, source: c.scope, group: c.group, at: Date.parse(c.at) || 0, who: { html: hubFace(c) }, waiting: c.group === "needs" ? Math.max(1, Number(c.waiting) || 1) : 0,
+        // (The card of a Pip that works in a folder names it, when the list says it: the Project Folder dropdown shows every folder's.)
+        from: [c.kind === "setup" && c.name === "New Pip" ? "" : c.name, c.kind === "setup" ? "New Pip" : "Pip", c.scope === "project" && projectFolders && c.project ? c.project : "", age].filter(Boolean).join(" · "), title: c.title, chips: c.chips,
+        // (Narrow: its name and how old, then its name alone; never "Billing review · Pip · s…".)
         fromShort: c.kind === "setup" ? [] : [[c.name, age].filter(Boolean).join(" · "), c.name].filter((way, k, all) => way && all.indexOf(way) === k),
         actions: [{ id: "open", label: review ? "Review" : "Open", primary: true, title: review ? "Open what waits for you, in Pips" : `Open ${c.name} in Pips` },
           c.canRead ? { id: "read", label: "Mark read", title: "Mark as read, without opening its chat" }
@@ -2407,7 +2424,7 @@
     }
     // What needs you: sessions first (their work stands still), then Pips, the most urgent first. What is new: the newest first.
     fresh.sort((a, b) => (b.at || 0) - (a.at || 0));
-    return [...needs, ...fresh].map(({ at, ...card }) => card);
+    return [...needs, ...fresh];       // (each with its time, `at`: Home's Recent orders by it; the hub is given them without)
   }
   function paintHub() {
     if (chatPlace !== "home" || !hub) return;
@@ -2417,10 +2434,13 @@
     // (Home can't say "nothing needs you" when DGC couldn't list the Pips: it says that instead, with a way to ask again. H3.)
     if (pipModel?.unknown) notes.push({ text: "DGC couldn’t list your Pips, so what they need isn’t shown here.", retry: true });
     if (hubSaid) notes.push({ text: hubSaid });
-    const cards = hubCards(), said = { cards, more: pipModel?.more || 0, partial: pipModel?.partial === true, notes: [] };
+    const cards = hubCards(), said = { cards: cards.map(({ at, ...card }) => card), more: pipModel?.more || 0, partial: pipModel?.partial === true, notes: [] };
     homeNow = { cards, notes };
     hub.update(said); hubNew?.update(said);
-    paintHomeCount(cards.length, cards.filter((c) => c.group === "needs").length);
+    // One number for what needs you, the same on Home, its tab and the Pips tab: the things waiting, never the cards (a
+    // Pip's one card can stand for two: "Needs you 1" held "2 things are waiting for you").
+    const needsNow = hubWaiting(cards);
+    paintHomeCount(cards.filter((c) => c.group !== "needs").length + needsNow, needsNow);
     home?.update();
   }
   // ---- Home's cards: what each shows, from the lists this page has (media/shared/homecards.js draws them) ---------------
@@ -2451,9 +2471,9 @@
     return {
       notes: homeNow.notes,
       // (unknown: DGC couldn't list the Pips, so "nothing needs you" isn't something Home can say. H3.)
-      needs: { count: needs.length + (pipModel?.more || 0), faces: needs.map((c) => c.who?.html || ""), unknown: pipModel?.unknown === true },
+      needs: { count: hubWaiting(needs) + (pipModel?.more || 0), faces: needs.map((c) => c.who?.html || ""), unknown: pipModel?.unknown === true },
       // (On the card's own rows, the short way to say where it is from: a row has less room than an opened card. H2.)
-      news: fresh.map((c) => ({ key: `hub:${c.key}`, icon: c.who?.html || "", name: c.title, meta: Array.isArray(c.fromShort) && typeof c.fromShort.at(-1) === "string" ? c.fromShort.at(-1) : c.from, title: `Open: ${c.title} · ${c.from}` })),
+      news: fresh.map((c) => ({ key: `hub:${c.key}`, at: Number(c.at) || 0, icon: c.who?.html || "", name: c.title, meta: Array.isArray(c.fromShort) && typeof c.fromShort.at(-1) === "string" ? c.fromShort.at(-1) : c.from, title: `Open: ${c.title} · ${c.from}` })),
       recent,
       work: { rows: [...work].sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0)), total: work.length, more: sessionsMoreToLoad, running: work.filter((r) => r.running).length, folder: folderNow, empty: "No sessions yet. Start one with New." },
       chats: { offered: chatsAvailable, why: "Chats aren’t set up in this DGC.", rows: chats, total: chats.length, fresh: chats.filter((r) => r.fresh).length, empty: "No chats yet. Start one with New chat." },
@@ -2518,6 +2538,8 @@
     else for (const key of mine) { const c = every.find((x) => x.key === key); if (c?.canRead) homePips?.read(key); else if (c?.canDismiss) homePips?.dismiss(key); }
     paintHub();
   }
+  /** How many things wait in these cards (media/shared/hub.js counts a card by the things it stands for). */
+  const hubWaiting = (cards) => (window.DgcHub?.waiting ? window.DgcHub.waiting(cards) : cards.filter((c) => c.group === "needs").length);
   /** Home's number: only what needs you (a card, a question, a held step). Things that are only new are never in the
    *  number (decided 16 Nov): alone they are a quiet dot. Its spoken name and its tooltip say both counts. */
   function paintHomeCount(total, needs = 0) {
@@ -2755,26 +2777,27 @@
     default:     { icon: "shield",    desc: "Ask before edits and commands" },
     acceptEdits: { icon: "edit",      desc: "Approve file edits for me" },
     plan:        { icon: "checklist", desc: "Read only, plan first" },
-    auto:        { icon: "zap",       desc: "Approve everything" },
+    auto:        { icon: "zap",       desc: "Everyday steps run; a risky one stops" },
   };
   const MODE_ORDER = ["default", "acceptEdits", "plan", "auto"];
   const THINK = ["off", "low", "medium", "high", "xhigh"];
   let reasoningControl = "provider";
+  // Thinking's "?" in the model picker: a line or two in plain words (user test 2, M3: it read "sent as Ollama's
+  // thinking levels … bounded parallel agents; it cannot guarantee better answers"). What a level does, for this model;
+  // then Ultra, the one stop whose name does not say what it is.
   function reasoningNote() {
-    const detail = reasoningControl === "glm-flash-levels"
-      ? "GLM Flash always reasons: Off/Low send Low, Medium/High send High, Extra high/Ultra send Max. DGC’s instructions also vary by profile."
-      : reasoningControl === "glm-levels"
-      ? "GLM always reasons (with thinking off it writes its reasoning into the answer): Off/Low send Low, Medium and High send those levels, Extra high/Ultra send Max. DGC’s instructions also vary by profile."
+    const detail = reasoningControl === "glm-flash-levels" || reasoningControl === "glm-levels"
+      ? "This model always thinks; the level sets how long."
       : reasoningControl === "ollama-levels"
-      ? "Off turns thinking off. Low, Medium and High are sent as Ollama’s thinking levels and Extra high as Max. A model that grades its thinking follows them; one that does not treats every level as on. DGC’s instructions also vary by profile."
+      ? "More thinking: slower, better on hard work. Off answers at once."
       : reasoningControl === "toggle"
-      ? "This model accepts thinking on/off. Low–Extra high change DGC’s instructions, not native reasoning levels."
+      ? "Thinking here is on or off; higher levels ask for more careful work."
       : reasoningControl === "levels"
-      ? "This model accepts Low, Medium and High. Off uses Low; Extra high uses High with deeper DGC instructions."
+      ? "This model has Low, Medium and High; other levels use the nearest."
       : reasoningControl === "instructions"
-      ? "This model has no supported reasoning control. These profiles change DGC’s instructions only."
-      : "Native reasoning support depends on the model and provider.";
-    return detail + " Ultra adds guidance for deeper work and bounded parallel agents; it cannot guarantee better answers.";
+      ? "No thinking setting here; a level sets how carefully DGC asks it to work."
+      : "More thinking: slower, better on hard work; how much depends on the model.";
+    return detail + " Ultra can also use helpers.";
   }
   let curMode = "default", curThink = "off", curModel = "", curSubscription = "", curUltra = false, noProvider = false;
   let curBaseUrl = "";              // the chat's endpoint, as the host's state says it: whose prompt cache it is
@@ -2838,13 +2861,14 @@
     dialog.innerHTML = `<div class="auto-mode-body">
       <div class="auto-mode-heading"><span class="auto-mode-warning codicon codicon-warning" aria-hidden="true"></span>
       <div><h2 id="auto-mode-title">Turn on Auto mode?</h2><p class="auto-mode-scope">For this Work session</p></div></div>
-      <p id="auto-mode-intro">DGC can take actions without asking each time. Only enable Auto for work and content you trust.</p>
+      <p id="auto-mode-intro">Everyday steps run without asking. A risky one stops and says why; your yes lets it go. Only enable Auto for work and content you trust.</p>
       <div class="auto-mode-permissions">
         <div class="auto-mode-permission"><span class="codicon codicon-folder" aria-hidden="true"></span><div><strong>Files and folders</strong><p>Read, create, edit, or delete files, including outside your project, wherever your account has access.</p></div></div>
         <div class="auto-mode-permission"><span class="codicon codicon-terminal" aria-hidden="true"></span><div><strong>Terminal commands</strong><p>Run commands, install software, and change settings with your account’s permissions.</p></div></div>
         <div class="auto-mode-permission"><span class="codicon codicon-globe" aria-hidden="true"></span><div><strong>Internet and connected apps</strong><p>Send data and use tools from enabled plugins, including tools that change things in your accounts.</p></div></div>
       </div>
-      <p class="auto-mode-risk"><strong>Mistakes or malicious instructions can cause data loss or expose private information.</strong> You can switch back to Default at any time.</p>
+      <p class="auto-mode-check"><strong>The safety check stops a step that</strong> writes or deletes outside your project, reads passwords or keys, deletes a folder or throws work away, sends your data out, changes this computer’s setup, or publishes.</p>
+      <p class="auto-mode-risk"><strong>The check can miss a step: a mistake or a hidden instruction can still lose data or expose private information.</strong> You can switch back to Default at any time.</p>
       <p class="auto-mode-limits">Your deny and ask rules still apply. Auto does not grant new account permissions or remove sandbox restrictions.</p>
       <p class="auto-mode-trust" hidden>This workspace is not trusted. Continuing also trusts this workspace.</p>
       </div><div class="auto-mode-buttons"><button type="button" class="auto-mode-cancel">Cancel</button><button type="button" class="auto-mode-confirm"><span class="codicon codicon-warning" aria-hidden="true"></span><span>Enable Auto</span></button></div>`;
@@ -2894,6 +2918,8 @@
     ["spreadsheet", "Spreadsheet", "A sheet, formulas and all", "table"],
     ["page", "Page", "One self-contained web page", "browser"],
     ["dashboard", "Dashboard", "Charts over data you allow", "dashboard"],
+    ["checklist", "Checklist", "Steps, ticked off as they are done", "checklist"],
+    ["design", "Design", "Screens drawn on a canvas", "symbol-color"],
   ];
   let outputOffered = null;            // the capability, or null: no chip
   let outputPick = "auto";
@@ -3674,7 +3700,7 @@
         if (!fb) return r;
         const isFallback = !r.current && agentsFallbackOn(row, r.value);
         return { ...r, pills: set ? (r.current ? [["Main", "main"]] : isFallback ? [["Fallback", "fallback"]] : []) : [],
-          actions: [{ id: "agentsFallback", label: isFallback ? "Stop using as fallback" : "Use as fallback", disabled: r.current }], agentsFallback: isFallback };
+          actions: [{ id: "agentsFallback", label: isFallback ? "Stop using as the sub-agents’ fallback" : "Use as the sub-agents’ fallback", disabled: r.current }], agentsFallback: isFallback };
       }));
       if (!own) conn.footer = [{ id: "agentsTyped", label: "Enter another model…", icon: "edit" }];
       return conn;
@@ -4487,7 +4513,7 @@
     document.body.appendChild(node);
     // (`extra`: words cut with "…" under the pointer, said under the control's own label; `own`: the label of a box
     // that has none of its own, only words that are cut.)
-    let timer = 0, warm = 0, target = null, native = "", alive = 0, extra = "", own = "", quiet = 0;
+    let timer = 0, warm = 0, target = null, native = "", alive = 0, extra = "", own = "", quiet = 0, byPointer = false;
     // A note that says what just happened ("Downloaded", "Saved to Library": media/shared/download.js) takes the label's
     // place for its moment: no label shows over it, or beside it.
     document.addEventListener("dgc-said", () => { hide(); quiet = Date.now() + SAID_MS; }, true);
@@ -4528,7 +4554,7 @@
       const label = mine || (el0 === target && native ? native : (el0.getAttribute("title") || el0.dataset.tip || "")).trim();
       if (!label || el0.closest("[hidden]")) return;
       hide();
-      target = el0; native = el0.getAttribute("title") || ""; extra = more; own = mine;
+      target = el0; native = el0.getAttribute("title") || ""; extra = more; own = mine; byPointer = !instant;
       // Moving to a neighbouring control should not make you wait again -- but the window in
       // which that holds is short, or scanning a toolbar makes every label feel instant.
       //
@@ -4545,7 +4571,10 @@
         // A control the page took away while its label was up (a list drawn again under the pointer) takes its label
         // with it: a label never stays over rows it does not belong to.
         if (alive) clearInterval(alive);
-        alive = setInterval(() => { if (target !== el0 || !el0.isConnected || !el0.getClientRects().length) { if (target === el0) hide(); else { clearInterval(alive); alive = 0; } } }, 300);
+        // And so does one the pointer is no longer on, however it left (out of the page into the editor, under a panel
+        // that opened over it: user test 2, a label stood for minutes). Asked of the page only where a real pointer
+        // has moved in it, and never of words that lie under their own card (those are not what is hovered).
+        alive = setInterval(() => { if (target !== el0 || !el0.isConnected || !el0.getClientRects().length || (byPointer && !own && realPointer && !el0.matches(":hover"))) { if (target === el0) hide(); else { clearInterval(alive); alive = 0; } } }, 300);
       }, delay);
     }
     // A control that changes its own `title` while its label is up or about to be (the agents pill
@@ -4565,6 +4594,8 @@
     return { show, hide, retitle, node };
   })();
   renderCacheClock();             // the clock's first paint: in the footer from the start, its words through the label
+  let realPointer = false;        // a pointer has really moved in this page (so ":hover" can be asked)
+  let clickedAt = null;           // where the pointer last pressed: a control drawn again under it is not pointed at anew
   const tipTarget = (event) => event.target?.closest?.("[title], [data-tip]") || null;
   // Words cut with "…" say the whole of themselves to a pointer that rests on them (the layout audit, 0.52), as on
   // every other page (media/shared/tip.js, cutUnder: the same rule; this page draws its own label). Looked for
@@ -4596,13 +4627,25 @@
     try { node.focus(options); } finally { quietFocusTarget = null; }
     hoverTip.hide();
   }
+  document.addEventListener("pointermove", (e) => {
+    if (e.isTrusted) realPointer = true;
+    if (clickedAt && Math.hypot(e.clientX - clickedAt.x, e.clientY - clickedAt.y) > 3) clickedAt = null;
+  }, { capture: true, passive: true });
   document.addEventListener("pointerover", (e) => {
+    // What was just clicked and drawn again where the pointer still rests (a filter, a star) gets no label over it.
+    if (clickedAt && Math.hypot(e.clientX - clickedAt.x, e.clientY - clickedAt.y) <= 3) { hoverTip.hide(); return; }
     const found = tipTarget(e), cut = cutUnder(e.clientX, e.clientY);
     if (found) hoverTip.show(found, false, cut && (found.contains(cut.el) || cut.el.contains(found)) && !(found.getAttribute("title") || found.dataset.tip || "").includes(cut.words.slice(0, 24)) ? cut.words : "");
     else if (cut) hoverTip.show(cut.el, false, "", cut.words);
     else hoverTip.hide();
   });
-  document.addEventListener("pointerdown", () => hoverTip.hide(), true);
+  document.addEventListener("pointerdown", (e) => { hoverTip.hide(); clickedAt = Number.isFinite(e.clientX) ? { x: e.clientX, y: e.clientY } : null; }, true);
+  // The pointer left the page (into the editor, another tab, the window's edge): nothing in the page is pointed at.
+  document.addEventListener("pointerout", (e) => { if (!e.relatedTarget) hoverTip.hide(); });
+  document.documentElement.addEventListener("mouseleave", () => hoverTip.hide());
+  // What scrolls takes its control from under the label.
+  document.addEventListener("scroll", () => hoverTip.hide(), { capture: true, passive: true });
+  document.addEventListener("wheel", () => hoverTip.hide(), { capture: true, passive: true });
   document.addEventListener("focusin", (e) => {
     if (quietFocusTarget && e.target === quietFocusTarget) { hoverTip.hide(); return; }
     const found = tipTarget(e);
@@ -4949,7 +4992,9 @@
   const PIN_LOG_SHARE = 0.4;       // nor one taller than this share of the transcript: the answer keeps the rest
   const PIN_JUMP_DELAY_MS = 300;   // a single click waits this long for a second one (the reference's 300ms)
   function fitPin(head, room) {
-    if (head._pinH > 0) head.classList.toggle("pin-off", head._pinH + PIN_GROUND_PX > room);
+    if (!(head._pinH > 0)) return;
+    const was = head.classList.contains("pin-off");
+    if (head.classList.toggle("pin-off", head._pinH + PIN_GROUND_PX > room) !== was && head.classList.contains("turn-head")) setPinned(head);
   }
   // The window's height is the measure, so that a draft growing in the composer never flips a pin per keystroke. But
   // the window is not what the transcript gets: in a short Work chat (a low window, the terminal panel open, an editor
@@ -4969,7 +5014,8 @@
     const room = pinRoom();
     for (const entry of entries) {
       const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect?.height ?? 0;
-      if (height > 0) entry.target._pinH = height;   // 0: not rendered (agent page, hidden panel); keep the last
+      // 0: not rendered (agent page, hidden panel); keep the last. Small while it is stuck: its whole height is kept.
+      if (height > 0 && !entry.target.classList.contains("pinned")) entry.target._pinH = height;
       fitPin(entry.target, room);
     }
   }) : null;
@@ -4977,7 +5023,77 @@
     const room = pinRoom();
     for (const head of log.querySelectorAll(".turn > .msg.user.turn-head, .turn > .msg.dgc > .msg.user.turn-steer")) fitPin(head, room);
   };
-  window.addEventListener("resize", refitPins);
+  // A pinned prompt looks pinned while it is stuck (main.css, "a pinned prompt looks pinned"): one line, a hairline and a soft
+  // shadow under it, so the answer reads as passing under it. In its own place it was indistinguishable from any
+  // prompt: with a turn mostly scrolled past, "your message, then the Edited card" read as a reply gone missing.
+  // Stuck = its box's top has passed the rest line while the box still reaches it. An IntersectionObserver whose root
+  // is a one-pixel band on that line says so when it changes; nothing runs per scroll frame. Going small must move
+  // nothing: the height it gives up stays in the box as a margin under it (two reads, once per change).
+  const pinWatchers = new Map();          // by the head's own top margin: the band sits where that head comes to rest
+  function pinWatcher(margin) {
+    if (typeof IntersectionObserver !== "function") return null;
+    const height = log.clientHeight;
+    if (!(height > 0)) return null;
+    let seen = pinWatchers.get(margin);
+    if (!seen) {
+      const line = Math.max(0, Math.round((parseFloat(getComputedStyle(log).paddingTop) || 0) - margin));
+      seen = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          const head = entry.target.querySelector(":scope > .msg.user.turn-head");
+          if (head) { head._stuck = entry.isIntersecting; setPinned(head); }
+        }
+        // (The band is the pixel just above the rest line: a box resting ON the line, as the first prompt does at the
+        // top of the log, is not stuck; one pixel past it is.)
+      }, { root: log, rootMargin: `-${Math.max(0, line - 2)}px 0px -${Math.max(0, height - line + 1)}px 0px`, threshold: 0 });
+      pinWatchers.set(margin, seen);
+    }
+    return seen;
+  }
+  // Decided again whenever what it rests on changes: the observer's word, a prompt that no longer fits (fitPin), a
+  // long prompt opened or folded.
+  function setPinned(head) {
+    const may = () => head._stuck === true && !head.classList.contains("pin-off") && !head.querySelector(':scope > .bubble[data-fold="open"]');
+    const is = head.classList.contains("pinned");
+    if (may() === is) return;
+    if (is) { head.classList.remove("pinned"); head.style.removeProperty("--pin-give"); return; }
+    // Whether it pins at all is decided on its whole height, here if the observer of its size has not said yet: a
+    // prompt too tall for this window scrolls away as it always did, and is never made small instead.
+    const full = head.offsetHeight;
+    if (full > 0 && !(head._pinH > 0)) { head._pinH = full; fitPin(head, pinRoom()); }
+    if (!may() || head.classList.contains("pinned")) return;
+    // The margin first, and too much of it: the transcript is never shorter for a moment, which at its very end would
+    // pull the reader up by the difference (the scroll position is clamped to the shorter height and stays there).
+    head.style.setProperty("--pin-give", `${full}px`);
+    head.classList.add("pinned");
+    head.style.setProperty("--pin-give", `${Math.max(0, full - head.offsetHeight)}px`);
+  }
+  /** A stuck prompt measured or changed as it is in its own place: `work` runs with it whole, then it is small again
+   *  with the margin its new height asks for. */
+  function wholeWhile(heads, work) {
+    const small = heads.filter((head) => head.classList.contains("pinned"));
+    for (const head of small) { head.style.setProperty("--pin-give", `${(head._pinH || 0) + head.offsetHeight}px`); head.classList.remove("pinned"); }
+    try { return work(); }
+    finally {
+      for (const head of small) {
+        const full = head.offsetHeight;
+        head._pinH = full;
+        head.style.setProperty("--pin-give", `${full}px`); head.classList.add("pinned");
+        head.style.setProperty("--pin-give", `${Math.max(0, full - head.offsetHeight)}px`);
+      }
+    }
+  }
+  function watchPin(box) {
+    const head = box?.querySelector?.(":scope > .msg.user.turn-head");
+    if (!head) return;
+    pinWatcher(Math.round(parseFloat(getComputedStyle(head).marginTop) || 0))?.observe(box);
+  }
+  // The band is measured in pixels of the transcript's height: built again when that changes.
+  function rewatchPins() {
+    for (const seen of pinWatchers.values()) seen.disconnect();
+    pinWatchers.clear();
+    for (const box of log.querySelectorAll(".turn")) watchPin(box);
+  }
+  window.addEventListener("resize", () => { refitPins(); rewatchPins(); });
   // The transcript's own height moves too, with no change to the window: a turn's controls and the rails under it come
   // and go, a question docks above the composer. Decided again then, except while the composer holds a draft: that is
   // the draft growing, and a pin never flips per keystroke.
@@ -4987,6 +5103,7 @@
       const height = log.clientHeight;
       if (height <= 0 || height === shownHeight) return;
       shownHeight = height;
+      rewatchPins();
       if (!input.value) refitPins();
     }).observe(log);
   }
@@ -5370,6 +5487,12 @@
   function fitPromptFolds(blocks, width = log.clientWidth) {
     const bubbles = new Set();
     for (const block of [].concat(blocks)) for (const bubble of block?.querySelectorAll?.(".msg.user > .bubble") || []) bubbles.add(bubble);
+    // (A prompt stuck at the top is one line there: its fold is decided on it whole, as in its own place.)
+    const stuck = [...bubbles].map((bubble) => bubble.parentElement).filter((row) => row?.classList.contains("pinned"));
+    if (stuck.length) { wholeWhile(stuck, () => fitPromptFoldsNow(bubbles, width)); return; }
+    fitPromptFoldsNow(bubbles, width);
+  }
+  function fitPromptFoldsNow(bubbles, width) {
     const verdicts = [];
     for (const bubble of bubbles) {
       bubble._foldWidth = width; bubble._foldFont = fontEpoch;   // as the pins do, even unmeasured
@@ -5411,6 +5534,7 @@
     // (0.47 pinned prompt): back to where it was sent first. Open, it does not pin (main.css).
     if (open && head && isPinned(head)) goToPrompt(head);
     setPromptFold(bubble, open ? "open" : "folded");
+    if (head?.classList.contains("turn-head")) setPinned(head);     // opened, it is read in its place; folded again, it may be stuck
     syncPromptLinks(bubble);
     rememberPrompt(bubble, open);
     if (open) {
@@ -5428,9 +5552,14 @@
     }
     renderToLatest();   // the Latest pill while away; following again once back at the end
   }
+  // A goal typed as "/goal …" (never one of its own commands: "/goal clear", "/goal pause", …).
+  const startsGoal = (text) => /^\/goal\s+\S/.test(String(text || "")) && !/^\/goal\s+(clear|pause|resume|status|stop)\b/i.test(String(text || ""));
   function fillUserBubble(bubble, text, attachments, displayMentions = []) {
     bubble.replaceChildren();
     const body = String(text || "");
+    // Its message says it started a goal, wherever the bubble is made (as it is sent, as its turn starts, read back):
+    // once it is in its row.
+    if (startsGoal(body)) queueMicrotask(() => { const row = bubble.parentElement; if (row?.classList.contains("user")) markGoalBubble(row); });
     // Only move an attachment into the sentence when every saved position is usable.
     // A malformed mark must leave its ordinary attachment chip visible.
     const marks = validPromptMentions(body, displayMentions) ? displayMentions : [];
@@ -5843,6 +5972,8 @@
       displayMentions);
     if (answerQuestion) bubble.prepend(el("p", "answered-q", esc(answerQuestion)));
     m.appendChild(bubble);
+    // (A goal typed as "/goal …": its own message, live and read back from the session.)
+    if (startsGoal(parsed.text)) markGoalBubble(m);
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
     markPipReportsNamedIn(parsed.text);
     return m;
@@ -6123,6 +6254,7 @@
       const role = first.querySelector(":scope > .role");
       if (role?.textContent.startsWith("you")) role.textContent = "you";
       pinFit?.observe(first);
+      watchPin(box);
     }
     return box;
   }
@@ -6142,7 +6274,7 @@
   }
   function unwrapTurn(box) {
     const head = box.querySelector(":scope > .msg.user.turn-head");
-    if (head) { head.classList.remove("turn-head", "pin-off"); pinFit?.unobserve(head); }
+    if (head) { head.classList.remove("turn-head", "pin-off", "pinned"); head.style.removeProperty("--pin-give"); pinFit?.unobserve(head); }
     box.replaceWith(...box.childNodes);
   }
   // A page of history lands above newer turns, and those may begin with a turn nobody typed: it
@@ -6745,7 +6877,7 @@
       + `<span class="ts-actions">`
       + `<button type="button" class="ts-undo" title="Put these files back as they were before this turn">Undo <span class="codicon codicon-discard" aria-hidden="true"></span></button>`
       + `<button type="button" class="ts-fold" aria-expanded="true" aria-controls="${listId}" aria-label="Fold the changed files" title="Fold the changed files"><span class="ts-chev">${icon("chevron-down", "sm")}</span></button>`
-      + `<button type="button" class="act ts-review" title="Open the diff for every file this session changed">${icon("file-text", "sm")}<span>Open diff</span></button>`
+      + `<button type="button" class="act wide ts-review" title="Open everything this session changed, file by file">${icon("file-text", "sm")}<span>Session changes</span></button>`
       + `</span></div>`
       + `<div class="ts-list" id="${listId}">${body}</div>`;
     card.querySelectorAll(".ts-folder-row").forEach((button) => button.onclick = () => {
@@ -7178,12 +7310,9 @@
       rows.push({ id: count ? `${base}-${count + 1}` : base, content, active, status: planState(item.status, loose) });
       if (rows.length >= 100) break;
     }
-    // The first step still to do is next (a plain ring), the ones after it later (a dashed one).
-    let next = false;
-    for (const row of rows) {
-      row.mark = row.status === "in_progress" ? "doing" : row.status !== "pending" ? row.status : next ? "later" : "next";
-      if (row.status === "pending") next = true;
-    }
+    // One mark to a state: every step still to do is the plain ring (user test 2, W4: the next step's plain ring and
+    // the later steps' dashed one were two looks for "to do", with no way to read the difference).
+    for (const row of rows) row.mark = row.status === "in_progress" ? "doing" : row.status !== "pending" ? row.status : "next";
     return rows;
   }
   const planLabel = (row) => (row.status === "in_progress" && row.active ? row.active : row.content);
@@ -7203,8 +7332,8 @@
     const whole = Math.floor(seconds);
     return whole < 60 ? `${whole}s` : `${Math.floor(whole / 60)}m ${whole % 60}s`;
   };
-  // A step's mark, 16 px: a ring with a turning arc while it runs (a still half-disc when nothing runs), the next step a
-  // plain ring, the later ones dashed, a filled disc with a check once done, a slashed ring when blocked, a soft disc
+  // A step's mark, 16 px: a ring with a turning arc while it runs (a still half-disc when nothing runs), a step still
+  // to do a plain ring, a filled disc with a check once done, a slashed ring when blocked, a soft disc
   // with a stroke when cancelled and with a cross when failed. Every arc turns in step with the others, wherever and
   // whenever it was drawn (its delay is the clock's phase). `fresh`: it just became done, so the check draws itself.
   const PLAN_GLYPHS = { done: "M5 12l5 5l10 -10", failed: "M18 6l-12 12M6 6l12 12", cancelled: "M5 12l14 0" };
@@ -7320,6 +7449,8 @@
       if (li._mark !== key) {
         const box = li.querySelector(".todo-markbox");
         box.innerHTML = planMark(row.mark, view.running, view.mounted && row.mark === "done" && li._mark !== "done");
+        // (Its state in words, when pointed at: the mark itself is a drawing.)
+        box.title = PLAN_STATES[row.status] || "";
         // Drawn once: a row moved later does not draw its check again.
         box.firstChild.addEventListener("animationend", (event) => {
           if (event.animationName === "todos-draw") box.firstChild?.classList.remove("todo-fresh");
@@ -8410,7 +8541,10 @@
     const command = card.querySelector(".body > .step-command");
     if (command) command.after(panel); else card.querySelector(".body")?.prepend(panel);
   }
-  function renderDiff(diff) {
+  // (`headers: false`, on a permission card: the lines themselves, without the "--- a/… +++ b/…" and "@@ … @@" lines a
+  // patch file carries. The file is named in the diff's own head, the line numbers stand beside each line, and where
+  // the diff skips ahead (a second part of the file) a quiet "⋯" says so.)
+  function renderDiff(diff, { headers = true } = {}) {
     const wrap = el("div", "diff open");
     const newPath = (diff.match(/^\+\+\+\s+([^\n\t]+)/m) || [])[1];
     const oldPath = (diff.match(/^---\s+([^\n\t]+)/m) || [])[1];
@@ -8420,8 +8554,9 @@
     const body = diff.split("\n").map((line) => {
       const hunk = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(line);
       let cls = "ctx", oldNo = "", newNo = "";
-      if (hunk) { cls = "hh"; oldLine = Number(hunk[1]); newLine = Number(hunk[2]); }
-      else if (line.startsWith("---") || line.startsWith("+++")) cls = "hh";
+      if (hunk) { cls = "hh"; const first = oldLine === null; oldLine = Number(hunk[1]); newLine = Number(hunk[2]);
+        if (!headers) return first ? "" : '<span class="hh hh-gap" aria-hidden="true"><span class="ln old"></span><span class="ln new"></span><span class="dc">⋯</span></span>'; }
+      else if (line.startsWith("---") || line.startsWith("+++")) { cls = "hh"; if (!headers && oldLine === null) return ""; }
       else if (line.startsWith("+")) { cls = "add"; newNo = newLine ?? ""; if (newLine !== null) newLine++; additions++; }
       else if (line.startsWith("-")) { cls = "del"; oldNo = oldLine ?? ""; if (oldLine !== null) oldLine++; deletions++; }
       else { oldNo = oldLine ?? ""; newNo = newLine ?? ""; if (oldLine !== null) oldLine++; if (newLine !== null) newLine++; }
@@ -9002,6 +9137,16 @@ function permissionChoices(ev) {
   let projectRoot = "";
   /** The four rules behind "Always allow edits in this project" for an Allow card (media/shared/rulewords.js): only for
    *  an edit of a file inside the project, by a DGC that says where the project is. None: the card keeps its own rule. */
+  /** An edit's card says what it does, to which file ("Edit cart.py"), never the tool's own name ("Run edit_file":
+   *  user test 2, W15). "" for anything that is not one of the tools that edit a file. */
+  const EDIT_VERBS = { edit_file: "Edit", multi_edit: "Edit", apply_patch: "Edit", write_file: "Write" };
+  function editTitle(ev) {
+    const verb = ev && Object.hasOwn(EDIT_VERBS, String(ev.name)) ? EDIT_VERBS[String(ev.name)] : "";
+    if (!verb) return "";
+    const path = String(ev.args?.path || ev.args?.file_path || "").trim();
+    const name = path.split(/[\\/]+/).filter(Boolean).pop() || "";
+    return name ? `${verb} <b title="${esc(path)}">${esc(name)}</b>` : `${verb} a file`;
+  }
   function projectEditRules(ev) {
     const words = window.DgcRuleWords;
     if (!words || !projectRoot || !ev || !words.isEdit(ev.name) || !words.inProject(ev.args?.path, projectRoot)) return [];
@@ -9553,7 +9698,7 @@ function permissionChoices(ev) {
     const changeState = reviewScope === "chat" ? currentChatChanges() : workspaceChangeState;
     $("changes-review-title").textContent = reviewScope === "chat" ? "Changes in this session" : "Workspace changes";
     $("changes-review-description").textContent = reviewScope === "chat"
-      ? "Saved before/after snapshots from this session’s runs in this session’s folder. Existing changes and edits between runs are excluded. Concurrent edits during a run may be included."
+      ? "What DGC changed in this session, file by file. Edits made outside DGC between its turns aren’t counted; one made while a turn ran may be."
       : "All pending changes since the last Git commit, including edits made before this session or by other tools.";
     const summary = $("changes-review-summary"), list = $("changes-review-list");
     const floor = reviewScope === "chat" && changeState.total && changeState.notices?.length ? "At least " : "";
@@ -9774,7 +9919,7 @@ function permissionChoices(ev) {
     body.replaceChildren();
     body.appendChild(el("div", "text", md(goalState.text)));
     const status = el("p");
-    status.textContent = `${goalState.status} · ${formatDuration(currentGoalElapsed())} worked · ${Number(goalState.cycles || 0)} cycles`;
+    status.textContent = `${goalState.status} · ${formatDuration(currentGoalElapsed())} worked · ${Number(goalState.cycles || 0)} ${Number(goalState.cycles || 0) === 1 ? "round" : "rounds"}`;
     body.appendChild(status);
     const attached = goalState.attachments || {};
     const labels = [...(Array.isArray(attached.skills) ? attached.skills.map(name => "$" + name) : []),
@@ -10926,7 +11071,7 @@ function permissionChoices(ev) {
           : fixFile ? `Copy <b>${esc(String(ev.args?.path || "a file"))}</b> from your project into the fix copy?` : "";
         const fixDetail = fixFile ? `<p>${esc(String(ev.args?.why || "A test needs it."))}</p><p class="muted">It is copied, never linked, and later fixes of this project get it too.</p>` : "";
         const calls = fixAsk ? null : pluginCalls(ev.name, ev.args);
-        const title = fixQuestion || plain?.title || (calls ? `Do this in <b>${esc(calls.plugin)}</b>?` : "") || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_workflow" ? "Set up a Pip workflow" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "pips_settings" ? "Change the Pips default model" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
+        const title = fixQuestion || plain?.title || (calls ? `Do this in <b>${esc(calls.plugin)}</b>?` : "") || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_workflow" ? "Set up a Pip workflow" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "pips_settings" ? "Change the Pips default model" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : editTitle(ev) || `Run <b>${esc(ev.name)}</b>`);
         // ev.choices is exactly the answers this card takes (ready.capabilities.permission_choices): a DGC Router change
         // (router_update) and a look on the network (router_find) send ["once", "deny"], asked every time, so they get
         // no Always allow. An older CLI sends no list (or all three): every button, as before.
@@ -10957,7 +11102,7 @@ function permissionChoices(ev) {
         if (!fixAsk) c.classList.add("perm-card");      // one line, then what it does (media/main.css, ui-04)
         const logoMark = c.querySelector(".q .perm-logo");
         if (logoMark) globalThis.DgcPluginCalls?.backdrop(logoMark.querySelector("img"), logoMark);
-        if (ev.diff) { c.querySelector(".feedback")?.before(renderDiff(String(ev.diff))); }
+        if (ev.diff) { c.querySelector(".feedback")?.before(renderDiff(String(ev.diff), { headers: false })); }
         // Only the answers answer. The diff's own toggle and open button are buttons too: given this handler, collapsing
         // the diff on a fix's Allow card sent an answer with no decision, which denied the call (0.51.0 release candidate).
         const noteBox = c.querySelector(".feedback.deny-note");
@@ -11702,12 +11847,22 @@ function permissionChoices(ev) {
   $("changes-review").addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); closeChangesReview(); }
   });
+  /** The message that started a goal says so: a small "Goal" over its bubble (user test 2, W9: it looked like any
+   *  other message). Once, on the bubble's own row. */
+  function markGoalBubble(m) {
+    if (!m || m.querySelector(":scope > .goal-mark")) return;
+    const mark = el("div", "goal-mark", icon("target") + "<span>Goal</span>");
+    mark.title = "This message started a goal";
+    (m.querySelector(":scope > .bubble") || m.firstChild)?.before(mark);
+    m.classList.add("goal-started");
+  }
   function appendGoalPrompt(objective, attachments = []) {
     const m = el("div", "msg user goal-prompt");
     m.appendChild(el("div", "role", "goal"));
     const bubble = el("div", "bubble");
     fillUserBubble(bubble, objective.replace(/^--tokens\s+\d{1,13}\s+/, ""), attachments);
     m.appendChild(bubble);
+    markGoalBubble(m);
     // Settled like every other prompt: pinned, skippable off screen, and its fold decided and
     // re-decided with the width. It was the one user bubble that never was.
     log.appendChild(m); settleBlock(m); setSending(true);
@@ -12062,7 +12217,7 @@ function permissionChoices(ev) {
   }
   function renderPipPicker() {
     if (!pipPicker.active) return;
-    const items=pipPicker.rows.map(p => ({label:p.name.replace(/\s+/g," "),kind:`${p.pip_type} Pip`,detail:`${p.scope === "personal" ? "Personal" : "Project"} · v${p.job_version} · ${p.pip_id.slice(-8)}`,pipReference:p}));
+    const items=pipPicker.rows.map(p => ({label:p.name.replace(/\s+/g," "),kind:`${p.pip_type} Pip`,detail:`${p.scope === "personal" ? "No folder" : "Works in a folder"} · v${p.job_version} · ${p.pip_id.slice(-8)}`,pipReference:p}));
     if (pipPicker.loading) items.push({label:"Loading Pips…",disabled:true});
     else if (pipPicker.error) items.push({label:pipPicker.error,disabled:true},{label:"Retry Pip list",pipRetry:true});
     else if (pipPicker.cursor && pipPicker.rows.length < 100) items.push({label:"Load more Pips",pipMore:true});
@@ -12316,7 +12471,7 @@ function permissionChoices(ev) {
   function applyComposerEdit(start, end, text) {
     start = Math.max(0, Math.min(start, composerText().length));
     end = Math.max(start, Math.min(end, composerText().length));
-    if (start === end && !text) return;
+    if (start === end && !text) { markComposerEmpty(); return; }   // nothing to change, but an empty box is still said
     const expected = composerText().slice(0, start) + text + composerText().slice(end);
     if (typeof document.execCommand === "function") {
       composerEditing = true;
@@ -12468,8 +12623,9 @@ function permissionChoices(ev) {
       // Every Pip, to hand it a job (Pips API 111): its name goes in the words, and the model is told who it is.
       loadPipTargets();
       if (pipJobBridge.api >= 111) candidates.unshift(...pipTargets.rows.filter((p) => !query || p.name.toLowerCase().includes(query))
-        .slice(0, 12).map((p) => ({ label: p.name, kind: "Pip", detail: p.folder ? `Works in ${p.folder}` : "For anything", pipTarget: p })));
-      if(pipReferencesSupported && (!query||"pips".includes(query)))candidates.unshift({label:"Reference a Pip…",kind:"Pips",detail:"This session’s workspace · no work starts",pipPicker:true});
+        .slice(0, 12).map((p) => ({ label: p.name, kind: "Pip", detail: p.folder ? `Works in ${p.folder}` : "No folder", pipTarget: p })));
+      // (The older reference-only row, for a DGC that can't hand a Pip a job: with the job rows above it only said, in words nobody could parse, that it starts no work. User test 2, W16.)
+      if(pipReferencesSupported && pipJobBridge.api < 111 && (!query||"pips".includes(query)))candidates.unshift({label:"Reference a Pip…",kind:"Pips",detail:"This session’s workspace · no work starts",pipPicker:true});
       showPop(candidates.slice(0, 40));
     } else hidePop();
   }
@@ -14236,10 +14392,11 @@ function permissionChoices(ev) {
     const short = (x, unit) => `${String(Math.round(x * 10) / 10).replace(/\.0$/, "")}${unit}`;
     return value >= 999950 ? short(value / 1e6, "M") : value >= 1000 ? short(value / 1000, "k") : String(value);
   }
-  // "2 h 14 min · 1.8M tokens · 7 cycles"; tokens and cycles only when there are any to say.
+  // "2 h 14 min · 1.8M tokens · 7 rounds"; tokens only when there are any to say, and rounds only from the second on
+  // (user test 2, W9: "1 cycle" is DGC's own word for a pass over the goal; one round is every goal's, and says nothing).
   function goalFacts(run) {
     return [goalSpan(run.elapsed_seconds), run.tokens > 0 ? `${goalCount(run.tokens)} ${run.tokens === 1 ? "token" : "tokens"}` : "",
-      run.cycles > 0 ? `${run.cycles} ${run.cycles === 1 ? "cycle" : "cycles"}` : ""].filter(Boolean).join(" · ");
+      run.cycles > 1 ? `${run.cycles} rounds` : ""].filter(Boolean).join(" · ");
   }
   function cleanGoalRun(item) {
     if (!item || typeof item !== "object" || !Object.hasOwn(GOAL_RUN_WORDS, String(item.status))) return null;
@@ -14645,15 +14802,16 @@ function permissionChoices(ev) {
   // action (Open Pips, Arrange Home, Open Library, Open Work) is an answer too: the host keeps it and says where to go
   // ({type: "sideTab"}, below).
   let whatsNew = null;
-  // DGC's version and "What's new" at the far right of the logo line, where that line holds nothing of a session's (Home
-  // and the Library in the side bar): the news again, whenever wanted. (dgcVersion is declared with the side bar's tabs.)
+  // DGC's version and "What's new" at the far right of the logo line, where that line holds nothing of a session's: every
+  // tab of the side bar, the same line on each (on Work it was missing: "where did What's new go?"). The news again,
+  // whenever wanted. (dgcVersion is declared with the side bar's tabs.)
   function paintNewsLink() {
     const link = $("phead-news");
     if (!link) return;
     // The number is the CLI's (DGC's engine answers ready with it; the extension has a number of its own).
     link.querySelector(".phead-ver").textContent = dgcVersion ? `CLI ${dgcVersion}` : "";
     link.setAttribute("aria-label", `What's new (DGC CLI ${dgcVersion})`);
-    link.hidden = !(chatPlace === "home" && dgcVersion && (sideTab === "home" || sideTab === "library"));
+    link.hidden = !(chatPlace === "home" && dgcVersion);
   }
   $("phead-news")?.addEventListener("click", () => vscode.postMessage({ type: "whatsNewShow" }));
   function openWhatsNew(msg) {
@@ -16844,7 +17002,9 @@ function permissionChoices(ev) {
     if (root.dot.dataset.state !== state) root.dot.dataset.state = state;
     const name = amChatName(), meta = amRootMeta();
     agentsSetText(root.desc, name);
-    agentsSetText(root.meta, meta.join(" · "));
+    // Its line as a helper's is: what is counted first, the model last and whole. In a narrow row what is counted gives
+    // way a whole part at a time (amFitMeta), where the line was cut mid-word: "55.3k t…" (user test 2, W18).
+    amSetMeta(root.meta, [...meta.slice(1), meta[0]], meta[0], meta.length > 1 ? meta[0] : "");
     amLabel(root, `${name}, the main agent, ${streaming ? "working" : "idle"}, ${meta.join(", ")}`, `${name}\nThe main agent`);
   }
   function amAgentEntry(record) {

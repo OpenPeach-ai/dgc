@@ -1398,6 +1398,32 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
  .pip-row-slot:has(.pip-row-marks-live)>.pip-row-menu{right:calc(50px + var(--pip-dot-room,0px))}
  .pip-row-menu.up{top:auto;bottom:calc(50% + 14px)}
 }
+/* A row with no switch (Core) keeps the switch's room where the rows wear a "…" (under 400 px), so its "…" stands in
+   the other rows' column, not at the far edge (user test 2, P1). */
+@container(max-width:399px){.pip-rows>.pip-row-slot.has-more,.pip-row-line:not(:has(>.pip-switch))>.pip-row-slot.has-more{margin-right:var(--pip-switch-room,52px)}}
+/* A side bar under 300 px (user test 2, P1: "Your P…" cut by its three buttons, a name squeezed out by its
+   "…", dot, count and switch, and Core's "…" in another column). There New Pip is its plus, so the heading is whole;
+   every row's "…" stands at the end of its row, in one column, with the row's dot and count before it; a row with
+   no switch (Core) keeps the switch's room, so its "…" is in that column too; and what waits on a Pip is a number on
+   its face's corner, as on a dock tile, which gives its room to the name. */
+@container(max-width:298px){
+ .simple-home-head button#simple-new,.simple-home-head button#projects-new{width:var(--btn-h,28px);padding:0;font-size:0;line-height:0;display:inline-grid;place-items:center}
+ .simple-home-head button#simple-new::before,.simple-home-head button#projects-new::before{content:"";width:12px;height:12px;background:linear-gradient(currentColor,currentColor) center/12px 1.5px no-repeat,linear-gradient(currentColor,currentColor) center/1.5px 12px no-repeat}
+ .simple-home-head{gap:6px}.simple-home-actions{gap:4px}
+ .pip-row-slot>.job-more,.pip-row-slot:has(.pip-row-marked)>.job-more,.pip-row-slot:has(.pip-row-both)>.job-more,.pip-row-slot:has(.pip-row-marks-live)>.job-more{right:calc(6px + var(--pip-dot-room,0px))}
+ .pip-row-slot>.pip-row-menu,.pip-row-slot:has(.pip-row-marked)>.pip-row-menu,.pip-row-slot:has(.pip-row-both)>.pip-row-menu,.pip-row-slot:has(.pip-row-marks-live)>.pip-row-menu{right:calc(6px + var(--pip-dot-room,0px))}
+ .pip-row-slot.has-more .pip-row,.pip-row-slot.has-more:is(.is-pinned,:hover,:focus-within) .pip-row{padding-right:calc(26px + var(--pip-dot-room,0px))}
+ .pip-row-slot.has-more .pip-row-copy,.pip-row-slot.has-more:is(.is-pinned,:hover,:focus-within) .pip-row-copy,.pip-row-slot.has-more.has-open:has(>.job-pin):is(:hover,:focus-within) .pip-row-copy,
+ .pip-row-slot.has-more:has(.pip-row-marks-live) .pip-row-copy,.pip-row-slot.has-more:has(.pip-row-marks-live):is(.is-pinned,:hover,:focus-within) .pip-row-copy,.pip-row-slot.has-more.has-open:has(>.job-pin):has(.pip-row-marks-live):is(:hover,:focus-within) .pip-row-copy{padding-right:0}
+ /* (The dot that marks a chat read stays at the row's end, before the "…"; the number beside it goes to the face.) */
+ .pip-row-slot.has-more .pip-row-marks-live,.pip-row-slot.has-more .pip-row-dot>.pip-row-marks-live{display:contents}
+ .pip-row-slot.has-more .pip-row-marks-live>.pip-row-read{position:absolute;top:50%;right:calc(26px + var(--pip-dot-room,0px));transform:translateY(-50%);margin:0}
+ /* The number that waits, on the face's corner. */
+ .pip-row-slot .pip-row,.pip-row-slot .pip-row-item{position:relative}
+ .pip-row-slot .pip-row-count{position:absolute;left:34px;top:3px;z-index:1;min-width:16px;height:16px;padding:0 4px;font-size:10px;line-height:16px;box-shadow:0 0 0 2px var(--vscode-sideBar-background,var(--vscode-editor-background))}
+ .pip-row-slot .pip-row-marks:not(:has(.pip-row-read,.pip-row-read-slot)){display:contents}
+ .pip-row-slot .pip-row-room .pip-row-count{display:none}
+}
 /* (In a side bar of 340 px and under, a row with its switch, its dot and its pin has no room for one more without
    taking the Pip's name: there Open in editor is in the chat's own menu.) */
 @container(max-width:340px){
@@ -1459,6 +1485,10 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
  .pip-thread .pip-convs .conv-mark.unread::before{width:6px;height:6px}
 }
 @container(max-width:340px){.pip-topbar-chat>.pip-thread{margin-left:0}}
+/* The way back (user test 2, P11: inside a Pip the tabs and the dock are gone, and the only way out was a small bare
+   arrow). It stands on a ground of its own, at the family's corner: the one control in the header that leaves the
+   chat reads as a button before it is pointed at. (No edge, and its mark keeps the header's quiet grey.) */
+.simple-pips.chat-open .pip-topbar.pip-topbar-chat>#simple-back{border-radius:var(--btn-r,6px);background:var(--btn-wash,var(--wash))}
 /* Narrower still, every part keeps its place and the name keeps what is left: the paddings tighten at 260 px, the
    on/off switch gives way at 240 px (with it the name had 18 px at 220: the switch is on the Pip's row in the list
    and on its page), and at VS Code's narrowest side bar the icon buttons are 24 px wide (as high as ever), which
@@ -2077,3 +2107,11 @@ body.vscode-light .error,body.vscode-high-contrast-light .error,:host-context(bo
 .pip-folder-move-says{margin:4px 0 2px}
 .pip-folder-move-head{font-size:12px;font-weight:600;margin:12px 0 0}
 .pip-folder-move-list{margin:4px 0 0}
+/* Pips not running: the one line under the header that says what that means (src/pipsClient.js runnerWhyMarkup). */
+.runner-why{margin:0;padding:2px 12px 8px;font-size:var(--t-sm,12px);line-height:1.45;overflow-wrap:anywhere}
+/* "(step 4)" in a Pip's reply: a link to that step in What it saw (user test round 2, P8). Words in a sentence, so a
+   link's look, not a button's. */
+.pip-step-ref{display:inline;min-height:0!important;height:auto;margin:0;padding:0;border:0;background:none;font:inherit;
+  color:var(--vscode-textLink-foreground,var(--link));text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.pip-step-ref:hover{color:var(--vscode-textLink-activeForeground,var(--vscode-textLink-foreground,var(--link)))}
+.pip-step-ref:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px;border-radius:2px}

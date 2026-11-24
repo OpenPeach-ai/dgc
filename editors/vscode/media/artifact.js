@@ -6,6 +6,9 @@
 (() => {
   "use strict";
   const vscode = acquireVsCodeApi();
+  // A control's `title` as DGC's own label, drawn in the page (media/shared/tip.js; the look is Work's ".tip", which this
+  // page's stylesheet carries): an icon's words show inside the panel, where the system's tooltip may not.
+  window.DgcTip?.install({ look: "tip" });
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
   const icon = (name, cls = "") => { const g = el("span", `codicon codicon-${name}${cls ? " " + cls : ""}`); g.setAttribute("aria-hidden", "true"); return g; };
@@ -155,7 +158,12 @@
     $("art-versions").focus();
   }
   $("art-versions-close").addEventListener("click", closeVersions);
-  $("art-versions-panel").addEventListener("keydown", (e) => { if (e.key === "Escape" && !openMenu) { e.preventDefault(); closeVersions(); } });
+  // Escape closes it wherever the keyboard is (it had to be inside the panel: after a click on the page Esc did
+  // nothing). A menu or a dialog that is open takes its own Escape first.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.defaultPrevented || openMenu || $("art-versions-panel").hidden || document.querySelector("dialog[open]")) return;
+    e.preventDefault(); closeVersions();
+  });
   function versionsList() {
     const view = state.view;
     const list = $("art-version-list");
@@ -171,7 +179,7 @@
       const actions = el("div", "art-version-actions");
       if (v.n !== view.version) {
         if (state.offer?.compare) {
-          const compare = el("button", "art-btn art-btn-quiet", "Compare");
+          const compare = el("button", "art-btn", "Compare");
           compare.type = "button";
           compare.setAttribute("aria-label", `Compare version ${v.n} with version ${view.version}`);
           compare.addEventListener("click", () => {
@@ -180,7 +188,7 @@
           });
           actions.append(compare);
         }
-        const restore = el("button", "art-btn art-btn-quiet", "Restore");
+        const restore = el("button", "art-btn", "Restore");
         restore.type = "button";
         restore.title = `Make version ${v.n} the current one again (a new version: nothing is lost)`;
         restore.addEventListener("click", () => {
@@ -191,7 +199,7 @@
       }
       if (formats().length) {
         const wrap = el("div", "art-menu-wrap");
-        const button = el("button", "art-btn art-btn-quiet");
+        const button = el("button", "art-btn");
         button.type = "button"; button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
         button.append(el("span", "", "Download"), icon("chevron-down", "art-caret"));
         button.setAttribute("aria-label", `Download version ${v.n}`);

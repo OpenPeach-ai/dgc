@@ -451,7 +451,8 @@ mode that needs it.
 
 ## In VS Code and Cursor
 
-Switching a Work chat into **Auto** opens **Turn on Auto mode?**, explaining its access to files,
+Switching a Work chat into **Auto** opens **Turn on Auto mode?**. It says what Auto does: everyday
+steps run without asking, a risky one stops and says why. It also says what DGC can reach: files,
 terminal commands, the internet and connected apps. **Cancel** is focused first; Escape cancels.
 The current mode stays unchanged until you confirm and DGC accepts the change. Your explicit
 permission rules and integration consent still apply. Switch modes again to leave Auto.
@@ -3980,10 +3981,10 @@ level you choose. The full guide is
 
 ## In short
 
-- **One kind.** One list, one **New Pip**: a character, a name, and a folder or none. "Personal" only
-  means a Pip with no folder.
-- **Its chat is its home.** What it finds, asks, fixes and reports is in its own chat; Home and **Needs
-  attention** show what needs you. A Work session gets a Pip's card only for a run it started.
+- **One kind.** One list, one **New Pip**: a character, a name, and a folder or none. A Pip works in a
+  folder, or in no folder.
+- **Its chat is its home.** What it finds, asks, fixes and reports is in its own chat; **Needs you**, on
+  Home and on the Pips tab, shows what needs you. A Work session gets a Pip's card only for a run it started.
 - **Its level decides.** **Ask me first** asks before it fixes (**Allow**) and before a change reaches
   your folder (**Apply**). **Approve for me** fixes new findings in its own copy and waits for Apply.
   **Do it all** fixes and applies by itself, never over a file you changed, always with **Undo**.
@@ -3996,14 +3997,14 @@ level you choose. The full guide is
 ## One kind of Pip
 
 There is one kind of Pip, in one list: the **Pips** tab of DGC's side bar. Core comes first, then the
-Pip with the latest news. Each row says where the Pip works: **Personal** for a Pip with no folder, or
-its folder. The search box finds a Pip by name, and the line under it shows **All Pips**, **Personal**
-or one folder; **Needs attention** follows that choice. The first time the Pips tab opens after the
+Pip with the latest news. Each row says where the Pip works: its folder, or **No folder**. The search
+box finds a Pip by name, and the line under it shows **All Pips**, **No folder** or one folder; **Needs
+you** follows that choice, and its number is the same one Home says. The first time the Pips tab opens after the
 update, someone who had Pips sees once what moved; **How Pips work now** in Pips settings shows it again.
 
 **New Pip** asks for a character, a name and a folder. The folder is filled in from where you are (the
-folder you chose, or the Work session you came from); **+ Give it a folder** picks one, and no folder
-makes a Personal Pip. There is no job form: the Pip says hello in its chat and sets itself up as you
+folder you chose, or the Work session you came from); **+ Give it a folder** picks one, and with no folder
+it works in none (give it one any time, from its page). The Pip says hello in its chat and sets itself up as you
 talk. Tell it what to look after and when ("check the billing code every evening at 8"), and in a
 turn you started it changes its own name, instructions, schedule and model at once: each change is one
 line after its reply, with **Undo** (while nothing has changed it since) and **Details**. **/setup** in
@@ -4126,13 +4127,13 @@ there, or **came back**. A run with nothing new says nothing new. What happens n
   fixed again by itself. One fix at a time per Pip: while its Allow card waits, a later check updates
   that card; while a change waits at Apply, a later check asks nothing new.
 - **What only you can do** (data, money, an account) is said once and kept as one line at the top of its
-  chat, **Waiting on you**, and one row in Needs attention, with **I've done it**, **Remind me later**
+  chat, **Waiting on you**, and one row in Needs you, with **I've done it**, **Remind me later**
   (back tomorrow) and **Not a problem**. An answer can be undone for ten minutes. A waiting card never
   pauses the Pip: its routines and checks go on.
 
 ## Where you notice
 
-What waits for you is on **Home** (Needs you), and on the Pips page under **Needs attention**, where a fix
+What waits for you is under **Needs you**, on Home and on the Pips page, where a fix
 to allow or a change to apply has its **Allow** or **Apply** on the row. A Pip pinned to the dock shows a
 number on its face when it needs you.
 

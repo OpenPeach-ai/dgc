@@ -56,9 +56,9 @@ bug. No Pip claims that tests passed unless DGC itself recorded the result.
 
 There is one kind of Pip, in one list: the **Pips** tab of DGC's side bar. Core comes
 first, then the Pip with the latest message or report. Each row says where the Pip
-works: **Personal** for a Pip with no folder, or its folder. A search box sits on top,
-and the line under it shows **All Pips**, **Personal** or one folder; **Needs
-attention** follows that choice. Every Pip has the same chat and the same page, its own
+works: its folder, or **No folder**. A search box sits on top,
+and the line under it shows **All Pips**, **No folder** or one folder; **Needs
+you** follows that choice. Every Pip has the same chat and the same page, its own
 computer, and a level; with a folder it also has its own copy of that folder.
 
 The first time the Pips tab opens after the update to 0.52, someone who had Pips sees
@@ -139,8 +139,8 @@ button in the DGC view's title bar, or the **DGC: Open Pips** command.
 **From the Pips view.** Choose **New Pip**. It asks for three things: a **Character**
 (the names with their faces; the face beside the list changes with what you pick), a
 **Name**, and a **Folder**. The folder is filled in from where you are: the folder the
-list shows, or the Work session you came from. **+ Give it a folder** picks one, and no
-folder makes a Personal Pip. There is no job form, no branch and no model to choose: the
+list shows, or the Work session you came from. **+ Give it a folder** picks one, and with no
+folder it works in none (give it one any time, from its page). There is no branch and no model to choose: the
 Pip says hello and sets itself up in its chat as you talk to it (see
 [Working with a Pip](#working-with-a-pip)). The list works from the keyboard too: the
 arrow keys, Home and End move, typing a name's first letters goes to it, Enter or Space
@@ -517,7 +517,7 @@ and the run reviews the ref's commit at the moment it is queued.
 Pips don't message you after every run. In the editor, Home's **Needs you** card holds what
 a Pip waits on you for, and **Recent** its new messages, beside your Work
 sessions and chats; the **Pips** card, if you add it, lists Core first, then the others and what
-waits. A number means something needs you: it's what Needs attention counts, and each Pip's row
+waits. A number means something needs you: it's what Needs you counts, and each Pip's row
 and the Pips tab say the same one. A dot means there's something new to read. A notification
 says when something is waiting for you. Once a day, when there is something to say, the
 digest gathers new findings, failed runs, reviews waiting, and earlier findings that
@@ -553,7 +553,7 @@ reaches you once:
 
 - **In the editor.** While VS Code (or Cursor) is open, DGC checks every minute and shows
   one notification, with **Open Pips**, whether or not the DGC panel is on screen. Its count of
-  what's waiting is the number beside **Needs attention**; reviews in a project are named apart. This is
+  what's waiting is the number beside **Needs you**; reviews in a project are named apart. This is
   the one to rely on when you work on a remote machine. `dgc.notifyPips` turns it off.
 - **On the desktop.** The runner shows a desktop notification (Notification Center on
   macOS, `notify-send` on Linux) even with the editor closed. Each alert and review is
@@ -700,13 +700,13 @@ touches your folder. Do it all asks nothing and tells you afterwards.
   left them in its copy.
 - **What only you can do** (data, money, an account: "the payment account is empty")
   is not a finding. It is said once, then kept as one line at the top of the Pip's chat,
-  **Waiting on you**, and as one row in Needs attention, with **I've done it**, **Remind
+  **Waiting on you**, and as one row in Needs you, with **I've done it**, **Remind
   me later** (it comes back tomorrow) and **Not a problem**. An answer can be undone for
   ten minutes. A waiting card never pauses a Pip: its routines, its checks and your
   other Pips go on.
 
 **Where you notice.** What waits for you is on **Home** (the Needs you card) and on the
-Pips page under **Needs attention**, where a fix to allow and a change to apply carry
+Pips page under **Needs you**, where a fix to allow and a change to apply carry
 their **Allow** and **Apply** on the row. A Pip pinned to the dock shows a number on its
 face when it needs you.
 

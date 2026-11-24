@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `output="checklist"` and `output="design"` are sent (Python `session`, `chat`, Pips; TypeScript `session`, `chat`,
+  `pips`), as the editor offers them (`capabilities.artifacts.outputs`); a DGC that doesn't make them says so.
 - **Pips API 113: the sites Pips may use in Your Browser, in one panel.** `seen_your_browser_sites {}` (M, local only) says the person opened it, so the sites noticed from their own sign-ins are no longer new. `get_your_browser`'s sites carry `new` and it lists `pips` (those the person may choose); `get_your_browser_recent` carries `new_sites`. `get_your_browser_lanes {}` (R, local only) says which Pips have a tab in Your Browser, whether each one's run is working in it now, and whether any Pip's run is live; every lane list carries `working`. Gated on API 113 in both SDKs.
 - **Pips API 112: Clear browsing data in Your Browser.** `clear_your_browser {history?, sign_ins?, passwords?}` (M, local only; at least one true) clears what was ticked from DGC's own profile there, never your own Chrome's, closing Your Browser and opening it again where it runs; it answers `{ok, cleared, reopened, chrome_account}`. `get_your_browser` and `get_your_browser_recent` carry `chrome_account`. Gated on API 112 in both SDKs.
 - **Editor protocol (for apps on the wire):** `your_browser_screen` {op open|send|close, data?} and the events `your_browser_screen_data` {data} and `your_browser_screen_closed` {reason, pictures} (`ready.capabilities.your_browser_screen`): Your Browser's own tab, where the computer has no screen, streams Chrome's real window as a Pip computer's screen streams.

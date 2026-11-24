@@ -37,6 +37,8 @@ class TheRequest(Base):
                 pip_chat.request("x", "k1", output=bad)
             self.assertEqual(caught.exception.code, "invalid_output")
         self.assertEqual(set(pip_chat.OUTPUTS), set(artifact_tools.OUTPUT_LINES), "one list: Work's")
+        for kind in ("checklist", "design"):
+            self.assertEqual(pip_chat.request("x", "k1", output=kind)["output"], kind, "the two newer kinds too")
 
     def control(self, request, actor="editor-user"):
         with patch("dgc.pips.WorkspaceRegistry", return_value=self.registry), patch.object(self.registry, "close"):

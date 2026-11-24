@@ -67,7 +67,7 @@ STARTERS = {
     },
     "morning_brief": {
         "title": "Morning brief",
-        "summary": "A Personal Pip writes a short brief each weekday morning from pages and searches you choose.",
+        "summary": "A Pip writes a short brief each weekday morning from pages and searches you choose.",
         "pip_type": "lens", "scope": "personal", "work_kind": "personal_task",
         "name": "Morning brief", "goal": _BRIEF_GOAL, "when": "weekdays",
         "default_time": "07:30", "params": ("time", "timezone", "web_reads"),
@@ -75,7 +75,7 @@ STARTERS = {
     },
     "page_watch": {
         "title": "Watch a page for changes",
-        "summary": "A Personal Pip reads a page each day and tells you what changed since last time.",
+        "summary": "A Pip reads a page each day and tells you what changed since last time.",
         "pip_type": "scout", "scope": "personal", "work_kind": "personal_task",
         "name": "Page watch", "goal": _WATCH_GOAL, "when": "daily",
         "default_time": "09:00", "params": ("time", "timezone", "web_reads"), "requires_web_reads": True,

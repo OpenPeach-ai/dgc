@@ -153,8 +153,8 @@ def controls(store, pip_id, config):
     if own is not None:
         options, source = own, 'last_message'
     reasoning = 'provider_dependent'
-    note = ('Requested effort uses DGC’s provider mappings. Some models only support on/off, '
-            'map levels differently, or use instruction guidance.')
+    # (Plain words, a line or two: they stand behind the "?" by Thinking in the Pip's model picker. User test 2, M3.)
+    note = 'More thinking: slower, better on hard work; how much depends on the model.'
     # Cached capability inspection only. Opening a conversation must not perform
     # provider discovery or contact a model endpoint on the editor command thread.
     try:
@@ -167,8 +167,7 @@ def controls(store, pip_id, config):
                            provider_capabilities=config.get('provider_capabilities', {}))
         if client.capability_snapshot().get('reasoning_control') == 'instructions':
             reasoning = 'instructions'
-            note = ('This model has no advertised native reasoning control. Effort adds instruction '
-                    'guidance only; it does not enable hidden reasoning.')
+            note = 'No thinking setting here; a level sets how carefully DGC asks this model to work.'
     except (RegistryError, ValueError, TypeError):
         pass  # An unavailable connection remains unavailable at send time.
     return {'version': 1, 'mode': 'read_only', 'options': options, 'options_source': source,

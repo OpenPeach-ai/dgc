@@ -98,11 +98,17 @@ test("the panel: every site, the new ones first, each with its choice and who ma
     assert.equal(p.title, "Sites Pips can use");
     assert.equal(p.focus, "Sites Pips can use", "the keys start at its title, never a ring on a choice nobody touched");
     assert.match(p.intro, /only on the sites you let it use; anywhere else it asks you first in its chat/);
+    // (A site let from a Pip's card is on the list with no sign-in: the panel never says "signed in" of the whole list.)
+    assert.match(p.intro, /^The sites your Pips may use in Your Browser\. /);
+    assert.doesNotMatch(p.intro, /sites you’re signed in to/);
+    assert.deepEqual(await x.page.evaluate(() => [...document.querySelectorAll("dialog.yb-sites-dialog li.yb-site")].map((li) => [li.dataset.site, li.querySelector('[data-k="out"]').textContent, li.querySelector('[data-k="out"]').getAttribute("aria-label")])),
+      [["github.com", "Sign out", "Sign out of github.com"], ["northwind-bank.com", "Sign out", "Sign out of northwind-bank.com"], ["lanestore.com", "Remove", "Remove lanestore.com"]],
+      "Sign out only where there is a sign-in: a site a Pip was let use from its card is removed");
     assert.deepEqual(p.sites.map((s) => [s.site, s.tags, s.mode]), [["github.com", ["New"], "all"], ["northwind-bank.com", ["New", "Bank or payment"], "none"], ["lanestore.com", [], "some"]]);
     assert.equal(p.sites[0].line, "Every Pip may use your sign-in here, each in its own tab.");
     assert.equal(p.sites[1].line, "No Pip yet. It’s a bank or payment site: a Pip that needs it asks you first.");
     assert.deepEqual(p.sites[2].pips, [["Ava", true], ["Ben", false]], "Some Pips: every Pip, the chosen ones ticked");
-    assert.equal(p.sites[2].line, "Only Ava may use your sign-in here.");
+    assert.equal(p.sites[2].line, "Only Ava may use this site.", "let from a card: no sign-in is claimed");
     await waitFor(x.page, () => window.__answered.includes("seen_your_browser_sites"));
     assert.deepEqual((await requests(x.page, "seen_your_browser_sites"))[0], { type: "seen_your_browser_sites" });
     assert.deepEqual((await requests(x.page, "get_your_browser"))[0], { type: "get_your_browser" });
@@ -134,7 +140,7 @@ test("a change is asked of DGC at once, one site at a time, and the row says who
       { type: "set_your_browser_site", site: "northwind-bank.com", mode: "chosen", pips: [AVA] }]);
     p = await panelNow(x.page);
     assert.deepEqual(p.sites.map((s) => [s.site, s.mode, s.line]), [["github.com", "all", "Every Pip may use your sign-in here, each in its own tab."],
-      ["northwind-bank.com", "some", "Only Ava may use your sign-in here."], ["lanestore.com", "some", "Only Ava and Ben may use your sign-in here."]]);
+      ["northwind-bank.com", "some", "Only Ava may use your sign-in here."], ["lanestore.com", "some", "Only Ava and Ben may use this site."]]);
     assert.match(p.said, /northwind-bank\.com: Only Ava may use your sign-in here\./, "said for a reader too");
     assert.equal(p.status, "", "(and nothing more on the page: the row shows it)");
     // A grant a chat's card made (Ava on lanestore.com) is taken back here: untick her.
@@ -148,22 +154,40 @@ test("Sign out is asked once more in its row; Keep keeps it, Sign out takes it o
   const x = await sideBar();
   try {
     await openSites(x);
-    await x.page.click('dialog.yb-sites-dialog li[data-site="lanestore.com"] [data-k="out"]');
+    await x.page.click('dialog.yb-sites-dialog li[data-site="github.com"] [data-k="out"]');
     let p = await panelNow(x.page);
-    assert.equal(p.sites[2].confirm, "Sign out of lanestore.com? No Pip can use it, and Your Browser clears your sign-in there.");
+    assert.equal(p.sites[0].confirm, "Sign out of github.com? No Pip can use it, and Your Browser clears your sign-in there.");
     assert.equal(p.focus, "keep", "the keys on Keep");
     await x.page.keyboard.press("Enter");
     p = await panelNow(x.page);
-    assert.equal(p.sites[2].confirm, "");
+    assert.equal(p.sites[0].confirm, "");
     assert.deepEqual(await requests(x.page, "sign_out_your_browser_site"), []);
+    await x.page.click('dialog.yb-sites-dialog li[data-site="github.com"] [data-k="out"]');
+    await x.page.click('dialog.yb-sites-dialog li[data-site="github.com"] [data-k="out-yes"]');
+    await waitFor(x.page, () => !document.querySelector('dialog.yb-sites-dialog li[data-site="github.com"]'));
+    assert.deepEqual(await requests(x.page, "sign_out_your_browser_site"), [{ type: "sign_out_your_browser_site", site: "github.com" }]);
+    p = await panelNow(x.page);
+    assert.deepEqual(p.sites.map((s) => s.site), ["northwind-bank.com", "lanestore.com"]);
+    assert.equal(p.waiting, "Signing out of github.com: Your Browser clears your sign-in there as soon as it runs.");
+    assert.equal(p.said, "Signed out of github.com.");
+  } finally { await x.close(); }
+});
+
+test("a site with no sign-in (let from a Pip's card) is removed, in words that claim no sign-in", async (t) => {
+  if (skipOrFail(t)) return;
+  const x = await sideBar();
+  try {
+    await openSites(x);
     await x.page.click('dialog.yb-sites-dialog li[data-site="lanestore.com"] [data-k="out"]');
+    let p = await panelNow(x.page);
+    assert.equal(p.sites[2].confirm, "Remove lanestore.com? No Pip can use it until you allow it again.");
+    assert.equal(await x.page.evaluate(() => document.querySelector('dialog.yb-sites-dialog li[data-site="lanestore.com"] [data-k="out-yes"]').textContent), "Remove");
     await x.page.click('dialog.yb-sites-dialog li[data-site="lanestore.com"] [data-k="out-yes"]');
     await waitFor(x.page, () => !document.querySelector('dialog.yb-sites-dialog li[data-site="lanestore.com"]'));
     assert.deepEqual(await requests(x.page, "sign_out_your_browser_site"), [{ type: "sign_out_your_browser_site", site: "lanestore.com" }]);
     p = await panelNow(x.page);
-    assert.deepEqual(p.sites.map((s) => s.site), ["github.com", "northwind-bank.com"]);
-    assert.equal(p.waiting, "Signing out of lanestore.com: Your Browser clears your sign-in there as soon as it runs.");
-    assert.equal(p.said, "Signed out of lanestore.com.");
+    assert.equal(p.said, "Removed lanestore.com.");
+    assert.doesNotMatch(p.waiting, /lanestore/, "nothing says it is signing out of a site that had no sign-in");
   } finally { await x.close(); }
 });
 
@@ -302,11 +326,11 @@ test("a Pip's page: its sites in Your Browser (Remove), the others (Let it use),
   assert.ok(g, "the section on its page");
   const rows = [...g.querySelectorAll("[data-yb-pip-site]")].map((li) => [li.dataset.ybPipSite, li.querySelector("small").textContent, li.querySelector("button").textContent]);
   assert.deepEqual(rows, [["lanestore.com", "Only Mornings", "Remove"], ["github.com", "Every Pip may use it", "Remove"], ["northwind-bank.com", "No Pip yet · Bank or payment", "Let Mornings use it"]]);
-  assert.match(g.textContent, /Other sites you’re signed in to/);
+  assert.match(g.textContent, /Other sites in Your Browser/); assert.doesNotMatch(g.textContent, /signed in to/, "lanestore.com was let from a card: no sign-in is claimed for the list");
   // Its card's grant (lanestore.com, chosen for it alone): Remove takes it back at once.
   await x.click('[data-yb-pip-remove="lanestore.com"]');
   assert.deepEqual(x.asked("set_your_browser_site")[0], { type: "set_your_browser_site", site: "lanestore.com", mode: "chosen", pips: [] });
-  assert.match(x.text(), /Mornings won’t use your sign-in on lanestore\.com now\./);
+  assert.match(x.text(), /Mornings won’t use lanestore\.com in Your Browser now\./);
   // An All Pips site asks first: the others keep it.
   await x.click('[data-yb-pip-ask-remove="github.com"]');
   assert.match(group(x).textContent, /Every Pip may use it\. Take it from Mornings only\?/);
@@ -314,7 +338,7 @@ test("a Pip's page: its sites in Your Browser (Remove), the others (Let it use),
   assert.deepEqual(x.asked("set_your_browser_site")[1], { type: "set_your_browser_site", site: "github.com", mode: "chosen", pips: [FERN] });
   await x.click('[data-yb-pip-add="northwind-bank.com"]');
   assert.deepEqual(x.asked("set_your_browser_site")[2], { type: "set_your_browser_site", site: "northwind-bank.com", mode: "chosen", pips: [MORNINGS] });
-  assert.match(x.text(), /Mornings may use your sign-in on northwind-bank\.com in Your Browser now\./);
+  assert.match(x.text(), /Mornings may use northwind-bank\.com in Your Browser now\./);
   // All sites…: the one Sites panel, on this page.
   await x.click("[data-yb-sites-all]");
   await x.drain();

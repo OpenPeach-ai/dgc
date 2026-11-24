@@ -8172,7 +8172,9 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "slides",
         "spreadsheet",
         "page",
-        "dashboard"
+        "dashboard",
+        "checklist",
+        "design"
       ]
     },
     "answers": {
@@ -12236,7 +12238,9 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "slides",
         "spreadsheet",
         "page",
-        "dashboard"
+        "dashboard",
+        "checklist",
+        "design"
       ]
     },
     "voice": {

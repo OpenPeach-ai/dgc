@@ -248,8 +248,12 @@ test("narrow Settings keeps labeled, scrollable icon navigation and restores the
     for (const width of [270, 360, 520, 620]) {
       await p.setViewportSize({ width, height: 300 });
       assert.equal(await nav.isVisible(), true);
-      assert.equal(Math.round((await nav.boundingBox()).width), 54);   // the 0.52 side menu: 54 folded to icons, 200 open (it was 52 and 172)
-      assert.equal(await p.locator(".nav-text").first().isVisible(), false);
+      // The 0.52 side menu: 54 folded to icons, 200 open (it was 52 and 172). From 520 to 620 px (a half-width tab) it
+      // keeps each section's name in a slimmer list, 150 wide: twelve icons with no words sent a new user clicking each
+      // one to find Models (user test 2, S5).
+      const named = width >= 520;
+      assert.equal(Math.round((await nav.boundingBox()).width), named ? 150 : 54);
+      assert.equal(await p.locator(".nav-text").first().isVisible(), named);
       assert.equal(await p.locator("#collapse-nav").isVisible(), false);
       for (const { id, label, title } of entries) {
         assert.ok(label, `${id} has an accessible label`);
