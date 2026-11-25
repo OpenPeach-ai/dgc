@@ -218,6 +218,24 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
     } finally { await x.close(); }
   });
 
+  test(`the dock's "+" → New work asks for the folder in New Session's dialog, as New does (${tag})`, async (t) => {
+    // 25 Nov (his report): the dock's New work started a session at once in this window's folder, with no folder choice.
+    if (skipOrFail(t)) return;
+    const x = await openHome(browser, { theme, width, tab: "work", motion: "reduce" });
+    try {
+      await x.send(listOf(""));
+      await x.page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "dockState", pins: [], offers: { work: true, chat: true, pip: true } } })));
+      await settle(x.page);
+      const plus = x.page.locator("#dgc-dock .dgc-dock-add");
+      if (!(await plus.count())) { t.skip("this scene draws no dock"); return; }
+      await plus.click(); await settle(x.page);
+      await x.page.click('.dgc-pop [data-id="work"]');
+      await x.page.waitForSelector("dialog.new-session-dialog[open]", { timeout: 3000 });
+      assert.equal(await x.page.locator("dialog.new-session-dialog .dgc-folder").count(), 1, "its folder dropdown");
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  });
+
   test(`New Session's dialog: the dropdown is the field, as wide as it, and its menu opens under it at the same width, one shape (${tag})`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openHome(browser, { theme, width, tab: "work", motion: "reduce" });

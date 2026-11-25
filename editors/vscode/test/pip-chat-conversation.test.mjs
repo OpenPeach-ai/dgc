@@ -1,6 +1,6 @@
 // A Pip's chat reads as a conversation, with its sub-agents (0.52; Pips API 97,
 // dgc/pip_agents.py). The Pip's face and name once per run
-// of its messages; what a check found is a list inside its message, each file a link, with a quiet "Open report"; it
+// of its messages; what a check found is a list inside its message, each file a link (no "Open report", 25 Nov); it
 // asks in its own words above the ordinary permission card (Not now · Allow); while its sub-agent works: its one line,
 // the sub-agent's row with the Pip's face in black and white, what it is doing, how long, "try n of 3", Steps · Watch
 // its computer · Stop (stop_pip_agent), and the chat stays free; when it ends: the Pip's words from its check, then the
@@ -9,6 +9,7 @@
 // this Pip. The stand-in DGC is test/support/one-pips-scene.mjs with `sub: true` (API 97's shapes).
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
+import {JSDOM} from 'jsdom';
 import {build} from 'esbuild';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
@@ -22,7 +23,7 @@ const setup=options=>{const x=open(options);windows.push(x.w);return x;};
 const chat=async(scene,api=97)=>{const x=setup({api,scene:{sub:true,waiting:false,...scene}});await x.drain();await x.openPip(GST);await x.drain();return x;};
 const words=(x,s)=>x.$$(s).map(n=>x.squash(n.textContent).trim());
 
-test('what a check found is a list inside the Pip\'s message: each file a link at its line, and a quiet Open report',async()=>{
+test('what a check found is a list inside the Pip\'s message: each file a link at its line, and no Open report',async()=>{
  const x=await chat({fix:'ask'});
  const post=x.$(`[data-run-post="${CHECK}"]`);
  assert.ok(post);
@@ -31,10 +32,23 @@ test('what a check found is a list inside the Pip\'s message: each file a link a
  assert.deepEqual(rows.map(li=>x.squash(li.querySelector('.pip-said-what').textContent)),['Order total ignores the discount','Tax is rounded to one decimal place','Adding the same tile twice makes two cart rows']);
  assert.deepEqual(rows.map(li=>li.querySelector('button.md-link[data-flow-file]').textContent),['totals.py:3','tax.py:4','cart.py:2']);
  assert.equal(rows[0].closest('.message-body')?.classList.contains('text'),true,'the list is in its message, as Work\'s prose');
- const report=post.querySelector('button.pip-quiet-link[data-post-open]');
- assert.equal(report.textContent,'Open report');assert.equal(report.dataset.postOpen,CHECK);
+ // 25 Nov (his call, seen on .111): a run's reply in a Pip's chat has no Open report: what it found is the reply.
+ assert.equal(post.querySelector('[data-post-open]'),null,'no Open report');
  rows[0].querySelector('[data-flow-file]').click();await x.drain();
  assert.deepEqual(x.posted('openFile').at(-1),{type:'openFile',path:'/home/me/code/lime_tiles/totals.py',line:3});
+});
+
+test('every finding the post carries is in the list (past 8 too); only what it found beyond them is a quiet link to the rest',async()=>{
+ const {foundListMarkup}=await import('../src/pipChat.js');
+ const f=n=>Array.from({length:n},(_,i)=>({title:`Finding ${i+1}`,path:'shop/cart.py',line:i+1,verdict:'open'}));
+ const doc=new JSDOM('').window.document,div=html=>{const d=doc.createElement('div');d.innerHTML=html;return d;};
+ const twelve=div(foundListMarkup({runId:CHECK,findings:f(12),total:12}));
+ assert.equal(twelve.querySelectorAll('.pip-said-found > li').length,12,'all twelve, none behind a link');
+ assert.equal(twelve.querySelector('[data-post-open]'),null);
+ assert.equal(twelve.querySelector('.pip-said-more'),null);
+ const more=div(foundListMarkup({runId:CHECK,findings:f(50),total:64}));
+ assert.equal(more.querySelectorAll('.pip-said-found > li').length,50);
+ assert.equal(more.querySelector('[data-post-open]')?.textContent,'See the other 14','only what the reply can\'t hold is a link');
 });
 
 test('it asks in its own words above the ordinary permission card: Not now, then Allow',async()=>{

@@ -11,8 +11,8 @@
 .message-body :is(h1,h2,h3,h4,h5,h6){font-weight:600;color:var(--vscode-editor-foreground,var(--vscode-foreground));text-wrap:balance;letter-spacing:normal}
 .message-body h1{font-size:1.5em;line-height:2em;margin:0 0 .5em}.message-body h2{font-size:1.25em;line-height:1.75em;margin:1em 0 .25em}.message-body h3{font-size:1.125em;line-height:1.75em;margin:1em 0 .25em}.message-body h4{font-size:1em;line-height:1.5em;margin:1em 0 0}.message-body :is(h5,h6){font-size:1em;line-height:1.62;margin:0}
 .message-body code{font-family:var(--vscode-editor-font-family,monospace);font-size:.88em;background:var(--code-chip, color-mix(in srgb, currentColor 10%, transparent));padding:.12em .4em;border-radius:var(--r-code,4px)}
-.message-body pre.code{position:relative;border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0;background:var(--vscode-textCodeBlock-background,var(--vscode-editor-background,#151516));overflow:auto;max-width:100%;white-space:pre;font-size:12px;line-height:1.6}
-.message-body pre.code>code{font-size:inherit;padding:0;border-radius:0;background:transparent;display:block}.message-body .code-language{margin-bottom:12px;font-size:11px;padding-right:24px}
+.message-body pre.code{position:relative;border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0;background:var(--vscode-textCodeBlock-background,var(--vscode-editor-background,#151516));overflow:hidden;max-width:100%;white-space:pre;font-size:12px;line-height:1.6}
+.message-body pre.code>code{font-size:inherit;padding:0;border-radius:0;background:transparent;display:block;overflow-x:auto}.message-body .code-language{margin-bottom:12px;font-size:11px;padding-right:24px}
 .message-body .md-link{font:inherit;color:var(--vscode-textLink-foreground,var(--link));background:transparent;min-height:0;text-decoration:none;padding:0}.message-body .md-link:hover,.message-body .md-link:focus-visible{text-decoration:underline;text-underline-offset:3px}
 /* A link in a message you sent (15 Nov): the same button a reply's link is, with its site's favicon or its bundled mark
    (media/shared/links.css), in the quiet colour a sent mark has (media/mentions.css, .prompt-link). It sits among the
@@ -24,7 +24,7 @@
 .message-body .md-link{display:inline;text-align:inherit;overflow-wrap:anywhere}
 .message-body blockquote{position:relative;margin:12px 0;padding:12px 16px;background:var(--vscode-editor-background,#202021);border:1px solid var(--line);border-left:3px solid var(--vscode-input-border,var(--line));border-radius:8px;color:var(--muted)}
 .message-body blockquote>.copy+*{margin-top:0;padding-right:36px}.message-body blockquote>:last-child{margin-bottom:0}.message-body hr{border:0;border-top:1px solid var(--line);margin:16px 0}
-.message-body .md-table-wrap{position:relative;max-width:100%;overflow-x:auto;margin:8px 0}.message-body .md-table{display:table;width:100%;border-collapse:collapse;font-size:12px;line-height:1.45}.message-body .md-table :is(th,td){padding:4px 8px;border:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}.message-body .md-table th{background:var(--vscode-input-background,#29292b);font-weight:700}
+.message-body .md-table-wrap{position:relative;max-width:100%;margin:8px 0}.message-body .md-table-scroll{max-width:100%;overflow-x:auto}.message-body .md-table{display:table;width:100%;border-collapse:collapse;font-size:12px;line-height:1.45}.message-body .md-table :is(th,td){padding:4px 8px;border:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}.message-body .md-table th{background:var(--vscode-input-background,#29292b);font-weight:700}
 .message-body button.copy{position:absolute;top:6px;right:6px;float:none;display:grid;place-items:center;height:20px;min-height:20px;width:20px;padding:0;border:1px solid var(--vscode-input-border,var(--line));border-radius:6px;background:var(--vscode-input-background,#29292b);color:var(--muted);font-size:12px;opacity:0}.message-body :is(pre.code,.md-table-wrap,blockquote):hover>.copy,.message-body button.copy:focus-visible,.message-body button.copy.done{opacity:1}.message-body button.copy:hover{border-color:var(--accent);color:var(--vscode-foreground)}
 /* Markdown's font icon cannot cross a ShadowRoot. A CSS mask supplies the same
    copy outline without depending on a font or fetching an asset. */
@@ -168,18 +168,6 @@ details[open]>summary .run-post-chev{transform:rotate(90deg)}
 .run-post-day-times{display:flex;flex-wrap:wrap;gap:2px 4px;min-width:0;flex:1 1 12em}
 .run-post-time{min-height:0;padding:1px 6px;border:0;border-radius:8px;background:transparent;color:var(--vscode-textLink-foreground);font-size:12px;font-variant-numeric:tabular-nums}
 .run-post-time:hover{background:var(--pip-wash,var(--vscode-toolbar-hoverBackground))}
-/* A run while it runs: the Pip at work, what it is doing now, its clock where its post's time will be, Stop, and how it
-   started. Its own post takes its place when it ends (pipRunPosts.js livePostMarkup). */
-.run-post-clock{margin-left:auto;flex:none;font-variant-numeric:tabular-nums;color:var(--muted)}
-.run-post-doing{display:flex;align-items:center;gap:7px;min-width:0;color:var(--muted)}
-.run-post-doing>span:last-child{min-width:0;overflow-wrap:anywhere}
-.run-post-doing code{color:var(--vscode-foreground)}
-.run-post-spinner{flex:none;width:10px;height:10px;border:1.5px solid color-mix(in srgb,currentColor 30%,transparent);border-top-color:var(--vscode-progressBar-background,var(--vscode-focusBorder,#3794ff));border-radius:50%;animation:run-post-spin .9s linear infinite}
-.run-post-live[data-live=queued] .run-post-spinner{animation:none;border-top-color:color-mix(in srgb,currentColor 30%,transparent)}
-.run-post-reply{margin-top:6px;color:var(--vscode-foreground)}
-.run-post-stop>svg{color:var(--muted)}
-.run-post-started{align-self:center;color:var(--muted);font-size:12px;line-height:1.35}
-@media(prefers-reduced-motion:reduce){.run-post-spinner{animation:none}}
 .run-post-flash{animation:run-post-flash 1.6s ease-out}
 @keyframes run-post-flash{0%{background:color-mix(in srgb,var(--vscode-focusBorder,var(--accent)) 22%,transparent)}100%{background:transparent}}
 @media (prefers-reduced-motion:reduce){.run-post-flash{animation:none;outline:1px solid var(--vscode-focusBorder)}.run-post-chev{transition:none}}

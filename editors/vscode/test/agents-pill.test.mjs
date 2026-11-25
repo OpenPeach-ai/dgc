@@ -393,15 +393,11 @@ test("the pill's hover label follows its state: agents ending under the pointer 
       "the label on screen changes with the state");
     await page.evaluate(() => window.__event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 }));
     await page.waitForTimeout(60);
-    // Queue goes with the turn, so the footer closes up and the pill moves out from under the pointer (what is under
-    // it now, the permission mode once the cache clock is always in the footer, labels itself): point at it again.
-    await page.hover("#agents-pill");
-    await page.waitForFunction(() => document.getElementById("hover-tip").textContent.startsWith("No sub-agents")
-      && !document.getElementById("hover-tip").hidden, null, { timeout: 10000 });
+    // At 460px "Agent map" can't show, and an idle pill was a lone hollow dot (his report, 25 Nov): it gives way here,
+    // and is the map's door again wherever its words fit (the idle tests above).
     const after = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
-      tip: document.getElementById("hover-tip").textContent, text: document.getElementById("agents-pill").innerText.trim() }));
-    assert.deepEqual(after, { hidden: false, tip: "No sub-agents working · Click to open the agent map", text: "" },
-      "the pill stays for the whole chat, counting none working");
+      state: document.getElementById("agents-pill").dataset.state, shown: document.getElementById("agents-pill").checkVisibility() }));
+    assert.deepEqual(after, { hidden: false, state: "idle", shown: false }, "kept for the chat, out of the way while idle in a narrow box");
   } finally { await page.close(); }
 });
 
@@ -447,6 +443,22 @@ for (const light of [false, true]) {
       if (process.env.DGC_AGENTS_SHOTS) {
         await page.screenshot({ path: `${process.env.DGC_AGENTS_SHOTS}/review-map-${light ? "light" : "dark"}-300.png` });
       }
+    } finally { await page.close(); }
+  });
+}
+
+// 25 Nov (his report on .111, a Pip's prompt box): with its sub-agents done and nothing running, a narrow box has no room
+// for "Agent map", and the hollow dot alone said nothing. Idle, the pill gives way where its words can't show; it is
+// back, with its count, the moment one runs or waits on you, and "Agent map" where there is room.
+for (const width of [300, 700]) {
+  test(`at ${width}px an idle pill ${width < 640 ? "gives way: no lone hollow dot" : "says Agent map"}`, async (t) => {
+    if (skipOrFail(t)) return;
+    const page = await panel(width, { state: "idle" });
+    try {
+      const g = await page.evaluate(() => { const pill = document.getElementById("agents-pill"); return { state: pill.dataset.state, shown: pill.checkVisibility(), text: pill.innerText.trim() }; });
+      assert.equal(g.state, "idle");
+      if (width < 640) assert.equal(g.shown, false, "no hollow dot alone in a narrow box");
+      else assert.deepEqual([g.shown, g.text], [true, "Agent map"]);
     } finally { await page.close(); }
   });
 }

@@ -938,7 +938,8 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 /* Its Folio stands where a file's badge does, with no tile under it. */
 .cd-widget-badge { background: none; color: var(--muted); font-size: 16px; line-height: 0; }
 .cd-widget-badge [data-mark] { --size: 36px; }
-.cd-widget pre.code { margin: 6px 0 0; max-height: 360px; overflow: auto; }
+.cd-widget pre.code { margin: 6px 0 0; max-height: 360px; overflow: hidden; display: flex; flex-direction: column; }
+.cd-widget pre.code > code { overflow: auto; min-height: 0; }   /* the code scrolls, its corner keeps Copy */
 /* New replies and newly made widgets/Outputs appear once. Reopened history stays still. */
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
   @keyframes cd-motion-arrive { from { opacity:.55; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }

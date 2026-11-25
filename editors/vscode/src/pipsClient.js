@@ -81,8 +81,8 @@ import '../media/shared/linkpreview.css';
 import '../media/shared/linkpreview.js';
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon,outputIcon,questionCard} from './pipsTranscript.js';
 import {patchChildren} from './pipsDomPatch.js';
-import {runPostsPage,mergePosts,postMarkup,postPlainText,postNeedsWhole,postShort,postStatus,timeline,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
-import {latestActivity,activityEnded,activityParts,activityText,startedWords,routineStartedWords,elapsed} from './pipRunActivity.js';
+import {runPostsPage,mergePosts,postMarkup,postPlainText,postNeedsWhole,postShort,postStatus,timeline,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,liveRowMarkup} from './pipRunPosts.js';
+import {latestActivity,activityEnded,activityParts,activityText,startedWords,elapsed} from './pipRunActivity.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
@@ -1063,7 +1063,12 @@ function chatControlsMarkup(canSend,busy){
  // An empty box offers voice mode where Send is; a word typed, and it's Send again.
  const offerVoice=!!voiceMode&&!busy&&canSend&&!draft.chatText.trim()&&!(canAttachImages()&&(pendingImages().length||pendingFiles().length));
  const sendAction=`<button type="submit" class="chat-send${canSend&&(draft.chatText.trim()||canAttachImages()&&(pendingImages().length||pendingFiles().length))?' ready':''}" aria-label="${busy?'Send mid-turn update':'Send message'}" title="${busy?'Send mid-turn update':'Send message'}"${canSend?'':' disabled'}>${composerIcon('up')}</button>`;
- const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${globalThis.DgcComposer?.STOP||composerIcon('stop')}</button>${S.apiVersion>=73?sendAction:''}`:sendAction;
+ const voiceAction=`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`;
+ // A run at work (Run now, a schedule) is stopped here too, as a reply is (25 Nov): the box keeps Send for a message.
+ const runStop=!busy&&liveStoppable(),stopping=runStop&&(S.live.stopping||S.live.state==='ending');
+ const action=busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${globalThis.DgcComposer?.STOP||composerIcon('stop')}</button>${S.apiVersion>=73?sendAction:''}`
+  :runStop?`<button type="button" id="chat-stop" class="composer-chip" title="${stopping?'Stopping it. It can take a moment.':'Stop this run. Nothing is posted for it.'}" aria-label="Stop this run"${stopping||!usable()?' disabled':''}>${globalThis.DgcComposer?.STOP||composerIcon('stop')}</button>${offerVoice?voiceAction:sendAction}`
+  :offerVoice?voiceAction:sendAction;
  const routineCount=(S.routines||[]).filter(r=>r.status==='on').length;
  const routineChip=keepsAll()&&S.apiVersion>=43?`<button type="button" id="chat-routines" class="composer-routines" aria-label="Routines: ${routineCount} on" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='routines'}" title="Manage ${esc(S.pip.name)}’s routines">${routineIcon()}<span>Routines</span>${routineCount?`<b>${routineCount}</b>`:''}</button>`:'';
  // The level (Pips API 58): a chip with the level's name where Work's mode picker is. It replaces the shield, whose "What
@@ -1254,8 +1259,7 @@ function ybWatchMarkup(chip=false){
  return `<button type="button" class="dgc-btn small pip-working-watch${chip?' run-post-watch':''}" data-yb-watch="1" aria-label="${esc(said)}" title="${esc(said)}">Watch</button>`;
 }
 function workingMeta(since,chars){return `(${Math.max(0,Math.floor((Date.now()-since)/1000))}s · ↓ ${Math.round(chars/4)} tok)`;}
-const workingClock=window.setInterval(()=>{for(const el of document.querySelectorAll('.pip-working-meta'))el.textContent=workingMeta(Number(el.dataset.since),Number(el.dataset.chars));
-  for(const el of document.querySelectorAll('.run-post-clock[data-since]'))el.textContent=elapsed(Date.now()-Number(el.dataset.since));},1000);
+const workingClock=window.setInterval(()=>{for(const el of document.querySelectorAll('.pip-working-meta'))el.textContent=workingMeta(Number(el.dataset.since),Number(el.dataset.chars));},1000);
 // Messaging feel (pips-17c). Reply on a Pip's message (Pips API 83): the message becomes a quote in the prompt box, the
 // shown conversation's own (chatReplies is one of convMaps), and goes with what you send next as `reply_to`.
 function canReply(){return S.apiVersion>=83&&!remoteHost&&keepsAll()&&!archived()&&usable();}
@@ -1296,8 +1300,8 @@ function chatMarkup(){
   const liveIn=new Set(liveCuts.map(c=>c.id).filter(Boolean)),sendingLive=liveCuts.some(c=>!c.id);
   const sendingMessage=sending?{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at,...(sending.marks?.length?{display_mentions:sending.marks}:{}),...(sending.reply?{reply_to:sending.reply}:{})}:null;
   const shown=[...foldRoutineLines(S.messages.filter(m=>!agentCheckReply(m)&&!readIn.has(m.id)&&!liveIn.has(m.id)).filter(m=>!(m.role==='user'&&m.intro===true)||failedHidden(m)||routineFailed(m)||jobTurn(m)),S.messages,postRoutineTitle),...(sendingMessage&&!sendingLive?[sendingMessage]:[])];
-  // While it answers, the Pip itself is in the chat, at work, with its name: the reply replaces it.
-  // A routine's run is its live post (liveMarkup), not the working row: what it is doing, its clock, Stop, how it started.
+  // While it answers, the Pip itself is in the chat, at work, with its name: the reply replaces it. A routine's run is a
+  // reply at work like any other (25 Nov); a run that posts (Run now, a schedule) has the same row (liveMarkup).
   const routineLive=routineLiveNow;
   const simple=chatStyle(),typing=!routineLive&&(busy||sending)&&(simple||S.messages.some(m=>m.role==='user'&&m.intro===true&&m.run_id===S.chatActiveRun?.id))&&(simple||!S.stream?.text)
    ?(simple?`<div class="pip-working" role="status">${pipAvatar(S.pip,'working',`working-${S.pip.id}`,type||characterType(S.pip.pip_type))}${workingWords(sending)}</div>`
@@ -1362,7 +1366,7 @@ function chatMarkup(){
    // (A view with no working row, a DGC from before simple Pips, says it is still writing: under the words, where the reply's own row will be.)
    +(simple?'':'<p class="message-status live-status" role="status">Still writing…</p>'):'';
   // A run going now: its live post, at the end, where its own post will stand when it ends.
-  const live=liveMarkup(markdown);
+  const live=liveMarkup();
   // A hello that failed says so, above what a new chat says about itself: nothing else has been said.
   const quietChat=S.messages.every(m=>m.role==='user'&&m.intro===true&&m.status==='failed')&&!items.some(i=>!(i.message&&failedHidden(i.message)))&&!live&&!items.some(i=>i.note||(i.message&&routineFailed(i.message)));
   return `<section class="pip-conversation${simple?' chat-style':''}${conv?' conv-look':''}" aria-label="Pip conversation">${flowPinnedMarkup()}<div class="conversation-log" role="log" aria-live="polite">${noProviderMarkup()}${pageNotesMarkup('chat-note')}${(S.messageCursor&&S.messages.length<200)||(chatPosts()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`${messages}<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${quietChat?'':messages}${live}${simple?'':typing}${liveReply}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${pipKeyCards()}${borrowCards()}${projectChangeCards()}${askingJobCards()}${flowTailMarkup()}${routineCards()}${settled.tail}${needsYouCard()}${cardRefusedCard()}${turnOpen?'</div>':''}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div><button type="button" id="pip-to-latest" class="pip-to-latest" data-dom-own="1" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg><span data-latest-label>Latest</span></button>${simple?runnerOffMarkup():''}${pipOff(S.pip)?`<p class="pip-off-line" role="status">${PIP_OFF_SAYS}</p>`:''}<div class="pip-composer-shell">${routinePopoverMarkup()}${computerWaitingCards()}${needsComputerCard()}${goalCard()}<div id="chat-tray" class="rail-line tray-only" data-dom-own="1"></div><form id="chat-form" class="pip-composer tray-box"><div class="dgc-drop" data-dom-own hidden aria-hidden="true">Drop to attach</div>${replyChipMarkup()}${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="${CHAT_MAX_CHARS}"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${pagePip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
@@ -1377,12 +1381,13 @@ function canAskDgc(){return typeof options.onAskDgc==='function'&&!remoteHost&&!
 // One Pips: a check's findings are a card under its post, with what became of them (src/pipFlow.js).
 function flowCards(){return onePips()&&!!S.pip&&!personalPip();}
 function canRunNow(){return supportedSource()&&(!executionPip(S.pip)||livePip(S.pip)&&S.apiVersion>=60)&&S.runner?.online&&!S.runner.paused&&S.pip?.status==='active'&&!!pipType(S.pip,S.types)?.available&&!S.pip.active_run&&!S.runs.some(r=>active(r.status))&&!S.busy&&usable();}
-// ---- A run while it runs: its live post (reported 24 Oct; pipRunPosts.js livePostMarkup) ----
-// From the moment a run starts, its chat has one post for it at the end: the Pip at work, what it is doing now (the run's
-// activity, read every 1.5 s while the chat is on screen), a clock, Stop, and how it started. When the run ends, its
-// own post (list_pip_run_posts) takes that place. All of it is read from the run -- get_pip's active run, list_pip_runs,
+// ---- A run while it runs (reported 24 Oct; drawn as a reply at work since 25 Nov: pipRunPosts.js liveRowMarkup) ----
+// From the moment a run starts, its chat has one row for it at the end, the working row a reply at work has: the Pip at
+// work, what it is doing now (the run's activity, read every 1.5 s while the chat is on screen), its time and the words
+// it has written; Stop is in the prompt box, and how it started is the row's tooltip. When the run ends, its own post
+// (list_pip_run_posts) takes that place. All of it is read from the run -- get_pip's active run, list_pip_runs,
 // get_pip_run and its activity -- so a reload while it runs draws it again. A routine's run (a hidden turn in a
-// Personal Pip's chat) is one too, in place of the working row, and its reply takes its place.
+// Personal Pip's chat) is a reply at work, and its reply takes its place.
 S.live=null;let liveSeq=0,liveTimer=0,liveLoading=false;
 // Runs that post in the chat when they end (dgc/pip_run_posts.py build): a source review, a live-data run, a Pulse's own
 // checks, a Quill draft and a Personal Pip's task. A chat reply has its working row; Patch work and a handoff's test run
@@ -1425,14 +1430,13 @@ function settleLive(){
   if(!postFor(live.runId)&&live.stopping)S.notice=`Stopped. ${S.pip?.name||'The Pip'} posts nothing for a run you stop.`;
   dropLive();
 }
-function syncRoutineLive(){
+// A routine's run is a reply at work (25 Nov, his call): the working row, its words as they come and Stop in the box, as
+// any reply; its pill on the bar above the box says which routine (trayRoutine). It has no live post of its own.
+function syncRoutineLive(){if(S.live?.routine)dropLive();}
+/** The routine a chat's running reply is, read from its hidden turn: {title, run}, or null. */
+function routineRunning(){
   const run=S.chatActiveRun,hidden=run&&postsShown()?S.messages.find(m=>m.role==='user'&&m.intro===true&&m.run_id===run.id):null,title=hidden?postRoutineTitle(hidden.text):null;
-  if(title){
-    if(S.live?.runId!==run.id){dropLive();S.live={runId:run.id,pipId:S.selected,routine:title,run,started:routineStartedWords(hidden.text,hidden.created_at),state:'running',stopping:false};}
-    else S.live.run=run;
-    return;
-  }
-  if(S.live?.routine)dropLive();                  // its reply is in the chat now, in its place
+  return title?{title:String(title),run}:null;
 }
 function scheduleLive(){
   window.clearTimeout(liveTimer);liveTimer=0;
@@ -1450,6 +1454,8 @@ async function loadLive(){
       const after=live.cursor,v=activityPage(await send('list_pip_run_activity',{run_id:id,after}),{id,pip_id:S.selected,workspace_id:S.workspace.id},after);
       if(token!==scope()||seq!==liveSeq)return;
       live.cursor=v.next_cursor;const next=latestActivity(v.events,live.activity);if(next!==live.activity){live.activity=next;changed=true;}
+      // The words it has written so far, counted as a reply's are (its working row's "↓ N tok").
+      for(const e of v.events)if(e?.event_type==='pip_run_progress'&&e.payload?.kind==='text_delta'&&typeof e.payload.text==='string'){live.chars=(live.chars||0)+e.payload.text.length;changed=true;}
       if(activityEnded(v.events))ended=true;
       if(!v.has_more)break;
     }
@@ -1462,17 +1468,10 @@ async function stopLive(runId){
   try{await send('cancel_pip_run',{run_id:runId});if(S.live===live){if(live.routine)void loadMessages();else void loadSelected(false);}}
   catch(error){if(S.live===live){live.stopping=false;setError(error);}}
 }
-function liveMarkup(markdown){
-  const live=S.live;if(!live||live.pipId!==S.selected||!S.pip)return '';
-  if(!live.routine&&S.conv)return '';   // a run's live post stands where its post will: in its first conversation
+function liveMarkup(){
+  const live=S.live;if(!live||live.routine||live.pipId!==S.selected||!S.pip)return '';
+  if(S.conv)return '';   // a run's row stands where its post will: in its first conversation
   const type=pipType(S.pip,S.types)||characterType(S.pip.pip_type);
-  if(live.routine){
-    const run=S.chatActiveRun?.id===live.runId?S.chatActiveRun:live.run,act=S.stream?.runId===live.runId?S.stream.activity:null,text=S.stream?.runId===live.runId?S.stream.text:'';
-    const state=live.stopping||run?.status==='cancelling'?'stopping':run?.status==='queued'?'queued':'running';
-    return livePostMarkup({runId:live.runId,name:S.pip.name,face:pipAvatar(S.pip,state==="queued"?"idle":"working",`post-${live.runId}`,type),routine:live.routine,
-      doing:!S.runner?.online?['Waiting for Pips to start']:state==='queued'?['Waiting to start']:runDoing(act)?[runDoing(act)]:['Getting started'],since:Date.parse(run?.started_at||''),state,started:live.started,
-      body:text?`<div class="run-post-reply">${markdown(replyParts(text).join('\n\n'))}</div>`:'',watch:ybWatchMarkup(true)});
-  }
   // Its state and start from the latest look (get_pip, list_pip_runs); from the full read only what never changes (when
   // it was due, what started it): read while it waited, that read has no start time.
   const now=S.pip.active_run?.id===live.runId?S.pip.active_run:{};
@@ -1481,12 +1480,21 @@ function liveMarkup(markdown){
   const state=live.state==='ending'?'ending':live.stopping||run.status==='cancelling'?'stopping':run.status==='queued'?'queued':'running';
   const pulse=pulseProgress({...run,command_progress:S.pip.active_run?.id===live.runId&&S.pip.active_run.command_progress||run.command_progress});
   const doing=!S.runner?.online&&state!=='ending'?['Waiting for Pips to start']:state==='queued'?['Waiting to start']:pulse?[`Checked ${pulse.passed+pulse.failed} of ${pulse.total}`]:live.activity||['Getting started'];
-  return livePostMarkup({runId:live.runId,name:S.pip.name,face:pipAvatar(S.pip,state==="queued"?"idle":"working",`post-${live.runId}`,type),
-    doing,since:Date.parse(run.started_at||''),state,started:startedWords(run,{first:live.first}),canStop:usable(),watch:ybWatchMarkup(true)});
+  return liveRowMarkup({runId:live.runId,name:S.pip.name,face:pipAvatar(S.pip,state==="queued"?"idle":"working",`working-${live.runId}`,type),
+    doing,since:Date.parse(run.started_at||''),state,started:startedWords(run,{first:live.first}),chars:live.chars||0,watch:ybWatchMarkup(true)});
 }
+/** The run at work in this chat that Stop in the prompt box stops when no reply is at work: its row is drawn. */
+function liveStoppable(){const live=S.live;return !!live&&!live.routine&&live.pipId===S.selected&&!!S.pip&&!S.conv&&live.state!=='ending';}
+// A jump to a run shows it for 1.6 s, and a redraw meanwhile (a live run is read every 1.5 s) keeps showing it.
+const flashing=new Set();
+function flashRun(runId,el){
+  flashing.add(runId);el.classList.add('run-post-flash');
+  window.setTimeout(()=>{flashing.delete(runId);for(const e of document.querySelectorAll(`[data-run-post="${runId}"],[data-streak-ids~="${runId}"]`))e.classList.remove('run-post-flash');},1600);
+}
+function keepFlashing(){for(const id of flashing)for(const e of document.querySelectorAll(`[data-run-post="${id}"],[data-streak-ids~="${id}"]`))e.classList.add('run-post-flash');}
 // To a run in the chat: its live post while it runs, else its post.
 async function jumpToRun(runId){
-  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-ids~="${runId}"]`);if(!el)return false;revealInChat(el);el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
+  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-ids~="${runId}"]`);if(!el)return false;revealInChat(el);el.focus?.({preventScroll:true});flashRun(runId,el);return true;};
   if(go())return;
   await Promise.all([loadMessages(),loadPosts()]);
   if(!go())openPostReport(runId);
@@ -1563,7 +1571,7 @@ function openPostReport(runId){S.tab='runs';S.overview=false;rememberView();rend
 // The status under its name: to its post in the chat, which says what it found.
 function jumpToPost(runId){
   S.tab='chat';S.overview=false;rememberView();render();
-  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-ids~="${runId}"]`);if(!el)return false;revealInChat(el);el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
+  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-ids~="${runId}"]`);if(!el)return false;revealInChat(el);el.focus?.({preventScroll:true});flashRun(runId,el);return true;};
   if(!go())void loadMessages().then(()=>{if(!go())openPostReport(runId);});
 }
 function askDgcAbout(runId){
@@ -2048,7 +2056,7 @@ const TRAY_ICONS={queue:'<path d="M2.5 4h1M2.5 8h1M2.5 12h1M6 4h7.5M6 8h7.5M6 12
 const trayIcon=name=>`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TRAY_ICONS[name]||''}</svg>`;
 const TRAY_TITLES={queue:'Queued messages',routine:'Routine running',computer:'Its computer',paste:'Pasted text'};
 let chatTray=null,chatTrayParts=null,chatTrayHome=null,chatTrayNote=null,chatTraySig='',chatTrayPip='';
-function trayRoutine(){const live=S.live,run=S.chatActiveRun;return live?.routine&&live.pipId===S.selected&&run&&live.runId===run.id?{title:String(live.routine),run}:null;}
+function trayRoutine(){return routineRunning();}
 // Its computer is busy with another request of yours: the run says so itself ("Waiting for its computer: it's finishing ...").
 function trayComputer(){const run=S.chatActiveRun,act=run&&S.stream?.runId===run.id?S.stream.activity:null,m=/^Waiting for its computer(?::\s*(.*))?$/.exec(String(act?.label||''));return m?{line:String(act.label),doing:m[1]||''}:null;}
 function traySpec(kind){
@@ -6310,6 +6318,7 @@ function render() {
   else if(focusData && !S.review) [...document.querySelectorAll('[data-job],[data-run],[data-pip-type]')].find(e=>e.dataset.job===focusData||e.dataset.run===focusData||e.dataset.pipType===focusData)?.focus({preventScroll:true});
   if(!S.review)landFocus(focusPlace,!focusIsCallers);
   picker.restore();
+  if(flashing.size)keepFlashing();
 }
 // Where the keyboard is, kept across a redraw (found 13 Nov: Enter on a control with no id redrew it and the focus
 // dropped, to nothing in the side bar and to the body in a tab). render() finds a control with an id again by its id;
@@ -8277,7 +8286,7 @@ document.addEventListener('click',event=>{
       closeReview();rememberCreationDraft();setupEditing=false;S.create=true;S.overview=false;S.createStep='describe';S.error='';render();$('setupTask')?.focus();break;
     case 'new-pip-back':openNewProjectPip();break;
     case 'workspace-back':S.overview=true;S.tab='chat';rememberView();render();break;
-    case 'pip-run-now':if(runAction()&&!runBlocked())runNow();break;
+    case 'pip-run-now':document.querySelectorAll('details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));if(runAction()&&!runBlocked())runNow();break;   // (its menu closes, as its other rows do)
     case 'pip-run-open':{const id=target.dataset.runId;S.tab='runs';S.overview=false;rememberView();render();void loadSelected(false).then(()=>{if(id&&S.tab==='runs')return loadRun(id);});break;}
     case 'back-pips':chatDrafts.set(S.selected,draft.chatText);if(!S.selected)S.tab='chat';S.overview=true;rememberView();render();break;
     case 'return-main':options.close?.();break;
@@ -8292,7 +8301,7 @@ document.addEventListener('click',event=>{
     case 'older-messages':void loadMessages(true);void loadPosts(true);break;
     case 'refresh-models':void loadModels();break;
     case 'add-computer':void addComputer();break;
-    case 'chat-stop':if(S.chatActiveRun?.id)void mutate({type:'cancel_pip_run',run_id:S.chatActiveRun.id},()=>loadMessages());break;
+    case 'chat-stop':if(S.chatActiveRun?.id)void mutate({type:'cancel_pip_run',run_id:S.chatActiveRun.id},()=>loadMessages());else if(liveStoppable())void stopLive(S.live.runId);break;
     case 'refresh':S.error='';S.notice='';void refresh(true);break;
     case 'open-personal-result':case 'save-personal-result':
       if(!remoteHost&&S.run?.status==='succeeded'){void send('open_pip_document',{run_id:S.run.id,save:target.id==='save-personal-result'}).catch(setError);}break;

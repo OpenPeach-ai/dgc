@@ -1034,7 +1034,8 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 .msg.dgc:hover .answer > .response-actions { opacity: 1; }
 /* One card inside another reads as a seam; the summary sits inset on the panel ground instead. */
 .answer > .turn-summary { background: var(--surface); }
-.md-table-wrap { position: relative; max-width: 100%; overflow-x: auto; margin: var(--sp-2) 0; }
+.md-table-wrap { position: relative; max-width: 100%; margin: var(--sp-2) 0; }
+.md-table-scroll { max-width: 100%; overflow-x: auto; }   /* the table scrolls; its wrap's corner keeps Copy */
 .md-table { width: 100%; border-collapse: collapse; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); white-space: normal; }
 .md-table th, .md-table td { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
 .md-table th { background: var(--surface2); color: var(--text-strong); font-weight: var(--w-bold); }
@@ -1938,6 +1939,8 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
   .model-control.no-provider .model-copy::before { content: "No provider"; }
   .agents-text, .agents-need { display: none; }
   .agents-pill .agents-short { display: inline; }
+  /* Idle, "Agent map" can't show here and a lone hollow dot says nothing: the pill gives way until one runs or waits. */
+  #agents-picker:has(> .agents-pill[data-state="idle"]) { display: none; }
   #workspace-changes .workspace-changes-label { display: none; }
   #workspace-changes .codicon { display: inline-block; }
 }
@@ -2098,8 +2101,10 @@ button.link.open-file { display: inline-flex; align-items: center; gap: var(--sp
 button.link.run-bg { white-space: nowrap; }
 button.link.run-bg[hidden] { display: none; }
 /* A step under the conversation's text: monospace at the prose size reads a size larger. */
-pre.code { position: relative; background: var(--code); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; overflow-x: auto; font: var(--w-reg) calc(var(--t-chat) - 1px)/1.6 var(--mono); color: var(--text); white-space: pre; }
-pre.code code { display: block; padding: 0; background: transparent; font-size: inherit; white-space: pre; }
+pre.code { position: relative; background: var(--code); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; overflow: hidden; font: var(--w-reg) calc(var(--t-chat) - 1px)/1.6 var(--mono); color: var(--text); white-space: pre; }
+/* The code scrolls sideways, not the block: the block's corner keeps its Copy and its language label (his report, 25 Nov:
+   scrolling a long line carried Copy along into the middle of it). */
+pre.code code { display: block; padding: 0; background: transparent; font-size: inherit; white-space: pre; overflow-x: auto; }
 /* One 400-line fence used to bury the answer and push the response actions off screen. Collapse
    past a readable height, with the expander saying how much is hidden. */
 pre.code.foldable { max-height: 22em; overflow: hidden; }
@@ -3622,7 +3627,7 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
    has no time), its words a touch firmer than the time's. */
 .msg.user .goal-mark { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-firm, var(--muted)); font: var(--w-med) var(--t-xs)/1.2 var(--sans); vertical-align: bottom; }
 .msg.user > .goal-mark { align-self: flex-end; margin: 2px 2px 0 0; }
-.msg-time > .goal-mark.in-time::after { content: "\00b7"; margin: 0 4px; color: var(--muted); font-weight: normal; }
+.msg-time > .goal-mark.in-time::after { content: "\00b7"; margin-right: 4px; color: var(--muted); font-weight: normal; }   /* (the mark's own 4px gap is the space before the dot) */
 .msg.user .goal-mark > .ic { color: inherit; }
 .sys.goal-end { margin: var(--sp-1) 0 var(--sp-2); color: var(--muted-firm, var(--muted)); font-variant-numeric: tabular-nums; }
 .sys.goal-end > .ic { color: inherit; }

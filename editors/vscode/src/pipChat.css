@@ -124,7 +124,10 @@ p.pip-agent-steps{padding-block:2px}
 .agents-pill .agents-short{display:none}
 .agents-pill .agents-dot{box-sizing:border-box;flex:none;width:7px;height:7px;border-radius:var(--r-full);background:var(--agent-run)}
 .agents-pill[data-state="idle"] .agents-dot{background:transparent;border:1px solid var(--agent-idle)}
-@container (max-width:639px){.agents-pill .agents-text{display:none}.agents-pill .agents-short{display:inline}}
+@container (max-width:639px){.agents-pill .agents-text{display:none}.agents-pill .agents-short{display:inline}
+  /* Idle (its sub-agents done, nothing running), its words can't show here and a lone hollow dot says nothing: it gives
+     way, and is back with its count when one runs or waits on you (his report, 25 Nov). */
+  .agents-pill[data-state="idle"]{display:none}}
 /* Work's agent map, for this Pip: a dialog over the chat. The Pip in colour at the root; its sub-agents in black and white. */
 #agent-map-root:empty{display:none}
 .pip-agent-map,.pip-agent-card{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:clamp(var(--sp-2),3vw,var(--sp-4))}

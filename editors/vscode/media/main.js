@@ -1838,7 +1838,9 @@
         vscode.postMessage({ type: "dockPlace", key, to });
       },
       onColour: (key, colour) => vscode.postMessage({ type: "dockColour", key, colour }),
-      onNew: (what) => { if (what === "pip") openPipsAt({ create: "personal" }); else vscode.postMessage({ type: "dockNew", what }); },
+      // New work asks for its folder as the side bar's New does (New Session's dialog; his report, 25 Nov: the dock's
+      // started a session at once in this window's folder).
+      onNew: (what) => { if (what === "pip") openPipsAt({ create: "personal" }); else if (what === "work") openNewSession(); else vscode.postMessage({ type: "dockNew", what }); },
       // The Pips' faces blink and look about as they do everywhere else.
       onDraw: (bar) => { try { dockFaces?.(); } catch {} dockFaces = window.PipConcepts?.plush?.mount?.(bar) || null; },
     });

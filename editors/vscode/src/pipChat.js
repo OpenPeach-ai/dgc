@@ -3,7 +3,7 @@
 // Pips view itself so they are the same in the side bar and when Pips is an editor tab, styled in src/pipChat.css to
 // Work's measures (media/main.css) and checked against Work's own nodes in test/pip-chat-conversation-browser:
 //   the Pip's words            Work's reply prose (.text.final): no bubble, its face and name once per run of messages
-//   what a check found         a list inside its message, each file a link at its line, and a quiet "Open report"
+//   what a check found         a list inside its message, each file a link at its line (no Open report, 25 Nov)
 //   the ask                    its own words ("Want me to fix these three?") above Work's permission card: Not now · Allow
 //   answered                   Work's folded line: "Fix 3 things in lime_tiles · Allowed"
 //   its sub-agent              the Pip's one line, then Work's row: the Pip's face in black and white (Work's live ring
@@ -39,17 +39,19 @@ const workTag = (a, esc, cls = 'pip-agent-tag') => a.kind === 'work' ? `<span cl
 export const fixWhat = (fix, folder = '') => `Fix ${plural(fix.count, 'thing')}${folder ? ` in ${folder}` : ''}`;
 
 /** What a check found, inside the Pip's message: a list, each finding with its file (a link that opens it at its
- *  line) and, after a fix, what became of it; then "Open report", quiet. The list shows up to 8. */
+ *  line) and, after a fix, what became of it. Every finding the post carries is in it, and there is no Open report (his
+ *  call, 25 Nov: a run's reply is the reply); only what it found beyond the post's own (up to 50) is a quiet link to
+ *  the rest, "See the other 14". */
 export function foundListMarkup({runId, findings, total = findings.length}, {esc = escape, off = false} = {}) {
-  const shown = findings.slice(0, 8), more = Math.max(0, total - shown.length), id = esc(runId);
+  const shown = findings, more = Math.max(0, total - shown.length), id = esc(runId);
   const rows = shown.map(f => {
     const at = where(f), lead = f.verdict === 'open' && f.found === 'back' ? 'Came back: ' : '';
     const file = at ? ` <button type="button" class="md-link" data-link-kind="file" data-flow-file="${esc(f.path)}" data-flow-line="${f.line}" title="${esc(`Open ${f.path}${f.line ? ` at line ${f.line}` : ''}`)}"${off ? ' disabled' : ''}>${esc(at)}</button>` : '';
     const verdict = VERDICT_WORDS[f.verdict] ? ` <span class="pip-said-verdict" data-verdict="${esc(f.verdict)}"${f.why ? ` title="${esc(f.why)}"` : ''}>· ${esc(VERDICT_WORDS[f.verdict])}</span>` : '';
     return `<li><span class="pip-said-what">${esc(lead + f.title)}</span>${file}${verdict}</li>`;
   }).join('');
-  return said((rows ? `<ul class="pip-said-found" aria-label="What it found">${rows}</ul>` : '') + (more ? `<p class="pip-said-more">and ${esc(String(more))} more in the report.</p>` : '')
-    + `<p><button type="button" class="pip-link pip-quiet-link" data-post-open="${id}">Open report</button></p>`);
+  return said((rows ? `<ul class="pip-said-found" aria-label="What it found">${rows}</ul>` : '')
+    + (more ? `<p class="pip-said-more"><button type="button" class="pip-link pip-quiet-link" data-post-open="${id}">${esc(`See the other ${more.toLocaleString('en-US')}`)}</button></p>` : ''));
 }
 
 /** The Pip's own words in the flow (its question, that it handed the job over, what its check found): Work's prose. */

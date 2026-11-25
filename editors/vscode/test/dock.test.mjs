@@ -293,7 +293,10 @@ test('"+" is always the last item and offers New work, a ChatDGC chat, Personal 
     assert.deepEqual(d.menu, ["New work", "New chat", "New Pip", "Settings"]);
     assert.equal(await x.page.evaluate(() => document.querySelector("#dgc-dock .dgc-dock-add").getAttribute("aria-expanded")), "true");
     await x.page.click('.dgc-pop [data-id="work"]');
-    assert.deepEqual((await posted(x, "dockNew")).at(-1), { type: "dockNew", what: "work" }, "a new Work session, at once");
+    // 25 Nov (his call): New work asks for its folder as the side bar's New does (its dialog, where the page knows the
+    // project folders: folder-select-shape holds it); with no folders listed it opens a session in this window's.
+    assert.deepEqual((await posted(x, "dockNew")).filter((m) => m.what === "work"), [], "not a session at once");
+    assert.deepEqual((await posted(x, "newSessionInEditor")).at(-1), { type: "newSessionInEditor" }, "New's own way");
     assert.deepEqual((await dockNow(x.page)).menu, [], "the menu closes");
     await plus(); await x.page.click('.dgc-pop [data-id="chat"]');
     assert.deepEqual((await posted(x, "dockNew")).at(-1), { type: "dockNew", what: "chat" });

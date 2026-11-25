@@ -174,6 +174,27 @@ test('all-clear runs in a row are one message that says it again, with how many 
   assert.equal(x.d.querySelectorAll('.run-post-quiet, details.run-posts-fold').length,0,'no log lines left');
 });
 
+// 25 Nov (his .111 picture): a heartbeat every 30 minutes said "Passed 200 times since Saturday:" and then all 200 times,
+// a wall of clocks. A long run of passes says how often and when the last was, in one line; a short one keeps its times.
+test('a long run of passes is one line: how many, since when, how often, and the last; never every time',async()=>{
+  const MIN=60000,n=40,start=NOW-(n-1)*30*MIN-HOUR;   // (a page holds 50: his 200 came over pages)
+  const posts=Array.from({length:n},(_,k)=>checks(k,start+k*30*MIN));
+  const x=setup({pipValue:pulse(),postsValue:posts});await openChat(x);
+  const fold=x.d.querySelector('article.run-post-streak');
+  assert.ok(fold);assert.equal(fold.dataset.runs,String(n));
+  const line=text(fold.querySelector('.run-post-times-line'));
+  const clock=ms=>new Date(ms).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+  assert.match(line,/^Passed 40 times since .+, about every 30 minutes; the last at /,line);
+  assert.ok(line.endsWith(`the last at ${clock(start+(n-1)*30*MIN)}.`),line);
+  assert.ok(line.length<140,`one line, not a wall (${line.length} characters)`);
+  // Irregular passes: the last three, by time.
+  const odd=[0,1,2,3,4,5,6,7,8,9,10,11].map(k=>checks(k,NOW-(40-k*k*0.25)*HOUR));
+  const y=setup({pipValue:pulse(),postsValue:odd});await openChat(y);
+  const said=text(y.d.querySelector('article.run-post-streak .run-post-times-line'));
+  assert.match(said,/^Passed 12 times since .+; the last three at .+, .+ and .+\.$/,said);
+  assert.doesNotMatch(said,/every/,said);
+});
+
 test('a new all-clear run updates the fold in place; a failure breaks it and is its own message',async()=>{
   const x=setup({pipValue:pulse(),postsValue:[0,1,2].map(k=>checks(k,NOW-(6-k)*HOUR))});await openChat(x);
   const before=x.d.querySelector('article.run-post-streak');

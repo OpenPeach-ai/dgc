@@ -16,6 +16,20 @@
 - **Home says "Checking your Pips…"** until it has read them, never a false "Nothing needs you" at start.
 - **Home's "Needs you" holds steady while a turn works**: a read of your Pips that failed or timed out on a busy machine
   was taken as "nothing waits", and the number fell to 0 for a moment. A failed read keeps what Home last knew.
+- **A Pip's run at work looks like a reply at work**: Run now, a schedule or a routine shows the working row in its chat
+  (its face at work, what it is doing, its time and the words it has written so far) with Stop in the prompt box, as a
+  chat reply does; how it started is the row's tooltip. No Stop chip or "Started by you" line in the chat.
+- **The dock's "+" → New work asks for the folder**, in the New session dialog the side bar's New opens.
+- **What a Pip's check found is its reply, with no Open report**: every finding the post carries is in the list (no
+  longer cut at 8); only a check that found more than its post holds offers "See the other 14".
+- **No lone hollow dot in a prompt box**: with its sub-agents done and nothing running, a narrow box has no room for
+  "Agent map", so the pill gives way until one runs or waits on you (Work and a Pip's chat).
+- **A Pip's ⋯ menu closes after Run now**, as it does after its other rows.
+- **A code block's Copy stays in its corner**: scrolled sideways, a long line no longer carries Copy (and the language
+  label) into the middle of it; the code scrolls, the block doesn't. The same for a wide table. In Work, ChatDGC and a
+  Pip's chat.
+- **A Pip's long run of passes is one line**: "Passed 200 times since Saturday, about every 30 minutes; the last at
+  3:29 PM." instead of every time it ran; a few passes still list their times.
 - **A goal's prompt says "Goal" under its bubble**, first in its time row ("Goal · 1:22 PM"), not over it.
 - **A checklist pops up when it's made, and when an item needs you** ("“Release list” needs you: Pick the version
   name"), not at each tick: its ticks are on its card and the Tasks pill, and the pop-up covered the prompt box.

@@ -55,8 +55,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       inside(await look(x, ".pip-said-found"), log, "what it found");
       const rows = await x.inPips((root) => [...root.querySelectorAll(".pip-said-found > li")].map((li) => ({ cut: li.scrollWidth > li.clientWidth + 1, link: getComputedStyle(li.querySelector(".md-link")).color, file: li.querySelector(".md-link").getBoundingClientRect().width > 20 })));
       assert.equal(rows.length, 3); assert.ok(rows.every((r) => !r.cut && r.file), JSON.stringify(rows));
-      const report = await look(x, ".pip-quiet-link");
-      assert.notEqual(report.color, rows[0].link, "Open report is quiet: not the link colour");
+      assert.equal(await x.inPips((root) => root.querySelectorAll(".pip-said [data-post-open]").length), 0, "no Open report (25 Nov)");
       const card = await look(x, ".pip-ask-card"); inside(card, log, "the permission card");
       const no = await look(x, ".pip-ask-card [data-flow-no]"), allow = await look(x, ".pip-ask-card [data-flow-allow]");
       button(no, "Not now"); button(allow, "Allow");
@@ -135,6 +134,22 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
       assert.ok(menu.left >= 0 && menu.right <= width, "its menu is inside the view");
       assert.equal(await sideways(x), false);
       assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  });
+}
+
+// 25 Nov (his report on .111): a Pip whose sub-agents are done shows the pill idle; in a narrow box its words can't
+// show, and a lone hollow dot said nothing: it gives way there, and says "Agent map" where there is room.
+for (const width of [300, 700]) {
+  test(`at ${width}px a Pip's idle sub-agents pill ${width < 640 ? "gives way" : "says Agent map"}`, async (t) => {
+    if (skipOrFail(t)) return;
+    const x = await open({ width, theme: "dark-modern" }, { fix: "applied" });
+    try {
+      await x.waitIn("#chat-agents");
+      const pill = await look(x, "#chat-agents");
+      assert.equal(await x.inPips((root) => root.querySelector("#chat-agents").dataset.state), "idle");
+      if (width < 640) assert.equal(pill.shown, false, "no hollow dot alone in a narrow box");
+      else assert.deepEqual([pill.shown, pill.text.replace(/\s+/g, " ")], [true, "Agent map"]);
     } finally { await x.close(); }
   });
 }

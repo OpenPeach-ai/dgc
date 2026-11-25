@@ -25,8 +25,11 @@ test('a Pip with a folder has the Personal Pip\'s header: back, its name, its fo
  assert.equal(rows[0],'Run now','Run now is the menu\'s first row');
  assert.ok(['Reports','Settings','Schedule','Changes'].every(name=>rows.includes(name)),`its sections are in the menu (${rows})`);
  assert.ok(!rows.includes('History')&&!rows.includes('Runs'),'its runs are its Reports');
- bar.querySelector('.pip-menu #pip-run-now').click();await x.drain();
+ bar.querySelector('.pip-menu').setAttribute('open','');
+ x.$('.pip-topbar .pip-menu #pip-run-now').click();await x.drain();
  assert.equal(x.requests('run_pip').length,1,'and it runs');
+ // 25 Nov (seen live): the menu stayed open over the chat after Run now; it closes, as its other rows do.
+ assert.equal(x.$('.pip-topbar .pip-menu').hasAttribute('open'),false,'the menu closes');
 });
 
 test('its settings page is the Personal Pip\'s page, with what only it has: where it works, what it reads, when it runs, reports, version history',async()=>{

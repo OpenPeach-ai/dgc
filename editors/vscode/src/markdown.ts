@@ -370,9 +370,11 @@ parser.renderer.rules.table_open = (tokens, index) => {
   const copy = source
     ? `<button type="button" class="copy" data-c="${escape(encodeURIComponent(source))}" aria-label="Copy table" title="Copy table"><span class="codicon codicon-copy" aria-hidden="true"></span></button>`
     : "";
-  return `<div class="md-table-wrap">${copy}<table class="md-table">`;
+  // Copy sits in the wrap's corner; the table scrolls sideways in a box of its own inside it, so Copy never scrolls
+  // along with it (his report, 25 Nov).
+  return `<div class="md-table-wrap">${copy}<div class="md-table-scroll"><table class="md-table">`;
 };
-parser.renderer.rules.table_close = () => "</table></div>";
+parser.renderer.rules.table_close = () => "</table></div></div>";
 
 // A quoted block is usually the one part of a response meant to leave the panel whole -- a drafted
 // mail, a message to forward -- and it was the last block with no copy of its own, so lifting it

@@ -1,9 +1,10 @@
 // A running Pip is visible in its own chat while it runs (reported 24 Oct). A user pressed ▶ Run now: the top bar said
-// "Running…" and the chat said nothing until the run ended. Now, from the moment a run starts, its chat has ONE live
-// post: the Pip's face at work, what it is doing now (from the run's activity), a clock, Stop, and how it started
-// ("Started by you", "On schedule · 9:00 AM", "Asked by DGC", "First run"). When the run ends that same post becomes
-// the run's report post in place: no second item, no jump. It is drawn from the run's state, so a reload while it runs
-// draws it again. A routine's run in a Personal Pip's chat is one too, and its reply takes its place.
+// "Running…" and the chat said nothing until the run ended. From the moment a run starts its chat shows it at work,
+// exactly as a reply at work (his call, 25 Nov: "why are we not able to exactly make it like how our new pips run"): ONE
+// working row at the end of the chat -- its face at work, "<name> · <what it is doing>", "(42s · ↓ 120 tok)" -- and Stop in
+// the prompt box, as for a reply; how it started ("Started by you", "On schedule · 9:00 AM", "Asked by DGC", "First run")
+// is the row's tooltip. When the run ends its post takes that place: no second item, no jump. It is drawn from the run's
+// state, so a reload while it runs draws it again. A routine's run in a Personal Pip's chat is a reply at work too.
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
@@ -61,7 +62,11 @@ function setup({personal=false,messages=[],state:initial={}}={}){
   const requests=type=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===type);
   // Timers already due (a 0 ms one) run as the view goes on; later ones wait for advance().
   const due=()=>{for(;;){const next=[...timers].filter(([,t])=>t.at<=clock).sort((a,b)=>a[1].at-b[1].at)[0];if(!next)return;timers.delete(next[0]);next[1].fn();}};
-  async function drain(){for(let n=0;n<15;n++){await flush();due();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const handler=handlers[m.request.type];const result=handler?.(m.request);if(result!==undefined){answered.add(m.id);send({type:'pipsReply',id:m.id,ok:true,result});}}}}
+  async function drain(){for(let n=0;n<15;n++){await flush();due();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const handler=handlers[m.request.type];
+    // A request this backend doesn't hold is answered as a DGC without it would: refused. (Left unanswered, a refresh's
+    // asks piled up past the client's 48 in flight, and every later ask was refused as "DGC is busy".)
+    if(!handler){answered.add(m.id);send({type:'pipsReply',id:m.id,ok:false,error:{code:'unsupported',message:'Not in this test.'}});continue;}
+    const result=handler(m.request);if(result!==undefined){answered.add(m.id);send({type:'pipsReply',id:m.id,ok:true,result});}}}}
   send({type:'pipsConnection',apiVersion:65,generation:1,connected:true,supported:true,enabled:true});
   const click=s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
   // The 4 s look the view takes while its chat is on screen.
@@ -70,7 +75,10 @@ function setup({personal=false,messages=[],state:initial={}}={}){
 }
 async function openChat(x){await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();}
 const text=el=>el?.textContent.replace(/\s+/g,' ').trim();
-const live=d=>d.querySelector('article.run-post-live');
+const live=d=>d.querySelector('.conversation-log .pip-working.run-working');
+const verb=d=>text(live(d)?.querySelector('.pip-working-verb'));
+const meta=d=>text(live(d)?.querySelector('.pip-working-meta'));
+const stopIn=d=>d.querySelector('#chat-form #chat-stop');
 const items=d=>[...d.querySelectorAll('.conversation-log [data-run-post],.conversation-log [data-message]')];
 // A run that started 42 seconds ago, as get_pip and list_pip_runs show it.
 function running(x,{trigger='manual',status='running',kind='audit'}={}){
@@ -94,29 +102,32 @@ test('▶ Run now: one live post from the start, with what it is doing, then the
   assert.ok(card,'the run is in its chat from the start');
   assert.equal(card.dataset.runPost,RUN,'drawn where the run’s own post will stand');
   assert.equal(items(x.d).at(-1),card,'at the end of the chat');
-  assert.ok(card.matches('.pip-message.assistant.run-post'),'a message from the Pip, like its posts');
-  assert.equal(card.querySelector('.run-post-face .avatar').dataset.pose,'working','its face, at work');
-  assert.equal(text(card.querySelector('.run-post-name')),'Billing audit');
-  assert.equal(text(card.querySelector('.run-post-clock')),'0:42','a clock from the run’s start');
-  assert.equal(text(card.querySelector('.run-post-doing')),'Getting started');
-  assert.equal(text(card.querySelector('.run-post-started')),'Started by you');
-  assert.equal(text(card.querySelector('[data-live-stop]')),'Stop');
+  assert.ok(card.matches('.pip-working'),'the working row a reply at work has');
+  assert.equal(card.querySelector('.avatar').dataset.pose,'working','its face, at work');
+  assert.equal(verb(x.d),'Billing audit · Getting started');
+  assert.equal(meta(x.d),'(42s · ↓ 0 tok)','its time from the run’s start, and its words so far');
+  assert.equal(card.getAttribute('title'),'Started by you','how it started: its tooltip, not a line in the chat');
+  assert.equal(card.querySelector('[data-live-stop],.run-post-started,.run-post-chip'),null,'no chips in the chat');
+  assert.ok(stopIn(x.d),'Stop is in the prompt box, as for a reply');
   // What it does next comes from the run's activity, read every 1.5 s while the chat is on screen.
   x.state.events.push(event(1,'pip_run_started'),event(2,'pip_run_progress',{kind:'tool_call',tool:'read_file',path:'app/billing.py'}));
   await x.advance(1500);
-  assert.equal(text(live(x.d).querySelector('.run-post-doing')),'Reading billing.py');
-  assert.equal(live(x.d).querySelector('.run-post-doing code').textContent,'billing.py');
+  assert.equal(verb(x.d),'Billing audit · Reading billing.py');
+  assert.equal(live(x.d).querySelector('.pip-working-verb code'),null,'plain words, as a reply’s row says them');
   assert.match(live(x.d).getAttribute('aria-label'),/^Billing audit: Reading billing\.py\. Running 0:42\. Started by you$/);
   const after=x.requests('list_pip_run_activity').at(-1).request.after;
-  x.state.events.push(event(3,'pip_run_progress',{kind:'progress',state:'waiting',message:'Waiting for the model'}));
+  x.state.events.push(event(3,'pip_run_progress',{kind:'progress',state:'waiting',message:'Waiting for the model'}),event(4,'pip_run_progress',{kind:'text_delta',text:'x'.repeat(480)}));
   await x.advance(1500);
-  assert.equal(text(live(x.d).querySelector('.run-post-doing')),'Waiting for the model');
+  assert.equal(verb(x.d),'Billing audit · Waiting for the model');
+  assert.equal(meta(x.d),'(42s · ↓ 120 tok)','the words it has written so far, as a reply counts them');
   assert.equal(x.requests('list_pip_run_activity').at(-1).request.after,2,'each look reads on from the last');
+  assert.ok(stopIn(x.d),'Stop still in the box');
   assert.ok(after<=2);
   // It ends: the same place now holds its report post.
   finished(x);
   await x.advance(1500);
-  assert.equal(live(x.d),null,'no live post left');
+  assert.equal(live(x.d),null,'no working row left');
+  assert.equal(stopIn(x.d),null,'and no Stop in the box');
   const posts=x.d.querySelectorAll(`[data-run-post="${RUN}"]`);
   assert.equal(posts.length,1,'one item for the run, never two');
   assert.equal(items(x.d).at(-1),posts[0],'in the same place, at the end');
@@ -127,11 +138,10 @@ test('▶ Run now: one live post from the start, with what it is doing, then the
 
 test('Stop stops the run; a run you stop posts nothing, and the chat says so',async()=>{
   const x=setup();running(x);await openChat(x);
-  x.click(`[data-live-stop="${RUN}"]`);await x.drain();
+  x.click('#chat-stop');await x.drain();
   assert.deepEqual(x.state.cancelled,[RUN],'cancel_pip_run, as History’s Cancel run');
-  assert.equal(text(live(x.d).querySelector('[data-live-stop]')),'Stopping…');
-  assert.equal(live(x.d).querySelector('[data-live-stop]').disabled,true);
-  assert.equal(text(live(x.d).querySelector('.run-post-doing')),'Stopping…');
+  assert.equal(stopIn(x.d).disabled,true,'pressed once');
+  assert.equal(verb(x.d),'Billing audit · Stopping…');
   x.state.active=null;x.state.runs=x.state.runs.map(r=>({...r,status:'cancelled'}));x.state.events.push(event(1,'pip_run_cancelled'));
   await x.advance(1500);await x.look();
   assert.equal(live(x.d),null,'gone');
@@ -145,7 +155,7 @@ test('a scheduled run says it started on schedule, at the time it was due, and e
   const due=new Date(NOW);due.setHours(9,0,0,0);
   x.state.detail[RUN]={manifest:{run_kind:'audit',trigger:'schedule',scheduled_at:due.toISOString()}};
   await openChat(x);
-  assert.equal(text(live(x.d).querySelector('.run-post-started')),`On schedule · ${due.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}`);
+  assert.equal(live(x.d).getAttribute('title'),`On schedule · ${due.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}`);
   finished(x,post({trigger:'schedule',outcome:'clear',total:0,counts:{},findings:[]}));
   await x.look();
   assert.equal(live(x.d),null);
@@ -159,23 +169,23 @@ test('a reload while it runs draws the live post again, from the run itself',asy
   await openChat(x);
   const card=live(x.d);
   assert.ok(card,'a fresh view, mid-run: there it is');
-  assert.equal(text(card.querySelector('.run-post-doing')),'Searching the code','what it is doing, from its saved activity');
-  assert.equal(text(card.querySelector('.run-post-clock')),'0:42','its clock from when it started, not from the reload');
-  assert.equal(text(card.querySelector('.run-post-started')),'Asked by DGC','a DGC chat ran it (run_pip_now)');
+  assert.equal(verb(x.d),'Billing audit · Searching the code','what it is doing, from its saved activity');
+  assert.equal(meta(x.d),'(42s · ↓ 0 tok)','its time from when it started, not from the reload');
+  assert.equal(card.getAttribute('title'),'Asked by DGC','a DGC chat ran it (run_pip_now)');
 });
 
 test('how it started: first run, waiting to start, and a run of a kind that never posts shows nothing',async()=>{
   const first=setup();first.state.pip.created_at=iso(NOW-42000);running(first,{status:'queued'});await openChat(first);
-  assert.equal(text(live(first.d).querySelector('.run-post-started')),'First run','its only run, queued with the Pip by its setup card');
+  assert.equal(live(first.d).getAttribute('title'),'First run','its only run, queued with the Pip by its setup card');
   const later=setup();later.state.pip.created_at=iso(NOW-HOUR);running(later);await openChat(later);
-  assert.equal(text(live(later.d).querySelector('.run-post-started')),'Started by you','Run now on a Pip that never ran: you started it');
-  assert.equal(text(live(first.d).querySelector('.run-post-doing')),'Waiting to start');
-  assert.equal(live(first.d).querySelector('.run-post-clock'),null,'no clock before it starts');
+  assert.equal(live(later.d).getAttribute('title'),'Started by you','Run now on a Pip that never ran: you started it');
+  assert.equal(verb(first.d),'Billing audit · Waiting to start');
+  assert.equal(live(first.d).querySelector('.pip-working-meta'),null,'no time before it starts');
   // It waited, then started: its clock starts with it (the full read, taken while it waited, has no start time).
   const waited=setup();waited.state.pip.created_at=iso(NOW-HOUR);running(waited,{status:'queued'});await openChat(waited);
-  assert.equal(live(waited.d).querySelector('.run-post-clock'),null);
+  assert.equal(live(waited.d).querySelector('.pip-working-meta'),null);
   running(waited);await waited.look();
-  assert.equal(text(live(waited.d).querySelector('.run-post-clock')),'0:42','the clock, once it runs');
+  assert.equal(meta(waited.d),'(42s · ↓ 0 tok)','its time, once it runs');
   assert.equal(live(waited.d).dataset.live,'running');
   const handoff=setup();running(handoff,{kind:'patch',trigger:'handoff'});await openChat(handoff);
   assert.equal(live(handoff.d),null,'Patch work is reviewed where it was handed off');
@@ -192,28 +202,27 @@ test('the Work chat’s chip opens the Pip’s chat at the live post',async()=>{
 // The routine's turn, exactly as dgc/pip_routines.py writes it (ROUTINE_TURN).
 const routineSource=readFileSync(new URL('../../../dgc/pip_routines.py',import.meta.url),'utf8');
 const ROUTINE_TURN=/ROUTINE_TURN = \(((?:\s*"(?:[^"\\]|\\.)*")+)\)/.exec(routineSource)[1].match(/"(?:[^"\\]|\\.)*"/g).map(s=>JSON.parse(s)).join('');
-test('a Personal Pip’s routine runs as a live post, not the working row, and its reply takes its place',async()=>{
+test('a Personal Pip’s routine runs as a reply at work: the working row, its words as they come, Stop in the box; its reply takes its place',async()=>{
   const turn=ROUTINE_TURN.replace('{title}','New orders').replace('{when}','when the shop app sends order.created').replace('{prompt}','Tell me about the order.');
   const hidden={id:'msg_r',pip_id:PIP,workspace_id:'ws',role:'user',text:turn,run_id:CHAT,model:'m',created_at:iso(NOW-30000),status:'succeeded',intro:true};
   const x=setup({personal:true,messages:[hidden],state:{chatActive:{id:CHAT,status:'running',created_at:iso(NOW-30000),started_at:iso(NOW-30000)}}});
   await openChat(x);
-  const card=live(x.d);
-  assert.ok(card,'the routine’s run is a live post');
-  assert.equal(card.dataset.runPost,CHAT);
-  assert.equal(text(card.querySelector('.run-post-routine')),'New orders');
-  assert.equal(text(card.querySelector('.run-post-started')),'From Shop event');
-  assert.equal(text(card.querySelector('.run-post-clock')),'0:30');
-  assert.equal(x.d.querySelector('.pip-working'),null,'no working row beside it');
+  assert.equal(x.d.querySelector('article.run-post-live'),null,'no live post');
+  const row=x.d.querySelector('.conversation-log .pip-working');
+  assert.ok(row,'the working row a reply at work has');
+  assert.match(text(row.querySelector('.pip-working-verb')),/^Morning brief · /);
+  assert.match(text(row.querySelector('.pip-working-meta')),/^\(30s · ↓ \d+ tok\)$/);
   // It is on the bar above the box too (prompt-tray-port.test.mjs): one pill, alone on the line.
   const pill=x.d.querySelector('#chat-tray .rail-chip[data-kind="routine"]');
   assert.ok(pill,'the routine running is a pill on the bar');
   assert.match(pill.getAttribute('aria-label'),/routine New orders is running/);
   assert.equal(x.d.querySelector('#chat-tray').dataset.solo,'routine');
-  x.click(`[data-live-stop="${CHAT}"]`);await x.drain();
+  assert.ok(stopIn(x.d),'Stop is in the prompt box');
+  x.click('#chat-stop');await x.drain();
   assert.deepEqual(x.state.cancelled,[CHAT],'Stop stops the routine’s run');
   x.state.chatActive=null;x.state.messages=[hidden,{...hidden,id:'msg_a',role:'assistant',intro:undefined,text:'One new order: #1042, ₹2,400.',created_at:iso(NOW)}];
   await x.look();
-  assert.equal(live(x.d),null);
+  assert.equal(x.d.querySelector('.conversation-log .pip-working'),null);
   assert.equal(x.d.querySelector('#chat-tray .rail-chip'),null,'the run ended: nothing on the bar');
   assert.equal(x.d.querySelector('#chat-tray').classList.contains('has-chips'),false);
   const reply=x.d.querySelector('[data-message="msg_a"]');

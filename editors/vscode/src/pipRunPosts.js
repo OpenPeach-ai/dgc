@@ -305,11 +305,32 @@ function foundText(p){
   const {rows,more,word}=foundRows(p);
   return rows.map(r=>`- ${r.label||r.sev}: ${[r.title,r.at].filter(Boolean).join(' · ')}`).join('\n')+(more?`\n${plural(more,`more ${word}`)}`:'');
 }
-// All-clear runs in a row, as words under the one reply that says it again: "Passed 3 times since 9:00 AM: Today 9:00 AM, 10:00 AM, 11:00 AM".
+// All-clear runs in a row, as words under the one reply that says it again. A few say every time: "Passed 3 times since
+// 9:00 AM: Today 9:00 AM, 10:00 AM, 11:00 AM". Many say how often and when the last was, in one line (his .111 picture,
+// 25 Nov: a heartbeat every 30 minutes listed all 200 times): "Passed 200 times since Saturday, about every 30 minutes;
+// the last at 3:29 PM." -- or, when they came at no steady pace, the last three.
+const TIMES_LISTED=8;
+function everyWords(runs){
+  const gaps=[];for(let i=1;i<runs.length;i++)gaps.push(at(runs[i])-at(runs[i-1]));
+  const mid=[...gaps].sort((a,b)=>a-b)[Math.floor(gaps.length/2)];
+  if(!(mid>0)||gaps.filter(g=>Math.abs(g-mid)<=mid*0.2).length<gaps.length*0.8)return '';     // no steady pace
+  const min=Math.max(1,Math.round(mid/60000));
+  if(min<60){const m=min<10?min:Math.round(min/5)*5;return m===1?'about every minute':`about every ${m} minutes`;}
+  const h=Math.round(min/60);
+  if(h<24)return h===1?'about every hour':`about every ${h} hours`;
+  const d=Math.round(h/24);return d===1?'about once a day':`about every ${d} days`;
+}
 function timesLine(runs,now){
+  const dayName=d=>{const n=daysAgo(d,now);return n===0?'Today':n===1?'Yesterday':new Date(d).toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'});};
+  if(runs.length>TIMES_LISTED){
+    const when=p=>{const t=at(p),d=startOfDay(t);return daysAgo(d,now)===0?clock(t):`${dayName(d)} ${clock(t)}`;};
+    const every=everyWords(runs);
+    if(every)return `${foldWords(runs,now)}, ${every}; the last at ${when(runs.at(-1))}.`;
+    const last=runs.slice(-3).reverse().map(when);
+    return `${foldWords(runs,now)}; the last three at ${last.slice(0,-1).join(', ')} and ${last.at(-1)}.`;
+  }
   const days=new Map();
   for(const p of runs){const d=startOfDay(at(p));if(!days.has(d))days.set(d,[]);days.get(d).push(p);}
-  const dayName=d=>{const n=daysAgo(d,now);return n===0?'Today':n===1?'Yesterday':new Date(d).toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'});};
   return `${foldWords(runs,now)}: ${[...days].map(([d,list])=>`${dayName(d)} ${list.map(p=>clock(at(p))).join(', ')}`).join(' · ')}`;
 }
 
@@ -362,25 +383,19 @@ export function postPlainText(p,{name='',previous=null,personal=false,now=Date.n
   return [said,found].filter(Boolean).join('\n\n');
 }
 
-// ---- A run while it runs (reported 24 Oct) ----------------------------------------------------------------------
-// From the moment a run starts its chat has ONE live post for it: the Pip's face at work, its name, what it is doing
-// now (from the run's activity, pipRunActivity.js), a clock, Stop, and how it started ("Started by you", "On schedule ·
-// 9:00 AM", "From a new commit", "Asked by DGC", "First run"). It stands where the run's own post will: at the end of the
-// chat, with the same head, so when the run ends that post takes its place, with no second item and no jump. It is
-// drawn from the run's state (get_pip's active run, list_pip_runs, get_pip_run, its activity), never from memory, so a
-// reload while it runs draws it again.
-/** The live post. `doing`: what it is doing now, as parts; `since`: when it started (ms); `state`: running, queued,
- *  stopping or ending (its post is on the way); `started`: how it started; `routine`: a routine's title; `body`: a
- *  routine's reply so far, drawn under what it is doing; `canStop`: Stop is offered. */
-export function livePostMarkup({runId,name,face='',doing=[],since=null,state='running',started='',routine='',body='',canStop=true,watch='',now=Date.now()}){
+// ---- A run while it runs (reported 24 Oct; a reply at work since 25 Nov) ----
+/** A run at work, drawn as a reply at work is (his call, 25 Nov: "exactly like how our new pips run"): the chat's
+ *  working row -- its face at work, "<name> · <what it is doing>", "(42s · ↓ 120 tok)" -- with Stop in the prompt box,
+ *  not in the chat; how it started is its tooltip. `chars`: the words it has written so far (its text_delta activity),
+ *  counted as a reply's are. It stands where the run's post will, so a jump to the run finds it (data-run-post). */
+export function liveRowMarkup({runId,name,face='',doing=[],since=null,state='running',started='',chars=0,watch='',now=Date.now()}){
+  // (Plain words, as a reply's row says them: its words shimmer, and a file name in code would be a box in them.)
   const id=esc(runId),doingText=state==='stopping'?'Stopping…':state==='ending'?'Finishing up…':doing.map(partText).join('')||'Getting started';
-  const doingHtml=state==='stopping'||state==='ending'?esc(doingText):doing.length?doing.map(partHtml).join(''):esc(doingText);
-  const clockText=Number.isFinite(since)?elapsed(now-since):'';
-  const clock=Number.isFinite(since)&&state!=='queued'?`<span class="run-post-clock" data-since="${since}" aria-hidden="true">${clockText}</span>`:'';
-  const stop=canStop&&state!=='ending'?`<button type="button" class="run-post-chip run-post-stop" data-live-stop="${id}"${state==='stopping'?' disabled':''} title="${state==='stopping'?'Stopping it. It can take a moment.':'Stop this run. Nothing is posted for it.'}">${icon('stop')}<span>${state==='stopping'?'Stopping…':'Stop'}</span></button>`:'';
-  const head=`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong>${routine?`<span class="run-post-routine">${esc(routine)}</span>`:''}${clock}</div>`;
-  const label=`${name}${routine?`, ${routine}`:''}: ${doingText}${state==='queued'?'':clockText?`. Running ${clockText}`:''}${started?`. ${started}`:''}`;
-  return `<article class="pip-message assistant dgc run-post run-post-live" data-run-post="${id}" data-live="${esc(state)}" tabindex="-1" aria-label="${esc(label)}" aria-busy="true">${head}<div class="answer"><div class="message-body text final run-post-body"><p class="run-post-doing"><span class="run-post-spinner" aria-hidden="true"></span><span>${doingHtml}</span></p>${body}</div></div><div class="run-post-attach">${stop}${watch}${started?`<span class="run-post-started">${esc(started)}</span>`:''}</div></article>`;
+  const doingHtml=esc(doingText);
+  const timed=Number.isFinite(since)&&state!=='queued',n=Math.max(0,Number(chars)||0);
+  const meta=timed?`<span class="pip-working-meta" data-since="${since}" data-chars="${n}">(${Math.max(0,Math.floor((now-since)/1000))}s · ↓ ${Math.round(n/4)} tok)</span>`:'';
+  const label=`${name}: ${doingText}${timed?`. Running ${elapsed(now-since)}`:''}${started?`. ${started}`:''}`;
+  return `<div class="pip-working run-working" role="status" data-run-post="${id}" data-live="${esc(state)}" tabindex="-1" aria-label="${esc(label)}"${started?` title="${esc(started)}"`:''}>${face}<span class="pip-working-verb">${esc(name)} · ${doingHtml}</span>${meta}${watch}</div>`;
 }
 
 /** The chat's messages and runs in time order. Each run is {post, previous}; all-clear runs of one kind in a row

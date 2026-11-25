@@ -92,13 +92,18 @@ test('W27: with no sub-agent working the chip is the map\'s door, "Agent map", n
     try {
       assert.deepEqual([x.during.hidden, x.during.words, x.during.state], [false, "2 sub-agents", "running"], "premise: two working, the chip says so");
       const after = await x.pill();
-      assert.deepEqual([after.hidden, after.words, after.state], [false, "Agent map", "idle"], "none working: it stays, as the way to the map, and says what it opens");
-      const seen = await x.page.evaluate(() => { const p = document.getElementById("agents-pill"); return { all: p.innerText.trim(), tip: p.title || p.getAttribute("aria-label"), name: p.getAttribute("aria-label") }; });
+      const seen = await x.page.evaluate(() => { const p = document.getElementById("agents-pill"); return { all: p.innerText.trim(), tip: p.title || p.getAttribute("aria-label"), name: p.getAttribute("aria-label"), shown: p.checkVisibility() }; });
       assert.doesNotMatch(seen.all, /\b0\b/, `no zero anywhere on it (${width}px: “${seen.all}”)`);
       assert.match(seen.name, /^Agent map · No sub-agents working · Click to open the agent map$/);
-      await x.page.click("#agents-pill");
-      assert.equal(await x.page.evaluate(() => !document.getElementById("agent-map").hidden), true, "and it opens the map");
-      await x.page.keyboard.press("Escape");
+      if (width >= 640) {
+        assert.deepEqual([after.hidden, after.words, after.state, seen.shown], [false, "Agent map", "idle", true], "none working: it stays, as the way to the map, and says what it opens");
+        await x.page.click("#agents-pill");
+        assert.equal(await x.page.evaluate(() => !document.getElementById("agent-map").hidden), true, "and it opens the map");
+        await x.page.keyboard.press("Escape");
+      } else {
+        // 25 Nov (his report): too narrow for "Agent map", an idle pill was a lone hollow dot. It gives way here.
+        assert.deepEqual([after.state, seen.shown], ["idle", false], "none working in a narrow box: out of the way");
+      }
       // The count comes back the moment one works again.
       await x.event({ type: "turn_start", turn_id: "tg2", prompt: "again" });
       await x.event({ type: "agent_started", id: x.sid(3), parent_id: null, call_id: "cg3", description: "Read tests/", depth: 1, state: "running", started_at: Date.now() / 1000, isolated: false, parallel: false });
