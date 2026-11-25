@@ -5,10 +5,17 @@
    copy) sits small at the right, above that layer. Each surface keeps its own markup and adds these classes:
    .dgc-doc-card on the box, .dgc-doc-tile on its mark (data-tone on the box picks the colour), .dgc-doc-words,
    .dgc-doc-name and .dgc-doc-meta on its words, .dgc-doc-acts on its buttons and .dgc-doc-open on Open. */
+:root, :host {
+  /* The card's size, ONE setting for every surface (Work, ChatDGC, a Pip's chat): the sheet's scale (1 = 44 × 56), the
+     card's least height, its padding, its buttons, its words. His pick, 25 Nov ("C, compact", from four sizes drawn in
+     real VS Code): a 52 px card, a 28 × 36 sheet, 24 px buttons (it was 76 px, 44 × 56 and 28 px). */
+  --doc-sheet-scale: 0.64; --doc-card-h: 52px; --doc-card-pad: 7px; --doc-card-btn: 24px; --doc-card-max: 440px;
+  --doc-card-name: var(--t-sm); --doc-card-meta: var(--t-xs);
+}
 .dgc-doc-card {
   --doc-tile: var(--fk-neutral);
   position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
-  max-width: 520px; min-height: 64px; box-sizing: border-box; margin: 8px 0; padding: 9px 12px 9px 10px;
+  max-width: var(--doc-card-max, 440px); min-height: 64px; box-sizing: border-box; margin: 8px 0; padding: var(--doc-card-pad, 7px) 12px var(--doc-card-pad, 7px) 10px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card);
   transition: border-color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out);
 }
@@ -34,11 +41,11 @@
 .dgc-doc-card .dgc-doc-words { flex: 1 1 80px; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .dgc-doc-card .dgc-doc-name {
   display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font: var(--w-med) var(--t-base)/1.3 var(--sans); color: var(--text-strong);
+  font: var(--w-med) var(--doc-card-name, var(--t-sm))/1.3 var(--sans); color: var(--text-strong);
 }
 .dgc-doc-card .dgc-doc-meta {
   display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font: var(--w-reg) var(--t-sm)/1.3 var(--sans); color: var(--muted);
+  font: var(--w-reg) var(--doc-card-meta, var(--t-xs))/1.3 var(--sans); color: var(--muted);
 }
 /* Pointed at, the card's ground steps toward the text: its quiet line steps with it, so it still reads at 4.5:1
    (it was 4.3 to 4.4:1 on the lit card, 14 Nov). */
@@ -63,22 +70,23 @@
 @media (prefers-reduced-motion: reduce) { .dgc-doc-card { transition: none; } }
 
 /* The card's mark is a small sheet of its kind (media/shared/filesheet.js): the tile only holds it. */
-.dgc-doc-card .dgc-doc-tile.has-sheet { width: 44px; height: 56px; margin-right: 5px; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; overflow: visible; }
+.dgc-doc-card .dgc-doc-tile.has-sheet { width: calc(44px * var(--doc-sheet-scale, 0.64)); height: calc(56px * var(--doc-sheet-scale, 0.64)); margin-right: calc(5px * var(--doc-sheet-scale, 0.64)); padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; overflow: visible; place-items: start; }
+.dgc-doc-card .dgc-doc-tile.has-sheet > .dgc-sheet { transform-origin: 0 0; scale: var(--doc-sheet-scale, 0.64); }
 /* A card whose Download menu is open lies over the cards after it. */
 .dgc-doc-card:has([aria-expanded="true"]) { z-index: 2; }
-.dgc-doc-card:has(.dgc-doc-tile.has-sheet) { container-type: inline-size; min-height: 76px; padding: 9px 12px; border-color: var(--hair); background: color-mix(in srgb, var(--text) 4.5%, transparent); }
+.dgc-doc-card:has(.dgc-doc-tile.has-sheet) { container-type: inline-size; min-height: var(--doc-card-h, 52px); padding: var(--doc-card-pad, 7px) 12px; border-color: var(--hair); background: color-mix(in srgb, var(--text) 4.5%, transparent); }
 .dgc-doc-card:has(.dgc-doc-tile.has-sheet):hover { border-color: var(--hair-strong); background: color-mix(in srgb, var(--text) 6.5%, transparent); }
 /* Open, seen: a pill filled with the text colour. The card's own Open button lies over the whole card, so a click on
    the pill, the sheet or the name opens it; the pill takes no clicks of its own. */
 .dgc-doc-card .dgc-doc-open-pill {
-  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 13px; border-radius: var(--btn-r, 6px); pointer-events: none;
+  display: inline-flex; align-items: center; gap: 6px; height: var(--doc-card-btn, 24px); padding: 0 13px; border-radius: var(--btn-r, 6px); pointer-events: none;
   background: var(--solid); color: var(--on-solid); font: var(--w-med) var(--t-sm)/1 var(--sans); white-space: nowrap;
 }
 .dgc-doc-card .dgc-doc-open-pill svg { width: 14px; height: 14px; }
 .dgc-doc-card.stopped .dgc-doc-open-pill, .dgc-doc-card[data-removed="true"] .dgc-doc-open-pill { display: none; }
 /* Download (or Save a copy): a round icon button in the editor's greys; its word stays for a screen reader and a tip. */
 .dgc-doc-card .dgc-doc-acts button.dgc-doc-dl:not(.dgc-doc-open) {
-  display: inline-grid; place-items: center; width: 28px; height: 28px; min-width: 0; min-height: 0; padding: 0; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px);
+  display: inline-grid; place-items: center; width: var(--doc-card-btn, 24px); height: var(--doc-card-btn, 24px); min-width: 0; min-height: 0; padding: 0; border: 1px solid var(--hair-strong); border-radius: var(--btn-r, 6px);
   background: transparent; color: var(--text); cursor: pointer; box-shadow: none;
 }
 .dgc-doc-card .dgc-doc-acts button.dgc-doc-dl:not(.dgc-doc-open):hover:not(:disabled), .dgc-doc-card .dgc-doc-acts button.dgc-doc-dl[aria-expanded="true"]:not(.dgc-doc-open) { border-color: var(--hair-strong); background: var(--wash); color: var(--text); }
@@ -96,7 +104,7 @@
 .dgc-file-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .dgc-file-more > svg { width: 14px; height: 14px; }
 /* On a card it stands beside Save a copy…, the same box. */
-.dgc-doc-card .dgc-doc-acts .dgc-file-more { width: 28px; height: 28px; border: 1px solid var(--hair-strong); color: var(--text, var(--vscode-foreground)); }
+.dgc-doc-card .dgc-doc-acts .dgc-file-more { width: var(--doc-card-btn, 24px); height: var(--doc-card-btn, 24px); border: 1px solid var(--hair-strong); color: var(--text, var(--vscode-foreground)); }
 /* "Copied", for a moment over the "…" that was used. */
 .dgc-file-said { position: fixed; z-index: 70; padding: 2px 8px; border-radius: var(--btn-r, 6px); background: var(--text-strong, var(--vscode-foreground)); color: var(--bg, var(--vscode-editor-background));
   font: var(--w-med, 500) 11px/1.6 var(--sans, var(--vscode-font-family)); pointer-events: none; white-space: nowrap; }

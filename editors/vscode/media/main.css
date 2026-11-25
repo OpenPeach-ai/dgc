@@ -2436,14 +2436,16 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.dgc > .
 /* ---- a pinned prompt looks pinned ---------------------------------------------------------------- */
 /* While it is stuck at the top (main.js setPinned marks it .pinned, and only a prompt that pins: never one too tall or
    one opened to be read), a reader sees that the answer passes under it: one line with an ellipsis (a long prompt's
-   Show more at its end), and the ground ends in a hairline and a soft shadow where it had a fade. In its own place it
+   Show more at its end), and the ground ends in a soft shadow where it had a fade. In its own place it
    was indistinguishable from any prompt: with a turn mostly scrolled past, "your message, then the Edited card" read
    as a reply gone missing. The height it gives up stays in its box as a margin under it (--pin-give), so nothing in
    the transcript moves when it goes small. In its own place it is not .pinned, and is exactly as above. */
 .turn > .msg.user.turn-head.pinned { margin-bottom: var(--pin-give, 0px); }
 .turn > .msg.user.turn-head.pinned > .bubble { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding-bottom: var(--sp-2); }
 .turn > .msg.user.turn-head.pinned > .bubble:has(> .prompt-text) > .prompt-atts, .turn > .msg.user.turn-head.pinned > .bubble:has(> .prompt-text)::after, .turn > .msg.user.turn-head.pinned > .msg-time { display: none; }
-.turn > .msg.user.turn-head.pinned::before { bottom: calc(-1 * var(--sp-2)); -webkit-mask-image: none; mask-image: none; border-bottom: 1px solid var(--hair-strong, var(--hair)); box-shadow: 0 8px 12px -10px rgba(0, 0, 0, .55); }
+/* (A soft shadow, no line: a hairline here read as a stray white line across the panel under a folded long prompt, his
+   report 25 Nov.) */
+.turn > .msg.user.turn-head.pinned::before { bottom: calc(-1 * var(--sp-2)); -webkit-mask-image: none; mask-image: none; box-shadow: 0 8px 12px -10px rgba(0, 0, 0, .55); }
 body.vscode-light .turn > .msg.user.turn-head.pinned::before { box-shadow: 0 8px 12px -10px rgba(0, 0, 0, .22); }
 /* ---- end a pinned prompt looks pinned ------------------------------------------------------------ */
 

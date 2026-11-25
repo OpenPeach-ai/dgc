@@ -226,9 +226,9 @@ test("ChatDGC's artifact and file cards are the shared card, and a click anywher
       const shown = (e) => !!e && e.getClientRects().length > 0, c = (e, p) => getComputedStyle(e)[p];
       return { kind: s?.dataset.kind, tag: tag?.textContent, tab: tag ? c(tag, "backgroundColor") : "", w: Math.round(r?.width || 0), h: Math.round(r?.height || 0), page: !!s?.querySelector(".dgc-sheet-page > *"),
         open: shown(pill) ? [pill.textContent, c(pill, "backgroundColor"), c(pill, "pointerEvents")] : null, dl: dl ? [shown(dl), dl.textContent.trim(), Math.round(dl.getBoundingClientRect().width), !!dl.querySelector("svg"), c(dl, "backgroundColor")] : null }; });
-    assert.deepEqual([f.kind, f.tag, f.tab, f.w, f.h, f.page], ["slides", "Slides", "rgb(217, 119, 6)", 44, 56, true], `a sheet of slides, its tab in the kind's colour: ${JSON.stringify(f)}`);
+    assert.deepEqual([f.kind, f.tag, f.tab, f.w, f.h, f.page], ["slides", "Slides", "rgb(217, 119, 6)", 28, 36, true], `(the card's size, his pick C, 25 Nov: 28 × 36) a sheet of slides, its tab in the kind's colour: ${JSON.stringify(f)}`);
     assert.equal(f.open[0], "Open", "Open, seen");
-    assert.deepEqual(f.dl.slice(0, 4), [true, "Download", 28, true], "Download is a round icon that keeps its word");
+    assert.deepEqual(f.dl.slice(0, 4), [true, "Download", 24, true], "Download is a round icon that keeps its word (24 px: the card's size C, 25 Nov)");
     const name = await card.locator(".cd-file-name").boundingBox();
     await s.page.mouse.click(name.x + name.width / 2, name.y + name.height / 2);
     assert.equal((await s.posted("artifactOpen")).length, 1, "a click on its name opens it");

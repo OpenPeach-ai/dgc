@@ -804,8 +804,9 @@ for (const [theme, forcedColors] of [["dark-modern", false], ["light-modern", fa
         assert.equal(m.bottom, "-4px", "4px under the bubble");
         assert.equal(m.outline, "solid", "and an edge round the pinned prompt");
       } else {
-        // (While it is stuck the ground ends in a hairline and a soft shadow, where a fade read as nothing at all.)
-        assert.equal(m.mask, "none"); assert.equal(m.edge, "1px", "a hairline under it"); assert.notEqual(m.shadow, "none", "and a soft shadow");
+        // (While it is stuck the ground ends in a soft shadow, where a fade read as nothing at all. No line: under a
+        // folded long prompt it read as a stray white line across the panel, his report 25 Nov.)
+        assert.equal(m.mask, "none"); assert.equal(m.edge, "0px", "no line under it"); assert.notEqual(m.shadow, "none", "a soft shadow");
         assert.equal(m.bottom, "-8px");
         assert.equal(m.outline, "none", "no outline outside high contrast");
       }
@@ -946,7 +947,7 @@ test("a pasted image's chip shows its file name, cut to fit", async (t) => {
 // User test, round 2: after a second message the log sat at its end with the first turn mostly scrolled past, its
 // prompt pinned at the top over the last part of its answer. Pinned, it looked like any prompt in its place, so it
 // read as "your message, then the Edited card": as if the reply were missing. While it is stuck a prompt looks pinned:
-// one line, a hairline and a soft shadow under it; in its own place it is exactly as before.
+// one line, a soft shadow under it (no line, 25 Nov); in its own place it is exactly as before.
 const LONG_PROMPT = "Make a one-page document: a welcome note for new tile-shop staff, with the opening hours, who to ask about returns, where the samples are kept and how the till is closed at night.";
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 700]) {
   test(`a pinned prompt looks pinned while it is stuck, and is itself again in its place (${theme}, ${width}px)`, async (t) => {
@@ -976,7 +977,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       assert.ok(stuck.text <= stuck.line * 1.4, `one line tall (${stuck.text}px of a ${stuck.line}px line)`);
       assert.deepEqual([stuck.cut, stuck.ellipsis], [true, "ellipsis"], "the rest of it behind an ellipsis");
       assert.ok(stuck.bubble < rest.bubble || rest.text <= rest.line * 1.4, "smaller than in its place");
-      assert.equal(stuck.edge, "1px", "a hairline under it"); assert.notEqual(stuck.shadow, "none", "and a soft shadow");
+      assert.equal(stuck.edge, "0px", "no line under it (25 Nov)"); assert.notEqual(stuck.shadow, "none", "a soft shadow");
       assert.ok(Math.abs(stuck.top - rest.top) <= 1, "on the same rest line");
       assert.equal(stuck.height, rest.height, "nothing in the log moved when it went small: the transcript is as tall as before");
       assert.equal(stuck.wide, false);

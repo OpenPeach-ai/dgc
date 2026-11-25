@@ -28,6 +28,10 @@
 - **A code block's Copy stays in its corner**: scrolled sideways, a long line no longer carries Copy (and the language
   label) into the middle of it; the code scrolls, the block doesn't. The same for a wide table. In Work, ChatDGC and a
   Pip's chat.
+- **No line under a pinned prompt**: stuck at the top, a prompt's ground ends in a soft shadow only; its hairline read as
+  a stray white line across the panel under a folded long prompt.
+- **Smaller artifact and file cards everywhere**: a 52 px card (was 76), its sheet 28 × 36 (was 44 × 56), 24 px buttons and
+  the chat's small type, in Work, ChatDGC and a Pip's chat alike; one setting in media/shared/doccard.css.
 - **A Pip's long run of passes is one line**: "Passed 200 times since Saturday, about every 30 minutes; the last at
   3:29 PM." instead of every time it ran; a few passes still list their times.
 - **A goal's prompt says "Goal" under its bubble**, first in its time row ("Goal · 1:22 PM"), not over it.

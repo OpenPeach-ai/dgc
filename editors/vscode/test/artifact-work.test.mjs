@@ -233,12 +233,12 @@ test("a Work artifact is the shared card: a sheet of its kind with its name on a
       const shown = (e) => !!e && e.getClientRects().length > 0, c = (e, p) => getComputedStyle(e)[p];
       return { kind: s?.dataset.kind, tag: tag?.textContent, tab: tag ? c(tag, "backgroundColor") : "", w: Math.round(r?.width || 0), h: Math.round(r?.height || 0), page: !!s?.querySelector(".dgc-sheet-page > *"),
         open: shown(pill) ? [pill.textContent, c(pill, "backgroundColor"), c(pill, "pointerEvents")] : null, dl: dl ? [shown(dl), dl.textContent.trim(), Math.round(dl.getBoundingClientRect().width), !!dl.querySelector("svg"), c(dl, "backgroundColor")] : null }; });
-    assert.deepEqual([f.kind, f.tag, f.tab, f.w, f.h, f.page], ["slides", "Slides", "rgb(217, 119, 6)", 44, 56, true], `a sheet of slides, its tab in the kind's colour: ${JSON.stringify(f)}`);
+    assert.deepEqual([f.kind, f.tag, f.tab, f.w, f.h, f.page], ["slides", "Slides", "rgb(217, 119, 6)", 28, 36, true], `(the card's size, his pick C, 25 Nov: 28 × 36) a sheet of slides, its tab in the kind's colour: ${JSON.stringify(f)}`);
     assert.equal(f.open[0], "Open", "Open, seen");
     assert.equal(f.open[2], "none", "the pill takes no clicks: the card's own Open lies over all of it");
     const grey = (rgb) => { const v = (rgb.match(/[\d.]+/g) || []).slice(0, 3).map(Number); return Math.max(...v) - Math.min(...v) <= 12; };
     assert.ok(grey(f.open[1]) && grey(f.dl[4]), `the buttons stay in the editor's greys: ${f.open[1]}, ${f.dl[4]}`);
-    assert.deepEqual(f.dl.slice(0, 4), [true, "Download", 28, true], "Download is a round icon that keeps its word");
+    assert.deepEqual(f.dl.slice(0, 4), [true, "Download", 24, true], "Download is a round icon that keeps its word (24 px: the card's size C, 25 Nov)");
     await card.locator(".dgc-doc-dl").click();
     assert.deepEqual(await card.locator(".amenu-item").allTextContents(), ["PowerPoint (.pptx)", "PDF", "Web page (.html)"], "its menu offers what slides can be saved as");
     await s.page.keyboard.press("Escape");
@@ -274,7 +274,7 @@ test("in a 300 px side bar the card is the sheet, the name, the line and the dow
       return { kind: s?.dataset.kind, tag: tag?.textContent, tab: tag ? c(tag, "backgroundColor") : "", w: Math.round(r?.width || 0), h: Math.round(r?.height || 0), page: !!s?.querySelector(".dgc-sheet-page > *"),
         open: shown(pill) ? [pill.textContent, c(pill, "backgroundColor"), c(pill, "pointerEvents")] : null, dl: dl ? [shown(dl), dl.textContent.trim(), Math.round(dl.getBoundingClientRect().width), !!dl.querySelector("svg"), c(dl, "backgroundColor")] : null }; });
     assert.equal(f.open, null, "no Open pill when narrow");
-    assert.deepEqual([f.kind, f.w, f.dl[0], f.dl[2]], ["slides", 44, true, 28], "the sheet and the download icon stay");
+    assert.deepEqual([f.kind, f.w, f.dl[0], f.dl[2]], ["slides", 28, true, 24], "the sheet and the download icon stay (size C: 28 px sheet, 24 px button)");
     const box = await card.boundingBox(), sheet = await card.locator(".dgc-sheet").boundingBox(), dl = await card.locator(".dgc-doc-dl").boundingBox();
     assert.ok(dl.x + dl.width <= box.x + box.width && Math.abs(dl.y + dl.height / 2 - (sheet.y + sheet.height / 2)) < 8, "on one line, inside the card");
     assert.equal(await s.page.evaluate(() => document.documentElement.scrollWidth), 300);
