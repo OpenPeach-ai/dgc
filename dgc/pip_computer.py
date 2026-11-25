@@ -2575,6 +2575,25 @@ def job_check_ins(registry, config, now=None) -> int:
     return sent
 
 
+def close_switched_off(registry) -> int:
+    """A Pip switched off (paused) or archived runs nothing on its own, its computer included (his report, 25 Nov: switched
+    off, its computer kept running until it idled out). Each of its computers closes as soon as nothing uses it: no run
+    of the Pip has it (an Off Pip still answers when you write to it, and its computer opens again if that answer needs
+    it) and nothing on it waits for the person. Its sign-ins and Files stay on disk."""
+    idle = [key for key, host in list(HOSTS.items()) if getattr(host, "run_id", None) is None and not host.browser.held]
+    if not idle:
+        return 0
+    ids = sorted({key[0] for key in idle})
+    off = {row["id"] for row in registry.db.execute(
+        f"SELECT id FROM pips WHERE status IN ('paused','archived') AND id IN ({','.join('?' * len(ids))})", ids).fetchall()}
+    closed = 0
+    for key in idle:
+        if key[0] in off:
+            stop_one(key)
+            closed += 1
+    return closed
+
+
 def tick(registry, config) -> dict:
     """In the supervisor: carry out decisions, expire old holds, close idle computers."""
     from .pips import PipStore
@@ -2695,6 +2714,7 @@ def tick(registry, config) -> dict:
         if host.run_id is None and not host.browser.held and time.monotonic() - host.last_used > IDLE_SECONDS:
             stop_one(key)                # that computer only: another of the Pip's may be busy
             done["closed"] += 1
+    done["closed"] += close_switched_off(registry)
     # What the user approved while its chat was busy: its next turn, now the chat is free (pip_chat.send_owed_turns).
     from .pip_chat import send_owed_turns
     send_owed_turns(registry, config)

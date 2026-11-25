@@ -6,6 +6,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.52.0 — unreleased (the date goes in on release day)
 
+- **Switched off, a Pip's computer closes.** A Pip that is off (or archived) runs nothing on its own, its computer
+  included: each of its computers closes as soon as nothing uses it (no answer of it at work, no card waiting on it),
+  instead of waiting to idle out. Its sign-ins and Files stay; written to, it still answers and opens its computer again.
 - **The Artifacts tools are offered in the adaptive tool profile too.** `make_artifact`, `edit_artifact` and
   `find_artifacts` were offered there only when a prompt matched a few words, so "design me a landing page, show me here
   in the Canvas" got no design tool and the model said the Canvas couldn't open. They are offered on every turn in every
