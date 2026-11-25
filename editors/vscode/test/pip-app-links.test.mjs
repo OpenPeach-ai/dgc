@@ -680,3 +680,23 @@ test('linking one more address keeps the address it had: both are the Pip’s, a
  x.click(`[data-allow-from="${DRAFT}"]`);
  assert.deepEqual([...x.d.querySelectorAll('.allow-from-menu [role=menuitemradio]')].map(r=>r.textContent.trim()).sort(),['me@example.com','work@example.com'],'the first address was not dropped');
 });
+
+// 25 Nov (seen walking a Project Pip through): "Let Cart audit put this on Terminal? It read this from your apps" with
+// Allow once, and nothing saying what "this" was: the hold carries the exact text, and the card never showed it. It shows
+// it now, all of it, in a box that scrolls; and a Terminal is said as one: "run this in its Terminal".
+test('a careful hold shows exactly what it would type; one for its Terminal says so',async()=>{
+ const id=c=>'compact_'+c.repeat(32);
+ const cmd="python3 - <<'EOF'\nfrom pathlib import Path\np = Path('billing/totals.py')\np.write_text(p.read_text().replace('sum(i.price * i.qty)', 'max(0, sum(i.price * i.qty) - discount)'))\nEOF";
+ const term={id:id('c'),pip_id:PIP,workspace_id:PW,run_id:'run_'+'b'.repeat(32),summary:{kind:'text',read_from_apps:true,method:'TYPE',host:'Terminal',path:'/',page:'',fields:[{name:'typed',value:cmd}],text:cmd,more_fields:0,body_bytes:0},digest:'d'.repeat(64),frame:null,status:'pending',created_at:'2026-11-25T10:00:00Z',expires_at:'2099-11-25T11:00:00Z',resolved_at:null,resolved_by:null,continuation_run_id:null};
+ const page={...term,id:id('d'),summary:{...term.summary,host:'forum.example',path:'/post',page:'https://forum.example/post',text:'Order 1042 ships Friday.',fields:[{name:'typed',value:'Order 1042 ships Friday.'}]}};
+ const x=setup({links:[],computer:{pip_id:PIP,granted:true,available:true,reason:'',pending:2,actions:[term,page]}});await openChat(x);
+ let card=x.d.querySelector('[data-computer-card]');
+ assert.match(card.querySelector('strong').textContent,/^Let Gmail run this in its Terminal\?$/);
+ assert.doesNotMatch(card.textContent,/from your apps/,'a Terminal is not one of your apps');
+ const held=card.querySelector('pre.held-text');
+ assert.ok(held,'what it would type, in the card');assert.equal(held.textContent,cmd,'all of it, exactly');
+ x.click(`[data-computer-decide="${id('c')}"][data-approve="0"]`);
+ const no=x.requests('decide_pip_computer_action').at(-1);
+ x.answer(no,{action:{...term,status:'rejected',resolved_at:'2026-11-25T10:01:00Z',resolved_by:'editor-user'}});
+ card=null;
+});

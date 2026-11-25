@@ -6,12 +6,13 @@
    tokens.css. */
 .dgc-pagehead { box-sizing: border-box; flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; min-height: 39px; margin: 0; padding: 2px 0 8px;
   border: 0; border-bottom: 1px solid var(--hair); background: none; }
-/* The name never breaks inside a word: when the row is too short it ends in "…". Its box is its capitals, from their
-   top to the baseline (text-box), so the row centres the status dot and ⋯ on the middle of the letters, not of a box
-   that also holds the space under the line (noted 17 Nov: the dot and ⋯ sat under the middle of "Pips"). It clips
-   only sideways, for the "…": the descenders of "Pips" show under the trimmed box. */
+/* The name never breaks inside a word: when the row is too short it ends in "…". Its box is its small letters, from
+   their top to the baseline (text-box: ex), so the row centres the status dot and ⋯ where a middle dot "·" sits: on the
+   middle of the small letters, not of a box that also holds the space under the line (17 Nov: the dot and ⋯ sat under
+   the middle of "Pips") and not on the capital's middle either (26 Nov: there the dot read high beside "ips"). It
+   clips only sideways, for the "…": the capital's top and the descenders of "Pips" show past the trimmed box. */
 .dgc-pagehead > .dgc-pagehead-title { flex: 0 1 auto; min-width: 0; margin: 0; padding: 0; overflow-x: clip; overflow-y: visible; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; word-break: normal;
-  color: var(--text-strong); font: var(--w-semi) 15px/1.3 var(--sans); letter-spacing: 0; text-transform: none; text-box: trim-both cap alphabetic; }
+  color: var(--text-strong); font: var(--w-semi) 15px/1.3 var(--sans); letter-spacing: 0; text-transform: none; text-box: trim-both ex alphabetic; }
 .dgc-pagehead-aside { flex: none; display: inline-flex; align-items: center; }
 .dgc-pagehead-gap { flex: 1 1 0; min-width: 0; }
 .dgc-pagehead .dgc-pagehead-more { appearance: none; list-style: none; flex: none; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 28px; height: 28px; min-width: 28px; min-height: 28px; margin: 0; padding: 0;

@@ -13,7 +13,9 @@ const ar = (n) => "ar_" + String(n).repeat(16).slice(0, 16);
 // (How long ago each thing was made is kept in minutes and written as a time when a scene opens, so "40m" reads 40m
 // however long the test file has been running.)
 const AGES = new Map(), ago = (minutes) => { const said = `ago:${minutes}`; AGES.set(said, minutes); return said; };
-const dated = (list) => (Array.isArray(list) ? list.map((item) => Object.fromEntries(Object.entries(item).map(([k, v]) => [k, typeof v === "string" && /^ago:\d+$/.test(v) ? new Date(Date.now() - Number(v.slice(4)) * 60000).toISOString() : v]))) : list);
+// One clock per list: two items said to be the same age get the same time (the clock moving a millisecond between
+// them made the second one newer, and Widgets' newest-first order changed under the test, r123 and r150).
+const dated = (list) => { if (!Array.isArray(list)) return list; const now = Date.now(); return list.map((item) => Object.fromEntries(Object.entries(item).map(([k, v]) => [k, typeof v === "string" && /^ago:\d+$/.test(v) ? new Date(now - Number(v.slice(4)) * 60000).toISOString() : v]))); };
 const A = (n, type, title, minutes, origin, made_by, more = {}) => ({ id: ar(n), type, label: { page: "Page", doc: "Document", slides: "Slides", sheet: "Sheet", dashboard: "Dashboard" }[type], title, version: 1 + (n % 3),
   created: ago(minutes + 600), updated: ago(minutes), origin, made_by, exports: type === "sheet" ? ["xlsx", "csv"] : ["html"], ...more });
 export const TILE = pipId("b"), MORNING = pipId("c");

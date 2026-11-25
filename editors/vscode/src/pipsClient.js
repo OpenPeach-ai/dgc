@@ -462,7 +462,7 @@ const heldRejects=new Map(),REJECT_HOLD_MS=6000;
 // Show all, opened on a run's result or a routine's reply (by run or message id): for this view only.
 const shownInFull=new Set();
 S.sidebarPinned=savedView?.sidebar_pinned===true;
-function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,...(S.apiVersion>=ONE_API?{pips_filter:one.filter}:{}),selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,conversations:Object.fromEntries([...convShown].slice(-20)),conversation_drafts:Object.fromEntries([...convDrafts].slice(-40)),conversations_hidden:convState.collapsed,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500),goals_dismissed:[...goalsDismissed].slice(-100)};options.setState?.(savedView);shareDraft();}
+function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,...(S.apiVersion>=ONE_API?{pips_filter:one.filter}:{}),selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,conversations:Object.fromEntries([...convShown].slice(-20)),conversation_drafts:Object.fromEntries([...convDrafts].slice(-40)),conversations_hidden:convState.collapsed,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100),attention_folded:[...attentionFolded].slice(-500),goals_dismissed:[...goalsDismissed].slice(-100),changes_dismissed:[...changesDismissed].slice(-200)};options.setState?.(savedView);shareDraft();}
 const characterStyles=document.createElement('style');characterStyles.id='pips-plush-styles';characterStyles.textContent=window.PipConcepts.plush.styles;document.head.append(characterStyles);
 let outcomeSessions=[],outcomeSessionsCursor='',outcomeSessionsMore=false,outcomeSessionsLoaded=false,outcomeSessionsLoading=false,outcomeSessionsError='',outcomeHistory=[],outcomeCursor=null,outcomeLoaded=false,outcomeLoading=false,outcomeError='',outcomeInspection=null,outcomeInspecting=false,outcomeSessionSeq=0,outcomeSeq=0,outcomeInspectSeq=0,outcomeReviewSeq=0,outcomeRetry=null;
 let notifications=null,notificationItems=[],notificationLoading=false,notificationError='',notificationSeq=0,notificationMark='';
@@ -1614,10 +1614,10 @@ async function loadMessages(more=false){
  if(!more)askPipUsage(true);
  if(!more){void loadFlow();void loadGoal();void loadConversations();void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadLevel();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
-  const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null,optionsEpoch=chatOptionsEpoch;S.messagesLoading=true;
+  const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null,optionsEpoch=chatOptionsEpoch,first=!more&&!S.messagesLoaded;S.messagesLoading=true;
   if(!S.messagesLoaded)render();
   let back=null;
-  try{const page=messagesPage(await send('list_pip_messages',{pip_id:id,limit:20,...(before?{before_id:before}:{}),...convArg()}),id,S.workspace.id);if(token!==scope()||sequence!==messageSeq)return;if(S.apiVersion>=24){S.chatControls=null;S.chatControls=checkedChatControls(page.chat_controls);
+  try{const page=messagesPage(await send('list_pip_messages',{pip_id:id,limit:CHAT_PAGE,...(before?{before_id:before}:{}),...convArg()}),id,S.workspace.id);if(token!==scope()||sequence!==messageSeq)return;if(S.apiVersion>=24){S.chatControls=null;S.chatControls=checkedChatControls(page.chat_controls);
     // Since API 47 DGC keeps the Pip's own window and thinking, so what it says wins over what this view remembered:
     // the main chat may have changed them. Not while this view is saving its own choice, or when a save overlapped.
     const kept=S.apiVersion>=47&&!remoteHost&&!before&&optionsEpoch===chatOptionsEpoch&&!chatOptionsSaving.has(id);
@@ -1635,7 +1635,22 @@ async function loadMessages(more=false){
     if(!more)void loadReplyStats();
     if(!more)projectChangesDue(id,page);
   }catch(error){if(token===scope()&&sequence===messageSeq)S.messagesError=errorText(error);}
-  finally{if(token===scope()&&sequence===messageSeq){S.messagesLoading=false;render();maybeMarkRead();}}
+  finally{if(token===scope()&&sequence===messageSeq){S.messagesLoading=false;render();maybeMarkRead();if(first&&S.messagesLoaded)void fillEarlier(token,id);}}
+}
+// A Pip's chat opens with up to its last CHAT_KEPT messages, as a Work session shows its long history (his call, 25 Nov: it
+// opened with 20): pages of CHAT_PAGE, the most DGC gives at once, read back on first open; its runs' posts reach as far
+// back. Load earlier messages is there only for a chat longer than that.
+const CHAT_PAGE=50,CHAT_KEPT=200;
+async function fillEarlier(token,id){
+ for(let i=0;i<Math.ceil(CHAT_KEPT/CHAT_PAGE)&&token===scope()&&S.selected===id&&S.messageCursor&&S.messages.length<CHAT_KEPT;i++){
+  const before=S.messages.length;await loadMessages(true);if(S.messages.length<=before)break;
+ }
+ const oldest=Date.parse(S.messages[0]?.created_at||'');
+ for(let i=0;i<4&&token===scope()&&S.selected===id&&postsShown()&&S.postsCursor&&Number.isFinite(oldest);i++){
+  const last=S.posts.at(-1)||S.posts[0],at=Date.parse(S.posts.reduce((m,p)=>!m||Date.parse(p.posted_at)<Date.parse(m.posted_at)?p:m,null)?.posted_at||'');
+  if(!last||!(at>oldest))break;
+  const count=S.posts.length;await loadPosts(true);if(S.posts.length<=count)break;
+ }
 }
 // A message waiting with no reply running has its turn starting this moment: see it start without waiting for the next poll.
 let waitingLooks=0,waitingLook=0;
@@ -2822,7 +2837,9 @@ function waitingCard(a,count){
  const s=a.summary||{},words=carefulWords(s,name);
  if(isCode(s))return codeCard(a,count);
  if(!words)return computerSubmitCard(a,name,off,count);
- return `<div class="dgc-card app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(words[0],s,esc)}</strong><small>${wordsHtml(words[1],s,esc)}</small></div>${count}</div><div class="dgc-card-actions app-link-actions">${heldButtons(a,s,name,off)}</div></div>`;
+ // What it would type, all of it, in the card (25 Nov: "Let Cart audit put this on Terminal?" never said what "this" was).
+ const held=s.kind==='text'&&typeof s.text==='string'&&s.text?`<pre class="held-text" tabindex="0" aria-label="What it would type">${esc(s.text)}</pre>`:'';
+ return `<div class="dgc-card app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="dgc-card-head app-link-head"><span class="dgc-card-icon app-link-mark" aria-hidden="true">!</span><div class="dgc-card-words app-link-words"><strong>${wordsHtml(words[0],s,esc)}</strong><small>${wordsHtml(words[1],s,esc)}</small></div>${count}</div>${held}<div class="dgc-card-actions app-link-actions">${heldButtons(a,s,name,off)}</div></div>`;
 }
 // A submit its computer holds, as the Soft card (approved 2026-11-05): what it is, what Always allow would cover, Send once /
 // Always allow / Reject, and the rest under Details. A payment is never sent once in one tap: Review… shows it first. Since
@@ -3566,8 +3583,10 @@ function quickScheduleMarkup(){const q=quickScheduleParts();return q.html+infoTi
 function quickScheduleParts(){
  const p=S.pip,off=S.busy||!usable(),next=record(p.schedule_state)?p.schedule_state.next_due_at:null;
  if(executionPip(p)&&!pulsePip(p))return {html:'<p class="muted">On a handoff only.</p>',says:'It runs only when you approve a handoff to it.'};
- if(currentTree())return {html:'<p class="muted">When you ask.</p>',says:'It runs when you ask. A schedule needs committed source (see Advanced).'};
- if(pulsePip(p)||documentationPip(p)&&S.apiVersion<20)return {html:`<p>${esc(p.event_trigger?eventTriggerLabel(p.event_trigger):scheduleLabel(p.schedule))}</p><button type="button" data-tab="schedule">Change…</button>`,says:''};
+ // A Pip that reads your current files runs only when you ask, with its own copy or without: DGC refuses a schedule or
+ // events for it (pip_sources.validate_job, manual_only). Only the older page has Advanced, where its source is changed.
+ if(currentTree())return {html:'<p class="muted">When you ask.</p>',says:pageView()?'It reads your files as they are, so it runs only when you ask.':'It runs when you ask. A schedule needs committed source (see Advanced).'};
+ if(planPage(p))return {html:`<p>${esc(p.event_trigger?eventTriggerLabel(p.event_trigger):scheduleLabel(p.schedule))}</p><button type="button" data-tab="schedule">Change…</button>`,says:''};
  const kinds=[['manual','When I ask'],['daily','Every day'],['weekdays','Weekdays'],['hours','Every few hours'],...(draft.quickKind==='custom'?[['custom',p.event_trigger?eventTriggerLabel(p.event_trigger):scheduleLabel(p.schedule)]]:[])];
  const says=draft.quickKind==='custom'?'Set in Advanced.':draft.quickKind==='manual'?'It runs when you ask it to.':draft.quickKind==='hours'?'':`Times are in ${draft.quickZone}.`;
  return {says,html:`<form id="quick-schedule-form" class="quick-schedule"><select id="quickKind" data-draft="quickKind" aria-label="When it runs"${says?' aria-describedby="pipRunsSays"':''}${off?' disabled':''}>${kinds.map(([key,label])=>`<option value="${key}"${draft.quickKind===key?' selected':''}>${esc(label)}</option>`).join('')}</select>${['daily','weekdays'].includes(draft.quickKind)?`<label class="inline">at <input id="quickTime" data-draft="quickTime" type="time" step="60" value="${esc(draft.quickTime)}" required${off?' disabled':''}></label>`:draft.quickKind==='hours'?`<label class="inline">every <input id="quickHours" data-draft="quickHours" type="number" min="1" max="168" step="1" value="${esc(draft.quickHours)}" required${off?' disabled':''}> hours</label>`:''}<button type="submit" class="primary"${off||draft.quickKind==='custom'||!S.quickDirty?' disabled':''}>Save</button></form>${next&&!S.quickDirty?`<p class="settings-fact">Next run ${esc(date(next))}.</p>`:''}`};
@@ -5502,19 +5521,36 @@ function flowFixFor(runId){const list=(flowNow()?.fixes||[]).filter(f=>f.run_id=
 // The change card of a fix: the project-change card, drawn with its fix and nowhere else in the chat.
 function flowChangeIds(){return new Set((flowNow()?.fixes||[]).map(f=>f.change_id).filter(Boolean));}
 function flowChangeCard(fix){
- const change=fix.change_id?S.projectChanges.find(c=>c.id===fix.change_id):null;if(!change)return '';
+ const change=fix.change_id?S.projectChanges.find(c=>c.id===fix.change_id):null;if(!change||changesDismissed.has(change.id))return '';
  const off=archived()||!usable();
  return projectCardMarkup({...change,...(fix.tests&&!change.tests?{tests:fix.tests}:{})},{esc,open:projectOpen,diffs:projectDiffs,busy:projectBusy?.id===change.id?projectBusy.what:'',off:off||(!!projectBusy&&projectBusy.id!==change.id),
-  confirm:projectConfirm===change.id,note:projectNotes.get(change.id)||'',error:projectErrors.get(change.id)||'',one:true,canCommit:S.apiVersion>=FLOW_API,
+  confirm:projectConfirm===change.id,note:projectNotes.get(change.id)||'',error:projectErrors.get(change.id)||'',one:true,canCommit:S.apiVersion>=FLOW_API,dismiss:changeDone(change),
   ...(convOn()?{look:'work',folded:!changeUi.opened.has(change.id),menu:changeUi.menu===change.id}:{})});
 }
 /** Under a check's post: its findings as one card, then what became of them: the Allow card, the fix at work, its change. */
 function flowUnderPost(p){
  const fix=flowFixFor(p.run_id),found=fix?.findings.length?fix.findings:fixesPage({pip_id:S.selected,fixes:[{id:'pipfix_'+'0'.repeat(32),state:'ask',count:0,digest:'-',findings:Array.isArray(p.findings)?p.findings.slice(0,50):[]}]},S.selected).fixes[0]?.findings||[];
  const total=Number.isSafeInteger(p.total)&&p.total>=found.length?p.total:found.length;
- if(convOn())return (p.outcome==='findings'?foundListMarkup({runId:p.run_id,findings:found,total},{esc,off:!usable()}):'')+(fix?flowFixMarkup(fix):'');
+ if(convOn())return (p.outcome==='findings'?foundListMarkup({runId:p.run_id,findings:found,total},{esc,off:!usable()}):'')+(fix?flowFixMarkup(fix):'')+waitingCards(waitingUnder(p.run_id));
  const card=p.outcome==='findings'?findingsCardMarkup({runId:p.run_id,findings:found,total,counts:record(p.found)?p.found:null,name:S.pip.name},{esc,off:!usable()}):'';
- return card+(fix?flowFixMarkup(fix):'');
+ return card+(fix?flowFixMarkup(fix):'')+waitingCards(waitingUnder(p.run_id));
+}
+// What only you can do (25 Nov, his report: answered lines stuck in a pinned area at the top of the chat): each card stands
+// in the chat where it came from, under the check whose fix found it, and once answered is one line there. One whose
+// check isn't in the chat (or from a DGC that doesn't say which fix found it) waits at the chat's end. Nothing is pinned.
+function waitingUnder(runId){
+ const page=flowNow();if(!page?.waiting.length)return [];
+ const fixes=new Set(page.fixes.filter(f=>f.run_id===runId).map(f=>f.id));
+ return page.waiting.filter(w=>w.fix&&fixes.has(w.fix));
+}
+function waitingPlaced(){
+ const page=flowNow();if(!page?.waiting.length||!chatPosts())return new Set();
+ const drawn=new Set(S.posts.map(p=>p.run_id)),runOf=new Map(page.fixes.map(f=>[f.id,f.run_id]));
+ return new Set(page.waiting.filter(w=>w.fix&&drawn.has(runOf.get(w.fix))).map(w=>w.id));
+}
+function waitingCards(list){
+ const off=archived()||!usable();
+ return list.map(w=>waitingCardMarkup(w,{esc,off:off||!!flow.busy&&flow.busy.id!==w.id,busy:flow.busy?.id===w.id?flow.busy.what:'',error:flow.errors.get(w.id)||''})).join('');
 }
 const ENDED_SAYS={unchanged:'I looked and found nothing to change.',failed:'The fix didn’t finish.',stopped:'The fix was stopped. Nothing in your folder was changed.',interrupted:'The fix was interrupted. Nothing in your folder was changed.',undone:'The fix was undone.',discarded:'You discarded the fix.'};
 /** One fix in the conversation (Pips API 97): the Pip's question and the permission card; then the answered line, its
@@ -5597,17 +5633,15 @@ function flowFixMarkup(fix){
 function flowTailMarkup(){
  const page=flowNow();if(!page)return soloWorkMarkup();
  const drawn=new Set(chatPosts()?S.posts.map(p=>p.run_id):[]);
+ const placed=waitingPlaced();
  return page.fixes.filter(f=>!f.run_id||!drawn.has(f.run_id)).filter(f=>!['discarded','undone','unchanged','declined'].includes(f.state)).map(flowFixMarkup).join('')
+  +waitingCards(page.waiting.filter(w=>!placed.has(w.id)))
   +soloWorkMarkup()+(flow.error?`<p class="app-link-note" role="alert">${esc(flow.error)}</p>`:'');
 }
-// What only you can do: one line at the top of its chat, and its cards under it when shown.
+// What only you can do used to be one line pinned at the top of its chat, its cards under it when shown; its cards are in
+// the chat now (waitingUnder, flowTailMarkup), and nothing is pinned.
 function flowPinnedMarkup(){
- const page=flowNow();if(!page?.waiting.length)return '';
- const line=waitingLineMarkup(page.waiting,{esc,open:flow.waitingOpen}),off=archived()||!usable();
- // (What was just answered keeps its line under the pinned one while it is open, with Undo where there is one.)
- const cards=flow.waitingOpen?page.waiting.map(w=>waitingCardMarkup(w,{esc,off:off||!!flow.busy&&flow.busy.id!==w.id,busy:flow.busy?.id===w.id?flow.busy.what:'',error:flow.errors.get(w.id)||''})).join(''):'';
- if(!line&&!cards)return '';
- return `<div class="pip-found-pinned">${line}${cards?`<div class="pip-found-pinned-list" id="pip-waiting-list">${cards}</div>`:''}</div>`;
+ return '';
 }
 function flowLive(){return (flowNow()?.fixes||[]).find(f=>FIX_LIVE.includes(f.state))||null;}
 async function flowDecide(id,allow){
@@ -5654,10 +5688,14 @@ function projectReview(id){
  for(const f of files){const key=`${id}|${f.path}`;if(all)projectOpen.delete(key);else if(!projectOpen.has(key)){projectOpen.add(key);void loadProjectDiff(id,f.path);}}
  render();
 }
+// Change cards taken out of the chat once done (his report, 25 Nov), kept across reloads; and what "done" is.
+const changesDismissed=new Set(Array.isArray(savedView?.changes_dismissed)?savedView.changes_dismissed.filter(id=>typeof id==='string'&&id.length<=128).slice(-200):[]);
+function changeDone(c){return ['undone','discarded'].includes(c.status)||(c.status!=='pending'&&(!record(c.git)||c.git.committed===true));}
 async function projectCommit(id){
  const change=S.projectChanges.find(c=>c.id===id);if(!change||!usable()||projectBusy||archived())return;
  const token=scope(),pip=S.selected;projectBusy={id,what:'commit'};projectErrors.delete(id);render();
- try{const decided=projectAnswer(await send('commit_pip_project_change',{pip_id:pip,change_id:id}),id);if(token!==scope()||S.selected!==pip)return;S.projectChanges=S.projectChanges.map(c=>c.id===id?decided:c);}
+ try{const decided=projectAnswer(await send('commit_pip_project_change',{pip_id:pip,change_id:id}),id);if(token!==scope()||S.selected!==pip)return;S.projectChanges=S.projectChanges.map(c=>c.id===id?decided:c);
+  void loadProjectChanges();}   // (a commit may take another card's files too: every card says what Git says of its own files now)
  catch(error){if(token===scope()&&S.selected===pip)projectErrors.set(id,errorText(error));}
  finally{if(projectBusy?.id===id)projectBusy=null;if(token===scope())render();}
 }
@@ -5691,6 +5729,10 @@ function placePartMarkup(){
 function folderMoveKind(){return onePips()?moveOffered(S.pip,{apiVersion:S.apiVersion,remote:remoteHost,archived:archived()}):'';}
 function folderMoveMenuRow(){const kind=folderMoveKind();return kind?moveMenuRow(kind,{off:S.busy||!usable(),icon:a=>window.DgcIcons?.html(a,{size:15})||''})+'<hr>':'';}
 // What only a Pip with a folder has, on its settings page.
+/** Its Settings page shows the folder group (Works in, What it reads, When it runs…): every Pip but a Personal one. */
+function folderParts(){return !!S.pip&&!personalPip();}
+// The Pips whose schedule shares a page with their plan: a Pulse, and a documentation Pip before API 20.
+function planPage(p){return pulsePip(p)||documentationPip(p)&&S.apiVersion<20;}
 function folderPartsMarkup(p){
  const row=pipFolderRow(p),name=row?.name||spaceName(p.workspace_id)||'its folder',Pick=globalThis.DgcFolderPick,boxed=folderBox();
  const branch=typeof p.source_ref==='string'&&p.source_ref&&p.source_ref!=='HEAD'&&p.source_policy?.mode!=='working_tree'?p.source_ref:'';
@@ -5706,9 +5748,23 @@ function folderPartsMarkup(p){
  return `<section class="pip-page-group pip-folder-parts" aria-label="Its folder"><h3 class="pip-page-label">Its folder</h3>`
   +`<div class="pip-page-row static"><span class="row-words"><strong>Works in</strong><small class="pip-folder-where" title="${esc(row?.folder||name)}">${row&&row.exists===false?'<span class="pip-row-folder-note">Folder not found</span> ':''}${row&&Pick?Pick.pathHtml(row.shown,row.folder):esc(name)}</small></span>${folderMoveKind()===MOVE.remove?moveButton(MOVE.remove,{off:S.busy||!usable()}):''}</div>`
   +`<div class="pip-page-row static"><span class="row-words"><strong>What it reads</strong><small>${esc(reads)}</small></span></div>`
-  +`<button type="button" class="pip-page-row" data-tab="schedule"><span class="row-words"><strong>When it runs</strong><small class="row-preview">${esc(runs)}</small></span>${chev}</button>`
+  // When it runs, changed in place with the editor its routines use, saved at once (his call, 25 Nov: nothing of the old
+  // reviewed-schedule page left); a Pulse's plan and a handoff-only Pip still say why theirs is set elsewhere.
+  // A Pulse's plan (tests or live-data commands, saved as a reviewed change) is one page with its schedule: its Change
+  // opens that page at once, not an in-place editor that only offered a second Change… (r149 review, 25 Nov).
+  +(planPage(p)?`<div class="pip-page-row static pip-when"><span class="row-words"><strong>What and when it runs</strong><small class="row-preview">${esc(runs)}</small></span><button type="button" class="quiet" data-tab="schedule"${S.busy||!usable()?' disabled':''}>Change</button></div>`
+  // One that reads your current files has nothing to change here (r149 review: its editor offered a schedule DGC refuses).
+  :currentTree(p)?`<div class="pip-page-row static pip-when"><span class="row-words"><strong>When it runs</strong><small class="row-preview">Only when you ask. It reads your files as they are.</small></span></div>`
+  :`<div class="pip-page-row static pip-when"><span class="row-words"><strong>When it runs</strong><small class="row-preview">${esc(runs)}</small></span><button type="button" class="quiet" data-when-change aria-expanded="${S.legacyOpen}"${S.busy||!usable()?' disabled':''}>${S.legacyOpen?'Done':'Change'}</button></div>`)
+  +(S.legacyOpen?`<div class="routine-legacy-edit pip-when-edit">${quickScheduleMarkup()}</div>`:'')
   +`<button type="button" class="pip-page-row" data-tab="runs"><span class="row-words"><strong>Reports</strong><small class="row-preview">What each check found, as a table</small></span>${chev}</button>`
-  +`<button type="button" class="pip-page-row" data-tab="revisions"><span class="row-words"><strong>Version history and approvals</strong><small class="row-preview">Every change to it, and who approved it</small></span>${chev}</button></section>`;
+  +`<button type="button" class="pip-page-row" data-tab="revisions"><span class="row-words"><strong>Version history and approvals</strong><small class="row-preview">Every change to it, and who approved it</small></span>${chev}</button>`
+  +folderMoreMarkup()+`</section>`;
+}
+// What left its menu (one Pip menu, 25 Nov) is one click from its Settings page: Handoffs, Memory, Context, as it has them.
+function folderMoreMarkup(){
+ const kept=pipSections().filter(([key])=>['handoffs','memory','context'].includes(key));
+ return kept.length?`<p class="pip-folder-more"><span class="muted">More:</span> ${kept.map(([key,text])=>`<button type="button" class="pip-link" data-tab="${key}">${esc(text)}</button>`).join('<span class="muted" aria-hidden="true"> · </span>')}</p>`:'';
 }
 // Choosing Do it all says what it means first (decided, like Work's auto mode). Continue sets it; Cancel leaves it.
 const FULL_WARNING='A Pip on Do it all acts without asking. It can send anything it sees, including your code, to the web. It applies its fixes to your folder, and it can start a sub-agent with full Work tools on your real files, including ones Git ignores such as .env. Payments follow the limit you set.';
@@ -6184,7 +6240,10 @@ function simplePipHeader(){
  // One Pips: every Pip has the Personal Pip's header. A Pip with a folder keeps every section it has in its menu, with
  // Run now there, and says its folder beside its name.
  const project=!pagePip(),folderPip=!personalPip()&&!project,every=project||folderPip?pipSections():null;
- const sections=(project||folderPip?every:[['chat','Chat'],['runs',historyName('Results')],['job','Settings'],...(S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?[['memory','Memory']]:[]),['revisions','Changes'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]).filter(([key])=>key!==S.tab);
+ // One Pip menu (his call, 25 Nov): a Pip with a folder has a Personal Pip's pages in it, Reports, Settings and
+ // Notifications; its schedule, version history, handoffs, memory and context are on its Settings page. A Project Pip
+ // on the older page (a remote machine, or Pips before One Pips) keeps them all: its Settings page has no such rows.
+ const sections=(project?every:folderPip?every.filter(([key])=>['runs','job','notifications'].includes(key)):[['chat','Chat'],['runs',historyName('Results')],['job','Settings'],...(S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?[['memory','Memory']]:[]),['revisions','Changes'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]).filter(([key])=>key!==S.tab);
  if(S.apiVersion>=43&&!remoteHost&&mayHaveBox()&&screenSetup.pip!==S.selected&&!screenSetup.loading)void loadDesktopStatus();
  const computer=!(S.apiVersion>=42&&(personalPip()||folderBox()))?'':settingUpComputer()
   ?`<span class="topbar-setup" role="status" title="Getting its computer ready. This happens once."><span class="topbar-spinner" aria-hidden="true"></span>Setting up your Pip…</span>`
@@ -6733,7 +6792,7 @@ function projectChangeCards(){
  const lastUserAt=Math.max(0,...(S.messages||[]).filter(m=>m.role==='user'&&m.intro!==true).map(m=>Date.parse(m.created_at)||0));
  const off=archived()||!usable();
  const withFix=flowChangeIds();
- return shownProjectChanges(S.projectChanges,{lastUserAt}).filter(c=>!withFix.has(c.id)).map(c=>projectCardMarkup(c,{one:onePips(),canCommit:S.apiVersion>=FLOW_API,esc,open:projectOpen,diffs:projectDiffs,busy:projectBusy?.id===c.id?projectBusy.what:'',off:off||(!!projectBusy&&projectBusy.id!==c.id),
+ return shownProjectChanges(S.projectChanges,{lastUserAt}).filter(c=>!withFix.has(c.id)&&!changesDismissed.has(c.id)).map(c=>projectCardMarkup(c,{one:onePips(),canCommit:S.apiVersion>=FLOW_API,esc,open:projectOpen,diffs:projectDiffs,busy:projectBusy?.id===c.id?projectBusy.what:'',off:off||(!!projectBusy&&projectBusy.id!==c.id),dismiss:changeDone(c),
    confirm:projectConfirm===c.id,note:projectNotes.get(c.id)||'',error:projectErrors.get(c.id)||''})).join('')
   +(S.projectsError?`<p class="app-link-note" role="alert">${esc(S.projectsError)}</p>`:'');
 }
@@ -6760,7 +6819,7 @@ async function projectDecide(what,id){
   S.projectChanges=S.projectChanges.map(c=>c.id===id?decided:c);projectConfirm='';
   for(const key of [...projectOpen])if(key.startsWith(id+'|'))projectOpen.delete(key);
   // What Apply held back is still different in the Pip's copy: DGC lists it as a change of its own.
-  if(what==='apply')void loadProjectChanges();}
+  if(what==='apply'||what==='undo')void loadProjectChanges();}   // (Apply's held-back rest, and every card's own Git state after an Undo)
  catch(error){if(token!==scope()||S.selected!==pip)return;
   // The Pip changed more since this card was drawn: nothing was applied. The change is read and shown again.
   if(what==='apply'&&error?.code==='conflict'){projectNotes.set(id,MOVED_ON);await loadProjectChanges();}
@@ -6990,7 +7049,7 @@ function routinesSectionMarkup(short=false){   // short: on its page, where the 
  if(!S.routines)return '<p class="muted" role="status">Loading…</p>';
  const links=S.appLinks||[],busy=!!routineBusy||S.busy||!usable();
  const form=routineEditing?routineFormMarkup(draft,{esc,busy,error:routineError,isNew:routineEditing==='new',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar'),apps:ownAppNames(),events:appEventNames.get(draft.routineApp)||[],webhooks:webhookRoutines()}):'';
- return routinesMarkup(S.routines,{esc,busy,editing:routineEditing,form,formatDate:date,pipName:S.pip.name,short,posts:r=>convList()?routinePostsMarkup(r,convList(),{esc,busy}):'',panel:hookPanel,schedule:S.pip.schedule?scheduleLabel(S.pip.schedule):'',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar')})+(S.legacyOpen&&S.pip.schedule?`<div class="routine-legacy-edit">${quickScheduleMarkup()}</div>`:'');
+ return routinesMarkup(S.routines,{esc,busy,editing:routineEditing,form,formatDate:date,pipName:S.pip.name,short,posts:r=>convList()?routinePostsMarkup(r,convList(),{esc,busy}):'',panel:hookPanel,schedule:S.pip.schedule&&!folderParts()?scheduleLabel(S.pip.schedule):'',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar')})+(S.legacyOpen&&S.pip.schedule&&!folderParts()?`<div class="routine-legacy-edit">${quickScheduleMarkup()}</div>`:'');
 }
 function routinePopoverMarkup(){
  if(S.composerPanel!=='routines'||!keepsAll()||S.apiVersion<43)return '';
@@ -8012,7 +8071,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.routineNew!==undefined){editRoutine('new');return;}
   if(target.dataset.routineCancel!==undefined){routineEditing='';routineError='';closeHook();render();return;}
   if(target.dataset.routineDelete){const id=target.dataset.routineDelete;void routineCall('delete_pip_routine',{routine_id:id},id,'Routine deleted.').then(r=>{if(r){routineEditing='';closeHook();render();}});return;}
-  if(target.dataset.routineLegacy!==undefined){S.legacyOpen=!S.legacyOpen;render();return;}
+  if(target.dataset.routineLegacy!==undefined||target.dataset.whenChange!==undefined){S.legacyOpen=!S.legacyOpen;if(S.legacyOpen)hydrateQuickSchedule(S.pip);render();return;}
   if(target.dataset.pipPage){const v=target.dataset.pipPage;if(v==='instructions')draft.pipInstructions=S.pip?.goal||'';if(v==='character'){const look=profile(S.pip?.profile);draft.lookBody=look.body||'';lookDirty=false;}S.pipPage=v;render();if(v==='instructions')$('pipInstructions')?.focus();if(v==='info')void loadRoutines();return;}
   if(target.dataset.pipPageTab){S.pipPage=target.dataset.pipPageTab;routineEditing='';render();if(S.pipPage==='info')void loadRoutines();else void loadShared(S.pipPage);return;}
   if(target.dataset.pipShare!==undefined){document.querySelectorAll('details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));void exportPipFile();return;}
@@ -8157,6 +8216,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.projectApply){void projectDecide('apply',target.dataset.projectApply);return;}
   if(target.dataset.projectReview){projectReview(target.dataset.projectReview);return;}
   if(target.dataset.projectCommit){void projectCommit(target.dataset.projectCommit);return;}
+  if(target.dataset.projectDismiss){changesDismissed.add(target.dataset.projectDismiss);rememberView();render();return;}
   // What a Pip found and its fix, in its chat (src/pipFlow.js).
   if(target.dataset.flowFile){flowOpenFile(target.dataset.flowFile,target.dataset.flowLine);return;}
   if(target.dataset.flowAllow){void flowDecide(target.dataset.flowAllow,true);return;}

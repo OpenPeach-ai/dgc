@@ -62,13 +62,42 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     } finally { await x.close(); }
   });
 
+  // His .111 picture (25 Nov): Copy, Read aloud and Trace under a reply didn't line up; Read aloud's speaker sat 1.5 px
+  // off the others (its Play / Stop wrapper set it on a text baseline). One centre line, and one of Play / Stop shows.
+  test(`${theme} at ${width}px: a reply's Copy, Read aloud and Trace sit on one line`, async (t) => {
+    if (skipOrFail(t)) return;
+    const x = await openOnePips(browser, { width, theme, scene: { traced: true, waiting: false } });
+    try {
+      await x.openPip(GST); await x.waitIn(".pip-message .response-actions .ract-trace");
+      const rows = await x.inPips((root) => [...root.querySelectorAll(".pip-message .response-actions")].filter((row) => row.querySelector(".ract-trace")).map((row) => {
+        return [...row.querySelectorAll(".ract")].filter((b) => b.getBoundingClientRect().height > 2).map((b) => {
+          const shown = [...b.querySelectorAll("svg")].filter((v) => v.getBoundingClientRect().height > 0);
+          let r; if (shown[0]) r = shown[0].getBoundingClientRect(); else { const range = document.createRange(); range.selectNodeContents(b); r = range.getBoundingClientRect(); }
+          return { what: b.dataset.chatAction || (b.dataset.postTrace ? "trace" : b.dataset.postCopy ? "copy" : b.dataset.readAloud ? "read" : b.textContent.trim()), icons: shown.length, mid: (r.top + r.bottom) / 2 };
+        });
+      }));
+      assert.ok(rows.length >= 1, "a reply with Trace");
+      for (const row of rows) {
+        const read = row.find((b) => b.what === "read");
+        assert.ok(read && row.some((b) => /copy/.test(b.what)) && row.some((b) => b.what === "trace"), `Copy, Read aloud and Trace (${JSON.stringify(row)})`);
+        assert.equal(read.icons, 1, "Read aloud shows one of Play / Stop");
+        const mids = row.map((b) => b.mid);
+        assert.ok(Math.max(...mids) - Math.min(...mids) <= 1, `one centre line (${JSON.stringify(row)})`);
+      }
+      assert.deepEqual(x.errors, []);
+    } finally { await x.close(); }
+  });
+
   test(`${theme} at ${width}px: the flow's cards fit the chat, and their answers are buttons of the family`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openOnePips(browser, { width, theme, scene: { fix: "ask" } });
     try {
       await x.openPip(GST); await x.waitIn(".pip-found-ask");
       const log = await look(x, ".conversation-log");
-      for (const s of [".pip-found-findings", ".pip-found-ask", ".pip-found-waiting-line"]) { const b = await look(x, s); assert.ok(b && b.left >= log.left - 1 && b.right <= log.right + 1, `${s} is inside the chat (${JSON.stringify(b)})`); }
+      // (Changed on purpose, 25 Nov: nothing is pinned at the top of the chat now; what waits on you is a card in it, under
+      // the post it came from, so the card itself is what must fit.)
+      await x.waitIn(".pip-found-waiting");
+      for (const s of [".pip-found-findings", ".pip-found-ask", ".pip-found-waiting"]) { const b = await look(x, s); assert.ok(b && b.left >= log.left - 1 && b.right <= log.right + 1, `${s} is inside the chat (${JSON.stringify(b)})`); }
       for (const s of ["[data-flow-allow]", "[data-flow-no]"]) { const b = await look(x, s); assert.equal(b.radius, "6px", s); assert.equal(b.height, 28, s); assert.equal(b.cut, false, `${s} says its word whole`); }
       const allow = await look(x, "[data-flow-allow]"), no = await look(x, "[data-flow-no]");
       assert.equal(allow.top, no.top, "Allow and Not now are on one line");

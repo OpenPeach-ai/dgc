@@ -23,7 +23,10 @@ test('a Pip with a folder has the Personal Pip\'s header: back, its name, its fo
  assert.equal(bar.querySelector('.topbar-actions > #pip-run-now'),null,'no Run now button in the bar');
  const rows=[...bar.querySelectorAll('.pip-menu .tabs-menu > button')].map(b=>b.textContent.trim());
  assert.equal(rows[0],'Run now','Run now is the menu\'s first row');
- assert.ok(['Reports','Settings','Schedule','Changes'].every(name=>rows.includes(name)),`its sections are in the menu (${rows})`);
+ // One Pip menu (his call, 25 Nov: a Project Pip kept every page its old page had): Reports, Settings and
+ // Notifications, as a Personal Pip's; its schedule, version history and the rest are on its Settings page.
+ const pages=rows.filter(r=>!['Run now','Open in editor','Remove its folder…','Give it a folder…'].includes(r));
+ assert.deepEqual(pages,['Reports','Settings','Notifications'],`one menu for every Pip (${rows})`);
  assert.ok(!rows.includes('History')&&!rows.includes('Runs'),'its runs are its Reports');
  bar.querySelector('.pip-menu').setAttribute('open','');
  x.$('.pip-topbar .pip-menu #pip-run-now').click();await x.drain();
@@ -43,12 +46,57 @@ test('its settings page is the Personal Pip\'s page, with what only it has: wher
  assert.deepEqual(rows,['Works in','What it reads','When it runs','Reports','Version history and approvals']);
  assert.equal(parts.querySelector('.pip-folder-where').title,LIME_DIR);
  assert.match(x.squash(parts.textContent),/Your files as they are, in its own copy\. Not what Git ignores, such as \.env\./,'what it reads, said here');
- assert.match(x.squash(parts.textContent),/When it runs.*(8:00 PM|20:00)/,'its schedule');
+ // (Changed on purpose, 25 Nov: a Pip that reads your current files runs only when you ask: DGC refuses a schedule for
+ // it, so its row says so and has no Change. A Pip that reads committed code shows its schedule: the test below.)
+ assert.match(x.squash(parts.textContent),/When it runs\s*Only when you ask\. It reads your files as they are\./,'when it runs, said truly');
+ assert.equal(parts.querySelector('.pip-when button'),null,'nothing to change there');
  assert.doesNotMatch(x.text(),/Reports to|owner|Owner session/,'no owner session');
  assert.equal(x.requests('get_pip_owner').length,0,'and none is asked for');
  assert.equal(page.querySelector('[aria-label="Routines"]'),null,'no empty Routines section');
+ // What left its menu is one click from here: Handoffs, Memory, Context.
+ const more=[...parts.querySelectorAll('.pip-folder-more [data-tab]')].map(b=>b.dataset.tab);
+ assert.deepEqual(more,['handoffs','memory','context'],'the rest of what it had, under More');
  parts.querySelector('[data-tab="revisions"]').click();await x.drain();
  assert.equal(x.$('.simple-content').dataset.view,'revisions','version history and approvals open from there');
+});
+
+// 25 Nov (his call: nothing of the old Project Pip page left): "When it runs" changed it on the old reviewed-schedule page
+// (Review schedule…, Reset, Waiting changes). It is changed in place now, with the editor a Pip's routines use, saved at
+// once; and the schedule is said once on the page, not again under Routines.
+test('When it runs is changed in place, saved at once; never the old schedule page; said once on its page',async()=>{
+ // A Pip that reads committed code: the only kind DGC lets run on a schedule.
+ const x=setup({api:95,scene:{committed:true}});await x.drain();await x.openPip(GST);await x.menu('job');
+ const parts=x.$('.pip-folder-parts');
+ assert.match(x.squash(parts.querySelector('.pip-when').textContent),/When it runs.*(8:00 PM|20:00)/,'its schedule');
+ assert.equal(parts.querySelector('[data-tab="schedule"]'),null,'no way to the old schedule page');
+ const change=parts.querySelector('.pip-when [data-when-change]');
+ assert.ok(change,'Change, on its row');
+ assert.equal(x.$('.pip-page .routine-row.legacy'),null,'not said again under Routines');
+ change.click();await x.drain();
+ const form=x.$('.pip-folder-parts #quick-schedule-form');
+ assert.ok(form,'the editor, in place');
+ assert.equal(x.$('.simple-content').dataset.view,'job','still its Settings page');
+ x.$('#quickKind').value='manual';x.$('#quickKind').dispatchEvent(new x.w.Event('change',{bubbles:true}));await x.drain();
+ x.$('#quick-schedule-form button[type=submit]').click();await x.drain();
+ const saved=x.requests('propose_pip_update').at(-1);
+ assert.ok(saved,'saved at once (its own change: proposed and taken in one step), no Review schedule…');
+ assert.ok('schedule' in (saved.changes||saved.request?.changes||{}),'its schedule');
+});
+
+// r149 review (25 Nov): a Pulse's plan (tests or live-data commands, saved as a reviewed change) shares one page with its
+// schedule. With the Schedule row gone from its menu, its "When it runs" Change opened an in-place editor that only had
+// a second "Change…" in it; its row says what and when it runs, and its Change opens that page at once.
+test('a Pulse\'s row says what and when it runs, and its Change opens its plan and schedule page at once',async()=>{
+ const x=setup({api:95,scene:{pulse:true}});await x.drain();await x.openPip(GST);await x.menu('job');
+ const row=x.$('.pip-folder-parts .pip-when');
+ assert.ok(row,'its row');
+ assert.equal(x.squash(row.querySelector('strong').textContent),'What and when it runs');
+ assert.equal(row.querySelector('[data-when-change]'),null,'no in-place editor for it');
+ const change=row.querySelector('[data-tab="schedule"]');
+ assert.ok(change,'its Change');assert.equal(x.squash(change.textContent),'Change');
+ change.click();await x.drain();
+ assert.equal(x.$('.simple-content').dataset.view,'schedule','its plan and schedule page, in one click');
+ assert.ok(x.$('#schedule-form'),'with the form that saves them as a reviewed change');
 });
 
 test('a Pip pinned to a branch says so on its page; one without a box says it only reads',async()=>{

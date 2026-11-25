@@ -122,7 +122,7 @@ function fix(f) {
 function waiting(w) {
   if (!record(w) || !WAIT.test(String(w.id || '')) || !words(w.title, 200) || !WAITING_STATES.includes(w.state)) return null;
   return {id: w.id, title: w.title.trim(), blocks: text(w.blocks, 300) ? w.blocks.trim() : '', since: time(w.since) ? w.since : '', state: w.state,
-    remind_at: time(w.remind_at) ? w.remind_at : '', can_undo: w.can_undo === true};
+    remind_at: time(w.remind_at) ? w.remind_at : '', can_undo: w.can_undo === true, fix: FIX.test(String(w.fix_id || '')) ? w.fix_id : ''};
 }
 /** list_pip_fixes, checked: {folder, fixes (oldest first), waiting}. A fix or a line this editor can't read is left
  *  out: it never costs the chat. */

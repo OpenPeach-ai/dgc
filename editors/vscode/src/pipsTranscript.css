@@ -184,3 +184,14 @@ details[open]>summary .run-post-chev{transform:rotate(90deg)}
 .live-status{font-size:11px;margin:-8px 0 16px;color:var(--muted)}
 /* The output a message asked for wasn't made (Pips API 100): Work's own system line (.sys), under the reply. */
 .pip-message .output-missing{margin:6px 0 2px;font:400 11px/1.45 var(--sans,inherit);color:var(--faint,var(--muted));white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* A reply's row on one line (his .111 picture, 25 Nov): Read aloud's speaker sits in a wrapper (Play / Stop) whose line
+   height set it on a text baseline, 1.5 px off Copy and Trace. The wrappers keep voicebar.css's display (one of the two
+   shows), lose the line box, and every icon is a block centred in its button. */
+.pip-message .ract :is(.ra-play,.ra-stop){line-height:0}
+.pip-message .ract svg{display:block;flex:none}
+/* The same for the ⓘ (Response details), measured live: closed, its details box took a text line (22 px) and set the
+   summary 1 px above the row. Closed it is only its summary; open, it is its own line below and keeps its text's. */
+.pip-message .message-details:not([open]){line-height:0}
+.pip-message .message-details:not([open])>summary{line-height:normal}
+.pip-message .message-details>summary svg{display:block;flex:none}

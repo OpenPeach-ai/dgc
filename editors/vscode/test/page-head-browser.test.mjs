@@ -132,7 +132,11 @@ test("the ⋯ of each still opens its own menu", async (t) => {
 // letters. The title's box is now its capitals (text-box: cap to the baseline), so the row centres on them; the
 // descenders still show. Measured on the drawn pixels at 2x: the middle of the "P" (its top to the baseline), of the
 // dot, and of the ⋯.
-test("the status dot and ⋯ sit on the middle of the title's letters, not of its box (Pips, 2x, both themes)", async (t) => {
+// Noted again 26 Nov: "that green dot is not in the centre of text aligned". On the capital's middle it read high:
+// "Pips" is one capital and three small letters, and a dot beside a word belongs where a middle dot "·" does, on the
+// middle of the small letters (1 px under the capital's at 15 px; 1.3 px in SF Pro). The title's box is now its small
+// letters (text-box: ex to the baseline); measured on the "s".
+test("the status dot and ⋯ sit on the middle of the title's small letters, not of its box (Pips, 2x, both themes)", async (t) => {
   if (skipOrFail(t)) return;
   const { openOnePips } = await import("./support/one-pips-scene.mjs");
   for (const theme of ["dark-modern", "light-modern"]) {
@@ -142,15 +146,15 @@ test("the status dot and ⋯ sit on the middle of the title's letters, not of it
       const parts = await x.inPips((root) => {
         const head = root.querySelector(".dgc-pagehead"), r = (n) => { const b = n.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height }; };
         const title = head.querySelector(".dgc-pagehead-title"), range = document.createRange(); range.setStart(title.firstChild, 0); range.setEnd(title.firstChild, 1);
-        const first = range.getBoundingClientRect();
-        return { head: r(head), cap: { x: first.left, y: first.top, w: first.width, h: first.height }, word: r(title), dot: r(head.querySelector(".status-dot")), more: r(head.querySelector(".dgc-pagehead-more svg")),
+        const first = range.getBoundingClientRect(); range.setStart(title.firstChild, 3); range.setEnd(title.firstChild, 4); const last = range.getBoundingClientRect();
+        return { head: r(head), cap: { x: first.left, y: first.top, w: first.width, h: first.height }, small: { x: last.left, y: last.top, w: last.width, h: last.height }, word: r(title), dot: r(head.querySelector(".status-dot")), more: r(head.querySelector(".dgc-pagehead-more svg")),
           text: title.textContent, trim: getComputedStyle(title).textBoxTrim || "" };
       });
       assert.equal(parts.text, "Pips");
       const png = (await x.page.screenshot({ clip: { x: parts.head.x, y: parts.head.y, width: parts.head.w, height: parts.head.h } })).toString("base64");
       const blank = await browser.newPage();
       const cols = (b) => ({ x0: Math.round((b.x - parts.head.x) * 2) + 1, x1: Math.round((b.x + b.w - parts.head.x) * 2) - 1 });
-      const [cap, word, dot, more] = await blank.evaluate(async ([src, boxes]) => {
+      const [cap, small, word, dot, more] = await blank.evaluate(async ([src, boxes]) => {
         const img = new Image(); img.src = `data:image/png;base64,${src}`; await img.decode();
         const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const g = c.getContext("2d"); g.drawImage(img, 0, 0);
         const d = g.getImageData(0, 0, c.width, c.height).data, bg = [d[0], d[1], d[2]];
@@ -158,10 +162,10 @@ test("the status dot and ⋯ sit on the middle of the title's letters, not of it
           for (let y = 0; y < c.height - 3; y++) for (let x = Math.max(0, b.x0); x < Math.min(c.width, b.x1); x++) { const i = (y * c.width + x) * 4;
             if (Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2]) > 90) { top = Math.min(top, y); bot = Math.max(bot, y); } }
           return { top, bot, mid: (top + bot) / 2 }; });
-      }, [png, [cols(parts.cap), cols(parts.word), cols(parts.dot), cols(parts.more)]]);
+      }, [png, [cols(parts.cap), cols(parts.small), cols(parts.word), cols(parts.dot), cols(parts.more)]]);
       await blank.close();
-      assert.ok(Math.abs(dot.mid - cap.mid) <= 1.5, `${theme}: the dot's middle (${dot.mid}) is the capital's (${cap.mid}), in device pixels`);
-      assert.ok(Math.abs(more.mid - cap.mid) <= 1.5, `${theme}: the ⋯'s middle (${more.mid}) is the capital's (${cap.mid})`);
+      assert.ok(Math.abs(dot.mid - small.mid) <= 1.5, `${theme}: the dot's middle (${dot.mid}) is the small letters' (${small.mid}; the capital's ${cap.mid}), in device pixels`);
+      assert.ok(Math.abs(more.mid - small.mid) <= 1.5, `${theme}: the ⋯'s middle (${more.mid}) is the small letters' (${small.mid})`);
       assert.ok(word.bot >= cap.bot + 4, `${theme}: the "p"s still hang below the line (${word.bot} vs ${cap.bot}): nothing is cut`);
     } finally { await x.close(); }
   }

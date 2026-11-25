@@ -28,6 +28,31 @@
 - **A code block's Copy stays in its corner**: scrolled sideways, a long line no longer carries Copy (and the language
   label) into the middle of it; the code scrolls, the block doesn't. The same for a wide table. In Work, ChatDGC and a
   Pip's chat.
+- **What only you can do is a card in the chat, where it came from**: under the check whose fix found it (or at the
+  chat's end), and one line there once answered. Nothing is pinned at the top of a Pip's chat any more; the answered
+  lines no longer stay open up there for a day.
+- **One Pip menu**: a Project Pip's ⋯ menu is a Personal Pip's (Run now, Open in editor, Reports, Settings,
+  Notifications, its folder), not every page its old page had; its schedule ("When it runs"), version history,
+  handoffs, memory and context are on its Settings page. A Project Pip on the older page (in a remote window) keeps
+  every page in its menu, as its Settings page has none of them.
+- **When it runs is changed in place**: on a Pip's Settings page, Change opens the schedule editor its routines use and
+  saves at once; the old reviewed-schedule page (Review schedule…, Reset, Waiting changes) is gone from its pages. A
+  Pulse's row says what and when it runs, and its Change opens its plan and schedule (tests or live-data commands)
+  at once. A Pip that reads your current files says it runs only when you ask, with nothing to change there: DGC
+  doesn't schedule one.
+- **A reply's row sits on one line**: in a Pip's chat, Read aloud's speaker sat 1.5 px off Copy and Trace, and the ⓘ
+  (Response details) 1 px above them. On a Pip's Settings page, the "More: Handoffs · Memory · Context" line lines up
+  with the rows above it.
+- **A Pip's change card that is done has ×**: committed, undone or discarded, it can be taken out of the chat, and stays
+  out after a reload. After a commit or an Undo every card is read again, so a card whose files that commit took too
+  no longer offers Commit these files.
+- **The dot beside "Pips" sits on the middle of the word**: the green dot after the Pips list's name sat on the middle
+  of the capital P, so it read high beside "ips". It and the ⋯ on every page's header row (Work, Chat, Library, Pips)
+  now sit on the middle of the small letters, where a middle dot "·" sits.
+- **A Pip's chat opens with up to its last 200 messages**, read 50 at a time, as a Work session shows its long history
+  (it opened with 20); Load earlier messages, when there is one, is a quiet button with room under it.
+- **A held step shows what it would type**: a careful-mode card has the exact text in a box that scrolls, and one for
+  its Terminal says "run this in its Terminal" instead of "put this on Terminal … from your apps".
 - **No line under a pinned prompt**: stuck at the top, a prompt's ground ends in a soft shadow only; its hairline read as
   a stray white line across the panel under a folded long prompt.
 - **Smaller artifact and file cards everywhere**: a 52 px card (was 76), its sheet 28 × 36 (was 44 × 56), 24 px buttons and

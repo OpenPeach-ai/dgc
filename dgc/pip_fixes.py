@@ -264,6 +264,8 @@ def _waiting_view(row, now) -> dict:
                             and (current - answered).total_seconds() <= UNDO_SECONDS)}
     if row["remind_at"]:
         out["remind_at"] = row["remind_at"]
+    if row["fix_id"]:
+        out["fix_id"] = row["fix_id"]      # the fix that found it: its card stands under that check in the chat (25 Nov)
     return out
 
 

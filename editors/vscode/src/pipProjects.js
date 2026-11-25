@@ -153,18 +153,21 @@ const reasons = (label, list, esc) => list.length ? `<p class="pip-project-label
  *   confirm  Discard was pressed: the card asks before the Pip's work in its copy goes
  *   note   one line said in the card (the Pip changed more since you looked); error: what went wrong
  */
-export function projectCardMarkup(change, { esc, open = new Set(), diffs = new Map(), busy = '', off = false, confirm = false, note = '', error = '', one = false, canCommit = false, look = '', folded = false, menu = false } = {}) {
+export function projectCardMarkup(change, { esc, open = new Set(), diffs = new Map(), busy = '', off = false, confirm = false, note = '', error = '', one = false, canCommit = false, look = '', folded = false, menu = false, dismiss = false } = {}) {
   const id = esc(change.id), name = oneLine(change.name), hold = off || busy ? ' disabled' : '';
+  // A card that is done (committed, undone, discarded, or in a folder Git doesn't keep) can be taken out of the chat
+  // (his report, 25 Nov).
+  const x = dismiss ? `<button type="button" class="pip-project-dismiss" data-project-dismiss="${id}" aria-label="Remove from the chat" title="Remove from the chat">${globalThis.DgcIcons?.html?.('close', {size: 14}) || '×'}</button>` : '';
   // `look: "work"` (a Pip's chat as a conversation, Pips API 97): a change that waits, or is in your folder, is drawn
   // as Work's changed-files card; what was undone, discarded or not applied keeps its own words below.
   if (look === 'work' && (change.status === 'pending' || (!['discarded', 'undone'].includes(change.status) && ((change.result || {}).applied || []).length)))
-    return workCardMarkup(change, { esc, open, diffs, busy, off, confirm, note, error, canCommit, folded, menu });
-  const box = (state, label, inner) => `<section class="dgc-card pip-project-card" data-project-change="${id}" data-state="${state}" role="group" aria-label="${esc(label)}">${inner}</section>`;
+    return workCardMarkup(change, { esc, open, diffs, busy, off, confirm, note, error, canCommit, folded, menu, x });
+  const box = (state, label, inner) => `<section class="dgc-card pip-project-card" data-project-change="${id}" data-state="${state}" role="group" aria-label="${esc(label)}">${x}${inner}</section>`;
   const wrong = error ? `<p class="dgc-card-error" role="alert">${esc(error)}</p>` : '';
   const r = change.result || {};
   if (change.status === 'discarded') {
     const left = (r.left || []).length;
-    return `<p class="pip-project-line" data-project-change="${id}" data-state="discarded" role="status">Discarded the changes to ${esc(name)}.${left ? ` ${esc(plural(left, 'file'))} in the copy couldn’t be put back.` : ''}</p>`;
+    return `<p class="pip-project-line" data-project-change="${id}" data-state="discarded" role="status">Discarded the changes to ${esc(name)}.${left ? ` ${esc(plural(left, 'file'))} in the copy couldn’t be put back.` : ''}${x}</p>`;
   }
   if (change.status === 'undone') {
     const restored = (r.restored || []).length, kept = r.kept || [];
@@ -221,7 +224,7 @@ const WORK_ICON = {
 /** Work's changed-files card for a Pip's change (media/main.js turnSummaryCard): "Edited 2 files" +15 −5, its files,
  *  and in its head More (Discard) · the fold · Review · Apply; once in your folder, "Applied to your folder" with
  *  Review · Undo (and Commit these files in a Git project). `folded`: its files are folded away; `menu`: More is open. */
-function workCardMarkup(change, { esc, open, diffs, busy, off, confirm, note, error, canCommit, folded, menu }) {
+function workCardMarkup(change, { esc, open, diffs, busy, off, confirm, note, error, canCommit, folded, menu, x = '' }) {
   const id = esc(change.id), name = oneLine(change.name), hold = off || busy ? ' disabled' : '', r = change.result || {}, pending = change.status === 'pending';
   const files = change.files, total = files.length + (change.more || 0), applied = (r.applied || []).length, held = r.held_back || [];
   const plus = files.reduce((n, f) => n + (f.plus || 0), 0), minus = files.reduce((n, f) => n + (f.minus || 0), 0);
@@ -244,7 +247,7 @@ function workCardMarkup(change, { esc, open, diffs, busy, off, confirm, note, er
   return `<section class="pip-project-card pip-change" data-project-change="${id}" data-state="${esc(change.status)}" role="group" aria-label="${esc(pending ? `Changes for ${name}` : `Changed in ${name}`)}">`
     + `<div class="pip-change-head"><div class="pip-change-heading"><strong class="pip-change-title">${esc(title)}</strong>`
     + (plus || minus ? `<span class="pip-change-totals"><span class="add-stat">+${plus.toLocaleString('en-US')}</span> <span class="del-stat">−${minus.toLocaleString('en-US')}</span></span>` : '') + '</div>'
-    + `<div class="pip-change-actions">${actions}</div>${more}</div>`
+    + `<div class="pip-change-actions">${actions}${x}</div>${more}</div>`
     + `<ul class="pip-project-files" id="${listId}" aria-label="Files changed"${folded ? ' hidden' : ''}>${rows}</ul>`
     + reasons(held.length === 1 ? '1 file was held back' : `${held.length} files were held back`, held, esc)
     + `<p class="pip-change-says">${esc(says)}</p>${note ? `<p class="pip-change-says" role="status">${esc(note)}</p>` : ''}${error ? `<p class="dgc-card-error" role="alert">${esc(error)}</p>` : ''}${asks}</section>`;

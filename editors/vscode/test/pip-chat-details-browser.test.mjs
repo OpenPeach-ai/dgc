@@ -257,3 +257,31 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
     } finally { await s.close(); }
   });
 }
+
+// His .111 picture (25 Nov): the icons under a reply didn't line up. Read aloud's speaker sat 1.5 px off Copy and Trace
+// (its Play / Stop wrapper set it on a text baseline), and, measured live after, the closed ⓘ (Response details) 1 px
+// above them (its details box took a text line). Every part of a reply's row on one centre line; one of Play / Stop.
+for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
+  test(`${theme}, ${width} px: a reply's row, Copy to Trace with its ⓘ, sits on one centre line`, async (t) => {
+    if (skipOrFail(t)) return;
+    const s = await open({ theme, width, where: width === 300 ? "side" : "tab" });
+    try {
+      await s.p.waitForFunction(() => !!(window.__pipsRoot || document).querySelector(".pip-message .response-actions .ract-trace"));
+      const rows = await inPage(s.p, (root) => [...root.querySelectorAll(".pip-message .response-actions")].filter((row) => row.querySelector(".ract-trace") && row.querySelector(".message-details:not([open])")).map((row) =>
+        [...row.children].filter((c) => c.getBoundingClientRect().height > 2 && !c.classList.contains("reply-stats")).map((c) => {
+          const shown = [...c.querySelectorAll("svg")].filter((v) => v.getBoundingClientRect().height > 0);
+          let r; if (shown[0]) r = shown[0].getBoundingClientRect(); else { const range = document.createRange(); range.selectNodeContents(c); r = range.getBoundingClientRect(); }
+          return { what: c.dataset.chatAction || c.className.toString().split(" ")[0], icons: shown.length, mid: (r.top + r.bottom) / 2 };
+        })));
+      assert.ok(rows.length >= 1, "a reply with Trace and its ⓘ");
+      for (const row of rows) {
+        assert.ok(["copy", "read", "trace", "message-details"].every((w) => row.some((b) => b.what === w)), `Copy, Read aloud, ⓘ and Trace (${JSON.stringify(row)})`);
+        assert.equal(row.find((b) => b.what === "read").icons, 1, "Read aloud shows one of Play / Stop");
+        // (A narrow row wraps, by design: what shares a line shares its centre.)
+        const lines = [];
+        for (const b of [...row].sort((a, z) => a.mid - z.mid)) { const line = lines.at(-1); if (line && b.mid - line[0].mid <= 6) line.push(b); else lines.push([b]); }
+        for (const line of lines) { const mids = line.map((b) => b.mid); assert.ok(Math.max(...mids) - Math.min(...mids) <= 1, `one centre line (${JSON.stringify(row)})`); }
+      }
+    } finally { await s.close(); }
+  });
+}

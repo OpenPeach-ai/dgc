@@ -58,6 +58,9 @@ export function carefulWords(summary, pipName = 'The Pip') {
   // The safety floor (API 58): a Terminal command that could wipe its Files asks at every level.
   if (summary?.kind === 'floor') return [`Let ${pipName} run this in its Terminal?`,
     `This command ${summary.floor || 'could delete everything in its Files'}: ${(summary.fields?.[0]?.value || '').slice(0, 160)}. Nothing has run yet; Allow lets it run this once.`, 'Allow once'];
+  // Its Terminal is not a page and not one of your apps (25 Nov): what it would run, said as running it.
+  if (summary?.kind === 'text' && /^terminal$/i.test(String(summary.host || ''))) return [`Let ${pipName} run this in its Terminal?`,
+    'It read things from outside this run (careful mode), so it asks before it types them anywhere. Nothing has run yet; Allow lets it run this once.', 'Allow once'];
   if (summary?.kind === 'text') return [`Let ${pipName} put this on ${summary.host || 'a page'}?`,
     'It read this from your apps (careful mode). Nothing has been typed or sent yet; Allow lets it do this once.', 'Allow once'];
   // Your Browser (dgc/your_browser_lane.py): a Pip's own tab in your browser, a site only you let it use there,

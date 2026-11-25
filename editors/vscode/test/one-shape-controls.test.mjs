@@ -245,7 +245,8 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       await x.openPip(GST); await x.waitIn(".pip-found-ask");
       // (Changed on purpose, 18 Nov: this DGC, Pips API 96, is offered no menu on the Allow card any more; its one row,
       // "Start a sub-agent with Work tools", comes with API 109: test/pip-work-subagent-browser.test.mjs holds its shape.)
-      await x.click("#pip-waiting-toggle"); await x.waitIn(".pip-found-waiting"); await settle(x.page);
+      // (Changed on purpose, 25 Nov: what waits on you is a card in the chat under its post, not a pinned line to open.)
+      await x.waitIn(".pip-found-waiting"); await settle(x.page);
       held(await walk(x.page, ROUND), "One Pips: a chat with the findings card, the Allow card and what waits on you");
       await x.click("#chat-level"); await x.waitIn(".composer-level-menu");
       await x.inPips((root) => [...root.querySelectorAll(".composer-level-menu [data-pip-level-pick]")][2].click()); await x.waitIn("#review-root .dialog"); await settle(x.page);

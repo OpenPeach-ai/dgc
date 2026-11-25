@@ -2124,3 +2124,29 @@ body.vscode-light .error,body.vscode-high-contrast-light .error,:host-context(bo
   color:var(--vscode-textLink-foreground,var(--link));text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .pip-step-ref:hover{color:var(--vscode-textLink-activeForeground,var(--vscode-textLink-foreground,var(--link)))}
 .pip-step-ref:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px;border-radius:2px}
+
+/* What a careful hold would type, all of it, in its card: a quiet box that scrolls past a few lines (25 Nov). */
+.app-link .held-text{max-height:9.5em;overflow:auto;margin:8px 0 0;padding:6px 8px;border:1px solid var(--line,var(--vscode-panel-border));border-radius:var(--btn-r,6px);background:var(--vscode-textCodeBlock-background,transparent);color:var(--vscode-foreground);font:12px/1.45 var(--vscode-editor-font-family,ui-monospace,monospace);white-space:pre-wrap;overflow-wrap:anywhere}
+.app-link .held-text:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
+
+/* Its Settings page's quiet "More: Handoffs · Memory · Context" (one Pip menu, 25 Nov). */
+/* The More line is the group's last row (seen live, 25 Nov: it sat against the card's left edge and its bottom border):
+   the rows' inside padding, their hairline above, and its pages as links, not grey chips. */
+.pip-folder-more{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px;margin:0;padding:10px 14px 12px;border-top:1px solid var(--pip-edge);font-size:12px}
+.pip-folder-more .pip-link{display:inline;min-height:0!important;height:auto;padding:0;border:0;background:transparent;color:var(--vscode-textLink-foreground,var(--link));font:inherit;cursor:pointer}
+.pip-folder-more .pip-link:hover{text-decoration:underline}
+
+/* Load earlier messages at the top of a Pip's chat: a quiet button, centred, with room before the first message (his
+   report, 25 Nov: it sat against the replies). */
+.conversation-log > #older-messages{display:block;align-self:center;width:auto;min-height:24px;height:24px;margin:4px auto 18px;padding:0 12px;border:1px solid var(--line,var(--vscode-panel-border));border-radius:var(--btn-r,6px);background:transparent;color:var(--muted-firm,var(--muted));font-size:12px;line-height:22px;box-shadow:none}
+.conversation-log > #older-messages:hover:not(:disabled){color:var(--vscode-foreground);background:var(--wash,color-mix(in srgb,currentColor 8%,transparent))}
+
+/* × on a change card that is done: takes it out of the chat (25 Nov). In a card's corner; on Work's card, last in its row. */
+.pip-project-card{position:relative}
+.pip-project-card>.pip-project-dismiss{position:absolute;top:8px;right:8px}
+.pip-project-dismiss{display:inline-grid;place-items:center;width:24px;height:24px;min-width:0;min-height:0;padding:0;border:0;border-radius:var(--btn-r,6px);background:transparent;color:var(--muted);cursor:pointer;box-shadow:none}
+.pip-project-dismiss:hover{background:var(--wash,color-mix(in srgb,currentColor 10%,transparent));color:var(--vscode-foreground)}
+.pip-project-dismiss:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}
+.pip-project-dismiss svg{width:14px;height:14px}
+.pip-project-line>.pip-project-dismiss{vertical-align:middle;margin-left:6px;width:20px;height:20px}
+.pip-project-card:has(>.pip-project-dismiss)>.dgc-card-head{padding-right:28px}

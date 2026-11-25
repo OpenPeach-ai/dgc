@@ -86,11 +86,22 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
           return { name: row.getAttribute("title") || "", shown: text.textContent.trim(), height: Math.round(box(n).height), nowrap: s.whiteSpace, cut: s.textOverflow, clipped: text.scrollWidth > text.clientWidth + 1, rowHeight: Math.round(box(row).height),
             star: !!n.querySelector(".primary-badge") && box(n.querySelector(".primary-badge")).right <= box(n).right + 0.5 }; });
         const counts = [...root.querySelectorAll(".pip-row-count")].map((n) => { const s = getComputedStyle(n); return { fill: s.backgroundColor, corner: parseFloat(s.borderTopLeftRadius), height: box(n).height }; });
-        return { statusWords: getComputedStyle(status).fontSize, dot: [Math.round(box(dot).width), Math.round(box(dot).height)], toggle: { words: toggle.textContent.trim(), name: toggle.getAttribute("aria-label"), width: Math.round(box(toggle).width), height: Math.round(box(toggle).height),
+        // Where the letters of "Pips" are, from the font itself (not from the title's box, which the row centres on):
+        // the baseline is the text's top plus the font's ascent, and the middle of the small letters is half the height
+        // of an x above it, where a middle dot "·" sits (26 Nov: on the middle of the capital P the green dot read high
+        // beside "ips").
+        const title = root.querySelector(".simple-bar .dgc-pagehead-title"), range = document.createRange(); range.selectNodeContents(title);
+        const ink = document.createElement("canvas").getContext("2d"); ink.font = getComputedStyle(title).font;
+        const em = ink.measureText("Pips"), small = ink.measureText("x").actualBoundingBoxAscent, glyphs = range.getClientRects()[0];
+        const baseline = glyphs.top + (glyphs.height - em.fontBoundingBoxAscent - em.fontBoundingBoxDescent) / 2 + em.fontBoundingBoxAscent;
+        const letters = baseline - small / 2, dotMid = box(dot).top + box(dot).height / 2;
+        return { statusWords: getComputedStyle(status).fontSize, dot: [Math.round(box(dot).width), Math.round(box(dot).height)], online: dot.classList.contains("online"),
+          dotOff: +(dotMid - letters).toFixed(2), dotMid: +dotMid.toFixed(2), letters: +letters.toFixed(2), toggle: { words: toggle.textContent.trim(), name: toggle.getAttribute("aria-label"), width: Math.round(box(toggle).width), height: Math.round(box(toggle).height),
           icon: !!toggle.querySelector("svg"), right: Math.round(box(root.querySelector(".simple-bar")).right - box(toggle).right) }, names, counts,
           sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 };
       });
       assert.deepEqual([m.statusWords, m.dot], ["0px", [8, 8]], "the runner's status is a small dot");
+      assert.ok(Math.abs(m.dotOff) <= 0.5, `the dot sits on the middle of the small letters of "Pips" (its middle ${m.dotMid}, theirs ${m.letters}: ${m.dotOff}px off)`);
       assert.deepEqual([m.toggle.words, m.toggle.name, m.toggle.icon], ["", "Controls", true], "Controls is a \"…\" button, named for a screen reader");
       assert.ok(m.toggle.width <= 34 && m.toggle.width === m.toggle.height, `the "…" button is a round icon button (${m.toggle.width}x${m.toggle.height})`);
       assert.ok(m.counts.length >= 2, "two rows carry a number");

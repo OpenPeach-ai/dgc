@@ -1855,3 +1855,21 @@ test('saving a scheduled Pip says so when DGC turned on Keep Pips running',async
  x.answer(x.requests('accept_pip_update')[0],{pip:job('a',{current_version:2,source_policy:policy,schedule}),keep_running_notice:told});await x.drain();
  assert.ok(x.d.body.textContent.includes('Source saved. Its next run uses it. '+told));
 });
+
+// 25 Nov (his call): a Pip's chat opened with only its last 20 messages, where a Work session shows its long history. It
+// opens with up to its last 200 (the most it keeps loaded), read in pages of 50, as many as DGC allows at once; Load
+// earlier messages is there only for a chat longer than that.
+test('a Pip chat opens with up to its last 200 messages, read 50 at a time, so it needs no Load earlier',async()=>{
+ for(const [total,shown,older] of [[120,120,false],[260,200,true]]){
+  const all=Array.from({length:total},(_,i)=>chatMessage('m'+String(i).padStart(4,'0'),'a',{role:i%2?'assistant':'user',text:`Message ${i}`,created_at:new Date(Date.UTC(2026,9,1,10,0,i)).toISOString()}));
+  const asked=[];
+  const page=(r)=>{asked.push(r.limit);const end=r.before_id?all.findIndex(m=>m.id===r.before_id):all.length;const start=Math.max(0,end-(r.limit||20));
+   return {pip_id:'a',workspace_id:'ws',messages:all.slice(start,end),next_before_id:start>0?all[start].id:null,active_run:null,history_context_omitted_count:0};};
+  const x=setup({conversation:true});await x.drain({list_pip_messages:page});await x.drain({list_pip_messages:page});await x.drain({list_pip_messages:page});await x.drain({list_pip_messages:page});await x.drain({list_pip_messages:page});
+  assert.ok(asked.length>1&&asked.every(n=>n===50),`pages of 50 (${asked})`);
+  const ids=[...x.d.querySelectorAll('[data-message]')].map(n=>n.dataset.message).filter(id=>/^m\d{4}$/.test(id));
+  assert.equal(new Set(ids).size,shown,`${total} messages: the last ${shown} shown`);
+  assert.equal(x.d.querySelector('#older-messages'),null,'no Load earlier: it opened with all it keeps');
+  assert.equal(/Showing the latest 200 loaded messages/.test(x.d.body.textContent),older,older?'past 200, it says the rest are saved':'all of it is here');
+ }
+});

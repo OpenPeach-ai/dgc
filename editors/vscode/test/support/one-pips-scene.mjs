@@ -84,7 +84,7 @@ export function makeBackend(o = {}) {
     model_choice: o.model ? { mode: "model", model: o.model } : { mode: "default" }, created_at: "2026-11-01T09:00:00Z", updated_at: "2026-11-01T09:00:00Z",
     ...(o.look && o.look[id] ? { profile: { body: o.look[id] } } : {}), ...(o.mine && id === MORNINGS ? { computer_plan: { schema_version: 1 } } : {}), ...extra });
   const pips = o.empty ? [] : [pip(CORE, P, "Core", "core"), pip(MORNINGS, P, "Mornings", "quill"),
-    pip(GST, LIME, NAME, "rook", { goal: sub ? "Check the tile shop's totals every evening at 8" : "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.pending ? { proposals: o.pending } : {}), ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}) }),
+    pip(GST, LIME, NAME, o.pulse ? "pulse" : "rook", { goal: sub ? "Check the tile shop's totals every evening at 8" : "Check the GST code every evening at 8", schedule: { type: "daily", time: "20:00", timezone: "Asia/Kolkata" }, ...(o.pending ? { proposals: o.pending } : {}), ...(o.branch ? { source_ref: o.branch, source_policy: { mode: "committed_only" } } : {}), ...(o.committed || o.pulse ? { source_policy: { mode: "committed_only" } } : {}), ...(o.manual ? { schedule: null } : {}) }),
     pip(ERP, LIME, "ERP daily audit", "scout"), pip(BEDS, GARDEN, "Bed planner", "scout")];
   const folders = [
     { folder: "/home/me/code/shop", name: "shop", here: true, exists: true, git: true, sessions: 2, pips: 0, workspace_id: SHOP, updated_at: ago(30) },
@@ -159,7 +159,7 @@ export function makeBackend(o = {}) {
         { text: "Running the e-way tests in its copy", state: "doing" }, { text: "Round-off, then the retry loop", state: "next" }] } : {}),
       ...(done ? { change_id: CHANGE, tests: "passed", findings: [{ ...findings[0], verdict: "fixed" }, { ...findings[1], verdict: "fixed" }, { ...findings[2], verdict: "needs_you", why: "Stopping on error 4012 would also stop the nightly re-send." }] } : {}) }];
   };
-  const waitingNow = () => state.waiting === "none" ? [] : [{ id: WAIT, title: "GSP wallet is empty", blocks: "filings are blocked", since: ago(4400), state: state.waiting, can_undo: state.waiting === "dismissed" }];
+  const waitingNow = () => state.waiting === "none" ? [] : [{ id: WAIT, fix_id: FIX, title: "GSP wallet is empty", blocks: "filings are blocked", since: ago(4400), state: state.waiting, can_undo: state.waiting === "dismissed" }];
   const change = () => ({ id: CHANGE, workspace_id: LIME, name: "lime_tiles", status: state.change, digest: "c1", more: 0, created_at: ago(3), updated_at: ago(2), tests: "passed",
     files: sub ? [{ path: "totals.py", change: "modified", plus: 6, minus: 2 }, { path: "cart.py", change: "modified", plus: 9, minus: 3 }] : [{ path: "billing/eway.py", change: "modified", plus: 12, minus: 1 }, { path: "billing/billing_routes.py", change: "modified", plus: 5, minus: 3 }],
     result: state.change === "applied" ? { applied: sub ? ["totals.py", "cart.py"] : ["billing/eway.py", "billing/billing_routes.py"], held_back: [], ...(state.fix === "applied" ? { by: "pip-level:full" } : {}) }
@@ -313,7 +313,8 @@ export function makeBackend(o = {}) {
       events: [{ seq: 1, event_type: "pip_run_started", payload: {} }, { seq: 2, event_type: "pip_run_progress", payload: { kind: "tool_call", tool: "edit_file", path: "totals.py" } },
         { seq: 3, event_type: "pip_run_progress", payload: { kind: "progress", state: "tool", message: "Running the tests" } }].filter((e) => e.seq > (r.after || 0)).map((e) => ({ ...e, run_id: FIXRUN, pip_id: GST, workspace_id: LIME, created_at: ago(0) })) },
     cancel_pip_run: () => { state.fix = "stopped"; return { run: { id: FIXRUN, status: "cancelling" } }; },
-    list_pip_reply_stats: () => ({ stats: [] }),
+    // o.traced: every reply recorded its steps, so each has Trace in its row (dgc/reply_trace.py).
+    list_pip_reply_stats: (r) => (o.traced ? { pip_id: r.pip_id, stats: r.run_ids.map((run_id) => ({ run_id, seconds: 4, input_tokens: 120, output_tokens: 40, requests: 1, has_trace: true })) } : { stats: [] }),
     get_pip_chat_context: (r) => o.context ? { pip_id: r.pip_id, context_size: r.context_size, used_tokens: o.context, recent_messages: 4, summarized_messages: 0 } : undefined,
   };
   // A Pip's on/off switch (pause_pip / resume_pip, as dgc/pips.py: the revision must be the Pip's, and it moves on).

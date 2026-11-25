@@ -112,6 +112,25 @@ test('when the fix is ready: the change card with Apply, Review and Discard, and
  assert.deepEqual(x.requests('apply_pip_project_change').at(-1),{type:'apply_pip_project_change',pip_id:GST,change_id:CHANGE,expected_digest:'c1'});
 });
 
+// 25 Nov (his report on .111): committing one change card left another, whose files that commit took too, still
+// offering Commit these files; and a card that was done could not be put away. After a commit or an Undo every card is
+// read again (each says what Git says of its own files now); a card that is done (committed, in a folder that isn't a
+// Git project, undone or discarded) has × to take it out of the chat, kept across reloads.
+test('after a commit every card is read again; a card that is done has × to take it out of the chat, kept',async()=>{
+ const x=await chat({fix:'applied',level:'full'});
+ let card=x.$(`[data-project-change="${CHANGE}"]`);
+ assert.equal(card.querySelector('[data-project-dismiss]'),null,'not committed yet: nothing to put away');
+ const before=x.requests('list_pip_project_changes').length;
+ card.querySelector('[data-project-commit]').click();await x.drain();
+ assert.ok(x.requests('list_pip_project_changes').length>before,'every change read again after the commit');
+ card=x.$(`[data-project-change="${CHANGE}"]`);
+ const close=card.querySelector('[data-project-dismiss]');
+ assert.ok(close,'committed: done, × to put it away');assert.equal(close.getAttribute('aria-label'),'Remove from the chat');
+ close.click();await x.drain();
+ assert.equal(x.$(`[data-project-change="${CHANGE}"]`),null,'gone from the chat');
+ assert.ok((x.states.at(-1)?.changes_dismissed||[]).includes(CHANGE),'kept across a reload');
+});
+
 test('at Do it all it is already in your folder: Review, Undo, and Commit these files',async()=>{
  const x=await chat({fix:'applied',level:'full'});
  const card=x.$(`[data-project-change="${CHANGE}"]`);
@@ -129,36 +148,46 @@ test('at Do it all it is already in your folder: Review, Undo, and Commit these 
  assert.equal(x.requests('undo_pip_project_change').length,1);
 });
 
-test('what only you can do is one line at the top of its chat, with its card one click away',async()=>{
+// 25 Nov (his report on .111): what only you can do sat in a pinned area at the top of the chat; once the last was
+// answered its line (and its Hide) went, and the answered lines stayed open up there for a day. Its card is in the chat
+// now, where it came from: under the check whose fix found it, beside that fix; nothing of it is pinned at the top.
+test('what only you can do is a card in the chat, under the check whose fix found it; nothing is pinned at the top',async()=>{
  const x=await chat({fix:'ask'});
- const line=x.$('.pip-found-waiting-line');
- assert.ok(line,'the pinned line');
- assert.ok(x.$('.pip-conversation').firstElementChild.contains(line),'at the top of the chat, above the messages');
- assert.equal(x.squash(line.querySelector('.pip-found-waiting-words').textContent),'Waiting on you · 1 · GSP wallet is empty');
- const toggle=line.querySelector('#pip-waiting-toggle');
- assert.equal(toggle.textContent,'Show');assert.equal(toggle.getAttribute('aria-expanded'),'false');
- assert.equal(x.$('.pip-found-waiting'),null);
- toggle.click();await x.drain();
+ assert.equal(x.$('.pip-found-pinned, .pip-found-waiting-line, #pip-waiting-toggle'),null,'nothing pinned at the top');
  const card=x.$(`.pip-found-waiting[data-flow-waiting="${WAIT}"]`);
- assert.ok(card);assert.equal(x.$('#pip-waiting-toggle').textContent,'Hide');
+ assert.ok(card,'its card, shown');
+ const post=x.$(`[data-run-post="${CHECK}"]`);
+ assert.ok(post&&(post.contains(card)||post.compareDocumentPosition(card)&4),'after the check that found it');
+ const next=[...x.d.querySelectorAll('.conversation-log [data-message], .conversation-log [data-run-post]')].find(n=>n!==post&&post.compareDocumentPosition(n)&4&&!n.contains(card));
+ assert.ok(!next||card.compareDocumentPosition(next)&4,'before what came after it');
  assert.equal(card.querySelector('.dgc-card-title').textContent,'GSP wallet is empty');
  assert.match(card.querySelector('.dgc-card-sub').textContent,/^Only you can do this · filings are blocked · since /);
  assert.deepEqual([...card.querySelectorAll('.pip-found-actions button')].map(b=>b.textContent.trim()),['I’ve done it','Remind me later','Not a problem']);
- assert.equal(x.$('.pip-found-findings').textContent.includes('GSP wallet'),false,'it is never one of the findings');
+ assert.equal(x.$('.pip-found-findings')?.textContent.includes('GSP wallet')||false,false,'it is never one of the findings');
+});
+
+test('one whose check is not in the chat waits at its end, never at the top',async()=>{
+ const x=await chat({fix:'none'});
+ assert.equal(x.$('.pip-found-pinned, .pip-found-waiting-line'),null);
+ const card=x.$(`.pip-found-waiting[data-flow-waiting="${WAIT}"]`);
+ assert.ok(card,'its card');
+ const items=[...x.d.querySelectorAll('.conversation-log [data-message], .conversation-log [data-run-post]')];
+ assert.ok(!items.length||items.at(-1).compareDocumentPosition(card)&4,'after the last message');
 });
 
 for(const [word,answer,said] of [['I’ve done it','done',/You said it’s done: GSP wallet is empty\. Its next check looks again\./],['Remind me later','later',/It reminds you later: GSP wallet is empty\./],['Not a problem','not_a_problem',/Not a problem: GSP wallet is empty\. It won’t come up again\./]]){
- test(`"${word}" answers it, and the line at the top goes`,async()=>{
-  const x=await chat({fix:'none'});
-  x.$('#pip-waiting-toggle').click();await x.drain();
+ test(`"${word}" answers it, and its card becomes one line in its place`,async()=>{
+  const x=await chat({fix:'ask'});
   [...x.d.querySelectorAll('.pip-found-waiting [data-flow-waiting-answer]')].find(b=>b.dataset.flowWaitingAnswer===answer).click();await x.drain();
   assert.deepEqual(x.requests('answer_pip_waiting').at(-1),{type:'answer_pip_waiting',pip_id:GST,waiting_id:WAIT,answer});
-  assert.equal(x.$('.pip-found-waiting-line'),null,'nothing waits on you now');
-  assert.match(x.text('.pip-found-pinned'),said);
+  assert.equal(x.$('.pip-found-waiting'),null,'the card is answered');
+  const line=x.$(`.pip-found-line[data-flow-waiting="${WAIT}"]`);
+  assert.ok(line,'one line where it was');assert.match(x.squash(line.textContent),said);
+  assert.equal(x.$('.pip-found-pinned'),null,'never at the top');
   if(answer==='not_a_problem'){
    x.$('[data-flow-waiting-answer="undo"]').click();await x.drain();
    assert.equal(x.requests('answer_pip_waiting').at(-1).answer,'undo');
-   assert.ok(x.$('.pip-found-waiting-line'),'Undo puts it back');
+   assert.ok(x.$(`.pip-found-waiting[data-flow-waiting="${WAIT}"]`),'Undo puts its card back');
   }
  });
 }
