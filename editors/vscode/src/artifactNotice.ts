@@ -13,6 +13,9 @@
 // - One that waited its turn is not shown if its artifact was opened in a tab meanwhile.
 // - Not for the person's own doing (their edit, a restore, a removal, a refresh, this window's own save), nor for one
 //   that is already open in a tab, nor for one that opens by itself beside the chat showing it.
+// - A checklist is offered when it is made, and when an item of it now needs you ("“Release list” needs you: Pick the
+//   version name"), never for its ticks: those are progress its card and the Tasks pill show (a pop-up covered the
+//   prompt box at every tick while a turn worked through one, 25 Nov).
 //
 // It hears what every screen hears (Artifacts.listen: {type: "artifactChanged", artifact, op, surface, mine}); anything
 // else with its own way to open (a chat's widget nobody is looking at) is offered through offer().
@@ -27,6 +30,8 @@ const MAX_TITLE = 80;
 
 /** One thing made: `key` and `version` say which (once each), `open` opens it. */
 export interface MadeNotice { key: string; version: number; title: string; updated: boolean; open: () => void;
+  /** A checklist's item that now needs you: the notification says that instead. */
+  needs?: string;
   /** True once it is on screen in a tab of its own: asked again when its turn comes, after it has waited. */
   showing?: () => boolean }
 /** What the pop-up needs of the artifacts: opening one, and whether one is on screen already. */
@@ -40,8 +45,9 @@ function oneLine(value: unknown): string {
 }
 
 /** The notification's words. */
-export function madeWords(title: unknown, updated: boolean): string {
-  const name = oneLine(title);
+export function madeWords(title: unknown, updated: boolean, needs?: unknown): string {
+  const name = oneLine(title), item = oneLine(needs);
+  if (item) { return `${name ? `“${name}”` : "A checklist"} needs you: ${item}`; }
   if (!name) { return updated ? "DGC updated something it made" : "DGC made something new"; }
   return `DGC ${updated ? "updated" : "made"} “${name}”`;
 }
@@ -54,6 +60,8 @@ export class ArtifactNotice {
   private noticed: Record<string, number>;
   private onScreen?: { timer: ReturnType<typeof setTimeout> };
   private waiting?: MadeNotice;
+  /** A checklist's items that needed you when it was last heard, by checklist. */
+  private readonly asking = new Map<string, Set<string>>();
 
   constructor(context: { globalState?: Store }, private readonly hub?: NoticeHub, options: { holdMs?: number } = {}) {
     this.store = context?.globalState;
@@ -96,12 +104,26 @@ export class ArtifactNotice {
     const author = String(versions.length ? versions[versions.length - 1]?.author ?? "" : "").trim().toLowerCase();
     if (author === "you") { return; }                                         // the person's own edit, in any window
     const version = Number.isSafeInteger(view.version) && view.version > 0 ? view.version : 1;
+    // A checklist: what needs you now, against what needed you when it was last heard (nothing known: nothing new).
+    let needs = "";
+    if (view.type === "checklist") {
+      const now = new Set<string>(Array.isArray(view.progress?.needs) ? view.progress.needs.filter((id: unknown) => typeof id === "string") : []);
+      const before = this.asking.get(view.id);
+      this.asking.set(view.id, now);
+      if (this.asking.size > REMEMBERED) { this.asking.delete(this.asking.keys().next().value as string); }
+      if (op === "changed" || version > 1) {
+        const added = before ? [...now].filter((id) => !before.has(id)) : [];
+        if (!added.length) { this.fresh(view.id, version); return; }      // a tick: progress, not news
+        const waiting = view.progress?.waiting;
+        needs = waiting && added.includes(waiting.id) && typeof waiting.title === "string" && waiting.title.trim() ? waiting.title : "an item";
+      }
+    }
     if (!this.fresh(view.id, version)) { return; }
     // On screen already, or about to be without anyone asking: its tab shows it. (Marked as offered all the same.)
     const hub = this.hub;
     const showing = (): boolean => { try { return hub?.showing(view.id) === true || this.opensByItself?.(message) === true; } catch { return false; } };
     if (showing()) { return; }
-    this.show({ key: view.id, version, title: view.title, updated: op === "changed" || version > 1, open: () => hub?.open(view.id, view), showing });
+    this.show({ key: view.id, version, title: view.title, updated: op === "changed" || version > 1, open: () => hub?.open(view.id, view), showing, ...(needs ? { needs } : {}) });
   }
 
   /** Anything else a turn made that has its own way to open. */
@@ -118,7 +140,7 @@ export class ArtifactNotice {
     (mine.timer as any).unref?.();
     this.onScreen = mine;
     let asked: Thenable<string | undefined>;
-    try { asked = vscode.window.showInformationMessage(madeWords(item.title, item.updated), "Open"); }
+    try { asked = vscode.window.showInformationMessage(madeWords(item.title, item.updated, item.needs), "Open"); }
     catch { this.cleared(mine); return; }
     void Promise.resolve(asked).then((choice) => {
       if (choice === "Open") { try { item.open(); } catch { /* opening says its own failures */ } }

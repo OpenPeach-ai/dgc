@@ -3618,8 +3618,12 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
 /* A goal's end ("Goal done · 2 h 14 min · 1.8M tokens · 7 cycles"): one quiet line under its turn, in the muted ink
    that reads at 4.5:1 (the line is a fact to read, not a passing notice). */
 /* The message that started a goal: a small "Goal" over its bubble, at the bubble's side. */
-.msg.user > .goal-mark { display: inline-flex; align-items: center; gap: 4px; align-self: flex-end; margin: 0 2px 3px 0; color: var(--muted-firm, var(--muted)); font: var(--w-med) var(--t-xs)/1.2 var(--sans); }
-.msg.user > .goal-mark > .ic { color: inherit; }
+/* "◎ Goal · 1:22 PM" under the prompt that started a goal: first in its time row (or alone under the bubble while it
+   has no time), its words a touch firmer than the time's. */
+.msg.user .goal-mark { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-firm, var(--muted)); font: var(--w-med) var(--t-xs)/1.2 var(--sans); vertical-align: bottom; }
+.msg.user > .goal-mark { align-self: flex-end; margin: 2px 2px 0 0; }
+.msg-time > .goal-mark.in-time::after { content: "\00b7"; margin: 0 4px; color: var(--muted); font-weight: normal; }
+.msg.user .goal-mark > .ic { color: inherit; }
 .sys.goal-end { margin: var(--sp-1) 0 var(--sp-2); color: var(--muted-firm, var(--muted)); font-variant-numeric: tabular-nums; }
 .sys.goal-end > .ic { color: inherit; }
 /* The Goals pill's list ("/goal-history"): a goal a row, its name over how it ended, when, its time and tokens;

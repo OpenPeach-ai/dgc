@@ -85,16 +85,22 @@ class OutputChipTest(unittest.TestCase):
         seen = self.run_turn(agent, "", [ChatResult(content="ok", tool_calls=[])])
         self.assertNotIn("# Output", seen["prompt"])
 
-    def test_the_tools_are_offered_every_turn_and_in_adaptive_only_when_chosen(self):
-        standard = self.agent()
-        names = {t["function"]["name"] for t in standard._tool_schemas()}
-        self.assertTrue({"make_artifact", "edit_artifact"} <= names)
-        adaptive = self.agent(tool_profile="adaptive")
-        adaptive._turn_output = ""
-        adaptive._active_tool_intents = set()
-        self.assertNotIn("make_artifact", {t["function"]["name"] for t in adaptive._tool_schemas()})
-        adaptive._turn_output = "slides"
-        self.assertIn("make_artifact", {t["function"]["name"] for t in adaptive._tool_schemas()})
+    def test_the_tools_are_offered_every_turn_in_every_profile(self):
+        # 25 Nov: in the adaptive profile "design me a landing page, show me here in the Canvas" matched none of its
+        # words, so make_artifact wasn't offered and the model said the Canvas couldn't be opened in this session. The
+        # Artifacts tools are offered on every turn in every profile (about 2,000 tokens), as standard offers them.
+        for profile in ("standard", "adaptive", "full"):
+            agent = self.agent(tool_profile=profile)
+            agent._turn_output = ""
+            agent._active_tool_intents = set()
+            names = {t["function"]["name"] for t in agent._tool_schemas()}
+            self.assertTrue({"make_artifact", "edit_artifact", "find_artifacts"} <= names, profile)
+
+    def test_adaptive_offers_make_artifact_for_a_canvas_ask(self):
+        agent = self.agent(tool_profile="adaptive")
+        agent._turn_output = ""
+        agent._activate_tool_intents("design me a landing page for Rustire, show me here in the Canvas")
+        self.assertIn("make_artifact", {t["function"]["name"] for t in agent._tool_schemas()})
 
     def test_typed_output_withholds_the_legacy_page_tool_only_for_that_turn(self):
         for profile in ("standard", "full", "adaptive"):

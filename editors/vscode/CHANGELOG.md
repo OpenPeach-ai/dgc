@@ -14,6 +14,11 @@
   rest of Chrome's window, and Fit / 100% is in a slim bar.
 - **A Pip's page**: Edit sits under its face, and its top bar no longer slides under DGC's logo line.
 - **Home says "Checking your Pips…"** until it has read them, never a false "Nothing needs you" at start.
+- **Home's "Needs you" holds steady while a turn works**: a read of your Pips that failed or timed out on a busy machine
+  was taken as "nothing waits", and the number fell to 0 for a moment. A failed read keeps what Home last knew.
+- **A goal's prompt says "Goal" under its bubble**, first in its time row ("Goal · 1:22 PM"), not over it.
+- **A checklist pops up when it's made, and when an item needs you** ("“Release list” needs you: Pick the version
+  name"), not at each tick: its ticks are on its card and the Tasks pill, and the pop-up covered the prompt box.
 - **Plain words**: the card offering Continue after a stop, and the line when DGC skips a repeated step.
 - **No bright scrollbars**: every page keeps the slim bars (a slides editor's strip had a standard bar with arrows).
 - **The Edited card starts folded** to its header after a reply, in Work and in a Pip's chat: its count, Undo and Session

@@ -180,3 +180,29 @@ test("a widget, or anything else with its own way to open: the same one notifica
   notice.offer({ key: "wg_" + "3".repeat(16), version: 1, title: "", updated: false, open() {} });
   assert.equal(world.shown[2].message, "DGC made something new");
 });
+
+// 25 Nov (seen live during an RC run): a checklist the turn is working through popped "DGC updated “<checklist>”" over the
+// prompt box at every tick. Its ticks are progress its card and the Tasks pill already show; the pop-up is for its
+// making, and for an item that now needs you, said as that.
+test("a checklist: made is offered; its ticks are not; an item that now needs you is, once, in those words", async () => {
+  const { hub } = window_();
+  const list = (version, done, more = {}) => view(ID, "Release list", { type: "checklist", label: "Checklist", version,
+    versions: Array.from({ length: version }, (_, k) => ({ n: k + 1, author: "DGC", at: "2026-11-25T09:00:00Z", summary: k ? "Ticked" : "Made" })),
+    progress: { done, total: 4, needs: [], pinned: true, ...more } });
+  hub.onEvent(changed(list(1, 0)));
+  assert.deepEqual(world.shown.map((s) => s.message), ["DGC made “Release list”"]);
+  world.shown[0].answer(undefined); await tick();
+  hub.onEvent(changed(list(2, 1), "changed"));
+  hub.onEvent(changed(list(3, 2), "changed"));
+  await tick();
+  assert.equal(world.shown.length, 1, "a tick is progress, not news");
+  const asks = { needs: ["c3"], waiting: { id: "c3", title: "Pick the version name" } };
+  hub.onEvent(changed(list(4, 2, asks), "changed"));
+  assert.equal(world.shown.length, 2);
+  assert.equal(world.shown[1].message, "“Release list” needs you: Pick the version name");
+  assert.deepEqual(world.shown[1].items, ["Open"]);
+  world.shown[1].answer(undefined); await tick();
+  hub.onEvent(changed(list(5, 3, asks), "changed"));
+  await tick();
+  assert.equal(world.shown.length, 2, "the same item still waiting is not news again");
+});

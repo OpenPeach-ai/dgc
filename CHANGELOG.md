@@ -6,6 +6,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.52.0 — unreleased (the date goes in on release day)
 
+- **The Artifacts tools are offered in the adaptive tool profile too.** `make_artifact`, `edit_artifact` and
+  `find_artifacts` were offered there only when a prompt matched a few words, so "design me a landing page, show me here
+  in the Canvas" got no design tool and the model said the Canvas couldn't open. They are offered on every turn in every
+  profile (about 2,000 tokens), as the standard profile offers them.
 - **A reopened chat's history never starts inside a turn.** The 1 MB a reopened chat is sent could begin in the middle of
   a long turn; it now begins with that turn's own start, so the turn replays whole and folds.
 - **"Show me here in the Canvas" makes a design.** DGC's docs say what the canvas is, `dgc_docs` weighs a rare word over

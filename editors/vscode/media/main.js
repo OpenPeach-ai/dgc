@@ -6219,8 +6219,10 @@
     if (!time) return;
     const old = node.querySelector(":scope > .msg-time");
     const bubble = node.querySelector(":scope > .bubble");
+    node.querySelector(":scope > .goal-mark")?.remove();
     if (old) old.replaceWith(time); else if (bubble) bubble.after(time); else node.appendChild(time);
     syncSteerTime(node);
+    syncGoalMark(node);
   }
   // ---- the box a turn goes in (0.47 pinned prompt) ----
   // A prompt opens a box: its row, then anything the log wrote between that prompt and its turn
@@ -11876,14 +11878,22 @@ function permissionChoices(ev) {
   $("changes-review").addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); closeChangesReview(); }
   });
-  /** The message that started a goal says so: a small "Goal" over its bubble (user test 2, W9: it looked like any
-   *  other message). Once, on the bubble's own row. */
+  /** The message that started a goal says so (user test 2, W9: it looked like any other message): a small "Goal"
+   *  under its bubble, where its time is ("Goal · 1:22 PM"; his call, 25 Nov: it sat over the bubble). Once. */
   function markGoalBubble(m) {
-    if (!m || m.querySelector(":scope > .goal-mark")) return;
-    const mark = el("div", "goal-mark", icon("target") + "<span>Goal</span>");
-    mark.title = "This message started a goal";
-    (m.querySelector(":scope > .bubble") || m.firstChild)?.before(mark);
+    if (!m) return;
     m.classList.add("goal-started");
+    syncGoalMark(m);
+  }
+  /** The Goal mark's place: first in the prompt's time row, or under the bubble while it has no time. Asked again
+   *  whenever the time is drawn (stampPrompt), as the steer words are. */
+  function syncGoalMark(node) {
+    if (!node?.classList.contains("goal-started")) return;
+    const time = node.querySelector(":scope > .msg-time");
+    const mark = node.querySelector(".goal-mark") || el("span", "goal-mark", icon("target") + "<span>Goal</span>");
+    mark.title = "This message started a goal";
+    if (time) { mark.classList.add("in-time"); if (time.firstChild !== mark) time.prepend(mark); }
+    else { mark.classList.remove("in-time"); const bubble = node.querySelector(":scope > .bubble"); if (bubble && bubble.nextSibling !== mark) bubble.after(mark); else if (!bubble && !mark.parentNode) node.appendChild(mark); }
   }
   function appendGoalPrompt(objective, attachments = []) {
     const m = el("div", "msg user goal-prompt");

@@ -48,6 +48,8 @@ function harness(t,state,{api=48}={}){
    }
    if(m.request.type==='list_pip_unread'&&state.unreadFail){queueMicrotask(()=>reply(m,false,'Unread updates unavailable.'));return;}
    if(m.request.type==='list_workspaces'&&state.workspacesFail){queueMicrotask(()=>reply(m,false,'The personal workspace binding changed.'));return;}
+   if(m.request.type==='list_pip_attention'&&state.attentionFail){queueMicrotask(()=>reply(m,false,'No reply from DGC.'));return;}
+   if(m.request.type==='get_pip_digest'&&state.digestFail){queueMicrotask(()=>reply(m,false,'No reply from DGC.'));return;}
    const make=answers[m.request.type];if(make)queueMicrotask(()=>reply(m,true,make(m.request)));},
   onOpen:v=>opened.push(JSON.parse(JSON.stringify(v))),onModel:m=>models.push(JSON.parse(JSON.stringify(m))),setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval:()=>{}});
  t.after(()=>{strip.dispose();w.close();});
@@ -356,4 +358,24 @@ test('before the Pips are read the model says it is checking; Pips that are off 
  assert.notEqual(x.model().checking,true,'Pips off: nothing to check');
  x.strip.receive({type:'pipsConnection',generation:4,connected:true,supported:true,enabled:true,apiVersion:30});
  assert.notEqual(x.model().checking,true,'a CLI before this list: nothing to check');
+});
+
+// 25 Nov (seen in an RC run): Home's "Needs you" read 2, then 0, then 2 again while a Work turn ran. A read of what waits
+// (or of the news) that fails or times out under load was taken as "nothing": the cards went and the number with them,
+// until the next poll. A failed read keeps what Home last knew; the next read that answers says what is true now.
+test('a read that fails between polls keeps what Home last knew; the next one that answers says what is true now',async t=>{
+ const state={list:[pip(1,'Approvals')],digest:digest([failed(2,'Nightly build')]),projectList:[],
+  attention:{total:2,items:[],reviews:[],truncated:false,counts:{},by_pip:{[id(1)]:2}}};
+ state.list.push(pip(2,'Nightly build'));
+ const x=harness(t,state,{api:69});await x.connect();
+ const said=()=>[x.model().need,x.rows()];
+ const before=[2,[['Approvals','2 waiting for you',false],['Nightly build','1 run failed',true]]];
+ assert.deepEqual(said(),before);
+ state.attentionFail=true;state.digestFail=true;await x.poll();
+ assert.deepEqual(said(),before,'a failed read is not "nothing waits"');
+ assert.ok(!x.models.some(m=>m.ready&&m.need===0),'never a moment of 0');
+ state.attentionFail=false;state.digestFail=false;
+ state.attention={total:0,items:[],reviews:[],truncated:false,counts:{},by_pip:{}};state.digest=digest([]);
+ await x.poll();
+ assert.deepEqual(said(),[0,[]],'answered again: what is true now');
 });

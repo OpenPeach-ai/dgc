@@ -2546,7 +2546,8 @@ the model choose; a tool with nothing to act on (no skills installed, no backgro
 active goal) still stays out. `tool_profile: adaptive` instead offers the core read / edit / search
 / shell surface and adds the others only when the request's wording asks for them, which keeps a
 small local context clear at the cost of a differently worded ask being told the tool does not
-exist. `tool_profile: full` offers every tool allowed by the current permission mode. Plan mode
+exist; DGC's Artifacts tools (`make_artifact`, `edit_artifact`, `find_artifacts`) are offered on every
+turn there too. `tool_profile: full` offers every tool allowed by the current permission mode. Plan mode
 denies mutations. Full-auto omits the blocking options prompt unless your request mentions
 choosing.
 
@@ -3729,7 +3730,8 @@ view's **…** menu shows it again.
 
 When a Work session, a chat or a Pip makes or updates a page, a document, slides, a sheet or a
 dashboard, one notification says **DGC made "…"** with **Open**. A newer one replaces an unanswered older
-one, and it never repeats after a reload.
+one, and it never repeats after a reload. A checklist has one when it is made, and when an item of it needs you
+(**"…" needs you: …**), not for each item it ticks: those show on its card.
 
 ## The composer
 

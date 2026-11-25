@@ -3666,7 +3666,10 @@ class Agent(GoalLifecycle):
                            if ((name := tool.get("function", {}).get("name", "")).startswith("mcp__")
                                or name not in _OPTIONAL_TOOL_INTENT
                                or _OPTIONAL_TOOL_INTENT[name] in active
-                               or (name in ("make_artifact", "edit_artifact") and getattr(self, "_turn_output", ""))
+                               # DGC's Artifacts (a design on the canvas, slides, a document…) are offered on
+                               # every turn, as standard offers them: "show me here in the Canvas" matched none of
+                               # the words, and the model said the Canvas couldn't open here (25 Nov). ~2,000 tokens.
+                               or name in ("make_artifact", "edit_artifact", "find_artifacts")
                                or (name == "task" and self._task_exposed())
                                or (name in {"repo_map", "code_intel"}
                                    and "narrow_scope" not in active)

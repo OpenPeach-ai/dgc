@@ -319,10 +319,14 @@ export function mountHomePips(options) {
     const pip = checkedPip(raw);
     if (pip && !seen.has(pip.id)) { seen.add(pip.id); found.push(pip); }
    }
-   let value = null, waiting = null;
+   let value = null, waiting = null, freshDigest = true;
    const asked = sequence + 1;
-   try { value = pipDigest((await request('get_pip_digest')).digest); } catch { value = null; }
-   if (apiVersion >= 44) { try { waiting = attentionPage(await request('list_pip_attention', {limit: 100, ...(projects ? {projects} : {})})); } catch { waiting = null; } }
+   // A read that fails or times out (a busy machine, a Work turn at full tilt) keeps what Home last knew of the same
+   // list: it is not "nothing waits". Home said "Needs you 0" for a moment and then 2 again, 25 Nov. The next read that
+   // answers says what is true now.
+   const sameList = scope => listedScopes.length === wanted.length && listedScopes.every((id, k) => id === wanted[k].id) && scope;
+   try { value = pipDigest((await request('get_pip_digest')).digest); } catch { value = sameList(digest) || null; freshDigest = false; }
+   if (apiVersion >= 44) { try { waiting = attentionPage(await request('list_pip_attention', {limit: 100, ...(projects ? {projects} : {})})); } catch { waiting = sameList(attention) || null; } }
    const unseen = apiVersion >= 69 ? await Promise.all(wanted.map(w => request('list_pip_unread', {workspace_id: w.id}).catch(() => null))) : [];
    if (token !== epoch) return;
    // A Pip past list_pips' first 100 that has news or a card waiting still gets its row, by its name there.
@@ -342,7 +346,7 @@ export function mountHomePips(options) {
    void readAnswered(waiting, token);
    personal = workspaces.find(w => w?.kind === 'personal' && typeof w.id === 'string')?.id || null;
    // A digest asked for after a dismiss was kept already leaves that news out, or it is new news.
-   if (value) for (const [id, after] of hidden) if (asked > after) hidden.delete(id);
+   if (value && freshDigest) for (const [id, after] of hidden) if (asked > after) hidden.delete(id);
    if (!unreadFailure) {
     for (const [id, after] of reads) if (asked > after) reads.delete(id);
     // A dismissed Pip with nothing unread now (read, archived or gone) or whose project is gone loses its entry; what was
