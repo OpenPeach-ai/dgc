@@ -24,9 +24,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   covers that site for the session, Always allow saves `DGCBrowser(dgc-browser:https://site)`. Its tab opens nothing
   else, never types a password or a code, and never pays or sends anything on a bank or payment site: the step says
   what wasn't sent. DGC Browser belongs to the Pips supervisor, so a Work session asks it for its tab (a private socket
-  of its own); with Pips off it asks nothing and says to start them. The dock's Watch shows its tab. Work's own browser stays the one for any page
-  ("check my browser" included); when it can't show what you mean (your account's page is a sign-in page), Work tries
-  DGC Browser and says which browser it used.
+  of its own); with Pips off it asks nothing and says to start them. The dock's Watch shows its tab. Work's own
+  browser stays the one for any page ("check my browser" included); when it can't show what you mean (your account's
+  page is a sign-in page), Work tries DGC Browser and says which browser it used.
 - **Switched off, a Pip's computer closes.** A Pip that is off (or archived) runs nothing on its own, its computer
   included: each of its computers closes as soon as nothing uses it (no answer of it at work, no card waiting on it),
   instead of waiting to idle out. Its sign-ins and Files stay; written to, it still answers and opens its computer again.

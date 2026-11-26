@@ -627,7 +627,10 @@ test("each picture is made of DGC's own parts: the real Pip faces, file sheets, 
   try {
     const parts = [];
     for (let i = 0; i < N; i++) {
-      parts.push(await x.page.evaluate(() => { const st = document.querySelector("#whats-new .wn-stage"), n = (s) => st.querySelectorAll(s).length;
+      parts.push(await x.page.evaluate(async () => { const st = document.querySelector("#whats-new .wn-stage"), n = (s) => st.querySelectorAll(s).length;
+        // (A slide's pictures load once it is drawn: read them when decoded, as the 290 px test does. Read at once,
+        // the largest one could still be 0 px on a busy machine. A picture that fails to load stays 0 px, and fails.)
+        await Promise.all([...st.querySelectorAll("img")].map((i) => i.decode().catch(() => {})));
         return { faces: [...st.querySelectorAll(".dgc-plush[data-character]")].map((f) => f.dataset.character), star: n(".hc-star"), folios: n(".folio[data-mark]"),
           sheets: [...st.querySelectorAll(".dgc-sheet[data-kind]")].map((n) => n.dataset.kind), cards: n(".hc-card"), rows: n(".hc-li"), lib: n(".dgc-lib .lib-row"), halo: n(".halo"),
           thread: n(".dgc-cm-thread .dgc-cm-msg") + n(".dgc-cm-thread .dgc-cm-sug"), buttons: n("span.dgc-btn"), steps: n(".todos-card li.todo .todo-mark svg"), link: n(".dgc-linkcard .dgc-linkcard-title"),
