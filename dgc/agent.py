@@ -2371,6 +2371,17 @@ class _ChatToolResources:
             self.stop(owner, hub)
 
 
+# DGC's own frames around a typed message (an open file's context, the local time, a Pip reference, skill instructions):
+# not what the user wrote, and an open file of DGC's own code can name DGC Browser.
+_DGC_FRAMES = re.compile(r"<((?:editor|dgc|pip)-[a-z-]+)\b[^>]*>.*?</\1>", re.DOTALL)
+_NAMES_DGC_BROWSER = re.compile(r"\bdgc[ -]?browser\b", re.IGNORECASE)
+
+
+def names_dgc_browser(user_text) -> bool:
+    """The user's own words in this message name DGC Browser ("use the DGC browser")."""
+    return bool(_NAMES_DGC_BROWSER.search(_DGC_FRAMES.sub(" ", str(user_text or ""))))
+
+
 class Agent(GoalLifecycle):
     @staticmethod
     def _mcp_client_capabilities(ui) -> dict:
@@ -9375,6 +9386,27 @@ class Agent(GoalLifecycle):
         from .work_cli import client_for
         return client_for(self.config)
 
+    def _steer_to_dgc_browser(self, name, args) -> str:
+        """The user named DGC Browser in this turn's message and the model opened a page with the browser tool: once a
+        turn, that call is answered "use dgc_browser" instead of run (live, 26 Nov: "Use the DGC browser: open
+        example.com" was opened with the browser tool "as instructed" by the order rule for "my browser", about 1 in
+        700 times; no wording changed that without sending "check my browser" to DGC Browser first more often). Once:
+        a message that names it to say "not the DGC browser" costs one round, and the next browser call runs. Only
+        where dgc_browser was offered on this request, and never for the user's own Chrome (signed_in), which they
+        named instead."""
+        if (name != "browser" or self.depth != 0 or not getattr(self, "_named_dgc_browser", False)
+                or getattr(self, "_dgc_browser_steered", False) or not isinstance(args, dict)
+                or args.get("signed_in") is True
+                or str(args.get("operation") or "").strip().lower() not in ("open", "screenshot")):
+            return ""
+        offered = getattr(self, "_offered_tool_names", None)
+        if offered is not None and "dgc_browser" not in offered:
+            return ""
+        self._dgc_browser_steered = True
+        return ("Not opened: the user asked for DGC Browser by name in their message, so open this page with the "
+                "dgc_browser tool instead. (If their message says not to use DGC Browser, call browser again: it "
+                "runs then.)")
+
     def _cli_model_window(self) -> int:
         """The window of the CLI that is this chat's model in Dev Mode (dgc/work_cli.py), else 0. Cheap: settings only."""
         if self.depth != 0 or getattr(self.ui, "cli_model_enabled", False) is not True:
@@ -9410,6 +9442,11 @@ class Agent(GoalLifecycle):
                       notification: Notification | None = None, pip_setup_notice: dict | None = None) -> bool:
         wake = source == "monitor"
         self._turn_reasoning_pending = []           # reasoning never carries across turns
+        if self.depth == 0:
+            # Named in the user's own words ("use the DGC browser"): a page opened with the browser tool is sent to
+            # DGC Browser once (_handle_call). Only a prompt the user typed: a goal's later turns, a wake, a continue no.
+            self._named_dgc_browser = source == "prompt" and names_dgc_browser(user_text)
+            self._dgc_browser_steered = False
         self._heard()                               # the user's prompt (or the wake) starts the clock
         if self.depth == 0:
             # A new top-level turn: the approval and its "Execute the plan now" tool result are
@@ -11695,6 +11732,10 @@ class Agent(GoalLifecycle):
             # The sites this session already opened there (and the user allowed): opening one again doesn't ask.
             from .tools import dgc_browser_sites
             policy_args = {**args, "_session_sites": sorted(dgc_browser_sites(self.ctx))}
+        steer = self._steer_to_dgc_browser(name, args)
+        if steer:
+            self.ui.tool_denied(name, display_args, "you asked for DGC Browser", call_id)
+            return steer
         decision, reason = perms.decide(name, policy_args)
         browser_closed = ""
         if name == "dgc_browser" and decision == ASK and isinstance(args, dict):

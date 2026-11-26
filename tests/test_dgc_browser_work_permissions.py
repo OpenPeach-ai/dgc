@@ -98,5 +98,77 @@ class NothingToAsk(unittest.TestCase):
         self.assertNotIn("nothing to see", out)
 
 
+
+class NamedGoesThere(unittest.TestCase):
+    """Live, 26 Nov (packaged 230f7048): "Use the DGC browser: open https://example.com ..." was opened with the browser
+    tool, the model saying "as instructed" (the order rule for "my browser"), about 1 in 700 times on the editor's own
+    request; no tool wording changed that without sending "check my browser" to DGC Browser first more often.
+    Now a turn whose message names DGC Browser answers its first browser open "use dgc_browser",
+    once, without asking anything; the next browser call runs; a message that doesn't name it is untouched."""
+
+    def harness(self, mode="default"):
+        from test_subagents import Harness
+        directory = tempfile.TemporaryDirectory(prefix="dgc-browser-named-")
+        self.addCleanup(directory.cleanup)
+        harness = Harness(Path(directory.name), mode=mode)
+        self.addCleanup(harness.close)
+        return harness
+
+    def turn(self, harness, text):
+        # What _run_turn_now sets for a top-level turn the user typed (the turn itself isn't run here).
+        from dgc.agent import names_dgc_browser
+        harness.agent._named_dgc_browser, harness.agent._dgc_browser_steered = names_dgc_browser(text), False
+
+    def test_only_the_users_own_words_name_it(self):
+        from dgc.agent import names_dgc_browser
+        for said in ("Use the DGC browser: open https://example.com", "open it in dgc-browser", "DGC Browser, please",
+                     "check it in the dgcbrowser"):
+            with self.subTest(said=said):
+                self.assertTrue(names_dgc_browser(said))
+        for said in ("Check my browser: how many unread GitHub notifications?", "open example.com in a browser",
+                     '<editor-context-json version="1">{"file": "dgc/dgc_browser.py", "text": "DGC Browser"}</editor-context-json>\n\nfix the test',
+                     "what time is it\n\n<dgc-now>DGC Browser</dgc-now>", "the dgc_browser_work module"):
+            with self.subTest(said=said):
+                self.assertFalse(names_dgc_browser(said), "an open file, DGC's own notes or a module name don't count")
+
+    def test_named_the_first_browser_open_is_sent_to_dgc_browser_once_and_asks_nothing(self):
+        harness = self.harness("default")
+        self.turn(harness, "Use the DGC browser: open https://example.com and tell me its heading")
+        from dgc import agent as agent_module
+        with patch.object(agent_module, "execute") as ran:
+            out = harness.agent._handle_call(ToolCall("b1", "browser", {"operation": "open", "url": "https://example.com"}))
+        self.assertIn("open this page with the dgc_browser tool instead", out)
+        self.assertEqual([f for f in harness.stream.frames() if f["type"] == "permission_request"], [], "nothing asked")
+        denied = [f for f in harness.stream.frames() if f["type"] == "tool_denied"]
+        self.assertEqual([f.get("reason") for f in denied], ["you asked for DGC Browser"], "a row says why it didn't run")
+        ran.assert_not_called()
+        # Once: the next browser call is decided and run as any other (here it asks, as browser does in default mode).
+        harness.answer("permission_request", {"decision": "deny"})
+        again = harness.agent._handle_call(ToolCall("b2", "browser", {"operation": "open", "url": "https://example.com"}))
+        self.assertNotIn("dgc_browser tool instead", again)
+        self.assertEqual(len([f for f in harness.stream.frames() if f["type"] == "permission_request"]), 1)
+
+    def test_not_named_not_an_open_their_own_chrome_or_not_offered_runs_as_before(self):
+        cases = (("Check my browser: how many unread GitHub notifications?", {"operation": "open", "url": "https://github.com/notifications"}, None),
+                 ("Use the DGC browser to check it", {"operation": "snapshot"}, None),
+                 ("Use the DGC browser to check it", {"operation": "open", "url": "https://example.com", "signed_in": True}, None),
+                 ("Use the DGC browser to check it", {"operation": "open", "url": "https://example.com"}, {"browser", "read_file"}))
+        for text, args, offered in cases:
+            with self.subTest(text=text, args=args, offered=offered):
+                harness = self.harness("default")
+                self.turn(harness, text)
+                if offered is not None:
+                    harness.agent._offered_tool_names = offered
+                self.assertEqual(harness.agent._steer_to_dgc_browser("browser", args), "")
+                self.assertFalse(harness.agent._dgc_browser_steered)
+
+    def test_a_sub_agent_and_dgc_browser_itself_are_never_redirected(self):
+        harness = self.harness("default")
+        self.turn(harness, "Use the DGC browser: open https://example.com")
+        self.assertEqual(harness.agent._steer_to_dgc_browser("dgc_browser", dict(OPEN)), "")
+        harness.agent.depth = 1
+        self.assertEqual(harness.agent._steer_to_dgc_browser("browser", {"operation": "open", "url": "https://example.com"}), "")
+
+
 if __name__ == "__main__":
     unittest.main()

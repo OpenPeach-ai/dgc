@@ -4084,6 +4084,11 @@
     return out.some((c) => c && c.name === "goal-history") ? out : [...out, entry];
   }
   let streaming = false, turn = null;
+  // A goal sent while nothing runs looks started at once (27 Nov: its time and "Loading model" came ~5 s after Send,
+  // once the backend had saved the goal; an idle prompt's come at once). Its time is drawn at Send and a starting row
+  // stands under it, as a turn's own does (showStarting); its turn_start takes the row's place and keeps its clock.
+  const startingRows = new Map();      // request id -> { block, at, timer }
+  const STEERED_TO_DGC_BROWSER = "you asked for DGC Browser";   // (dgc/agent.py _handle_call's reason, word for word)
   let viewerStreaming = null;          // set by the image viewer: keeps its Stop in step with the turn
   // A custom slash command sent while idle shows Stop before its turn exists. Holds the command's
   // name until that turn starts or the backend answers that command with an error or refusal.
@@ -4355,6 +4360,7 @@
     }
   }
   function rejectPrompt(id, confirmed = true) {
+    dropStarting(id);
     const pending = pendingPrompts.get(id) || queuedPrompts.get(id);
     if (!pending) return;
     // Queued, or steering the backend acknowledged but had not applied: known unsent, not in doubt.
@@ -6169,8 +6175,14 @@
     } else if (!promptNode) {
       head = echoPrompt(prompt, requestId, savedAttachments, answerQuestion, displayMentions);
     }
+    // The starting row drawn at Send under this turn's prompt (showStarting), found by the row's request id: with or
+    // without an id on turn_start (an older backend's goal turn carries none; echoPrompt found its row). Any other turn
+    // starting first takes every starting row away: none stays saying a turn is starting that isn't this one.
+    const rowId = !replaying && head?.matches?.(".msg.user") ? String(head.dataset.promptId || "") : "";
+    const from = rowId ? takeStarting(rowId) : null;
+    if (!replaying && !from) for (const id of [...startingRows.keys()]) dropStarting(id);
     const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
-    if (!replaying) block.classList.add("motion-arrive");
+    if (!replaying && !from) block.classList.add("motion-arrive");   // (taking a starting row's place: it came in already)
     block._turnId = String(id || "");               // a turn_files for it after it ended finds its card
     block.appendChild(el("div", "role dgc", "DGC"));
     // The verb starts empty and is written only by renderTurnMeta, from what the backend says the
@@ -6178,7 +6190,7 @@
     // first byte to the last, through six gates and every tool call.
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb"></span> <span class="meta"></span>`);
     block.appendChild(act);
-    appendTarget.appendChild(block);
+    if (from?.block?.isConnected) from.block.replaceWith(block); else appendTarget.appendChild(block);
     // A claimed queued prompt: the turn goes at the end like any other, so whatever the log said
     // between that prompt being sent and its turn starting (a compaction, a notice, an error) stays
     // above the turn, where it happened. The prompts still waiting are the ones that move: back
@@ -6197,7 +6209,7 @@
     wrapTurn(head, block);
     // No clock for a replayed turn: the session file does not record when it started, and a
     // fabricated 0s is worse than no number at all.
-    const t0 = replaying ? null : Date.now();
+    const t0 = replaying ? null : from ? from.at : Date.now();   // a goal's clock runs from its Send
     turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "",
              id: String(id || ""), activity: null, phaseT0: t0, handoff: false,
              prompt: String(prompt || ""), edits: new Map() };
@@ -6209,7 +6221,7 @@
     // history (a {role: "time"} item, legacyItem), so a reopened chat says when each prompt was sent.
     turn.head = head?.matches?.(".msg.user") ? head : null;
     if (turn.head && id) railTurnIds.set(turn.head, String(id));    // the prompt rail knows it by its turn (an outline's id)
-    if (!replaying) stampPrompt(turn.head, Date.now());
+    if (!replaying) stampPrompt(turn.head, from ? from.at : Date.now());
     if (!replaying) {
       turn.timer = setInterval(renderTurnMeta, 200);
       renderTurnMeta();
@@ -8409,6 +8421,7 @@
           : value === "failed" ? failedAgentStep(card) || `${copy.past} · failed`
             : value === "blocked" ? `${copy.past} · blocked, repeated call`
               : value === "denied" ? `${copy.present} · denied`
+              : value === "redirected" ? "Opening it in DGC Browser instead"
               : value === "stopped" ? `${copy.past} · stopped`
                 : value === "moved" ? "Moved to the background" : copy.past;
     }
@@ -10837,6 +10850,7 @@ function permissionChoices(ev) {
       case "queue_changed": queueChanged(ev); break;
       case "prompt_accepted": {
         const pending = pendingPrompts.get(ev.request_id);
+        if (ev.state !== "started") dropStarting(ev.request_id);   // queued or steered: it isn't starting now
         if (ev.state === "steered") {
           if (pending) pending.acknowledged = true;
           if (pending?.node) {
@@ -11098,15 +11112,19 @@ function permissionChoices(ev) {
       }
       case "tool_denied": {
         ensureTurn();
+        // A browser call DGC sent to DGC Browser because the user's message named it (dgc/agent.py
+        // _steer_to_dgc_browser, its reason word for word): nobody refused anything, so it isn't red; it says where
+        // the page opens instead.
+        const steered = ev.name === "browser" && ev.reason === STEERED_TO_DGC_BROWSER;
         if (!agentIdFromCall(ev.call_id))
-          window.DgcTrace?.toolEnd(turn.trace, { ...ev, denied: true });
+          window.DgcTrace?.toolEnd(turn.trace, { ...ev, denied: !steered });
         turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ ...ev,
-          summary: ev.args?.path || ev.args?.command || ev.reason }));
-        c.querySelector(".dot").className = "dot deny";
-        setToolStatus(c, "denied");
-        setToolOutput(c, String(ev.reason || "Permission denied"));
+          summary: steered ? String(ev.args?.url || "") : ev.args?.path || ev.args?.command || ev.reason }));
+        c.querySelector(".dot").className = steered ? "dot ok" : "dot deny";
+        setToolStatus(c, steered ? "redirected" : "denied");
+        setToolOutput(c, steered ? "You asked for DGC Browser, so the page opens there instead." : String(ev.reason || "Permission denied"));
         break;
       }
       case "permission_decision": {
@@ -11947,6 +11965,33 @@ function permissionChoices(ev) {
     if (time) { mark.classList.add("in-time"); if (time.firstChild !== mark) time.prepend(mark); }
     else { mark.classList.remove("in-time"); const bubble = node.querySelector(":scope > .bubble"); if (bubble && bubble.nextSibling !== mark) bubble.after(mark); else if (!bubble && !mark.parentNode) node.appendChild(mark); }
   }
+  /** The starting row: what a turn's own row says before the backend's first word ("Working", its clock from Send),
+   *  in the turn's markup, right under the prompt. Its turn_start takes its place (startTurn); a refusal, a cancel or
+   *  a queue takes it away; one whose log was cleared stops by itself. */
+  function showStarting(node, requestId, at) {
+    dropStarting(requestId);
+    const block = el("div", "msg dgc motion-arrive starting");
+    block.appendChild(el("div", "role dgc", "DGC"));
+    const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">Working</span> <span class="meta"></span>`);
+    block.appendChild(act);
+    node.after(block);
+    const row = { block, at, timer: 0 };
+    const tick = () => {
+      if (!block.isConnected) { dropStarting(requestId); return; }
+      act.querySelector(".meta").textContent = `(${elapsedWords(Math.floor(Math.max(0, Date.now() - at) / 1000) * 1000)} · ↓ 0 tok)`;
+    };
+    tick(); row.timer = setInterval(tick, 200);
+    startingRows.set(requestId, row);
+  }
+  function takeStarting(requestId) {
+    const row = startingRows.get(requestId);
+    if (!row) return null;
+    startingRows.delete(requestId); clearInterval(row.timer);
+    return row;
+  }
+  function dropStarting(requestId) { takeStarting(requestId)?.block.remove(); }
+  /** A goal standing now: starting another first asks "Replace the current goal?" (src/panel.ts), so it isn't starting. */
+  const goalStanding = () => !!goalState.text && goalState.status !== "completed" && goalState.status !== "none";
   function appendGoalPrompt(objective, attachments = []) {
     const m = el("div", "msg user goal-prompt");
     m.appendChild(el("div", "role", "goal"));
@@ -11970,11 +12015,15 @@ function permissionChoices(ev) {
     // standing for them, and reconcilePills withdrew every skill, template and @file from the very
     // message being given back.
     const selected = attachments.map(({ fromPill, ...rest }) => rest);
+    const standing = goalStanding(), idle = !turn && !streaming;   // (read before the bubble: appendGoalPrompt sets Sending)
     const node = appendGoalPrompt(objective, selected);
     const requestId = `${promptPrefix}-${++promptSequence}`;
     node.dataset.promptId = requestId;     // which request this row is (echoPrompt finds it by this)
+    const sentAt = Date.now();
     pendingPrompts.set(requestId, { text: restoreText, attachments: selected, goal: true,
-      node, session: draftSession });
+      node, session: draftSession, sentAt });
+    // Nothing running and no goal to replace: it looks started now, as an idle prompt does (its time, a starting row).
+    if (idle && !standing) { stampPrompt(node, sentAt); showStarting(node, requestId, sentAt); }
     const values = key => selected.filter(item => item[key]).map(item => item[key]);
     vscode.postMessage({ type: "startGoal", text: objective, requestId,
       skills: values("skill"), templates: values("template"), context: values("resource"),

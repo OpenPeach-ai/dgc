@@ -6,6 +6,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.52.0 — unreleased (the date goes in on release day)
 
+- **A goal looks started the moment you send it.** Its time and the turn's first row ("Working", its clock running)
+  show at once, as a prompt's do; the goal's turn takes that row's place once DGC has saved the goal. It took a few
+  seconds to show anything, which looked broken. A refused goal takes the row away; replacing a standing goal still
+  asks first.
+- **Say "use the DGC browser" and Work uses it.** Now and then the model opened the page with Work's own browser
+  anyway, reading the order for "my browser" as covering it. A Work turn whose message names DGC Browser sends its
+  first page opened with the browser tool to DGC Browser instead, once; the step says "Opening it in DGC Browser
+  instead", not in red. Messages that don't name it are as before ("check my browser" tries Work's browser first).
 - **Home's Work, Chats and Pips cards put the latest first**, as Recent does: the session or chat with the newest
   reply on top, a session at work or a chat answering counted as active now, a pinned chat first. The Pips card lists
   Core, then the Pip that spoke or reported last; a Pip waiting for you is no longer lifted over newer ones (Needs you
