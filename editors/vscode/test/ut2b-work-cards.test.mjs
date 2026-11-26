@@ -69,7 +69,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
       await x.page.evaluate(() => document.querySelector("#log .goal-mark")?.scrollIntoView({ block: "start" }));
       await shot(x.page, `w9-goal-end-${short(theme)}-${width}`);
       assert.deepEqual([m.marked, m.words], [1, "Goal"], `only the goal's own message is marked (${m.all} messages)`);
-      // 25 Nov (his call): under the bubble, where its time is ("Goal · 1:22 PM"), not over it.
+      // 25 Nov (decided): under the bubble, where its time is ("Goal · 1:22 PM"), not over it.
       assert.ok(m.below && m.size >= 11, "a small mark under its bubble, inside the panel");
       if (m.time) assert.match(m.time, /^Goal · \d/, `first in the prompt's time row (${m.time})`);   // (this scene draws no times: goal-history holds that)
       if (m.end.length) { assert.equal(m.end[0], "Goal done · 14 s · 144.2k tokens", "one round is not counted"); assert.doesNotMatch(m.end.join(" "), /cycle/); }

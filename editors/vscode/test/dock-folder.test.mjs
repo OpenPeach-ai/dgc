@@ -1,5 +1,5 @@
 // A Work folder on the dock (asked 13 Nov: "how can i Pin a folder directory on to the dock?"). A folder is pinned from
-// a Project Folder dropdown's row and from a Folders card's tile (the dropdown's first line that pinned the chosen folder went on 14 Nov: each row's own pin does it); on the dock it is his folder icon
+// a Project Folder dropdown's row and from a Folders card's tile (the dropdown's first line that pinned the chosen folder went on 14 Nov: each row's own pin does it); on the dock it is the maintainer's folder icon
 // in the folder's own kept palette with the folder's name on its label, still unless something in it runs; a click
 // opens Work on that folder; its menu has New work here, Open in new window and Unpin; it shows in every window; a
 // folder that is gone is dimmed and says "Not found". The host's side (src/dock.ts, bundled against a stub `vscode`)
@@ -111,13 +111,13 @@ test("pin from a Folders card tile; on the Work page the Project Folder menu has
   if (skipOrFail(t)) return;
   const x = await openGrid(browser, { width: 460, layout: ["folders"], pins: [] });
   try {
-    const p = x.page, tile = p.locator('.hc-card[data-card="folders"] .hc-tile[data-name="rust_ire"]'), pin = tile.locator(".hc-pin");
+    const p = x.page, tile = p.locator('.hc-card[data-card="folders"] .hc-tile[data-name="tide_api"]'), pin = tile.locator(".hc-pin");
     assert.equal(Number(await pin.evaluate((n) => getComputedStyle(n).opacity)), 0);
     await tile.hover(); await x.rest();
     assert.equal(await shown(pin), 1, "pointed at: the tile's pin shows beside New work here");
-    assert.equal(await pin.getAttribute("aria-label"), "Pin to the dock: rust_ire");
+    assert.equal(await pin.getAttribute("aria-label"), "Pin to the dock: tide_api");
     await pin.click(); await x.rest(200);
-    assert.deepEqual(await folderPins(x), [["rust_ire", "/home/me/rust_ire"]]);
+    assert.deepEqual(await folderPins(x), [["tide_api", "/home/me/tide_api"]]);
     assert.equal(await pin.getAttribute("aria-pressed"), "true");
     assert.equal((await x.posted("projectFolderChoose")).length, 0, "the tile was not opened");
     assert.equal(await p.locator('.hc-card[data-card="folders"] .hc-tile.hc-gone .hc-pin').count(), 0, "a folder that is gone has no pin to offer");
@@ -133,11 +133,11 @@ test("pin from a Folders card tile; on the Work page the Project Folder menu has
     await p.keyboard.press("ArrowRight"); await x.rest(80);
     assert.equal(await p.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Pin to the dock: garden-notes", "the keyboard reaches the row's pin");
     await p.keyboard.press("Enter"); await x.rest(300);
-    assert.deepEqual(await folderPins(x), [["rust_ire", "/home/me/rust_ire"], ["garden-notes", GARDEN]]);
+    assert.deepEqual(await folderPins(x), [["tide_api", "/home/me/tide_api"], ["garden-notes", GARDEN]]);
     assert.equal((await x.posted("projectFolderChoose")).length, 0, "pinning chooses nothing");
     assert.equal(await p.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Unpin from the dock: garden-notes", "the pin says what it does now, and the menu is still open");
     await p.keyboard.press("Enter"); await x.rest(300);
-    assert.deepEqual(await folderPins(x), [["rust_ire", "/home/me/rust_ire"]], "and it unpins");
+    assert.deepEqual(await folderPins(x), [["tide_api", "/home/me/tide_api"]], "and it unpins");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });
@@ -154,7 +154,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
       const tiles = await p.evaluate(() => [...document.querySelectorAll('#dgc-dock .dgc-dock-item[data-kind="folder"]')].map((b) => { const icon = b.querySelector(".folder-icon"), tile = b.querySelector(".dgc-dock-tile").getBoundingClientRect(), r = icon?.getBoundingClientRect();
         return { label: b.getAttribute("aria-label"), palette: [...(icon?.classList || [])].find((c) => c.startsWith("folder--")) || "", name: icon?.querySelector(".folder-label")?.textContent || "", inside: !!r && r.left >= tile.left - 1 && r.right <= tile.right + 1 && r.top >= tile.top - 1 && r.bottom <= tile.bottom + 1,
           moving: [...b.querySelectorAll("*")].some((n) => n.getAnimations().some((a) => a.playState === "running")), gone: b.dataset.gone === "1", opacity: Number(getComputedStyle(b.querySelector(".dgc-dock-tile")).opacity), dot: b.querySelector(".dgc-dock-dot")?.dataset.dot || "" }; }));
-      assert.deepEqual(tiles.map((t) => [t.palette, t.name]), [["folder--fern", "garden-notes"], ["folder--azure", "shop"], [tiles[2].palette, "old-site"]], "his folder icon, in the folder's kept palette, its name on the label");
+      assert.deepEqual(tiles.map((t) => [t.palette, t.name]), [["folder--fern", "garden-notes"], ["folder--azure", "shop"], [tiles[2].palette, "old-site"]], "the maintainer's folder icon, in the folder's kept palette, its name on the label");
       assert.ok(tiles.every((t) => t.inside), "the icon fits its tile");
       assert.deepEqual(tiles.map((t) => t.moving), [false, false, false], "still at rest");
       assert.match(tiles[0].label, /^garden-notes\. Folder · 6 sessions/); assert.match(tiles[1].label, /^shop\. .*14 sessions · 1 Pip.*this window/i);

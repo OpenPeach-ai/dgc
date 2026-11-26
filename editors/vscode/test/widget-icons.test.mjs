@@ -2,7 +2,7 @@
 // dock-scene.mjs). A widget is one of ChatDGC's interactive answers (a calculator, a timer, a quiz); its mark is the
 // maintainer's own Folio (media/shared/folio.css: span.folio.folio--<palette> > i*3), in one of twelve palettes (his
 // fourteen without Citron and Lime). What is held here:
-//   - his sheet is shipped as he wrote it, and the old cube and its seven colour pairs are gone
+//   - the maintainer's sheet is shipped as written, and the old cube and its seven colour pairs are gone
 //   - a widget wears its Folio wherever it is shown: the Library's Widgets tab, a chat's Widgets list, its card in its
 //     reply, the dock; at each place's size, with nothing cut off; a deleted one's is dimmed
 //   - twelve palettes, never citron or lime; a widget's Folio rests (it has no work of its own to show), and nothing
@@ -60,7 +60,7 @@ const folios = (page, sel) => page.evaluate((sel) => [...document.querySelectorA
     shown: m.checkVisibility({ visibilityProperty: true }), dim: Number(getComputedStyle(m.parentElement).opacity) };
 }), sel);
 
-test("his Folio sheet is shipped as he wrote it and loaded with the others; the old cube and its seven colour pairs are gone", () => {
+test("the maintainer's Folio sheet is shipped as written and loaded with the others; the old cube and its seven colour pairs are gone", () => {
   assert.equal(createHash("sha256").update(readFileSync(new URL("../media/shared/folio.css", import.meta.url))).digest("hex"), "53a341b15d2c1986b1d4494ea1d7c79fd4b97af9ffce351c95566163062d7cb3", "folio.css, byte for byte");
   assert.match(read("media/main.css"), /@import url\("\.\/shared\/voxel\.css"\);\n@import url\("\.\/shared\/folio\.css"\);\n@import url\("\.\/shared\/blob\.css"\);/, "Work's page, ChatDGC's and the Library's all take it");
   for (const file of ["media/main.js", "media/chatdgc.js", "media/library.js", "media/shared/blob.js", "media/shared/blob.css", "media/shared/dock.css", "media/shared/tokens.css", "media/chatdgc.css"]) {
@@ -94,7 +94,7 @@ test("the Library's Widgets tab: every widget wears its Folio, the first palette
         assert.ok(m.inside && m.clearOfWords && m.shown, `inside its row and clear of its name (${width})`);
         assert.deepEqual([m.name, m.state], ["folio-tilt", "paused"], "at rest (--folio-play: paused)");
       }
-      assert.deepEqual(marks.slice(0, 12).map((m) => m.palette), TWELVE, "the first twelve: his twelve palettes in order, never citron or lime");
+      assert.deepEqual(marks.slice(0, 12).map((m) => m.palette), TWELVE, "the first twelve: the twelve palettes in order, never citron or lime");
       marks.forEach((m, i) => { for (let d = 1; d <= 10; d++) if (marks[i + d]) assert.notEqual(m.palette, marks[i + d].palette, `widget ${i + 1} and the one ${d} below never share a palette`); });
       assert.deepEqual((await x.posted("dockPalettes")).at(0), { type: "dockPalettes", kind: "widget", list: list.map((w) => ({ id: w.id })) }, "the host is asked to keep them: the list in view, in order");
       kept = await x.page.evaluate(() => ({ ...window.__dock.colours }));
@@ -156,7 +156,7 @@ test("a chat's Widgets list and a widget's card in its reply: the same Folio for
       await x.page.waitForFunction(() => document.getElementById("cd-widgets-panel").getAnimations().every((a) => a.playState === "finished"));   // (the list has arrived)
       const rows = await folios(x.page, "#cd-widgets-panel");
       assert.deepEqual(rows.map((m) => [m.id, m.palette]), [1, 2, 3, 4].map((n) => [WG(n), byId[WG(n)].palette]), "in the order they were made, each the same as on its card");
-      for (const m of rows) { assert.deepEqual([m.set, m.w, m.h], ["folio", 24, 24], "24 px in a list, as he sets it"); assert.ok(m.inside && m.clearOfWords && m.shown, `inside its row (${width})`); }
+      for (const m of rows) { assert.deepEqual([m.set, m.w, m.h], ["folio", 24, 24], "24 px in a list, as its sheet sets it"); assert.ok(m.inside && m.clearOfWords && m.shown, `inside its row (${width})`); }
       assert.ok(rows[2].dim < 0.6, "the deleted one dimmed here too");
       assert.equal(await x.page.evaluate(() => document.querySelectorAll("#cd-widgets-panel .codicon-play-circle, .cd-widget-badge .codicon-play-circle").length), 0, "the play glyph on a purple tile is gone");
       // The host was asked to keep the three it had not: by widget id.

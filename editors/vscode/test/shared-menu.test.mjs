@@ -7,7 +7,7 @@ import { THEMES } from "./support/options-scene.mjs";
 import { openWorkTab } from "./support/work-tab-scene.mjs";
 import { openChat, conversation, OFFER } from "./support/chat-scene.mjs";
 
-// One menu for "+" and every picker (0.52, UI step 2; his U2: three groups). Work, ChatDGC and the Pips each drew their
+// One menu for "+" and every picker (0.52, UI step 2; the U2 reference: three groups). Work, ChatDGC and the Pips each drew their
 // own menus: a heavy black shadow, 24 px rows, monospace hints, uppercase kickers, and keys that worked in some and not
 // others (Work's "+" menu answered no arrow keys at all; ChatDGC's model menu neither). Now media/shared/menu.css is how
 // every one of them looks and media/shared/menu.js answers the same keys in all of them.

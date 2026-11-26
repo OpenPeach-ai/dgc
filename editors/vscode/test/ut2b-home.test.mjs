@@ -1,5 +1,5 @@
 // User test round 2, Home. H2: the Folders card's "+1" chip said nothing: it says "1 more". (H3, the tab bar's glass
-// where the editor draws no blur, is the owner's call: his glass stays.)
+// where the editor draws no blur, is the owner's call: the glass stays.)
 // H5: a kind's tag ("DESIGN") was wider than its small tile: a tag is never wider than its tile.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";

@@ -393,7 +393,7 @@ test("the pill's hover label follows its state: agents ending under the pointer 
       "the label on screen changes with the state");
     await page.evaluate(() => window.__event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 }));
     await page.waitForTimeout(60);
-    // At 460px "Agent map" can't show, and an idle pill was a lone hollow dot (his report, 25 Nov): it gives way here,
+    // At 460px "Agent map" can't show, and an idle pill was a lone hollow dot (reported 25 Nov): it gives way here,
     // and is the map's door again wherever its words fit (the idle tests above).
     const after = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
       state: document.getElementById("agents-pill").dataset.state, shown: document.getElementById("agents-pill").checkVisibility() }));
@@ -447,7 +447,7 @@ for (const light of [false, true]) {
   });
 }
 
-// 25 Nov (his report on .111, a Pip's prompt box): with its sub-agents done and nothing running, a narrow box has no room
+// 25 Nov (reported from a test machine, a Pip's prompt box): with its sub-agents done and nothing running, a narrow box has no room
 // for "Agent map", and the hollow dot alone said nothing. Idle, the pill gives way where its words can't show; it is
 // back, with its count, the moment one runs or waits on you, and "Agent map" where there is room.
 for (const width of [300, 700]) {

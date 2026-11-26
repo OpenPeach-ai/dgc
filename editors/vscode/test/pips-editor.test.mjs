@@ -463,7 +463,7 @@ test('each broker mount has a distinct request namespace and ignores replies own
  first.receive({id:a[0].id,ok:true,result:'old'});second.receive({id:b[0].id,ok:true,result:'current'});assert.equal(await old,'old');assert.equal(await fresh,'current');
 });
 test('a minute without an answer: time asleep never counts, a read is asked once more, then said plainly',async()=>{
- // .111, 12 Nov: "DGC didn't answer in time. Refresh to see whether it worked before trying again." on the Project tab.
+ // A test machine, 12 Nov: "DGC didn't answer in time. Refresh to see whether it worked before trying again." on the Project tab.
  // Every read there takes milliseconds; the line came when the window's backend was replaced (its panel silent 15
  // minutes, the Mac asleep) or when the page woke from sleep and timed out requests DGC had answered meanwhile.
  const sent=[],broker=model.exports.requestBroker(m=>sent.push(m),'expiry');let t=Date.now();
@@ -1856,7 +1856,7 @@ test('saving a scheduled Pip says so when DGC turned on Keep Pips running',async
  assert.ok(x.d.body.textContent.includes('Source saved. Its next run uses it. '+told));
 });
 
-// 25 Nov (his call): a Pip's chat opened with only its last 20 messages, where a Work session shows its long history. It
+// 25 Nov (decided): a Pip's chat opened with only its last 20 messages, where a Work session shows its long history. It
 // opens with up to its last 200 (the most it keeps loaded), read in pages of 50, as many as DGC allows at once; Load
 // earlier messages is there only for a chat longer than that.
 test('a Pip chat opens with up to its last 200 messages, read 50 at a time, so it needs no Load earlier',async()=>{

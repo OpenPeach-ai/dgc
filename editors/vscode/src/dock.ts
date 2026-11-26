@@ -8,7 +8,7 @@
 // Deleting a pinned session, chat, artifact, file or widget takes it off the dock (forget); a pinned Pip that is gone
 // is taken off by the side bar once its list no longer has it.
 //
-// A session's mark is the maintainer's own Voxel (a Work session) or Mote (a ChatDGC chat), and a widget's his Folio,
+// A session's mark is the maintainer's own Voxel (a Work session) or Mote (a ChatDGC chat), and a widget's the maintainer's Folio,
 // each in one of twelve palettes (media/shared/marks.js). The palette a thing wears is kept here, with the pins, from
 // the moment it is given: a new session or widget gets the first palette not worn by the ones around it, a session from
 // before the marks the palette nearest its old colour, and a session's owner may choose another of the twelve. Kept, it

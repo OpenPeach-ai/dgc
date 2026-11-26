@@ -9,7 +9,7 @@ import {computerPortal} from './pipComputerNames.js';
 import '../media/shared/tokens.css';
 import '../media/shared/menu.css';
 import '../media/shared/dialog.css';
-// This computer's own mark, the maintainer's Portal, as he wrote it: in the bar, beside the computer's name.
+// This computer's own mark, the maintainer's Portal, as written: in the bar, beside the computer's name.
 import '../media/shared/portal.css';
 import './pipComputer.css';
 import '../media/shared/menu.js';

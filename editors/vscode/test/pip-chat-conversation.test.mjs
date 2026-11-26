@@ -32,7 +32,7 @@ test('what a check found is a list inside the Pip\'s message: each file a link a
  assert.deepEqual(rows.map(li=>x.squash(li.querySelector('.pip-said-what').textContent)),['Order total ignores the discount','Tax is rounded to one decimal place','Adding the same tile twice makes two cart rows']);
  assert.deepEqual(rows.map(li=>li.querySelector('button.md-link[data-flow-file]').textContent),['totals.py:3','tax.py:4','cart.py:2']);
  assert.equal(rows[0].closest('.message-body')?.classList.contains('text'),true,'the list is in its message, as Work\'s prose');
- // 25 Nov (his call, seen on .111): a run's reply in a Pip's chat has no Open report: what it found is the reply.
+ // 25 Nov (decided, seen on a test machine): a run's reply in a Pip's chat has no Open report: what it found is the reply.
  assert.equal(post.querySelector('[data-post-open]'),null,'no Open report');
  rows[0].querySelector('[data-flow-file]').click();await x.drain();
  assert.deepEqual(x.posted('openFile').at(-1),{type:'openFile',path:'/home/me/code/lime_tiles/totals.py',line:3});

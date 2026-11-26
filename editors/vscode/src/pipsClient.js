@@ -24,7 +24,7 @@ import '../media/shared/pagehead.js';   // window.DgcPageHead: the header row Wo
 import '../media/shared/folders.css';
 import '../media/shared/folderpick.css';
 import '../media/shared/folderpick.js';
-// A computer's own mark, the maintainer's Portal, as he wrote it (src/pipComputerNames.js draws it).
+// A computer's own mark, the maintainer's Portal, as written (src/pipComputerNames.js draws it).
 import '../media/shared/portal.css';
 // One card for everything that asks or reports, as in Work and ChatDGC (window.DgcCard).
 import '../media/shared/card.css';
@@ -1430,7 +1430,7 @@ function settleLive(){
   if(!postFor(live.runId)&&live.stopping)S.notice=`Stopped. ${S.pip?.name||'The Pip'} posts nothing for a run you stop.`;
   dropLive();
 }
-// A routine's run is a reply at work (25 Nov, his call): the working row, its words as they come and Stop in the box, as
+// A routine's run is a reply at work (25 Nov, decided): the working row, its words as they come and Stop in the box, as
 // any reply; its pill on the bar above the box says which routine (trayRoutine). It has no live post of its own.
 function syncRoutineLive(){if(S.live?.routine)dropLive();}
 /** The routine a chat's running reply is, read from its hidden turn: {title, run}, or null. */
@@ -1637,7 +1637,7 @@ async function loadMessages(more=false){
   }catch(error){if(token===scope()&&sequence===messageSeq)S.messagesError=errorText(error);}
   finally{if(token===scope()&&sequence===messageSeq){S.messagesLoading=false;render();maybeMarkRead();if(first&&S.messagesLoaded)void fillEarlier(token,id);}}
 }
-// A Pip's chat opens with up to its last CHAT_KEPT messages, as a Work session shows its long history (his call, 25 Nov: it
+// A Pip's chat opens with up to its last CHAT_KEPT messages, as a Work session shows its long history (decided 25 Nov: it
 // opened with 20): pages of CHAT_PAGE, the most DGC gives at once, read back on first open; its runs' posts reach as far
 // back. Load earlier messages is there only for a chat longer than that.
 const CHAT_PAGE=50,CHAT_KEPT=200;
@@ -3337,7 +3337,7 @@ const PIN_PATH='M10.2 1.8l4 4-2.2.9-2.4 2.4.3 3.1-1.1 1.1-2.6-2.6L2.8 14l-.8-.8 
 const pipSwitching=new Map();   // a Pip's id -> on or off, as asked, until DGC answers
 // What DGC answered last for a switched Pip ({status, lifecycle_revision}). The one list (Pips API 94+) keeps its own copy
 // of the Pips beside the folder list, and a list read that set off before the answer lands after it: a copy whose
-// revision is older than this one shows this one, so the switch never flips back (his live report, 14 Nov: it
+// revision is older than this one shows this one, so the switch never flips back (a live report, 14 Nov: it
 // "flickers, does not react and takes multiple times").
 const pipSwitched=new Map();
 function pipFresh(p){const known=record(p)?pipSwitched.get(p.id):null,rev=lifecycleRevision(p);return known&&rev!==null&&rev<known.lifecycle_revision?{...p,...known}:p;}
@@ -4561,7 +4561,7 @@ async function noteCall(type,fields,notice){
  finally{notesBusy=false;if(token===scope())render();}
 }
 // Under the reply that kept them, for good: drawn at the chat's end it sat below the next prompt and the Pip's
-// Thinking row, read as the newest thing, and went when a newer reply came (his picture, 15 Nov). A run's notes go
+// Thinking row, read as the newest thing, and went when a newer reply came (a screenshot, 15 Nov). A run's notes go
 // under its last reply only.
 function memoryKept(m,shown){
  if(m.role!=='assistant'||!m.run_id||S.apiVersion<44||!keepsAll()||S.notesPip!==S.selected||!S.notes?.length)return '';
@@ -5085,7 +5085,7 @@ function newPipBody(){
   options:SIMPLE_CHARACTERS.filter(id=>id!=='core').map(id=>{const t=characterType(id);return {value:id,label:t.name,face:avatar('idle',t,`new-${id}`)};})});
  return `${chooser}<label for="newPipName">Name<input id="newPipName" data-draft="newPipName" maxlength="60" autocomplete="off" placeholder="Like Gmail, Travel or Money" value="${esc(draft.newPipName)}"></label><p class="muted">It says hello and sets itself up in its chat.</p>`;
 }
-// One New Pip (his "perfect", 13 Nov): a character, a name, and one folder line pre-filled from where you are: the
+// One New Pip ("perfect", 13 Nov): a character, a name, and one folder line pre-filled from where you are: the
 // filter's folder, or the folder it was asked for from (a Work session's), else "+ Give it a folder", which is a Pip
 // with no folder (Personal). One click changes it; it is decided here, at creation. No goal, no branch and no model:
 // it sets itself up in its own chat. Describing the job to DGC and a shared Pip's file are one click away.
@@ -5535,7 +5535,7 @@ function flowUnderPost(p){
  const card=p.outcome==='findings'?findingsCardMarkup({runId:p.run_id,findings:found,total,counts:record(p.found)?p.found:null,name:S.pip.name},{esc,off:!usable()}):'';
  return card+(fix?flowFixMarkup(fix):'')+waitingCards(waitingUnder(p.run_id));
 }
-// What only you can do (25 Nov, his report: answered lines stuck in a pinned area at the top of the chat): each card stands
+// What only you can do (25 Nov, reported: answered lines stuck in a pinned area at the top of the chat): each card stands
 // in the chat where it came from, under the check whose fix found it, and once answered is one line there. One whose
 // check isn't in the chat (or from a DGC that doesn't say which fix found it) waits at the chat's end. Nothing is pinned.
 function waitingUnder(runId){
@@ -5688,7 +5688,7 @@ function projectReview(id){
  for(const f of files){const key=`${id}|${f.path}`;if(all)projectOpen.delete(key);else if(!projectOpen.has(key)){projectOpen.add(key);void loadProjectDiff(id,f.path);}}
  render();
 }
-// Change cards taken out of the chat once done (his report, 25 Nov), kept across reloads; and what "done" is.
+// Change cards taken out of the chat once done (reported 25 Nov), kept across reloads; and what "done" is.
 const changesDismissed=new Set(Array.isArray(savedView?.changes_dismissed)?savedView.changes_dismissed.filter(id=>typeof id==='string'&&id.length<=128).slice(-200):[]);
 function changeDone(c){return ['undone','discarded'].includes(c.status)||(c.status!=='pending'&&(!record(c.git)||c.git.committed===true));}
 async function projectCommit(id){
@@ -5748,7 +5748,7 @@ function folderPartsMarkup(p){
  return `<section class="pip-page-group pip-folder-parts" aria-label="Its folder"><h3 class="pip-page-label">Its folder</h3>`
   +`<div class="pip-page-row static"><span class="row-words"><strong>Works in</strong><small class="pip-folder-where" title="${esc(row?.folder||name)}">${row&&row.exists===false?'<span class="pip-row-folder-note">Folder not found</span> ':''}${row&&Pick?Pick.pathHtml(row.shown,row.folder):esc(name)}</small></span>${folderMoveKind()===MOVE.remove?moveButton(MOVE.remove,{off:S.busy||!usable()}):''}</div>`
   +`<div class="pip-page-row static"><span class="row-words"><strong>What it reads</strong><small>${esc(reads)}</small></span></div>`
-  // When it runs, changed in place with the editor its routines use, saved at once (his call, 25 Nov: nothing of the old
+  // When it runs, changed in place with the editor its routines use, saved at once (decided 25 Nov: nothing of the old
   // reviewed-schedule page left); a Pulse's plan and a handoff-only Pip still say why theirs is set elsewhere.
   // A Pulse's plan (tests or live-data commands, saved as a reviewed change) is one page with its schedule: its Change
   // opens that page at once, not an in-place editor that only offered a second Change… (r149 review, 25 Nov).
@@ -6240,7 +6240,7 @@ function simplePipHeader(){
  // One Pips: every Pip has the Personal Pip's header. A Pip with a folder keeps every section it has in its menu, with
  // Run now there, and says its folder beside its name.
  const project=!pagePip(),folderPip=!personalPip()&&!project,every=project||folderPip?pipSections():null;
- // One Pip menu (his call, 25 Nov): a Pip with a folder has a Personal Pip's pages in it, Reports, Settings and
+ // One Pip menu (decided 25 Nov): a Pip with a folder has a Personal Pip's pages in it, Reports, Settings and
  // Notifications; its schedule, version history, handoffs, memory and context are on its Settings page. A Project Pip
  // on the older page (a remote machine, or Pips before One Pips) keeps them all: its Settings page has no such rows.
  const sections=(project?every:folderPip?every.filter(([key])=>['runs','job','notifications'].includes(key)):[['chat','Chat'],['runs',historyName('Results')],['job','Settings'],...(S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?[['memory','Memory']]:[]),['revisions','Changes'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]).filter(([key])=>key!==S.tab);

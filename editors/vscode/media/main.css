@@ -97,7 +97,7 @@ body {
 }
 #phead .pm .cur, .cd-head .pm .cur { width: 5px; height: 11px; margin-left: var(--sp-1); background: var(--accent); display: inline-block; animation: blink 1.1s step-end infinite; }
 /* The product's name after the cursor (decided 18 Nov: DGC's products each named and coloured; this one is VIBE, in
-   DGC's purple): Geist Regular, as tall as "DGC" and set apart from the cursor as in his lockup sheet, about twice the
+   DGC's purple): Geist Regular, as tall as "DGC" and set apart from the cursor as in the lockup sheet, about twice the
    gap between "DGC" and the cursor. */
 @font-face { font-family: "Geist"; src: url("./fonts/Geist-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
 #phead .pm .pm-product, .cd-head .pm .pm-product { margin-left: calc(var(--sp-1) * 1.9); font: 400 var(--t-xs)/14px "Geist", var(--sans); letter-spacing: .1em; color: inherit; }
@@ -2102,7 +2102,7 @@ button.link.run-bg { white-space: nowrap; }
 button.link.run-bg[hidden] { display: none; }
 /* A step under the conversation's text: monospace at the prose size reads a size larger. */
 pre.code { position: relative; background: var(--code); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; overflow: hidden; font: var(--w-reg) calc(var(--t-chat) - 1px)/1.6 var(--mono); color: var(--text); white-space: pre; }
-/* The code scrolls sideways, not the block: the block's corner keeps its Copy and its language label (his report, 25 Nov:
+/* The code scrolls sideways, not the block: the block's corner keeps its Copy and its language label (reported 25 Nov:
    scrolling a long line carried Copy along into the middle of it). */
 pre.code code { display: block; padding: 0; background: transparent; font-size: inherit; white-space: pre; overflow-x: auto; }
 /* One 400-line fence used to bury the answer and push the response actions off screen. Collapse
@@ -3613,7 +3613,7 @@ body.vscode-high-contrast-light :is(.pip-report, .pip-report-group, .pips-digest
 .pip-fixes-name { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-strong); font-weight: var(--w-semi); }
 .pip-fixes-state { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-/* Wake-ups: one row each, its time, what it's for, and Cancel at the row's end (his picture, 19 Nov: the three stood
+/* Wake-ups: one row each, its time, what it's for, and Cancel at the row's end (a screenshot, 19 Nov: the three stood
    stacked, the time touching its words, with no room between). */
 .wakeup-row { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: 4px var(--sp-2);
   border-radius: var(--r-sm); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }

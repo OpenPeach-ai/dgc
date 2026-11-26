@@ -48,7 +48,7 @@ export const WEATHER = { type: "homeWeather", ok: true, place: "Lisbon, Portugal
 export const FOLDERS = { choice: "", window: { folder: "/home/me/shop", shown: "~/shop", name: "shop" }, rows: [
   { folder: "/home/me/shop", shown: "~/shop", name: "shop", here: true, exists: true, sessions: 14, pips: 1, workspace_id: null },
   { folder: "/home/me/garden-notes", shown: "~/garden-notes", name: "garden-notes", here: false, exists: true, sessions: 6, pips: 0, workspace_id: null },
-  { folder: "/home/me/rust_ire", shown: "~/rust_ire", name: "rust_ire", here: false, exists: true, sessions: 3, pips: 2, workspace_id: null },
+  { folder: "/home/me/tide_api", shown: "~/tide_api", name: "tide_api", here: false, exists: true, sessions: 3, pips: 2, workspace_id: null },
   { folder: "/home/me/old-site", shown: "~/old-site", name: "old-site", here: false, exists: false, sessions: 1, pips: 0, workspace_id: null },
   { folder: "/home/me/invoices", shown: "~/invoices", name: "invoices", here: false, exists: true, sessions: 2, pips: 0, workspace_id: null }] };
 

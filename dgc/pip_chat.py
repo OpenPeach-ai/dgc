@@ -602,7 +602,7 @@ def _message_image(store, pip_id, message_id, index):
     return item, path
 
 
-# His live test (15 Nov): minutes of silence on a long job, and a message sent while it worked made it drop the first
+# A live test (15 Nov): minutes of silence on a long job, and a message sent while it worked made it drop the first
 # ask. Work's replies say what they are about to do; a Pip's do too, and keep the first ask. Every Pip's chat hears it
 # (one kind of Pip, 16 Nov: a Personal Pip's chat never did, its prompt being its own).
 WORKING = (

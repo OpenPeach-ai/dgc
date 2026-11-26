@@ -5,7 +5,7 @@
 //   Portal (media/shared/portal.css) one of a Pip's computers  span.portal.portal--<palette> > i*2
 //   Pinwheel (media/shared/pinwheel.css) a ChatDGC project (13 Nov)  span.pinwheel.pinwheel--<palette> > i*4
 //     (only a project a user makes in ChatDGC: a Work session's folder is a directory, and keeps its plain folder icon)
-// The stylesheets are his, as he wrote them; they also hold Citron and Lime, which are too bright and never used here.
+// The stylesheets are the maintainer's, as written; they also hold Citron and Lime, which are too bright and never used here.
 // A session, a chat or a widget keeps the palette it was given (src/dock.ts stores it on this computer); a computer's
 // palette follows its number, as the picture on its desktop does. Nothing here touches a page: the pages (window.DgcMarks) and the
 // extension's host (src/dock.ts, src/pipsView.ts) run the same code, so both give the same thing the same palette.
@@ -15,9 +15,9 @@
   if (root && !root.DgcMarks) root.DgcMarks = api;
 })(typeof window !== "undefined" ? window : null, function () {
   "use strict";
-  /** The twelve, in the order they are offered. (His sheets have fourteen: never citron, never lime.) */
+  /** The twelve, in the order they are offered. (The maintainer's sheets have fourteen: never citron, never lime.) */
   const PALETTES = Object.freeze(["ember", "peach", "saffron", "fern", "mint", "lagoon", "ice", "azure", "iris", "lilac", "orchid", "rose"]);
-  /** Each palette's hue, as his sheets set it (--h). */
+  /** Each palette's hue, as the maintainer's sheets set it (--h). */
   const HUES = Object.freeze({ ember: 3, peach: 22, saffron: 39, fern: 133, mint: 158, lagoon: 177, ice: 195, azure: 213, iris: 247, lilac: 273, orchid: 294, rose: 331 });
   /** A mark's set, and how many empty <i> it holds. */
   const SETS = Object.freeze({ mote: 3, voxel: 6, folio: 3, portal: 2, pinwheel: 4 });
@@ -95,7 +95,7 @@
   // ---- a mark as HTML --------------------------------------------------------------------------------------------------
   const phase = (id) => hash(id) % 8;
   /**
-   * A mark, in his own markup. `set`: "mote" | "voxel" | "folio" | "portal". `palette`: one of the twelve (anything else
+   * A mark, in the sheet's own markup. `set`: "mote" | "voxel" | "folio" | "portal". `palette`: one of the twelve (anything else
    * draws Lagoon... never citron or lime). `size` in px (or let the page's CSS say). `moving`: it is the one that moves;
    * every other mark is paused, at rest. `id` only offsets where its motion starts, so two side by side never move in
    * step. `name`: said to a screen reader when the mark stands alone; without it the mark is decoration.

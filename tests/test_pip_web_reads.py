@@ -270,7 +270,7 @@ with patch.object(LLMClient, 'chat', chat), patch('requests.sessions.Session.req
              patch.object(web, "_search", side_effect=lambda query, config: fetched.append(query) or "SEARCH_TEXT_SENTINEL"):
             result = pips._execute_run(self.registry, row, self.cfg)
         offered = set(str(result.get("text") or "").partition("OFFERED: ")[2].split())
-        # 0.52 (his "yes to your full add list"): the real worker is offered the Library, a page read, DGC's docs and
+        # 0.52 ("yes to the full add list"): the real worker is offered the Library, a page read, DGC's docs and
         # deep research, not only their schemas in a list.
         self.assertTrue({"make_artifact", "edit_artifact", "web_fetch", "dgc_docs", "deep_research"} <= offered, offered)
         self.store.finish(run["id"], result=result)

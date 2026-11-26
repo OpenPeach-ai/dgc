@@ -261,7 +261,7 @@ test("Apply is your click, with the digest the card was drawn from; then what wa
   assert.equal(after.querySelector(".dgc-card-title").textContent, "Undone");
   assert.match(after.querySelector(".dgc-card-sub").textContent, /1 file put back in shop/);
   assert.match(after.textContent, /tests\/test_app\.py.*You changed it after Apply; yours is kept\./s);
-  // Nothing left to answer: the one button left is the × that puts the done card away (his .111 call, 25 Nov).
+  // Nothing left to answer: the one button left is the × that puts the done card away (decided, 25 Nov).
   assert.deepEqual([...after.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")), ["Remove from the chat"], "nothing left to answer, only the ×");
 });
 

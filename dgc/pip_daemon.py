@@ -125,7 +125,7 @@ def pause_if_idle(registry, actor) -> bool:
 # A newer install taking the runner over (pip_runtime._move_runner, 15 Nov): the runner of another install starts no
 # new reply, lets the ones running finish and stops once none runs, queued work left queued for the new runner. The
 # record names the install taking over. Waiting for a moment with nothing queued or running never came on a machine
-# where some Pip is always working: his runner ran a morning build for eight hours through two installs.
+# where some Pip is always working: one runner ran a morning build for eight hours through two installs.
 HANDOVER_KEY = "pips_runtime_handover"
 HANDOVER_ACTOR = "dgc-update"
 

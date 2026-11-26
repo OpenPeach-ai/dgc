@@ -1,8 +1,8 @@
 // A session's mark, in real Chromium on the side bar's real page (support/dock-scene.mjs, which keeps each session's
-// palette the way src/dock.ts does). The marks are the maintainer's own designs, in his own CSS: Mote for a ChatDGC
+// palette the way src/dock.ts does). The marks are the maintainer's own designs, in the maintainer's own CSS: Mote for a ChatDGC
 // chat (media/shared/mote.css), Voxel for a Work session (media/shared/voxel.css), each in one of twelve palettes (his
 // fourteen without Citron and Lime, which are too bright). What is held here:
-//   - his two sheets are shipped as he wrote them, and every page that shows a session loads them
+//   - the maintainer's two sheets are shipped as written, and every page that shows a session loads them
 //   - each list draws a Mote for a chat and a Voxel for a Work session: Work's list, Chat's list, Home's cards, the dock,
 //     the menu of colours, at each place's size, and nothing of a mark is cut off or lies over its neighbour
 //   - twelve palettes, never citron or lime
@@ -50,7 +50,7 @@ const marksIn = (page, sel) => page.evaluate((sel) => [...document.querySelector
     hue: getComputedStyle(m).getPropertyValue("--h").trim() };
 }), sel);
 
-test("his sheets are shipped as he wrote them, and every page that shows a session loads them before its own rules", () => {
+test("the maintainer's sheets are shipped as written, and every page that shows a session loads them before its own rules", () => {
   const sha = (rel) => createHash("sha256").update(readFileSync(new URL(`../${rel}`, import.meta.url))).digest("hex");
   assert.equal(sha("media/shared/mote.css"), "f9fb20f328d399800603b6d9f6cb44496d2656aa1ce0a2da12e222f6808e99e2", "mote.css, byte for byte");
   assert.equal(sha("media/shared/voxel.css"), "688f31342f5c4dff524ee3067869fb1cbb8b0f5bc1e65b70a04548869b27f6ca", "voxel.css, byte for byte");
@@ -79,9 +79,9 @@ test("each list draws a Voxel for a Work session and a Mote for a chat, at its p
       for (const m of marks) {
         assert.match(m.cls, /^voxel voxel--[a-z]+$/, "span.voxel.voxel--<palette>");
         assert.deepEqual([m.set, m.parts, m.hidden], ["voxel", "IIIIII", "true"], "six empty <i>; its name beside it says which session");
-        assert.deepEqual([m.w, m.h], [24, 24], `24 px in a list, as his own preview shows it (${width})`);
+        assert.deepEqual([m.w, m.h], [24, 24], `24 px in a list, as its own preview shows it (${width})`);
         assert.ok(m.inside && m.clearOfWords && m.shown, `inside its row and clear of its name (${width})`);
-        assert.equal(m.hue, String({ ember: 3, peach: 22, saffron: 39, fern: 133, mint: 158, lagoon: 177, ice: 195, azure: 213, iris: 247, lilac: 273, orchid: 294, rose: 331 }[m.palette]), "his sheet's own hue for that palette");
+        assert.equal(m.hue, String({ ember: 3, peach: 22, saffron: 39, fern: 133, mint: 158, lagoon: 177, ice: 195, azure: 213, iris: 247, lilac: 273, orchid: 294, rose: 331 }[m.palette]), "the maintainer's sheet's own hue for that palette");
       }
       // The dock: Voxels and a Mote, about seven tenths of a tile.
       const d = await dockNow(x.page);
@@ -150,7 +150,7 @@ test("only the session at work moves; every other mark is paused at rest; under 
     const marks = await marksIn(x.page, "#sessions-list");
     const moving = marks.filter((m) => m.state === "running");
     assert.deepEqual(moving.map((m) => m.id), [DOCK_SESSIONS[0].id], "one moves: the session that is running");
-    assert.deepEqual([moving[0].name, moving[0].time, moving[0].bodyState, moving[0].moving], ["voxel-heart", "8s", "running", true], "on his eight-second cycle");
+    assert.deepEqual([moving[0].name, moving[0].time, moving[0].bodyState, moving[0].moving], ["voxel-heart", "8s", "running", true], "on its eight-second cycle");
     for (const m of marks.filter((m) => m.id !== DOCK_SESSIONS[0].id)) assert.deepEqual([m.state, m.bodyState, m.moving], ["paused", "paused", false], `${m.id} is paused (--voxel-play: paused)`);
     const dock = await marksIn(x.page, "#dgc-dock");
     assert.deepEqual(dock.filter((m) => m.state === "running").map((m) => m.id), [`work:${DOCK_SESSIONS[0].id}`], "and on the dock, the same one");

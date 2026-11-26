@@ -69,7 +69,7 @@ await step("heads", async () => {
     await sheet(`heads-${theme}-${input}`, Object.values(rows));
   }
 });
-// ---- Home: the tab order, his Library icon on the tab and on the button beside Cards -----------------------------------------
+// ---- Home: the tab order, the maintainer's Library icon on the tab and on the button beside Cards -----------------------------------------
 await step("home", async () => {
   for (const theme of THEMES) for (const input of INPUTS) {
     const row = [];

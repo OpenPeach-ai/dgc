@@ -2576,7 +2576,7 @@ def job_check_ins(registry, config, now=None) -> int:
 
 
 def close_switched_off(registry) -> int:
-    """A Pip switched off (paused) or archived runs nothing on its own, its computer included (his report, 25 Nov: switched
+    """A Pip switched off (paused) or archived runs nothing on its own, its computer included (reported 25 Nov: switched
     off, its computer kept running until it idled out). Each of its computers closes as soon as nothing uses it: no run
     of the Pip has it (an Off Pip still answers when you write to it, and its computer opens again if that answer needs
     it) and nothing on it waits for the person. Its sign-ins and Files stay on disk."""
@@ -3203,7 +3203,7 @@ def _host_view(self, op: str, request: dict) -> dict:
 
 def _settle_writes(self) -> None:
     """With no run: while the person is using the computer (a click or key in the last few minutes), what its pages send
-    is theirs and is sent, and the Pip is never told (decided 20 Nov: a page's own beacon while he browsed became an
+    is theirs and is sent, and the Pip is never told (decided 20 Nov: a page's own beacon while the user browsed became an
     Allow card, and the Pip looked into it). With nobody at it, a page's own write waits for the user's approval."""
     if self.run_id is not None:
         return

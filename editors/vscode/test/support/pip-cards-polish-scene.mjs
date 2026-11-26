@@ -1,4 +1,4 @@
-// The Pip report cards of a Work chat as he saw them in a real project (13 Nov: "the Pips cards that come in work
+// The Pip report cards of a Work chat as they were seen in a real project (13 Nov: "the Pips cards that come in work
 // sessions needs UI polish"): two Pips, each posting a card with findings and Ask DGC to fix. What
 // pip-report-polish-browser.test.mjs measures and `node test/render-pip-cards.mjs <folder>` pictures. Not a *.test.mjs file.
 import { readFileSync } from "node:fs";
@@ -50,7 +50,7 @@ export const SHEETS = {
     report(failed()), line("A line of the chat"), report(clear()), line("A line of the chat"), report(broke()), report(mended())] },
   // The same, each opened.
   opened: { events: () => SHEETS.cards.events(), open: "all" },
-  // As he had them: two Pips' cards one after the other.
+  // As they were: two Pips' cards one after the other.
   two: { events: () => [ready(), ...turn("t1", "Tidy the October invoices", "Done: 14 invoices renumbered."), report(seven("2", ERP, 3)), report({ ...one("1"), total: 4, counts: { high: 1, medium: 3 } })] },
   "two-opened": { events: () => SHEETS.two.events(), open: "group" },
   "two-opened-card": { events: () => SHEETS.two.events(), open: "group+first" },

@@ -127,7 +127,7 @@ for (const [where, width] of [["side", 300], ["tab", 700]]) {
       const glyph = await x.p.evaluate(() => { const a = (window.__pipsRoot || document).querySelector(".pip-message.user .md-link[data-link-source]"), s = getComputedStyle(a, "::before"); return { family: s.fontFamily, content: s.content, width: parseFloat(s.width) }; });
       assert.match(glyph.family, /codicon/);
       assert.ok(glyph.content && glyph.content !== "none" && glyph.width > 0, `the mark has a glyph: ${JSON.stringify(glyph)}`);
-      // His look (15 Nov): a purple GitHub mark read as a brand logo in the wrong colour. A site's stand-in mark is the
+      // Seen 15 Nov: a purple GitHub mark read as a brand logo in the wrong colour. A site's stand-in mark is the
       // muted grey; only DGC's own mark is in the link's colour.
       const tint = await x.p.evaluate(() => {
         const root = window.__pipsRoot || document;

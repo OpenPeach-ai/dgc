@@ -1,5 +1,5 @@
-"""A newer install takes the Pips runner over without waiting for an idle moment that never comes (his machine,
-15 Nov: his runner ran a build from the morning for eight hours through two installs; some Pip was always working, and
+"""A newer install takes the Pips runner over without waiting for an idle moment that never comes (a test machine,
+15 Nov: one runner ran a build from the morning for eight hours through two installs; some Pip was always working, and
 the runner was moved only while nothing was queued or running).
 
 Now a newer install that finds another install's runner busy asks it to hand over: that runner starts no new reply,
@@ -107,7 +107,7 @@ class Draining(unittest.TestCase):
 
 
 class TheEditorsFirstLook(unittest.TestCase):
-    """His machine, 18 Nov: after an install, opening a Pip's computer still showed the old desktop. The runner of the
+    """A test machine, 18 Nov: after an install, opening a Pip's computer still showed the old desktop. The runner of the
     install before kept running, and the takeover only came with the next run asked for. Now the editor's first Pips
     request moves it (idle) or asks it to hand over (busy), once, in the background."""
     setUp = runtime_tests.LocalStartupTests.setUp

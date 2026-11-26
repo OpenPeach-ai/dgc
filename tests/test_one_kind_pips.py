@@ -155,7 +155,7 @@ class AFolderPipsChatIsThePersonalChat(FolderChat, unittest.TestCase):
         self.assertTrue(pips.READ_TOOLS <= set(seen["tools"]))
 
     def test_every_pip_says_what_it_will_do_first_when_a_reply_takes_work(self):
-        # pip_chat.SYSTEM's line (his live test, 15 Nov: "a Pip's do too") never reached a Personal Pip's chat.
+        # pip_chat.SYSTEM's line (a live test, 15 Nov: "a Pip's do too") never reached a Personal Pip's chat.
         for pip in (self.helper, self.pip):
             with self.subTest(pip=pip["name"]):
                 self.assertIn("start with one short line saying what you'll do", self.turn(self.queued(pip))["system"])

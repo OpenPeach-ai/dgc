@@ -1400,7 +1400,7 @@
         item.state = live ? `Space · ${plural(Number(live.chats) || 0, "chat")}` : "Space";
         item.icon = markHtml("project", pin.id, running);
       } else if (pin.kind === "folder") {
-        // A Work folder: his folder icon in the folder's own palette, its name on the label; still unless something
+        // A Work folder: the maintainer's folder icon in the folder's own palette, its name on the label; still unless something
         // in it runs (the running dot). One that is gone is dimmed, says so, and opens nothing.
         const folder = String(pin.ref?.folder || ""), row = projectFolders?.rows?.find((r) => r.folder === folder), gone = pin.gone === true || row?.exists === false;
         const inIt = sessionItems.filter((s) => (s.projectPath ? s.projectPath === folder : !!row?.here)), running = !gone && inIt.some((s) => s.running === true || !!s.windowless);
@@ -1838,7 +1838,7 @@
         vscode.postMessage({ type: "dockPlace", key, to });
       },
       onColour: (key, colour) => vscode.postMessage({ type: "dockColour", key, colour }),
-      // New work asks for its folder as the side bar's New does (New Session's dialog; his report, 25 Nov: the dock's
+      // New work asks for its folder as the side bar's New does (New Session's dialog; reported 25 Nov: the dock's
       // started a session at once in this window's folder).
       onNew: (what) => { if (what === "pip") openPipsAt({ create: "personal" }); else if (what === "work") openNewSession(); else vscode.postMessage({ type: "dockNew", what }); },
       // The Pips' faces blink and look about as they do everywhere else.
@@ -11881,7 +11881,7 @@ function permissionChoices(ev) {
     if (event.key === "Escape") { event.preventDefault(); closeChangesReview(); }
   });
   /** The message that started a goal says so (user test 2, W9: it looked like any other message): a small "Goal"
-   *  under its bubble, where its time is ("Goal · 1:22 PM"; his call, 25 Nov: it sat over the bubble). Once. */
+   *  under its bubble, where its time is ("Goal · 1:22 PM"; decided 25 Nov: it sat over the bubble). Once. */
   function markGoalBubble(m) {
     if (!m) return;
     m.classList.add("goal-started");

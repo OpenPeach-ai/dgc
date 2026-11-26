@@ -1,6 +1,6 @@
 // A running Pip is visible in its own chat while it runs (reported 24 Oct). A user pressed ▶ Run now: the top bar said
 // "Running…" and the chat said nothing until the run ended. From the moment a run starts its chat shows it at work,
-// exactly as a reply at work (his call, 25 Nov: "why are we not able to exactly make it like how our new pips run"): ONE
+// exactly as a reply at work (decided 25 Nov: "why are we not able to exactly make it like how our new pips run"): ONE
 // working row at the end of the chat -- its face at work, "<name> · <what it is doing>", "(42s · ↓ 120 tok)" -- and Stop in
 // the prompt box, as for a reply; how it started ("Started by you", "On schedule · 9:00 AM", "Asked by DGC", "First run")
 // is the row's tooltip. When the run ends its post takes that place: no second item, no jump. It is drawn from the run's

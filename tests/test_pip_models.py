@@ -185,8 +185,8 @@ class PipModelsTests(unittest.TestCase):
         self.assertNotIn(self.config["api_key"], json.dumps(result))
 
     def test_a_model_the_host_lists_is_never_refused_because_a_key_holds_its_name(self):
-        # Live test 14 Nov: Pips refused his whole Ollama list ("A configured model identifier contains sensitive data")
-        # because a saved key held his main model's name. The host lists it, so it is not a secret.
+        # Live test 14 Nov: Pips refused a whole Ollama list ("A configured model identifier contains sensitive data")
+        # because a saved key held the main model's name. The host lists it, so it is not a secret.
         config = {**self.config, "model": "deepseek-v4.1-flash:cloud", "fallback_api_key": "deepseek-v4.1-flash:cloud"}
         with patch.object(models.LLMClient, "list_models", return_value=["codellama:13b", "deepseek-v4.1-flash:cloud"]):
             result = models.list_pip_models(config)

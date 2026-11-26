@@ -89,10 +89,10 @@ class PagesFromOtherDevices(unittest.TestCase):
         self.assertEqual((got["artifact_bind"], got["artifact_hostname"]), ("localhost", ""))
         self.assertIsNone(ep.event_error(got))
         self.host.dispatch({"type": "set_config", "request_id": "s1",
-                            "values": {"artifact_bind": "lan", "artifact_hostname": "gb10.tail1234.ts.net"}})
+                            "values": {"artifact_bind": "lan", "artifact_hostname": "gpu-box.tail1234.ts.net"}})
         self.assertEqual([f for f in self.frames() if f["type"] == "command_rejected"], [])
         saved = json.loads((self.user / "config.json").read_text())
-        self.assertEqual((saved["artifact_bind"], saved["artifact_hostname"]), ("lan", "gb10.tail1234.ts.net"))
+        self.assertEqual((saved["artifact_bind"], saved["artifact_hostname"]), ("lan", "gpu-box.tail1234.ts.net"))
         self.host.dispatch({"type": "set_config", "request_id": "s2", "values": {"artifact_bind": "everywhere"}})
         self.assertTrue([f for f in self.frames() if f["type"] == "command_rejected" and f.get("request_id") == "s2"])
 

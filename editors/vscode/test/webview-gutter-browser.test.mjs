@@ -1,4 +1,4 @@
-// No stray band down the side of a DGC page (17 Nov, his picture of Settings: "an empty line space before the side
+// No stray band down the side of a DGC page (17 Nov, a screenshot of Settings: "an empty line space before the side
 // menu"). VS Code gives every webview `body { padding: 0 20px }` in its default styles (its pre/index.html,
 // _defaultStyles); a page that never sets its own padding keeps a 20px band at each side. Each full-tab page DGC draws
 // sets its body's padding itself. In real Chromium, with VS Code's default styles put in first.

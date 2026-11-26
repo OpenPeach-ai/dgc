@@ -238,7 +238,7 @@ class ListModelsAt(unittest.TestCase):
         self.fail("Work model picker did not answer")
 
     def test_a_model_the_host_lists_is_never_hidden_because_a_key_holds_its_name(self):
-        # Live test 14 Nov: his Ollama list showed "[REDACTED]" for deepseek-v4.1-flash:cloud (his main model) in Work and
+        # Live test 14 Nov: his Ollama list showed "[REDACTED]" for deepseek-v4.1-flash:cloud (the main model) in Work and
         # Pips: a saved key held that name. A name the host lists itself is not a secret; it shows in both lists.
         host = self.host(keys={"DGC_FALLBACK_API_KEY": "glm-5.3:cloud"})
         host.dispatch({"type": "list_models", "request_id": "work-models"})

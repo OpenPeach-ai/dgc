@@ -41,7 +41,7 @@ def _supervisor_command(project_root):
 
 def this_install() -> str:
     """Which install this DGC runs from (its package's folder): a runner says it, so a runner left by another install of
-    the same version is moved too. Every 0.52 test build says the same version; on his machine (15 Nov) the runner of a
+    the same version is moved too. Every 0.52 test build says the same version; on a test machine (15 Nov) the runner of a
     build installed a day earlier kept running its old code after two newer installs."""
     return str(Path(__file__).resolve().parents[1])
 
@@ -227,7 +227,7 @@ def older_runner_waiting(config) -> bool:
 def adopt_older_runner(config) -> bool:
     """The live runner is another install's (an update left it running): move it to this install while it is idle,
     or ask it to hand over while it is busy (start_runtime), at the editor's first look at Pips. The takeover came
-    only with the next run asked for, so opening a Pip's computer kept showing the old install's desktop (his machine,
+    only with the next run asked for, so opening a Pip's computer kept showing the old install's desktop (a test machine,
     18 Nov). True when it acted. A newer install's runner, or this install's own, is left alone."""
     if not older_runner_waiting(config):
         return False

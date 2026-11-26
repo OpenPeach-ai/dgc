@@ -324,7 +324,7 @@ export function requestBroker(send, namespace=globalThis.crypto.randomUUID()) {
     },
     receive(message) { const item=pending.get(message.id); if (!item) return; pending.delete(message.id); message.ok === true ? item.resolve(message.result) : item.reject(refusal(message.error)); },
     reset() { for(const item of pending.values()) item.reject(new Error('The connection to DGC changed. Refresh and try again.')); pending.clear(); },
-    // Called every few seconds while the page is awake (.111, 12 Nov: the red line came when the page woke from sleep, or
+    // Called every few seconds while the page is awake (a test machine, 12 Nov: the red line came when the page woke from sleep, or
     // when the window's backend was replaced, never from a slow read). Time the page itself was asleep (a laptop's sleep,
     // a hidden window the editor paused) isn't time spent waiting on DGC. A read with no answer in its time is asked
     // once more, then said plainly; an action is never sent twice.

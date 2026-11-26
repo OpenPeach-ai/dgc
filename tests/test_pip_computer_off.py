@@ -1,4 +1,4 @@
-"""Switched off, a Pip runs nothing on its own, its computer included (his report, 25 Nov: "switching off a Pip should
+"""Switched off, a Pip runs nothing on its own, its computer included (reported 25 Nov: "switching off a Pip should
 switch off its personal computer as well ... i switched off a pip, but its personal computer kept running").
 
 A Pip that is off (paused) or archived has each of its computers closed by the supervisor as soon as nothing uses it: no

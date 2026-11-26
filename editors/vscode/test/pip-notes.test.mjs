@@ -93,7 +93,7 @@ test('a reply that kept a note says so under it, with Forget right there; nothin
  assert.equal(old.requests('list_pip_notes').length,0,'an older CLI is never asked');
 });
 
-test('Remembered stays under the reply that kept it, never below a newer message (his picture, 15 Nov)',async()=>{
+test('Remembered stays under the reply that kept it, never below a newer message (a screenshot, 15 Nov)',async()=>{
  // It was drawn at the conversation's end, under the latest reply: the next prompt and the Pip's "Thinking" row sat
  // above it, and it read as the newest thing in the chat.
  const RUN2='run_'+'b'.repeat(32),RUN3='run_'+'c'.repeat(32),later=new Date(Date.now()+1000).toISOString(),last=new Date(Date.now()+2000).toISOString();

@@ -37,7 +37,7 @@
    before it; media/main.js draws it with the plush renderer): the height of
    the word's line, always there, so choosing a tab moves nothing. Empty (no renderer), it takes no room. */
 /* Core's face beside "Pips": its box centred on the line put its round body a pixel above the middle of the lowercase
-   letters (his eye, 19 Nov; measured: body centre 14.0 against the letters' 15-16). One pixel down sits it on them. */
+   letters (seen 19 Nov; measured: body centre 14.0 against the letters' 15-16). One pixel down sits it on them. */
 .dgc-tab-face { flex: none; display: block; width: 16px; height: 16px; line-height: 0; pointer-events: none; transform: translateY(1px); }
 .dgc-tab-face:empty { display: none; }
 .dgc-tab-face > * { width: 100%; height: 100%; }
@@ -84,7 +84,7 @@
   .dgc-tabs-bar { width: calc(100% - 2 * var(--sp-2)); }
   .dgc-tab-count { left: calc(50% - 2px); }
 }
-/* Forced colours: his Library books (on Home's Library button) are drawn in the text's own system colour, so the icon
+/* Forced colours: the maintainer's Library books (on Home's Library button) are drawn in the text's own system colour, so the icon
    never vanishes. */
 @media (forced-colors: active) {
   span.library-iris > i:nth-child(n) { forced-color-adjust: none; background: CanvasText; box-shadow: none; }

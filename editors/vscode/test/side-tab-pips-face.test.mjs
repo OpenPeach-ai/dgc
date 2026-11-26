@@ -6,7 +6,7 @@
 //     holds the order, the gap and the centring), about the height of the word's line, never cut
 //   - it is alive (it breathes and blinks) and keeps still under reduced motion
 //   - the tab's name for a screen reader is still "Pips"; choosing tabs moves nothing; the keys work as before
-//   - the five tabs still fit at 280 px (four fitted at 240 before Library; 292 while Library wore his books, 15 Nov); at 170 px (icons: side-tabs-icons.test.mjs) Pips is the face alone
+//   - the five tabs still fit at 280 px (four fitted at 240 before Library; 292 while Library wore the maintainer's books, 15 Nov); at 170 px (icons: side-tabs-icons.test.mjs) Pips is the face alone
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openDock } from "./support/dock-scene.mjs";

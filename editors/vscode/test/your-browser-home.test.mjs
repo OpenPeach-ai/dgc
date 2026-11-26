@@ -52,7 +52,7 @@ test("the dock: Your Browser sits just before +, on the right of the divider, an
     assert.ok(sep < tile.left && tile.right <= d.items.at(-1).left, "on the right of the | divider, before +");
     assert.ok(d.bar.left >= 7.5 && d.bar.right <= d.width - 7.5, "the bar still keeps 8 px from each edge");
     const halo = await x.page.evaluate(() => { const h = document.querySelector('#dgc-dock [data-key="browser"] .halo'), t = h?.closest(".dgc-dock-tile"); if (!h) return null; const a = h.getBoundingClientRect(), b = t.getBoundingClientRect(); return { inside: a.left >= b.left - 0.5 && a.right <= b.right + 0.5 && a.top >= b.top - 0.5 && a.bottom <= b.bottom + 0.5, share: a.width / b.width }; });
-    assert.ok(halo, "his Halo is its mark");
+    assert.ok(halo, "the maintainer's Halo is its mark");
     assert.ok(halo.inside && halo.share > 0.6 && halo.share < 0.8, `the Halo sits in its tile, as a mark does (${JSON.stringify(halo)})`);
     // A click opens it, with where the editor's window is.
     await x.page.mouse.click(...centre(tile));

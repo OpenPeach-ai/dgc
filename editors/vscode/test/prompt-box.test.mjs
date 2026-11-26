@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { openWorkTab } from "./support/work-tab-scene.mjs";
 
-// One prompt box, with attachment pills (0.52, UI step 3; his visual references of 7 Nov): a picture attaches as a pill
+// One prompt box, with attachment pills (0.52, UI step 3; the visual references of 7 Nov): a picture attaches as a pill
 // (a small picture, its name, a remove button) that opens the picture large just above the box without moving the
 // prompt; files dragged over the box show "Drop to attach"; an upload fills its pill from the left; Send turns into Stop,
 // a square inside a spinning arc, while a reply runs. The same pieces in Work, ChatDGC and a Pip's chat.

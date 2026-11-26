@@ -174,10 +174,10 @@ test('all-clear runs in a row are one message that says it again, with how many 
   assert.equal(x.d.querySelectorAll('.run-post-quiet, details.run-posts-fold').length,0,'no log lines left');
 });
 
-// 25 Nov (his .111 picture): a heartbeat every 30 minutes said "Passed 200 times since Saturday:" and then all 200 times,
+// 25 Nov (a screenshot from a test machine): a heartbeat every 30 minutes said "Passed 200 times since Saturday:" and then all 200 times,
 // a wall of clocks. A long run of passes says how often and when the last was, in one line; a short one keeps its times.
 test('a long run of passes is one line: how many, since when, how often, and the last; never every time',async()=>{
-  const MIN=60000,n=40,start=NOW-(n-1)*30*MIN-HOUR;   // (a page holds 50: his 200 came over pages)
+  const MIN=60000,n=40,start=NOW-(n-1)*30*MIN-HOUR;   // (a page holds 50: 200 came over pages)
   const posts=Array.from({length:n},(_,k)=>checks(k,start+k*30*MIN));
   const x=setup({pipValue:pulse(),postsValue:posts});await openChat(x);
   const fold=x.d.querySelector('article.run-post-streak');

@@ -1,4 +1,4 @@
-// Rows with buttons at narrow widths (his pictures, 16 Nov), in real Chromium on the real pages. The rule, for every
+// Rows with buttons at narrow widths (screenshots, 16 Nov), in real Chromium on the real pages. The rule, for every
 // list: where a row's icon buttons don't fit they are in the row's ⋯ menu, and the ⋯ is on every row at those widths
 // (seen without pointing at the row, reached by Tab); a row is one height at every width; a long name ends in "…" with
 // the whole name in its label; a label belongs to the row under the pointer and never lies over that row's own words.

@@ -62,7 +62,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 7
     } finally { await x.close(); }
   });
 
-  // His .111 picture (25 Nov): Copy, Read aloud and Trace under a reply didn't line up; Read aloud's speaker sat 1.5 px
+  // A screenshot from a test machine (25 Nov): Copy, Read aloud and Trace under a reply didn't line up; Read aloud's speaker sat 1.5 px
   // off the others (its Play / Stop wrapper set it on a text baseline). One centre line, and one of Play / Stop shows.
   test(`${theme} at ${width}px: a reply's Copy, Read aloud and Trace sit on one line`, async (t) => {
     if (skipOrFail(t)) return;

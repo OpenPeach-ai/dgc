@@ -203,7 +203,7 @@ test("it fits from 300 to 1200 px in both themes, and is kept as pictures for th
   }
 });
 
-// One action, one icon (his standing rule, 16 Nov): Download is the arrow into a tray a file's card wears, the icon
+// One action, one icon (a standing rule, 16 Nov): Download is the arrow into a tray a file's card wears, the icon
 // module's own entry, in the pop-up as on a row.
 test("the pop-up's Download is the one Download glyph, the very drawing a file's row wears", async (t) => {
   if (skipOrFail(t)) return;

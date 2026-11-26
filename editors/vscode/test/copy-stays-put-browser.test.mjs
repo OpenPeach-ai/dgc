@@ -21,7 +21,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); });
 
-const LONG = "/make design Create a Canvas design named “Rustire Landing Page” with Desktop and Phone artboards, using rustire-web-dashboard/src/pages/landing.tsx and landing.css as the reference.";
+const LONG = "/make design Create a Canvas design named “Tideway Landing Page” with Desktop and Phone artboards, using tideway-web-dashboard/src/pages/landing.tsx and landing.css as the reference.";
 // (Cells wrap anywhere, so it is many columns that make a table wider than the chat: a month of daily numbers.)
 const COLS = Array.from({ length: 18 }, (_, i) => `Nov ${i + 1}`);
 const TABLE = `| Shop | ${COLS.join(" | ")} |\n|---|${COLS.map(() => "---").join("|")}|\n` + ["Lime", "Birch", "Cedar"].map((s, k) => `| ${s} | ${COLS.map((_, i) => String(1000 + 37 * i + k)).join(" | ")} |`).join("\n");

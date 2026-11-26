@@ -72,7 +72,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
       { key: `work:${DOCK_SESSIONS[0].id}`, kind: "work", id: DOCK_SESSIONS[0].id, title: DOCK_SESSIONS[0].name, sub: "", look: {}, ref: {} }];
     await x.setting({ pins: pins.slice(0, 1) }); await x.settle();
     await p.click("#sessions-folder-pick"); await x.settle(); await p.waitForTimeout(700);
-    await p.hover('.dgc-folder-menu .dgc-folder-row[data-folder="/home/me/rust_ire"]'); await p.waitForTimeout(300); await shot(x, `3-folder-dropdown-pin-${width}-${t}`);
+    await p.hover('.dgc-folder-menu .dgc-folder-row[data-folder="/home/me/tide_api"]'); await p.waitForTimeout(300); await shot(x, `3-folder-dropdown-pin-${width}-${t}`);
     await p.mouse.move(2, 200); await p.waitForTimeout(300); await shot(x, `3-folder-menu-at-rest-${width}-${t}`);
     await p.keyboard.press("Escape"); await p.waitForTimeout(500);
     await x.setting({ pins }); await x.settle(); await p.mouse.move(2, 200); await p.waitForTimeout(300); await shot(x, `3-folder-work-page-and-dock-${width}-${t}`);
@@ -81,8 +81,8 @@ for (const theme of ["dark-modern", "light-modern"]) {
     await tile.click({ button: "right" }); await p.waitForTimeout(500); await shot(x, `3-folder-dock-menu-${width}-${t}`);
     await x.close();
     x = await openGrid(browser, { width, theme, layout: ["folders", "clock"], pins: pins.slice(0, 2), height: 520, scale: 2 });
-    if (width >= 380) { await x.page.hover('.hc-card[data-card="folders"] .hc-tile[data-name="rust_ire"]'); await x.rest(300); }
-    else { await x.page.click(sel("folders"), { position: { x: 60, y: 12 } }); await x.rest(300); await x.page.hover('.hc-open .hc-tile[data-name="rust_ire"]'); await x.rest(300); }
+    if (width >= 380) { await x.page.hover('.hc-card[data-card="folders"] .hc-tile[data-name="tide_api"]'); await x.rest(300); }
+    else { await x.page.click(sel("folders"), { position: { x: 60, y: 12 } }); await x.rest(300); await x.page.hover('.hc-open .hc-tile[data-name="tide_api"]'); await x.rest(300); }
     await shot(x, `3-folder-card-pin-${width}-${t}`); await x.close();
   }
   // 5. "New" means not seen: a chat's reply in the background, then its tab watched.

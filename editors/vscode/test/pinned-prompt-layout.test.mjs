@@ -805,7 +805,7 @@ for (const [theme, forcedColors] of [["dark-modern", false], ["light-modern", fa
         assert.equal(m.outline, "solid", "and an edge round the pinned prompt");
       } else {
         // (While it is stuck the ground ends in a soft shadow, where a fade read as nothing at all. No line: under a
-        // folded long prompt it read as a stray white line across the panel, his report 25 Nov.)
+        // folded long prompt it read as a stray white line across the panel, reported 25 Nov.)
         assert.equal(m.mask, "none"); assert.equal(m.edge, "0px", "no line under it"); assert.notEqual(m.shadow, "none", "a soft shadow");
         assert.equal(m.bottom, "-8px");
         assert.equal(m.outline, "none", "no outline outside high contrast");

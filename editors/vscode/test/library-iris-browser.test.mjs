@@ -1,5 +1,5 @@
 // The Library icon, Iris (0.52): three books, hue 247,
-// saturation 87%, lightness 65%, used exactly as he made it: its stylesheet (namespaced .library-iris) and its PNGs are
+// saturation 87%, lightness 65%, used exactly as made: its stylesheet (namespaced .library-iris) and its PNGs are
 // copied into the extension byte for byte (media/icons/library-iris/), and its README's markup is what the page holds:
 // <span class="library-iris" aria-hidden="true"><i></i><i></i><i></i></span> beside the visible word "Library", and
 // role="img" + aria-label="Library" where it stands alone. Places: Home's Library button beside Cards, and the editor
@@ -32,22 +32,22 @@ const skipOrFail = (t) => {
 before(async () => { if (!chromium) return; try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] }); } catch { browser = null; } });
 after(async () => { await browser?.close(); });
 
-// His files, as he made them (sha256 of each; a change to one is a redraw, which this refuses).
-const HIS = {
+// The maintainer's files, as made (sha256 of each; a change to one is a redraw, which this refuses).
+const ORIGINAL = {
   "library.css": "ee8d43c53c0e05767daf9ae8d6f552d5a6c3e7672aed0017682b6143aa740dd1",
   "png/library-iris-16.png": "17cd2793e0f7e5c19e137999ad6e7d565f36ae501a515d59a23e649a107cb273", "png/library-iris-20.png": "dc1f4087509bb248d2d093b2fa0b0a453183ac978a9f57aaa1b7e66d679bc073", "png/library-iris-24.png": "11f73970106ab0f672e60c41b505390b093bd80ba20e4d87f51a092450174f9b", "png/library-iris-32.png": "c3e2e64c2f3128ff7010f9df044fee51a144492e604ee65b6e3489d8bb7acd21",
   "png/library-iris-48.png": "0e4dbf068e1829f621ed0d0e54d9f213cc791289130b7cc7c13312a89dcd9e31", "png/library-iris-64.png": "d96f8d10af01aa0c7e6f0caf3947dd7f21556e478c7189feb26540de9797a098", "png/library-iris-128.png": "6ce7dc34bac463b654c378d4a238f5007707ab40de92670696f0398523773b7f", "png/library-iris-256.png": "88920bc8446d8a54af9279434b608e67cde2eb9367cef2491aa4eeac1fc84f01",
 };
 const MARKUP = /<span class="library-iris"[^>]*>\s*<i><\/i><i><\/i><i><\/i>\s*<\/span>/;
 
-test("his icon is in the extension exactly as he made it: library.css and every PNG, byte for byte, loaded by the side bar's page", () => {
-  for (const [file, hash] of Object.entries(HIS)) {
+test("the maintainer's icon is in the extension exactly as made: library.css and every PNG, byte for byte, loaded by the side bar's page", () => {
+  for (const [file, hash] of Object.entries(ORIGINAL)) {
     assert.ok(existsSync(root + "media/icons/library-iris/" + file), `media/icons/library-iris/${file} is there`);
-    assert.equal(sha("media/icons/library-iris/" + file), hash, `${file} is his file, unchanged`);
+    assert.equal(sha("media/icons/library-iris/" + file), hash, `${file} is the maintainer's file, unchanged`);
   }
   const css = read("media/icons/library-iris/library.css");
   assert.match(css, /\.library-iris\{--size:24px;--h:247;--sat:87%;--light:65%/, "hue 247, saturation 87%, lightness 65%");
-  assert.match(read("media/main.css"), /icons\/library-iris\/library\.css/, "the page loads his stylesheet");
+  assert.match(read("media/main.css"), /icons\/library-iris\/library\.css/, "the page loads the maintainer's stylesheet");
   // Nothing of ours recolours or redraws it: our rules only size it, place it and give forced colours a fallback.
   const ours = [read("media/shared/tabs.css"), read("media/shared/homecards.css"), read("media/main.css")].join("\n");
   for (const rule of ours.match(/[^{}]*\.library-iris[^{}]*\{[^}]*\}/g) || []) {
@@ -62,9 +62,9 @@ test("its markup is the README's: three <i> in a .library-iris span, hidden besi
   assert.match(tab, /<span class="dgc-tab-icon codicon codicon-library" aria-hidden="true"><\/span><span class="dgc-tab-word">Library<\/span>/, "the tab is the word, with the plain line icon for the narrow icon mode");
   assert.doesNotMatch(read("media/shared/tabs.css"), /\.dgc-tab[^{}]*\.library-iris/, "and the tab bar's stylesheet has no rule for it on a tab");
   assert.match(cards, MARKUP, "Home's Library button holds it"); assert.doesNotMatch(cards, /LIBRARY_ICON = '<svg/, "in place of the drawn books");
-  // The editor Library panel's tab icon: his PNG, light and dark.
+  // The editor Library panel's tab icon: the maintainer's PNG, light and dark.
   const chat = read("src/chatdgc.ts"), open = chat.slice(chat.indexOf("openLibrary(view"), chat.indexOf("libraryRef("));
-  assert.match(open, /library-iris/, "the editor Library panel's tab icon is his PNG");
+  assert.match(open, /library-iris/, "the editor Library panel's tab icon is the maintainer's PNG");
   assert.doesNotMatch(open, /panel\.iconPath = this\.chatdgcIcon\(\)/);
   assert.match(chat, /"media", "icons", "library-iris", "png", "library-iris-\d+\.png"/);
 });
@@ -93,7 +93,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 2
     const x = await openDock(browser, { tab: "home", width, theme });
     try {
       const { library: l, work, chat } = await tabNow(x.page);
-      assert.equal(l.iris, 0, "his Iris books are not on the tab");
+      assert.equal(l.iris, 0, "the maintainer's Iris books are not on the tab");
       assert.equal(l.pictures, 0, "no picture or coloured mark on it (only Pips has one)");
       assert.equal(l.name, "Library"); assert.equal(l.cls, "codicon-library"); assert.equal(l.hidden, "true");
       if (width >= 280) { assert.equal(l.word, true, "the word is drawn"); assert.equal(l.icon, false, "and no icon beside it"); assert.deepEqual([work.icon, chat.icon], [false, false], "as on Work and Chat"); }
@@ -113,7 +113,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 2
   });
 }
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [170, 292, 300, 440]) {
-  test(`${width} px (${theme}): Home's Library button wears his books beside “Library” (alone when narrow)`, async (t) => {
+  test(`${width} px (${theme}): Home's Library button wears the maintainer's books beside “Library” (alone when narrow)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openGrid(browser, { width, theme });
     try {

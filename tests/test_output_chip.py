@@ -99,7 +99,7 @@ class OutputChipTest(unittest.TestCase):
     def test_adaptive_offers_make_artifact_for_a_canvas_ask(self):
         agent = self.agent(tool_profile="adaptive")
         agent._turn_output = ""
-        agent._activate_tool_intents("design me a landing page for Rustire, show me here in the Canvas")
+        agent._activate_tool_intents("design me a landing page for Tideway, show me here in the Canvas")
         self.assertIn("make_artifact", {t["function"]["name"] for t in agent._tool_schemas()})
 
     def test_typed_output_withholds_the_legacy_page_tool_only_for_that_turn(self):

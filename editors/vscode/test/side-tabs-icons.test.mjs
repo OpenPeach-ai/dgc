@@ -32,10 +32,10 @@ before(async () => {
 after(async () => { await browser?.close(); });
 
 /** The first width that shows words; one pixel less shows icons. */
-const WORDS_FROM = 280;      // (240 with four tabs; 280 with Library, the fifth; 292 while Library wore his books before its word; 280 again now it does not. Measured: the names fit from 258.)
+const WORDS_FROM = 280;      // (240 with four tabs; 280 with Library, the fifth; 292 while Library wore the maintainer's books before its word; 280 again now it does not. Measured: the names fit from 258.)
 // (Decided 15 Nov, later the same day: "the header tabs don't need to show icon for library, only Pips tab shows
 // Core's face, not any other tab." Library is a word like Home, Work and Chat, and in icon mode a plain line icon of
-// their family, the codicon "library": never his coloured Iris books, which stay on Home's Library button and the
+// their family, the codicon "library": never the coloured Iris books, which stay on Home's Library button and the
 // editor Library panel's tab: library-iris-browser.test.mjs.)
 const ICONS = { home: "codicon-home", work: "codicon-briefcase", chat: "codicon-comment-discussion", library: "codicon-library" };
 const IDS = ["home", "work", "chat", "library", "pips"], WORDS = ["Home", "Work", "Chat", "Library", "Pips"];
@@ -109,7 +109,7 @@ for (const width of [700, 300]) {
       assert.equal(form(bar), "words");
       assert.deepEqual(bar.tabs.map((tab) => tab.word.text), WORDS);
       assert.deepEqual(bar.tabs.map((tab) => !!tab.icon?.seen), [false, false, false, false, false], "no icon beside any word: Library is the word alone");
-      assert.deepEqual(bar.tabs.filter((tab) => tab.id !== "pips").map((tab) => tab.coloured), [0, 0, 0, 0], "and none of them holds a coloured mark or a picture (his Iris books are not on the tab); the Pip's face is the one exception, below");
+      assert.deepEqual(bar.tabs.filter((tab) => tab.id !== "pips").map((tab) => tab.coloured), [0, 0, 0, 0], "and none of them holds a coloured mark or a picture (the maintainer's Iris books are not on the tab); the Pip's face is the one exception, below");
       assert.ok(by(bar, "pips").face, "Pips still wears the Core Pip's face beside its word");
       assert.ok(by(bar, "home").count && by(bar, "home").count.left >= by(bar, "home").flip.right, "Home's number is beside its word");
       assert.deepEqual(cuts(bar), []);

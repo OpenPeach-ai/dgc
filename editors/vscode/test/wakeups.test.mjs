@@ -53,7 +53,7 @@ test("a wake-up's turn reads as one it planned, never as a message the user type
   assert.match([...v.doc.querySelectorAll(".monitor-note")].at(-1).textContent, /Woke as a video ended/, "others keep their words");
 });
 
-test("each wake-up is one row: its time, what it is for, and a Cancel button at the end (his picture, 19 Nov)", async () => {
+test("each wake-up is one row: its time, what it is for, and a Cancel button at the end (a screenshot, 19 Nov)", async () => {
   const { v, event, chip } = chat();
   event({ type: "wakeups", items: [{ id: "wake1", at: at(7, 36), why: "Verify dashboard servers are live" }] });
   chip().click();

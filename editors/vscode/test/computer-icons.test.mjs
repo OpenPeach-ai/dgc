@@ -55,10 +55,10 @@ test("a computer's colour follows its number: Iris, Lagoon, Lilac, then nine mor
   assert.deepEqual([1, 2, 3].map((n) => marks.HUES[marks.computerPalette(n)]), [247, 177, 273]);
   for (let n = 1; n <= 40; n++) assert.doesNotMatch(names.computerPortal(n, 24), /citron|lime/);
   assert.equal(names.computerPortal(2, 18), '<span class="portal portal--lagoon" data-mark="portal" data-palette="lagoon" style="--size:18px;--portal-play:paused" aria-hidden="true"><i></i><i></i></span>',
-    "his markup: span.portal.portal--<palette> > i*2, sized by --size, at rest (--portal-play: paused), and decoration beside the name");
+    "the sheet's markup: span.portal.portal--<palette> > i*2, sized by --size, at rest (--portal-play: paused), and decoration beside the name");
 });
 
-test("his Portal sheet is shipped as he wrote it, inside both Pips bundles; twelve pictures for a computer's tab", () => {
+test("the maintainer's Portal sheet is shipped as written, inside both Pips bundles; twelve pictures for a computer's tab", () => {
   assert.equal(createHash("sha256").update(readFileSync(root + "media/shared/portal.css")).digest("hex"), "c2e326ad0f958ab85a1f2a25bb6d8e0bf4c62f02538c58c853d228f0ddde4da5", "portal.css, byte for byte");
   assert.match(read("src/pipsClient.js"), /^import '\.\.\/media\/shared\/portal\.css';$/m, "the Pips view takes it (the menu, the Pip's page)");
   assert.match(read("src/pipComputerClient.js"), /^import '\.\.\/media\/shared\/portal\.css';$/m, "and the computer's tab (its bar)");
@@ -108,7 +108,7 @@ test("the computer menu in a Pip's chat: a Portal before each computer's name, i
       assert.deepEqual(marks.map((m) => [m.number, m.palette]), [[1, "iris"], [2, "lagoon"], [3, "lilac"]], "each computer's own palette, by its number");
       for (const m of marks) {
         assert.match(m.cls, /^portal portal--[a-z]+$/); assert.deepEqual([m.parts, m.hidden], ["II", "true"], "two empty <i>; the name beside it says which computer");
-        assert.deepEqual([m.w, m.h], [24, 24], `24 px in a list, as he sets it (${width})`);
+        assert.deepEqual([m.w, m.h], [24, 24], `24 px in a list, as its sheet sets it (${width})`);
         assert.ok(m.inside && m.beforeName && m.shown, `inside its row, before its name (${width}, ${theme})`);
         assert.deepEqual([m.name, m.state], ["portal-tilt", "paused"], "at rest (--portal-play: paused)");
         assert.match(m.hole, /^exclude\b/, "an open frame: its middle is clear");
@@ -134,7 +134,7 @@ test("the computer menu in a Pip's chat: a Portal before each computer's name, i
 test("the Pip's page: each computer's Portal beside its name under “Computers: N”; the Pips list shows faces only", async (t) => {
   if (skipOrFail(t)) return;
   for (const [width, where] of [[700, "tab"], [300, "side"]]) {
-    // (Under reduced motion, his sheet stops every part of a Portal outright.)
+    // (Under reduced motion, the maintainer's sheet stops every part of a Portal outright.)
     const x = await openChat(browser, { settings: true, width, where, api: 86, motion: width === 700 ? "no-preference" : "reduce", convs: { computers: 2, states: [] } });
     try {
       await x.p.waitForSelector("#pip-convs");
@@ -185,7 +185,7 @@ test("the computer tab's slim bar: the face, the Pip's name, then this computer'
     b = await bar(wide.p);
     assert.equal(b.title, "Desk · Studio");
     assert.equal(b.palette, "lagoon", "computer 2 is Lagoon");
-    assert.equal(Math.round(b.portal.width), 18, "18 px in a tab's bar, as he sets it");
+    assert.equal(Math.round(b.portal.width), 18, "18 px in a tab's bar, as its sheet sets it");
     assert.ok(b.face.right <= b.pip.left + 0.5 && b.pip.right <= b.portal.left + 0.5 && b.portal.right <= b.name.left + 0.5, `the face, the Pip's name, the Portal, the computer's name, in that order (${JSON.stringify([b.face.right, b.pip, b.portal, b.name])})`);
     assert.equal(b.faceIn, false, "the Portal never takes the face's place: the face is where it was, before the title");
     assert.ok(Math.abs(b.portal.mid - b.name.mid) <= 2.5 && Math.abs(b.portal.mid - b.pip.mid) <= 2.5, "on the names' own line");

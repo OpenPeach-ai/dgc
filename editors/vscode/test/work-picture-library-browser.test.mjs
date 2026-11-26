@@ -136,7 +136,7 @@ test("in the viewer: Download saves it on this computer from the page; Save to L
 });
 
 // One action, one icon (16 Nov): the viewer's Download is the arrow into a tray a file's row wears; and a note saying
-// what happened ("Saved to Library") takes the hover label's place, never both at once (his review of the viewer, 18 Nov).
+// what happened ("Saved to Library") takes the hover label's place, never both at once (a review of the viewer, 18 Nov).
 test("the viewer's Download is the row's Download glyph, and a note never stands beside a hover label", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openPanel(700);

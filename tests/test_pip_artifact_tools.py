@@ -71,7 +71,7 @@ class APipMakesAndKeepsItsOwn(unittest.TestCase):
 
 
 class APipReadsAPageAndDGCsDocs(unittest.TestCase):
-    """His "yes to your full add list" (15 Nov): a quick read of one public page, through the controller with DGC's
+    """"Yes to the full add list" (15 Nov): a quick read of one public page, through the controller with DGC's
     leak guard and careful mode as its search has; and DGC's own docs, read-only."""
 
     def setUp(self):

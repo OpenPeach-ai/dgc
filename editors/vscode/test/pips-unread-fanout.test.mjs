@@ -1,4 +1,4 @@
-// The unread numbers are asked only of the workspaces that hold Pips (14 Nov, his "DGC is busy. Reconnect and try
+// The unread numbers are asked only of the workspaces that hold Pips (14 Nov, "DGC is busy. Reconnect and try
 // again." on the Pips tab): one list_pip_unread per workspace, all at once, every 15 s, over a profile with ~190
 // workspaces (test folders left behind) went past the 48 requests the page lets wait and the 64 the editor does.
 import { test, after } from "node:test";

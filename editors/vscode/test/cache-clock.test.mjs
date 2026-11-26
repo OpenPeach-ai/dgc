@@ -366,7 +366,7 @@ test("the window coming back finds the cache cold: the line is written then (a t
   x.tick(41 * 3600000);
   assert.deepEqual(x.notes(), [], "nothing woke it");
   x.shown();
-  assert.deepEqual(x.notes(), [IDLE("1d 17h", "524k")], "his example, to the letter");
+  assert.deepEqual(x.notes(), [IDLE("1d 17h", "524k")], "the example given, to the letter");
   assert.equal(x.node.dataset.cacheWindow, "cold", "and the clock in the footer agrees");
   assert.deepEqual(x.errors, []);
 });

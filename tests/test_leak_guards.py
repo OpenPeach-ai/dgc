@@ -72,7 +72,7 @@ class TheProjectsEnvValuesAreHidden(Project):
             self.assertNotIn(value, known, f"{value} is a setting, not a secret: hiding it would blind the model")
 
     def test_a_sudo_password_by_the_names_people_give_it(self):
-        # His DGC_SUDO (18 Nov): neither the general rule's names nor a secret's shape (short, one word) caught it.
+        # A DGC_SUDO (18 Nov): neither the general rule's names nor a secret's shape (short, one word) caught it.
         (self.root / ".env").write_text(ENV + "DGC_SUDO=Wombat-Lake-71\nSUDO_PASS=kettle9drum\nDB_PW=Blue#Heron22\n"
                                               "BYPASS_CACHE=true\nCOMPASS_URL=https://maps.example.com\n")
         leak_guard.forget()

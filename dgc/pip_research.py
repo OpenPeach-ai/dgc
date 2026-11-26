@@ -1,4 +1,4 @@
-"""A Pip's deep research (0.52; his "yes to your full add list", and "one capability, one module"): the ONE engine
+"""A Pip's deep research (0.52; "yes to the full add list", and "one capability, one module"): the ONE engine
 ChatDGC and Work run (dgc.deep_research), in the Pip's worker with the Pip's own model. The worker has no web of its
 own: each search and each page goes through the run's socket (pip_app_links.RunSocket, ops RESEARCH_OPS) to the
 controller, which reads it under careful mode and DGC's leak guard exactly as the Pip's web_search and web_fetch do.

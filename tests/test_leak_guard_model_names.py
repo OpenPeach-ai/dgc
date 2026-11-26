@@ -1,5 +1,5 @@
-"""The .env leak guard hides values that read as secrets, never a model's name (live 15 Nov: his rust_ire .env held
-OLLAMA_TEST_MODEL=<his default model>, a 25-character name with letters and digits; DGC then showed his default model
+"""The .env leak guard hides values that read as secrets, never a model's name (live 15 Nov: a project's .env held
+OLLAMA_TEST_MODEL=<a default model>, a 25-character name with letters and digits; DGC then showed the default model
 as "[REDACTED]" everywhere it scrubs what it shows)."""
 import tempfile
 import unittest

@@ -26,7 +26,7 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-title h1{flex:0 1 auto;min-width:0;max-width:260px;margin:0;font-size:var(--t-base);font-weight:600;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;white-space:nowrap}
 .pc-pip-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .pc-computer-name{flex:0 1000 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
-/* This computer's own mark, the maintainer's Portal (media/shared/portal.css), 18 px as he sets it for a tab: after
+/* This computer's own mark, the maintainer's Portal (media/shared/portal.css), 18 px as its sheet sets it for a tab: after
    the Pip's name and before the computer's, where the " · " was (which stays in the words, unseen). */
 .pc-sep{display:none}
 .pc-portal{display:inline-flex;flex:none;margin:0 5px 0 6px;line-height:0;vertical-align:middle}

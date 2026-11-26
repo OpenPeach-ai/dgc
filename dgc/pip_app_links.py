@@ -846,7 +846,7 @@ class RunSocket:
 
     def _fetch(self, args) -> str:
         """One public page as text, read here (the worker has no web of its own): careful mode and DGC's leak guard first,
-        as its search has them (0.52, his "yes to your full add list")."""
+        as its search has them (0.52, "yes to the full add list")."""
         url = str(args.get("url") or "").strip()
         if not url or len(url) > 2048 or not url.lower().startswith(("http://", "https://")):
             return "error: give one page's http or https address."

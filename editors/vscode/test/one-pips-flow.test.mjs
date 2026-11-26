@@ -112,7 +112,7 @@ test('when the fix is ready: the change card with Apply, Review and Discard, and
  assert.deepEqual(x.requests('apply_pip_project_change').at(-1),{type:'apply_pip_project_change',pip_id:GST,change_id:CHANGE,expected_digest:'c1'});
 });
 
-// 25 Nov (his report on .111): committing one change card left another, whose files that commit took too, still
+// 25 Nov (reported from a test machine): committing one change card left another, whose files that commit took too, still
 // offering Commit these files; and a card that was done could not be put away. After a commit or an Undo every card is
 // read again (each says what Git says of its own files now); a card that is done (committed, in a folder that isn't a
 // Git project, undone or discarded) has × to take it out of the chat, kept across reloads.
@@ -148,7 +148,7 @@ test('at Do it all it is already in your folder: Review, Undo, and Commit these 
  assert.equal(x.requests('undo_pip_project_change').length,1);
 });
 
-// 25 Nov (his report on .111): what only you can do sat in a pinned area at the top of the chat; once the last was
+// 25 Nov (reported from a test machine): what only you can do sat in a pinned area at the top of the chat; once the last was
 // answered its line (and its Hide) went, and the answered lines stayed open up there for a day. Its card is in the chat
 // now, where it came from: under the check whose fix found it, beside that fix; nothing of it is pinned at the top.
 test('what only you can do is a card in the chat, under the check whose fix found it; nothing is pinned at the top',async()=>{

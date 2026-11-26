@@ -138,7 +138,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 4
   });
 }
 
-// 25 Nov (his report on .111): a Pip whose sub-agents are done shows the pill idle; in a narrow box its words can't
+// 25 Nov (reported from a test machine): a Pip whose sub-agents are done shows the pill idle; in a narrow box its words can't
 // show, and a lone hollow dot said nothing: it gives way there, and says "Agent map" where there is room.
 for (const width of [300, 700]) {
   test(`at ${width}px a Pip's idle sub-agents pill ${width < 640 ? "gives way" : "says Agent map"}`, async (t) => {

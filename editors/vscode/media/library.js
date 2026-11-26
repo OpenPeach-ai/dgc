@@ -36,7 +36,7 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/;
   const ARTIFACT_ID = /^ar_[a-f0-9]{16}$/;
-  // The tabs, in his order: id, name, what one of them is called, its icon (a codicon) and its line for a label.
+  // The tabs, in the chosen order: id, name, what one of them is called, its icon (a codicon) and its line for a label.
   const TABS = [
     ["artifacts", "Artifacts", "artifact", "browser", "Artifacts: the pages, spreadsheets, documents, slides, dashboards, checklists and designs DGC made"],
     ["widgets", "Widgets", "widget", "symbol-misc", "Widgets: ChatDGC's widgets, and the cards a reply drew in Work or a Pip's chat"],
@@ -71,7 +71,7 @@
   const FAV_PAGED = { widgets: ["widget:", "chart:"], images: ["image:"], videos: ["video:"], files: ["file:", "workfile:"] };
   const FAV_PAGES = 40;     // the most pages a tab reads on its own, looking for its favorites
   const PAGE = 200;         // artifacts and widgets drawn at a time ("Show more" draws the next)
-  // An item's menu: the eight things, in his order (15 Nov), the same for every kind.
+  // An item's menu: the eight things, in the chosen order (15 Nov), the same for every kind.
   // (The first six are every file's, on every surface: media/shared/filemenu.js. A chat's file card has those and no more.)
   const ITEM_ACTS = [...window.DgcFileMenu.ACTS, ["rename", "Rename…"], ["remove", "Remove…"]];
   // What only a kind has, kept under the eight (by the ids of actions() below).

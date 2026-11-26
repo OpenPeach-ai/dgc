@@ -1,4 +1,4 @@
-// One New Pip (his "perfect", 13 Nov): the Personal form's character and name, plus one folder line pre-filled from
+// One New Pip ("perfect", 13 Nov): the Personal form's character and name, plus one folder line pre-filled from
 // where you are: the filter's folder, or the folder it was asked for from (a Work session's), else "+ Give it a
 // folder", which is a Pip with no folder (Personal). One click changes it; it is decided at creation. No goal, no
 // branch and no model fields: "we don't want user to define the goal while creating a Pip"; it sets itself up in its

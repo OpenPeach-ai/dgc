@@ -556,7 +556,7 @@ export function renderFields(section, main, config, providers, ui) {
                     sel("artifact_bind", [["localhost", "This computer only"], ["lan", "Your network and Tailscale"]], c.artifact_bind || "localhost"),
                     "Your network and Tailscale: your phone or another computer on the same network or tailnet opens a page DGC serves. Anyone there with its link can see it.")
                   + field("Address for links", "Optional: a name your devices use.", inp("artifact_hostname", c.artifact_hostname || ""),
-                    "A Tailscale name (gb10.tail1234.ts.net) or a host:port. Empty: links use this computer's own address.") : ""))
+                    "A Tailscale name (gpu-box.tail1234.ts.net) or a host:port. Empty: links use this computer's own address.") : ""))
             // A link's preview card (src/linkPreview.ts): the editor's own setting, so it applies at once, apart from Save.
             + group("Links", field("Show a preview when you point at a link", "Reads public pages only.", ui.editorBool("link_previews", c.link_previews !== false, "Show a preview when you point at a link"),
                     "Rest the pointer on a link in a chat and a card shows the site's name, picture, title and description. DGC reads only the top of a public page, with no sign-in and no cookies: never a private, local or tailnet address, a one-time link, or an address that holds a secret. Off: nothing is read.")

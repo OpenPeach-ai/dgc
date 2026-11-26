@@ -23,7 +23,7 @@ test('a Pip with a folder has the Personal Pip\'s header: back, its name, its fo
  assert.equal(bar.querySelector('.topbar-actions > #pip-run-now'),null,'no Run now button in the bar');
  const rows=[...bar.querySelectorAll('.pip-menu .tabs-menu > button')].map(b=>b.textContent.trim());
  assert.equal(rows[0],'Run now','Run now is the menu\'s first row');
- // One Pip menu (his call, 25 Nov: a Project Pip kept every page its old page had): Reports, Settings and
+ // One Pip menu (decided 25 Nov: a Project Pip kept every page its old page had): Reports, Settings and
  // Notifications, as a Personal Pip's; its schedule, version history and the rest are on its Settings page.
  const pages=rows.filter(r=>!['Run now','Open in editor','Remove its folder…','Give it a folder…'].includes(r));
  assert.deepEqual(pages,['Reports','Settings','Notifications'],`one menu for every Pip (${rows})`);
@@ -60,7 +60,7 @@ test('its settings page is the Personal Pip\'s page, with what only it has: wher
  assert.equal(x.$('.simple-content').dataset.view,'revisions','version history and approvals open from there');
 });
 
-// 25 Nov (his call: nothing of the old Project Pip page left): "When it runs" changed it on the old reviewed-schedule page
+// 25 Nov (decided: nothing of the old Project Pip page left): "When it runs" changed it on the old reviewed-schedule page
 // (Review schedule…, Reset, Waiting changes). It is changed in place now, with the editor a Pip's routines use, saved at
 // once; and the schedule is said once on the page, not again under Routines.
 test('When it runs is changed in place, saved at once; never the old schedule page; said once on its page',async()=>{

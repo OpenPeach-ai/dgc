@@ -532,7 +532,7 @@ class TheUsersOwnWords(Case):
 
 
 class YourSudoPasswordInEnv(Case):
-    """Decided 18 Nov: "the sudo password is in .env, use it" is his to decide; the model must be able to do it. DGC
+    """Decided 18 Nov: "the sudo password is in .env, use it" is the user's to decide; the model must be able to do it. DGC
     still hides the value from the model (it never reaches the model's provider), and says once how to use it by name.
     A stand-in sudo checks the password it is given: nothing here runs as root."""
 

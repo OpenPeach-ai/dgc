@@ -12133,7 +12133,7 @@ class Agent(GoalLifecycle):
         shown = redact_text(out, secrets)
         if REDACTED_MARK in shown and secrets and not getattr(self, "_hidden_note_given", False):
             # The first result that hid a secret says how to still use it when the user asks (decided 18 Nov: "the
-            # sudo password is in .env, use it" is his to decide; the model must be able to do it). The value itself
+            # sudo password is in .env, use it" is the user's to decide; the model must be able to do it). The value itself
             # still never reaches the model.
             self._hidden_note_given = True
             shown += "\n\n" + HIDDEN_VALUE_NOTE

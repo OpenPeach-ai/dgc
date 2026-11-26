@@ -1,4 +1,4 @@
-// The Routines pop-up's close button (his picture, 15 Nov): in a Pip's chat, the composer's Routines pop-up drew its ×
+// The Routines pop-up's close button (a screenshot, 15 Nov): in a Pip's chat, the composer's Routines pop-up drew its ×
 // as a wide box with a border (104 px by 28, the roomy button's own size) at its top right. Its markup gave it the
 // class "quiet", and the one-shape rule for the Pips view's worded buttons (button.quiet: the fixed width, the
 // outline) comes later in the cascade than .pip-routines-head button, which only asks for a minimum size. A close

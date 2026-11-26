@@ -233,7 +233,7 @@ test("a Work artifact is the shared card: a sheet of its kind with its name on a
       const shown = (e) => !!e && e.getClientRects().length > 0, c = (e, p) => getComputedStyle(e)[p];
       return { kind: s?.dataset.kind, tag: tag?.textContent, tab: tag ? c(tag, "backgroundColor") : "", w: Math.round(r?.width || 0), h: Math.round(r?.height || 0), page: !!s?.querySelector(".dgc-sheet-page > *"),
         open: shown(pill) ? [pill.textContent, c(pill, "backgroundColor"), c(pill, "pointerEvents")] : null, dl: dl ? [shown(dl), dl.textContent.trim(), Math.round(dl.getBoundingClientRect().width), !!dl.querySelector("svg"), c(dl, "backgroundColor")] : null }; });
-    assert.deepEqual([f.kind, f.tag, f.tab, f.w, f.h, f.page], ["slides", "Slides", "rgb(217, 119, 6)", 28, 36, true], `(the card's size, his pick C, 25 Nov: 28 × 36) a sheet of slides, its tab in the kind's colour: ${JSON.stringify(f)}`);
+    assert.deepEqual([f.kind, f.tag, f.tab, f.w, f.h, f.page], ["slides", "Slides", "rgb(217, 119, 6)", 28, 36, true], `(the card's size, pick C, 25 Nov: 28 × 36) a sheet of slides, its tab in the kind's colour: ${JSON.stringify(f)}`);
     assert.equal(f.open[0], "Open", "Open, seen");
     assert.equal(f.open[2], "none", "the pill takes no clicks: the card's own Open lies over all of it");
     const grey = (rgb) => { const v = (rgb.match(/[\d.]+/g) || []).slice(0, 3).map(Number); return Math.max(...v) - Math.min(...v) <= 12; };

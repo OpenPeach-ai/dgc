@@ -130,7 +130,7 @@
 @media (hover: none) { .dgc-lib .lib-fav { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .dgc-lib .lib-fav, .dgc-lib .lib-fav-filter { transition: none; } }
 /* The row's ⋯ is on every row at every width, after its words (and after its icon buttons, where those fit): nothing
-   needs the pointer on the row first, and Tab reaches it (his pictures, 16 Nov: in a narrow side bar the icons went and
+   needs the pointer on the row first, and Tab reaches it (screenshots, 16 Nov: in a narrow side bar the icons went and
    the ⋯ showed only on the row pointed at, so Pin could not be reached). Where the icon buttons don't fit (under 560px)
    they are in its menu, in their own order. */
 .dgc-lib .lib-row-more { flex: none; display: inline-flex; margin-right: calc(3px - (var(--lib-bleed, 8px) - 1px)); background: transparent; }

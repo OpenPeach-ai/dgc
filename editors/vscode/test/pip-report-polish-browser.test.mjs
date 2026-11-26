@@ -1,5 +1,5 @@
 // The Pip report cards of a Work chat, polished (asked 13 Nov: "the Pips cards that come in work sessions needs UI
-// polish, they do not look good ... better and cleaner"; he saw two Pips' cards with findings in a real project). In
+// polish, they do not look good ... better and cleaner"; two Pips' cards were seen with findings in a real project). In
 // real Chromium on Work's real page, with the Pips' real faces and the real clock, dark, light and high contrast, at
 // 300 and 700 px (media/main.js pipReportCard, media/main.css .pip-report):
 //  - calm: severity is a small dot and a quiet word, what a Pip found is said in the card's own ink, never red bold;

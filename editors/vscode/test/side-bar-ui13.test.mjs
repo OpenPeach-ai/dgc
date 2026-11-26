@@ -292,8 +292,8 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
 
 // ---- 5. the Project Folder menu ----------------------------------------------------------------------------------------
 const folderRow = (i) => ({ folder: `/tmp/dgc-pip-report-${"abcdefghijklmnopqrstuvwxyz"[i]}${i}x/repo`, shown: `/tmp/dgc-pip-report-${"abcdefghijklmnopqrstuvwxyz"[i]}${i}x/repo`, name: i === 7 ? "storefront" : "repo", here: false, exists: i % 3 !== 0 });
-const manyFolders = (n) => [{ folder: "/home/me/rust_ire", shown: "~/rust_ire", name: "rust_ire", here: true, exists: true }, ...Array.from({ length: n - 1 }, (_, i) => folderRow(i))];
-const workList = (folders, count = 6) => ({ type: "sessions_list", error: "", searchable: true, query: "", more: false, folders: { choice: "", rows: folders, window: { folder: "/home/me/rust_ire", shown: "~/rust_ire", name: "rust_ire" } },
+const manyFolders = (n) => [{ folder: "/home/me/tide_api", shown: "~/tide_api", name: "tide_api", here: true, exists: true }, ...Array.from({ length: n - 1 }, (_, i) => folderRow(i))];
+const workList = (folders, count = 6) => ({ type: "sessions_list", error: "", searchable: true, query: "", more: false, folders: { choice: "", rows: folders, window: { folder: "/home/me/tide_api", shown: "~/tide_api", name: "tide_api" } },
   items: Array.from({ length: count }, (_, i) => ({ id: `s-${i}`, path: `/s/${i}.json`, name: i ? `Session number ${i}` : "test session", preview: "", when: stamp(4 + i * 700), count: 3, open: !i,
     project: folders[i % folders.length].shown, projectPath: folders[i % folders.length].folder, projectName: folders[i % folders.length].name, ...(i % folders.length ? { here: false } : {}) })) });
 /** The open menu as it is on screen. */

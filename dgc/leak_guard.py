@@ -30,7 +30,7 @@ _PLACEHOLDER_FILES = re.compile(r"\.env\.(?:example|sample|template|dist|default
 _LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.*?)\s*$")
 _TOKEN_PREFIX = re.compile(r"^(?:sk|pk|rk)_(?:live|test)_|^sk-|^ghp_|^gho_|^github_pat_|^xox[abposr]-|^AKIA|^AIza|^glpat-|^hf_")
 _URL_PASSWORD = re.compile(r"^[a-z][a-z0-9+.-]*://[^\s/@:]+:([^\s/@]+)@", re.IGNORECASE)
-# Names a .env uses for a password that DGC's general rule (redaction.sensitive_name) doesn't know: his DGC_SUDO (18 Nov),
+# Names a .env uses for a password that DGC's general rule (redaction.sensitive_name) doesn't know: a DGC_SUDO (18 Nov),
 # SUDO_PASS, DB_PW. Only here, for a project's .env: a value under 8 characters is never hidden (it would match
 # ordinary text), so a short password still shows.
 _ENV_PASSWORD_NAME = re.compile(r"(?i)(?:^|[_-])(?:sudo|pass|pw)(?:$|[_-])")

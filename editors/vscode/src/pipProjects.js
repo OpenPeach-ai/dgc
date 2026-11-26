@@ -156,7 +156,7 @@ const reasons = (label, list, esc) => list.length ? `<p class="pip-project-label
 export function projectCardMarkup(change, { esc, open = new Set(), diffs = new Map(), busy = '', off = false, confirm = false, note = '', error = '', one = false, canCommit = false, look = '', folded = false, menu = false, dismiss = false } = {}) {
   const id = esc(change.id), name = oneLine(change.name), hold = off || busy ? ' disabled' : '';
   // A card that is done (committed, undone, discarded, or in a folder Git doesn't keep) can be taken out of the chat
-  // (his report, 25 Nov).
+  // (reported 25 Nov).
   const x = dismiss ? `<button type="button" class="pip-project-dismiss" data-project-dismiss="${id}" aria-label="Remove from the chat" title="Remove from the chat">${globalThis.DgcIcons?.html?.('close', {size: 14}) || '×'}</button>` : '';
   // `look: "work"` (a Pip's chat as a conversation, Pips API 97): a change that waits, or is in your folder, is drawn
   // as Work's changed-files card; what was undone, discarded or not applied keeps its own words below.

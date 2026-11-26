@@ -55,7 +55,7 @@ body { --bg: var(--vscode-editor-background, var(--fallback-bg)); --cd-col: 760p
 .cd-wlist { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0; padding: 4px; list-style: none; }
 .cd-wrow { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--r-md); }
 .cd-wrow:hover, .cd-wrow:focus-within { background: color-mix(in srgb, var(--text) 5%, transparent); }
-/* A widget's Folio (media/shared/folio.css, the maintainer's own), 24 px in a list as he sets it. */
+/* A widget's Folio (media/shared/folio.css, the maintainer's own), 24 px in a list as its sheet sets it. */
 .cd-wbadge { flex: none; display: grid; place-items: center; width: 28px; height: 28px; line-height: 0; color: var(--muted); font-size: 14px; }
 .cd-wbadge [data-mark] { --size: 24px; }
 .cd-wrow[data-removed] .cd-wbadge { opacity: .4; }

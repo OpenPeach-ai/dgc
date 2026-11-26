@@ -200,7 +200,7 @@ const pipsTab = (page) => page.evaluate(() => {
     otherOff: Math.abs((box(otherFlip).left + box(otherFlip).right) / 2 - (box(other).left + box(other).right) / 2),
     order: [...tab.children].map((c) => c.className), name: tab.textContent.trim(), sideways: document.documentElement.scrollWidth > innerWidth };
 });
-for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300, 280]) {   // (280: the narrowest with words; it was 292 while the Library tab wore his books)
+for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 300, 280]) {   // (280: the narrowest with words; it was 292 while the Library tab wore the maintainer's books)
   test(`the Pips tab: the word "Pips", then the Core Pip's face, the pair centred in the tab (${theme}, ${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const x = await openDock(browser, { tab: "home", width, height: 600, theme });
@@ -209,7 +209,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
         assert.ok(m.face, `${said}: the face is drawn`);
         assert.ok(m.face.left >= m.word.right - 0.5, `${said}: the face's left edge is after the word's right edge (${m.word.right} then ${m.face.left})`);
         assert.ok(Math.abs(m.face.left - m.flip.right - m.gap) <= 0.5, `${said}: the tab's own gap between them, as it was before the word (${m.face.left - m.flip.right} for ${m.gap})`);
-        // Centred box on box, the face's round body read a pixel high against the lowercase "ips" (his eye, 19 Nov): it sits
+        // Centred box on box, the face's round body read a pixel high against the lowercase "ips" (seen 19 Nov): it sits
         // one pixel below the word's box centre, so its body is level with the letters.
         const low = (m.face.top + m.face.bottom) / 2 - (m.word.top + m.word.bottom) / 2;
         assert.ok(low >= 0 && low <= 2, `${said}: the face is level with the word's letters (${(m.face.top + m.face.bottom) / 2} against ${(m.word.top + m.word.bottom) / 2})`);

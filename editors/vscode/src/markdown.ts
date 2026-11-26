@@ -371,7 +371,7 @@ parser.renderer.rules.table_open = (tokens, index) => {
     ? `<button type="button" class="copy" data-c="${escape(encodeURIComponent(source))}" aria-label="Copy table" title="Copy table"><span class="codicon codicon-copy" aria-hidden="true"></span></button>`
     : "";
   // Copy sits in the wrap's corner; the table scrolls sideways in a box of its own inside it, so Copy never scrolls
-  // along with it (his report, 25 Nov).
+  // along with it (reported 25 Nov).
   return `<div class="md-table-wrap">${copy}<div class="md-table-scroll"><table class="md-table">`;
 };
 parser.renderer.rules.table_close = () => "</table></div></div>";

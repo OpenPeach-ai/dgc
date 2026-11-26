@@ -16,7 +16,7 @@
   if (root.DgcFileMenu) return;
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  /** The six, in his order (15 Nov), the same for every kind of file. */
+  /** The six, in the chosen order (15 Nov), the same for every kind of file. */
   const ACTS = Object.freeze([["open", "Open"], ["editor", "Open in editor"], ["save", "Save a copy…"], ["copy", "Copy"], ["path", "Copy path"], ["reveal", "Reveal in file manager"]]);
   const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
   // A file whose text an editor shows and the clipboard takes (src/fileActs.ts keeps the same list).

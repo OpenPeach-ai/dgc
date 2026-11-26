@@ -1,4 +1,4 @@
-// A Pip's row with something new to read and a dock pin (his picture, 14 Nov): the pin sits level with the dot, and
+// A Pip's row with something new to read and a dock pin (a screenshot, 14 Nov): the pin sits level with the dot, and
 // the dot's "Read" (on hover or focus) never lies on the pin. "Read" is a button in the page's one shape (6 px corners),
 // never a pill. In real Chromium with the real Pips bundle, dark and light, in a tab (700 px) and in the side bar (300 px).
 import { after, before, test } from "node:test";

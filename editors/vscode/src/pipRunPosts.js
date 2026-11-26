@@ -306,7 +306,7 @@ function foundText(p){
   return rows.map(r=>`- ${r.label||r.sev}: ${[r.title,r.at].filter(Boolean).join(' · ')}`).join('\n')+(more?`\n${plural(more,`more ${word}`)}`:'');
 }
 // All-clear runs in a row, as words under the one reply that says it again. A few say every time: "Passed 3 times since
-// 9:00 AM: Today 9:00 AM, 10:00 AM, 11:00 AM". Many say how often and when the last was, in one line (his .111 picture,
+// 9:00 AM: Today 9:00 AM, 10:00 AM, 11:00 AM". Many say how often and when the last was, in one line (a screenshot from a test machine,
 // 25 Nov: a heartbeat every 30 minutes listed all 200 times): "Passed 200 times since Saturday, about every 30 minutes;
 // the last at 3:29 PM." -- or, when they came at no steady pace, the last three.
 const TIMES_LISTED=8;
@@ -384,7 +384,7 @@ export function postPlainText(p,{name='',previous=null,personal=false,now=Date.n
 }
 
 // ---- A run while it runs (reported 24 Oct; a reply at work since 25 Nov) ----
-/** A run at work, drawn as a reply at work is (his call, 25 Nov: "exactly like how our new pips run"): the chat's
+/** A run at work, drawn as a reply at work is (decided 25 Nov: "exactly like how our new pips run"): the chat's
  *  working row -- its face at work, "<name> · <what it is doing>", "(42s · ↓ 120 tok)" -- with Stop in the prompt box,
  *  not in the chat; how it started is its tooltip. `chars`: the words it has written so far (its text_delta activity),
  *  counted as a reply's are. It stands where the run's post will, so a jump to the run finds it (data-run-post). */

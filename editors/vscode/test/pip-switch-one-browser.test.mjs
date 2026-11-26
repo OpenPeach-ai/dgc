@@ -1,5 +1,5 @@
 // A Pip's on/off switch in the one list (Pips API 94 and up: what every 0.52 DGC shows), in real Chromium on the stand-in
-// DGC (test/support/one-pips-scene.mjs). His live report, 14 Nov: the switch "flickers, does not react and takes multiple
+// DGC (test/support/one-pips-scene.mjs). A live report, 14 Nov: the switch "flickers, does not react and takes multiple
 // times, then works". The one list draws its rows from its own copy of the Pips; the switch looked the Pip up in the
 // folder list (often without it, or out of date), sent DGC a revision it no longer held, and wrote DGC's answer only
 // there, so the row flipped back. Here: one press is one switch, it stays, the next press carries DGC's new revision, and

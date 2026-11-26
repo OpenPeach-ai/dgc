@@ -1,6 +1,6 @@
 // The marks' palettes as the extension's host keeps them, and a tab's icon (src/dock.ts over media/shared/marks.js,
 // bundled against a stub `vscode`). A Work session's mark is a Voxel and a ChatDGC chat's a Mote, the maintainer's own
-// designs, each in one of twelve palettes (his fourteen without Citron and Lime). What is held here:
+// designs, each in one of twelve palettes (the sheets' fourteen without Citron and Lime). What is held here:
 //   - a new session gets the first palette not worn by the sessions around it (its list's rows, the nearest first)
 //   - what it was given is kept: a reload, another order and a longer list never change it
 //   - a session from before the marks keeps the palette nearest its old colour (the one chosen, or its id's own)
@@ -35,7 +35,7 @@ const born = (id) => marks.born(id);
 const tick = () => new Promise((done) => setTimeout(done, 5));
 const ext = { fsPath: root.replace(/\/$/, "") };
 
-test("twelve palettes, in his order, and never Citron or Lime", () => {
+test("twelve palettes, in the chosen order, and never Citron or Lime", () => {
   assert.deepEqual([...marks.PALETTES], TWELVE);
   for (const sheet of ["mote", "voxel"]) {
     const css = readFileSync(`${root}media/shared/${sheet}.css`, "utf8");
@@ -49,7 +49,7 @@ test("twelve palettes, in his order, and never Citron or Lime", () => {
   // Whatever is asked for, a mark is never drawn in either.
   for (const set of ["mote", "voxel"]) for (const bad of ["citron", "lime"]) assert.doesNotMatch(marks.html(set, bad), /citron|lime/);
   assert.equal(marks.html("mote", "rose", { size: 24 }), '<span class="mote mote--rose" data-mark="mote" data-palette="rose" style="--size:24px;--mote-play:paused" aria-hidden="true"><i></i><i></i><i></i></span>',
-    "his markup: span.mote.mote--<palette> > i*3, sized by --size, paused by --mote-play");
+    "the sheet's markup: span.mote.mote--<palette> > i*3, sized by --size, paused by --mote-play");
   assert.match(marks.html("voxel", "azure", { moving: true, id: "x" }), /^<span class="voxel voxel--azure" data-mark="voxel" data-palette="azure" data-moving style="--phase:-\ds" aria-hidden="true">(<i><\/i>){6}<\/span>$/,
     "span.voxel.voxel--<palette> > i*6; the one that moves is not paused, and --phase offsets where it starts");
   assert.match(marks.html("mote", "ice", { name: 'Plan "A" & B' }), / role="img" aria-label="Plan &quot;A&quot; &amp; B">/, "alone, it is named for a screen reader");

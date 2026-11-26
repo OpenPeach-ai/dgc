@@ -293,7 +293,7 @@ test('"+" is always the last item and offers New work, a ChatDGC chat, Personal 
     assert.deepEqual(d.menu, ["New work", "New chat", "New Pip", "Settings"]);
     assert.equal(await x.page.evaluate(() => document.querySelector("#dgc-dock .dgc-dock-add").getAttribute("aria-expanded")), "true");
     await x.page.click('.dgc-pop [data-id="work"]');
-    // 25 Nov (his call): New work asks for its folder as the side bar's New does (its dialog, where the page knows the
+    // 25 Nov (decided): New work asks for its folder as the side bar's New does (its dialog, where the page knows the
     // project folders: folder-select-shape holds it); with no folders listed it opens a session in this window's.
     assert.deepEqual((await posted(x, "dockNew")).filter((m) => m.what === "work"), [], "not a session at once");
     assert.deepEqual((await posted(x, "newSessionInEditor")).at(-1), { type: "newSessionInEditor" }, "New's own way");
@@ -647,7 +647,7 @@ test("on an item: a quiet dot while it is open in an editor, the accent's dot wh
 });
 
 // ---- the mark ----------------------------------------------------------------------------------------------------------
-test("a mark on the dock: his own markup and CSS, no canvas; the running one moves on his eight-second cycle, never under reduced motion", async (t) => {
+test("a mark on the dock: the sheet's own markup and CSS, no canvas; the running one moves on its eight-second cycle, never under reduced motion", async (t) => {
   if (skipOrFail(t)) return;
   const x = await openDock(browser, { width: 300, height: 700 });
   try {

@@ -374,7 +374,7 @@ class CarefulComputerTests(unittest.TestCase):
         self.assertIn("Order desk", host.call("open", {"url": self.url}), "the next time it just opens")
 
     def test_typing_what_it_read_from_your_apps_waits_for_you_once(self):
-        # 0.52 (his D3, commit 78cf02a5): it may carry what it read from the user's apps to the sites they allowed or
+        # 0.52 (D3, commit 78cf02a5): it may carry what it read from the user's apps to the sites they allowed or
         # already sent to (pip_careful.carry_sites). A site its level opened for the first time in this run asks once
         # before it types that there; Allow adds the site for good.
         pip, host = self.host(taint=self.MAIL, level="approve")

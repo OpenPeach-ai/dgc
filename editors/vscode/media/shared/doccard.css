@@ -7,7 +7,7 @@
    .dgc-doc-name and .dgc-doc-meta on its words, .dgc-doc-acts on its buttons and .dgc-doc-open on Open. */
 :root, :host {
   /* The card's size, ONE setting for every surface (Work, ChatDGC, a Pip's chat): the sheet's scale (1 = 44 × 56), the
-     card's least height, its padding, its buttons, its words. His pick, 25 Nov ("C, compact", from four sizes drawn in
+     card's least height, its padding, its buttons, its words. Picked 25 Nov ("C, compact", from four sizes drawn in
      real VS Code): a 52 px card, a 28 × 36 sheet, 24 px buttons (it was 76 px, 44 × 56 and 28 px). */
   --doc-sheet-scale: 0.64; --doc-card-h: 52px; --doc-card-pad: 7px; --doc-card-btn: 24px; --doc-card-max: 440px;
   --doc-card-name: var(--t-sm); --doc-card-meta: var(--t-xs);

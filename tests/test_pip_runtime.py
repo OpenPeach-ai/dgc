@@ -51,7 +51,7 @@ class LocalStartupTests(unittest.TestCase):
             self.assertEqual(runtime.start_runtime(self.config), self.online)
 
     def test_a_busy_runner_from_an_older_install_is_asked_to_hand_over_and_says_so(self):
-        # (15 Nov) It used to be left running until nothing was queued or running, which never came on his machine.
+        # (15 Nov) It used to be left running until nothing was queued or running, which never came on a test machine.
         for version, words in ((None, "an older DGC (an earlier version)"), ("0.0.1", "an older DGC (0.0.1)"),
                                (__version__ + "+other", f"another DGC install ({__version__}+other)")):
             old = {**self.online, "version": version}
@@ -72,7 +72,7 @@ class LocalStartupTests(unittest.TestCase):
                 self.assertEqual(pause.call_count, 2)
 
     def test_a_runner_from_another_install_of_the_same_version_is_moved_too(self):
-        # 15 Nov, on his machine: every 0.52 test build says the same version, so the Pips runner of a build installed
+        # 15 Nov, on a test machine: every 0.52 test build says the same version, so the Pips runner of a build installed
         # a day earlier kept running its old code after two newer installs. A runner says which install it runs from;
         # another install's (or one too old to say) is moved like an older version's.
         here = runtime.this_install()

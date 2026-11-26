@@ -258,7 +258,7 @@ test("W9: the message that started a goal wears a small Goal mark; any other mes
   assert.match(said[0].title, /started a goal/i);
   assert.equal(said[1].mark, "", "a message that started none is not");
   assert.equal(x.v.doc.querySelectorAll("#log .goal-mark").length, 1);
-  // 25 Nov (his call): under the bubble, first in its time row ("Goal · 1:22 PM"), never over it.
+  // 25 Nov (decided): under the bubble, first in its time row ("Goal · 1:22 PM"), never over it.
   const first = x.v.doc.querySelector("#log .msg.user"), mark = first.querySelector(".goal-mark"), time = first.querySelector(":scope > .msg-time");
   assert.ok(time, "the prompt has its time");
   assert.equal(mark.parentNode, time, "the mark is in the time row");

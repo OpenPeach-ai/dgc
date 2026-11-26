@@ -1,4 +1,4 @@
-// The Home batch of 14 Nov (he tested the installed build and asked):
+// The Home batch of 14 Nov (the installed build tested, then asked for):
 //  - Clock: Here plus up to three more time zones (four in all), each added one with an × (shown when its clock is
 //    pointed at or has the keyboard); the Small card shows the home zone only; four fit without a city's name cut. The
 //    one zone kept before (`clock.zone`) is the first added zone.
@@ -287,7 +287,7 @@ test("Project Folder dropdown: no first line that pins the chosen folder; each r
     // Each folder's row has its own pin: a real button beside the row (a button cannot hold a button), with its name.
     const pins = await p.evaluate(() => [...document.querySelectorAll(".dgc-folder-menu .dgc-folder-pin")].map((n) => ({ tag: n.tagName, type: n.getAttribute("type"), label: n.getAttribute("aria-label"), pressed: n.getAttribute("aria-pressed"), inButton: !!n.parentElement.closest("button"), folder: n.dataset.folderPin,
       besideRow: n.parentElement.querySelector(".dgc-folder-row")?.dataset.folder, focusable: n.tabIndex >= -1 && !n.disabled })));
-    assert.deepEqual(pins.map((n) => n.label), ["Pin to the dock: shop", "Pin to the dock: garden-notes", "Pin to the dock: rust_ire", "Pin to the dock: invoices"], "every folder that is there has one, by name (a gone folder has none)");
+    assert.deepEqual(pins.map((n) => n.label), ["Pin to the dock: shop", "Pin to the dock: garden-notes", "Pin to the dock: tide_api", "Pin to the dock: invoices"], "every folder that is there has one, by name (a gone folder has none)");
     assert.ok(pins.every((n) => n.tag === "BUTTON" && n.type === "button" && !n.inButton && n.besideRow === n.folder && n.focusable && n.pressed === "false"), JSON.stringify(pins));
     // The keyboard: Down opened it on the chosen row; Right goes to that row's pin, which shows; Enter pins; the menu stays.
     assert.equal(await p.evaluate(() => document.activeElement?.dataset.folder), GARDEN);
@@ -306,19 +306,19 @@ test("Project Folder dropdown: no first line that pins the chosen folder; each r
     // Left goes back to the row; Right again, then Down moves on from that row to the next.
     await p.keyboard.press("ArrowLeft"); assert.equal(await p.evaluate(() => document.activeElement?.dataset.folder), GARDEN, "Left: back on the row");
     await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowDown");
-    assert.equal(await p.evaluate(() => document.activeElement?.dataset.folder), "/home/me/rust_ire", "Down from a pin: the next row");
+    assert.equal(await p.evaluate(() => document.activeElement?.dataset.folder), "/home/me/tide_api", "Down from a pin: the next row");
     await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowUp");
     assert.equal(await p.evaluate(() => document.activeElement?.dataset.folder), GARDEN, "Up from a pin: the row before");
     // By the pointer, as before: a click on a row's pin pins, the row itself is not chosen; and the pin lies inside its row.
-    const rust = p.locator('.dgc-folder-menu .dgc-folder-pin[data-folder-pin="/home/me/rust_ire"]');
-    await p.locator('.dgc-folder-menu .dgc-folder-row[data-folder="/home/me/rust_ire"]').hover(); assert.equal(await shown(rust), 1);
-    const lies = await p.evaluate(() => { const b = document.querySelector('.dgc-folder-menu .dgc-folder-pin[data-folder-pin="/home/me/rust_ire"]').getBoundingClientRect(), r = document.querySelector('.dgc-folder-menu .dgc-folder-row[data-folder="/home/me/rust_ire"]'), rr = r.getBoundingClientRect(), room = r.querySelector(".dgc-folder-pin-room").getBoundingClientRect();
+    const rust = p.locator('.dgc-folder-menu .dgc-folder-pin[data-folder-pin="/home/me/tide_api"]');
+    await p.locator('.dgc-folder-menu .dgc-folder-row[data-folder="/home/me/tide_api"]').hover(); assert.equal(await shown(rust), 1);
+    const lies = await p.evaluate(() => { const b = document.querySelector('.dgc-folder-menu .dgc-folder-pin[data-folder-pin="/home/me/tide_api"]').getBoundingClientRect(), r = document.querySelector('.dgc-folder-menu .dgc-folder-row[data-folder="/home/me/tide_api"]'), rr = r.getBoundingClientRect(), room = r.querySelector(".dgc-folder-pin-room").getBoundingClientRect();
       return { inRow: b.left >= rr.left && b.right <= rr.right && b.top >= rr.top && b.bottom <= rr.bottom, dx: Math.abs(b.left - room.left), dy: Math.abs((b.top + b.bottom) / 2 - (rr.top + rr.bottom) / 2) }; });
     assert.ok(lies.inRow && lies.dx <= 0.6 && lies.dy <= 0.6, `the pin is on its row, in the room the row keeps for it (${JSON.stringify(lies)})`);
     await rust.hover();
-    assert.notEqual(await p.evaluate(() => getComputedStyle(document.querySelector('.dgc-folder-menu .dgc-folder-row[data-folder="/home/me/rust_ire"]')).backgroundColor), "rgba(0, 0, 0, 0)", "pointing at the pin keeps its row lit");
+    assert.notEqual(await p.evaluate(() => getComputedStyle(document.querySelector('.dgc-folder-menu .dgc-folder-row[data-folder="/home/me/tide_api"]')).backgroundColor), "rgba(0, 0, 0, 0)", "pointing at the pin keeps its row lit");
     await rust.click(); await x.settle();
-    assert.deepEqual(await folderPins(x), [["rust_ire", "/home/me/rust_ire"]]); assert.equal((await x.posted("projectFolderChoose")).length, 0); assert.equal(await p.locator(".dgc-folder-menu").count(), 1);
+    assert.deepEqual(await folderPins(x), [["tide_api", "/home/me/tide_api"]]); assert.equal((await x.posted("projectFolderChoose")).length, 0); assert.equal(await p.locator(".dgc-folder-menu").count(), 1);
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });

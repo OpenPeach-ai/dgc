@@ -1,4 +1,4 @@
-// A Pip's run in its chat is a reply like any other (asked 24 Nov, testing the release candidate on .111: "the routines
+// A Pip's run in its chat is a reply like any other (asked 24 Nov, testing the release candidate: "the routines
 // should also run like a normal pip chat, how they usually respond"; "there should be no open results for a routine, a
 // routine run should just respond in chat whatever the result is"; "the old style of Project pip, where it has open
 // reports, run audit etc, is not good, lets make it like how we do personal pips, just chat with responses"):

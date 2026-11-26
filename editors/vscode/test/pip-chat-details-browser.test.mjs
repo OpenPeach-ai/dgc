@@ -258,7 +258,7 @@ for (const theme of ["dark", "light"]) for (const width of [700, 300]) {
   });
 }
 
-// His .111 picture (25 Nov): the icons under a reply didn't line up. Read aloud's speaker sat 1.5 px off Copy and Trace
+// A screenshot from a test machine (25 Nov): the icons under a reply didn't line up. Read aloud's speaker sat 1.5 px off Copy and Trace
 // (its Play / Stop wrapper set it on a text baseline), and, measured live after, the closed ⓘ (Response details) 1 px
 // above them (its details box took a text line). Every part of a reply's row on one centre line; one of Play / Stop.
 for (const theme of ["dark", "light"]) for (const width of [700, 300]) {

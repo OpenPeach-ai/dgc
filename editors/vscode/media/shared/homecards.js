@@ -98,10 +98,10 @@
   const shared = (action, size) => (root.DgcIcons ? root.DgcIcons.html(action, { size }) : "");
   const pinSvg = (on, size = 12) => shared(on ? "unpin" : "pin", size);
   const PLUS = shared("add", 12), CROSS = shared("close", 12), BACK = shared("back", 14), TICK = svg('<path d="M5 12l5 5L20 7"/>', 11, 3);
-  // The Library's mark: his Iris books (media/icons/library-iris/library.css), exactly as he made them, beside the word.
+  // The Library's mark: the maintainer's Iris books (media/icons/library-iris/library.css), exactly as made, beside the word.
   const LIBRARY_ICON = '<span class="library-iris" aria-hidden="true"><i></i><i></i><i></i></span>';
   // GitHub, Docs, DGC-SDK and Settings after Library and Cards (decided 17 Nov), each its own coloured mark at the same
-  // visible size as theirs (the sheet he approved): GitHub's own mark; Docs a page stack with a bookmark; DGC-SDK the
+  // visible size as theirs (the approved sheet): GitHub's own mark; Docs a page stack with a bookmark; DGC-SDK the
   // website's tilted tile with DGC's three strokes (its SDK page's own); Settings a graphite gear. Drawn here, so a
   // gradient's id is the mark's own.
   let markN = 0;

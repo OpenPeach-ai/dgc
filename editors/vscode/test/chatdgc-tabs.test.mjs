@@ -738,7 +738,7 @@ test("ChatDGC's tabs wear its own mark, the speech bubble, so they aren't taken 
   chat.openLibrary();
   const [tab, library] = world.panels;
   assert.deepEqual([drawn(tab.iconPath.light), drawn(tab.iconPath.dark)], [mark("light"), mark("dark")], "the SVG itself, light and dark");
-  // (The Library's own tab wears the Library's icon, his Iris books, since Library v2: the test of its editor tab, below.)
+  // (The Library's own tab wears the Library's icon, the maintainer's Iris books, since Library v2: the test of its editor tab, below.)
   assert.match(String(library.iconPath.light.fsPath || library.iconPath.light.path || library.iconPath.light), /library-iris-32\.png$/);
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const command = manifest.contributes.commands.find((c) => c.command === "dgc.newChatDGC");
@@ -2510,7 +2510,7 @@ test("Home's Artifacts card is given every favorite, however old: the newest six
   assert.deepEqual(card.items.filter((a) => a.favorite).map((a) => a.id), [all[3].id, all[65].id]);
 });
 
-test("the Library's editor tab: his Iris books on its tab, opened on the tab asked for, a maker's name leads back, ⋯ opens the settings", async () => {
+test("the Library's editor tab: the maintainer's Iris books on its tab, opened on the tab asked for, a maker's name leads back, ⋯ opens the settings", async () => {
   const shown = [];
   host.openSettings = (section) => shown.push(["settings", section]); host.openMaker = (maker) => shown.push(["maker", maker]);
   try {
@@ -2518,7 +2518,7 @@ test("the Library's editor tab: his Iris books on its tab, opened on the tab ask
     await chat.homeCardsMessage({ type: "homeLibraryOpen", view: "images" });
     const lib = world.panels.find((p) => p.viewType === CHATDGC_LIBRARY);
     assert.ok(lib, "the Library opened in a tab of its own");
-    for (const tone of ["light", "dark"]) assert.match(String(lib.iconPath[tone].fsPath || lib.iconPath[tone].path || lib.iconPath[tone]), /media[\\/]icons[\\/]library-iris[\\/]png[\\/]library-iris-32\.png$/, `its tab icon is his PNG (${tone})`);
+    for (const tone of ["light", "dark"]) assert.match(String(lib.iconPath[tone].fsPath || lib.iconPath[tone].path || lib.iconPath[tone]), /media[\\/]icons[\\/]library-iris[\\/]png[\\/]library-iris-32\.png$/, `its tab icon is the maintainer's PNG (${tone})`);
     lib.say({ type: "ready" });
     assert.deepEqual(lib.last("view"), { type: "view", view: "images" });
     await chat.homeCardsMessage({ type: "homeLibraryOpen", view: "videos" });

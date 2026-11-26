@@ -101,7 +101,7 @@ test('W27: with no sub-agent working the chip is the map\'s door, "Agent map", n
         assert.equal(await x.page.evaluate(() => !document.getElementById("agent-map").hidden), true, "and it opens the map");
         await x.page.keyboard.press("Escape");
       } else {
-        // 25 Nov (his report): too narrow for "Agent map", an idle pill was a lone hollow dot. It gives way here.
+        // 25 Nov (reported): too narrow for "Agent map", an idle pill was a lone hollow dot. It gives way here.
         assert.deepEqual([after.state, seen.shown], ["idle", false], "none working in a narrow box: out of the way");
       }
       // The count comes back the moment one works again.

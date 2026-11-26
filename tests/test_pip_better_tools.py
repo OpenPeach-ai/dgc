@@ -17,7 +17,7 @@ class BetterTools(unittest.TestCase):
         # computer) did. It should reach for such a tool itself, and next time start with the one that worked.
         for words in ("well-known", "tagged release", "README", "never pipe", "your keys", "in your Files",
                       "what you installed and why", "worked well", "use it first", "next time",
-                      # His addition (15 Nov): applications and programs too, judged by stars and community feedback on
+                      # Added 15 Nov: applications and programs too, judged by stars and community feedback on
                       # GitHub, or downloads and likes on Hugging Face; and (mine) its size and whether it runs here.
                       "application", "stars", "Hugging Face", "size",
                       # Decided 15 Nov: something big is a conversation, never a permission card, at every level

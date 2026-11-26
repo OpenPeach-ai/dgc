@@ -1,4 +1,4 @@
-"""Claude Code's words as they come (his live test, 15 Nov: a Pip on Claude Code said "Waiting for Claude Code (355s ·
+"""Claude Code's words as they come (a live test, 15 Nov: a Pip on Claude Code said "Waiting for Claude Code (355s ·
 0 tok)" for 13 minutes while the model streamed the whole time).
 
 DGC ran Claude Code with stream-json but without --include-partial-messages, so each message came only once it was

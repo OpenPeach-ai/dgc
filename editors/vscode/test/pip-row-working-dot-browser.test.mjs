@@ -1,4 +1,4 @@
-// A working Pip's row (his picture, 15 Nov): the row of a Pip that is replying wears a blue dot at its right end. With
+// A working Pip's row (a screenshot, 15 Nov): the row of a Pip that is replying wears a blue dot at its right end. With
 // the pointer over the row, its pin was drawn ON the dot (both sat at the row's end), and the new "Open in editor"
 // button stood beside it. The dot says the Pip is working, so nothing may lie on it: the dot keeps its place at the
 // row's end, and the row's buttons (Open in editor, the pin) stand beside it, to its left, with the row's words ending

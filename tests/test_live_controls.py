@@ -142,7 +142,7 @@ class LiveControlTests(unittest.TestCase):
                              for e in self.events))
 
     def test_a_saved_session_takes_a_new_model_while_its_turn_runs(self):
-        # Live (20 Nov, his Work session): switching the model mid-turn said "The session could not save its provider
+        # Live (20 Nov, a Work session): switching the model mid-turn said "The session could not save its provider
         # choice": the save asked for the turn's own reservation from the command thread and was refused, then put the
         # old route back under the running turn. A provider choice is one field under the lock the turn's saves take.
         from dgc import sessions

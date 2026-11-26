@@ -813,7 +813,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   /** The Library, in a tab of its own (one at a time); `view` opens it on that tab (LIBRARY_VIEWS). Its tab wears the
-   *  Library's own icon, his Iris books (media/icons/library-iris, the PNG as he made it, light and dark). */
+   *  Library's own icon, the maintainer's Iris books (media/icons/library-iris, the PNG as made, light and dark). */
   openLibrary(view = ""): void {
     // Shown again, it asks again: a file attached or made since is there (it keeps its filters).
     if (this.library) {

@@ -83,7 +83,7 @@ test("DgcIcons: one glyph per action, as an inline drawing and by its icon-font 
   } finally { await page.close(); }
 });
 
-// His complaint (16 Nov): a Pip's Open in editor didn't look like a Work session's. The same rows in a row's ⋯ and a
+// Reported 16 Nov: a Pip's Open in editor didn't look like a Work session's. The same rows in a row's ⋯ and a
 // chat's ⋯ wear Work's glyphs too, not words alone.
 test("Open in editor, Pin and Unpin wear the same glyph in Work's row menu, a Pip's row menu and a Pip chat's menu", async (t) => {
   if (skipOrFail(t)) return;

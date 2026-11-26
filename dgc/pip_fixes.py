@@ -4,7 +4,7 @@ pips-flow-design §1 and Q3 (agreed 14 Nov): a Pip's chat is its home. When a ch
 decides what happens next, and there is no "Fix it" card and no hidden Work session:
 
   Ask me first      a fix waits at the ordinary Allow card (Allow · Not now)
-  Approve for me    it starts fixing in its own copy by itself, new findings only (his yes); the change waits at Apply
+  Approve for me    it starts fixing in its own copy by itself, new findings only (approved); the change waits at Apply
   Do it all         it fixes and applies by itself, with Undo, never over a file you changed ("Do it all applies all":
                     his no to a size, delete or test fuse, 14 Nov); the card says when its tests failed in its copy
 
@@ -17,7 +17,7 @@ Guards for a fix nobody watched: one try per finding (a finding that comes back 
 level, and marked "back"); a finding you said Not now to, or that it found is not a defect, is not asked about again;
 one fix at a time per Pip. What only you can do (a verdict "needs you") becomes one waiting item: one line at the top
 of its chat and one row in Needs attention, with I've done it · Remind me later · Not a problem. A waiting item never
-pauses the Pip (his question 14 Nov): its routines and checks go on.
+pauses the Pip (a question, 14 Nov): its routines and checks go on.
 
 This module keeps the records and derives what each fix is now from its turn and its change; the turn itself is sent
 by ``send_due`` (the supervisor's tick, or at once from Allow).
@@ -409,7 +409,7 @@ def after_check(store, run, result) -> str | None:
         if level == pip_levels.APPROVE and not back:
             fresh = [item for item in chosen if item["state"] == "new"]
             if not fresh:
-                return None                              # Approve for me fixes new findings only (his yes, 14 Nov)
+                return None                              # Approve for me fixes new findings only (approved 14 Nov)
             chosen = fresh
         for number, item in enumerate(chosen, 1):
             item["id"] = f"finding_{number}"

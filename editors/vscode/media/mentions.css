@@ -76,7 +76,7 @@ body:is(.vscode-light, .vscode-high-contrast-light) .pip-message.user .bubble .p
   background-size: 400% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   animation: composerArtifactWords 7s ease-in-out infinite; }
 .composer-pip-face, .composer-pip-face .dgc-plush { display: inline-block; flex: none; width: 18px; height: 18px; }
-/* Up a pixel more beside its name (his eye, 20 Nov). */
+/* Up a pixel more beside its name (seen 20 Nov). */
 .composer-pip-face { vertical-align: -1px; margin-right: 4px; position: relative; top: -2px; }
 .composer-pill.pill-plugin::before, .composer-pill.pill-artifact::before { content: none; }
 .composer-pill.pill-plugin { padding: 2px 4px; color: var(--mark-plugin);

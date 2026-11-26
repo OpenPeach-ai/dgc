@@ -985,14 +985,14 @@ test("the token cap goes only to a CLI that answered it, as a whole number of to
 
 test("where pages open from goes only to a CLI that answered it", async () => {
   const older = harness();
-  await older.provider.saveSettings(settings({ artifact_bind: "lan", artifact_hostname: "gb10.tail1234.ts.net" }));
+  await older.provider.saveSettings(settings({ artifact_bind: "lan", artifact_hostname: "gpu-box.tail1234.ts.net" }));
   assert.equal(older.commands.some((c) => c.type === "set_config" && "artifact_bind" in (c.values || {})), false,
     "an older CLI refuses an unknown key, and the whole save with it");
   const { provider, commands } = harness();
   provider.onEvent({ type: "config", model: "m", mode: "default", artifact_bind: "localhost", artifact_hostname: "" });
-  await provider.saveSettings(settings({ artifact_bind: "lan", artifact_hostname: "  gb10.tail1234.ts.net " }));
+  await provider.saveSettings(settings({ artifact_bind: "lan", artifact_hostname: "  gpu-box.tail1234.ts.net " }));
   const config = commands.find((c) => c.type === "set_config" && "artifact_bind" in (c.values || {}));
-  assert.deepEqual([config?.values.artifact_bind, config?.values.artifact_hostname], ["lan", "gb10.tail1234.ts.net"]);
+  assert.deepEqual([config?.values.artifact_bind, config?.values.artifact_hostname], ["lan", "gpu-box.tail1234.ts.net"]);
   const odd = harness();
   odd.provider.onEvent({ type: "config", model: "m", mode: "default", artifact_bind: "localhost", artifact_hostname: "" });
   await odd.provider.saveSettings(settings({ artifact_bind: "everywhere" }));

@@ -1350,7 +1350,7 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 /* The same pin beside a row of Your Pips: at the row's end, left of its number and its dot; a pinned row keeps room for it. */
 .pip-row-slot{position:relative;display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
 /* A working Pip's row wears a dot at its very end (.pip-row::after, 13px in), and keeps 15px more room there for it.
-   The row's buttons stand that much further in, beside the dot and never on it (his picture, 15 Nov: the pin was drawn
+   The row's buttons stand that much further in, beside the dot and never on it (a screenshot, 15 Nov: the pin was drawn
    on the dot): the dot says the Pip is working, so it keeps its place and nothing covers it. */
 .pip-row-slot:has(.pip-row:is([data-state="working"],[data-state="waiting_approval"][data-waiting="0"])){--pip-dot-room:15px}
 .pip-row-slot>.job-pin{top:50%;right:calc(8px + var(--pip-dot-room,0px));margin-top:0;transform:translateY(-50%)}
@@ -1562,7 +1562,7 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .computer-menu .computer-add{min-height:32px}
 .computer-menu .computer-add .conv-mark{color:inherit}
 .computer-menu .computer-rename{padding-left:8px}
-/* A computer's own mark, the maintainer's Portal (media/shared/portal.css), 24 px in a list as he sets it: beside the
+/* A computer's own mark, the maintainer's Portal (media/shared/portal.css), 24 px in a list as its sheet sets it: beside the
    computer's name, never in the Pip's face's place. In the menu its state's dot (open, working, needs you) is a small
    badge on the Portal's corner, on a ring of the menu's own ground; a closed computer has none. */
 .computer-mark{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;line-height:0}

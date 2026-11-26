@@ -219,7 +219,7 @@ for (const theme of ["dark-modern", "light-modern"]) for (const width of [700, 3
   });
 
   test(`the dock's "+" → New work asks for the folder in New Session's dialog, as New does (${tag})`, async (t) => {
-    // 25 Nov (his report): the dock's New work started a session at once in this window's folder, with no folder choice.
+    // 25 Nov (reported): the dock's New work started a session at once in this window's folder, with no folder choice.
     if (skipOrFail(t)) return;
     const x = await openHome(browser, { theme, width, tab: "work", motion: "reduce" });
     try {

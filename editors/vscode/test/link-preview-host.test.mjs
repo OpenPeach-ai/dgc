@@ -26,7 +26,7 @@ const lp = createRequire(import.meta.url)(bundle);
 // ---- what is never read -------------------------------------------------------------------------------------------
 test("only public hosts: a private, local, LAN or tailnet name or address is never read", () => {
   const priv = ["http://localhost:3000/", "http://LOCALHOST/", "http://intranet/wiki", "http://gb10/", "http://printer.local/", "http://nas.lan/", "http://box.home/",
-    "http://erp.internal/", "http://x.intranet/", "http://hr.corp/", "http://a.private/", "http://router.home.arpa/", "https://gb10.tail1234.ts.net/app", "http://app.localhost/",
+    "http://erp.internal/", "http://x.intranet/", "http://hr.corp/", "http://a.private/", "http://router.home.arpa/", "https://gpu-box.tail1234.ts.net/app", "http://app.localhost/",
     "http://127.0.0.1:8080/", "http://127.9.9.9/", "http://10.0.0.5/", "http://172.16.0.1/", "http://172.31.255.254/", "http://192.168.1.1/admin", "http://100.64.0.1/", "http://100.100.50.2/",
     "http://100.127.255.254/", "http://169.254.169.254/latest/meta-data/", "http://0.0.0.0/", "http://2130706433/", "http://0x7f.1/", "http://017700000001/", "http://224.0.0.1/", "http://255.255.255.255/",
     "http://198.18.0.1/", "http://192.0.2.7/", "http://[::1]/", "http://[::]/", "http://[fe80::1]/", "http://[fd7a:115c:a1e0::1]/", "http://[fc00::1]/", "http://[::ffff:10.0.0.1]/",
@@ -176,7 +176,7 @@ test("a public page: its title, description and site, its picture and icon read 
 test("a private or one-time link, or one with a secret, is answered with its address alone and nothing is asked", async () => {
   const asked = [];
   const previews = lp.createLinkPreviews(world({ resolve: async (name) => { asked.push(name); return [{ address: "93.184.216.34", family: 4 }]; }, secrets: () => ["Zx81-spectrum-plus"] }));
-  for (const [url, why, site] of [["http://localhost:3000/app", "private", "localhost:3000"], ["https://gb10.tail1234.ts.net/x", "private", "gb10.tail1234.ts.net"], ["http://192.168.1.10/", "private", "192.168.1.10"],
+  for (const [url, why, site] of [["http://localhost:3000/app", "private", "localhost:3000"], ["https://gpu-box.tail1234.ts.net/x", "private", "gpu-box.tail1234.ts.net"], ["http://192.168.1.10/", "private", "192.168.1.10"],
     ["https://pub.test/reset?token=abc", "one-time", "pub.test"], ["https://pub.test/Zx81-spectrum-plus", "secret", "pub.test"]]) {
     const got = await previews.preview(url);
     assert.deepEqual([got.state, got.why, got.site], ["address", why, site], url);
