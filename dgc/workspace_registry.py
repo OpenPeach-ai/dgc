@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 55
+SCHEMA_VERSION = 56
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -481,6 +481,11 @@ class WorkspaceRegistry:
             # rebuilt with the new bound, every row and its order kept. No run, job or review receives new authority.
             from .pip_steering import widen as widen_steers
             widen_steers(self.db)
+        if version < 56:
+            # "Your Browser" is DGC Browser (26 Nov): its sites tables and metadata keys move to the new names, every row
+            # kept (dgc_browser.moved_names). No run, job or review receives new authority.
+            from .dgc_browser import moved_names as dgc_browser_names
+            dgc_browser_names(self.db)
         if 41 <= version < 51:
             # Replace the seven-colour CHECK with the eight established Pip colours.
             # Rows and their owner-only notification choices are copied unchanged.

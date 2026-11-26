@@ -50,7 +50,7 @@
 .dgc-dock-sheet .dgc-sheet-page { background: var(--sheet-body); }
 @media (forced-colors: active) { .dgc-dock-sheet .dgc-sheet-page { background: Canvas; } }
 .dgc-dock-plus { display: block; width: 46%; height: 46%; }
-/* Your Browser, always there before "+": the maintainer's Halo (media/icons/browser-halo/halo.css), still until the tile is pointed at
+/* DGC Browser, always there before "+": the maintainer's Halo (media/icons/browser-halo/halo.css), still until the tile is pointed at
    or has the keyboard, and never moving under reduced motion. */
 .halo.dgc-dock-halo { --size: calc(var(--s) * .72); --halo-play: paused; display: block; }
 .dgc-dock-item:hover .halo.dgc-dock-halo, .dgc-dock-item:focus-visible .halo.dgc-dock-halo { --halo-play: running; }

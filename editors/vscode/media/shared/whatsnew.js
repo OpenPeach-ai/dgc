@@ -4,7 +4,7 @@
 // hue, playing out its story (a loop of 6 s, transforms and opacity only; still under reduced motion, at its final
 // frame; paused while the window is hidden), with × at its top right and the dots on its bottom edge. Under it a quiet
 // eyebrow, the title, and three rows: an icon, a heading and a muted line or two. Then a footer under a hairline: the
-// slide's own action on the left (Open Pips, Open Your Browser, Open Library, Open Work, Open Settings), Next on the
+// slide's own action on the left (Open Pips, Open DGC Browser, Open Library, Open Work, Open Settings), Next on the
 // right (Done on the last), and the arrow keys.
 //
 // The picture has two forms, so its words can be read in any side bar: wide (the card 400 px or more: 16:9, two parts
@@ -25,8 +25,8 @@
   // ---- the words ---------------------------------------------------------------------------------------------------
   // What 0.52 ships, in a user's words; each line was checked against the code at this commit (24 Nov). Three rows a
   // slide. Where each is so: a Pip's chat, computer and copy (dgc/pip_computer.py, dgc/pip_folder.py), its levels
-  // (dgc/pip_levels.py), its daily limit and Always allow (src/pipPay.js, dgc/pip_action_grants.py); Your Browser
-  // (dgc/your_browser.py, the dock's menu in media/main.js); comments (dgc/artifact_comments.py,
+  // (dgc/pip_levels.py), its daily limit and Always allow (src/pipPay.js, dgc/pip_action_grants.py); DGC Browser
+  // (dgc/dgc_browser.py, the dock's menu in media/main.js); comments (dgc/artifact_comments.py,
   // media/shared/comments.js); the canvas (dgc/artifact_design.py, media/artifactDesign.js); checklists
   // (dgc/artifact_checklist.py, dgc/checklists.py, the Output chip in media/main.js); Home's cards and the Library
   // (media/shared/homecards.js, media/library.js); a typed /goal, the plan's steps, a link's preview and Archive
@@ -37,10 +37,10 @@
       { id: "levels", icon: "shield", head: "You choose how much it asks", text: "Ask me first, Approve for me, or Do it all. Set it for each Pip, in its prompt box." },
       { id: "pay-limit", icon: "credit-card", head: "A daily limit in dollars", text: "The most a Pip may pay by itself in a day. Always allow on a card lets that same step run next time without asking." },
     ] },
-    { scene: "browser", hue: "teal", title: "Your Browser", go: { to: "browser", label: "Open Your Browser" }, rows: [
+    { scene: "browser", hue: "teal", title: "DGC Browser", go: { to: "browser", label: "Open DGC Browser" }, rows: [
       { id: "yb-chrome", icon: "globe", head: "Chrome, with your sign-ins", text: "Sign in to your sites once. It opens beside the editor, or in a tab when DGC runs on another computer." },
-      { id: "yb-pip-tab", icon: "browser", head: "A Pip works in its own tab", text: "Only on the sites you let it use, never in your tabs. The dock says “Ava is working in it”, and you can watch." },
-      { id: "yb-menu", icon: "settings", head: "You decide, from the dock", text: "Your Browser's menu there has Sites Pips can use and Clear browsing data." },
+      { id: "yb-pip-tab", icon: "browser", head: "Pips and Work, each in its own tab", text: "Say “use the DGC browser” in Work, or let a Pip: only on sites you allow, never in your tabs. You can watch." },
+      { id: "yb-menu", icon: "settings", head: "You decide, from the dock", text: "DGC Browser's menu there has Sites Pips can use and Clear browsing data." },
     ] },
     { scene: "comments", hue: "amber", title: "Comment on anything DGC made", go: { to: "library", label: "Open Library" }, rows: [
       { id: "cm-pick", icon: "comment", head: "Point at a part and say it", text: "Pick words in a doc, cells in a sheet, a slide, part of a page or a checklist item, and comment." },
@@ -81,7 +81,7 @@
   // ---- the pictures: stills of DGC's own things, made of their own parts -----------------------------------------------
   // Each scene is drawn with the parts the real pages draw with: a Pip's face from the faces' renderer
   // (window.PipConcepts.plush, the same sprite the Pips list, Home and the dock use), a session's or a widget's mark
-  // (window.DgcMarks), a file's sheet (window.DgcFileSheet), the icons (window.DgcIcons), Your Browser's halo
+  // (window.DgcMarks), a file's sheet (window.DgcFileSheet), the icons (window.DgcIcons), DGC Browser's halo
   // (media/icons/browser-halo), Home's cards, the Library's rows, a comment's thread (media/shared/comments.css), a
   // link's preview card (media/shared/linkpreview.css), a turn's steps (Work's own marks, lent by the page) and the one
   // family of buttons, each in its own classes and stylesheets. A Pip's computer's apps are its own icons
@@ -160,12 +160,12 @@
           rows.forEach((r, i) => A.arrive(r, 0.3 + i * 0.3, { dy: 10 })); A.arrive(chosen, 1.6, { dy: 0 }); A.press(rows[1], 1.55);
           A.arrive(mine, t, { dx: narrow ? 0 : -14, dy: narrow ? 10 : 0 }); own.forEach((n, i) => A.arrive(n, t + 0.5 + i * 0.5, { dy: 8 })); } };
     },
-    // Your Browser: your own tabs, then a Pip's tab, with its face and the dock's words while it works there. Beside
+    // DGC Browser: your own tabs, then a Pip's tab, with its face and the dock's words while it works there. Beside
     // it, the sites your Pips may use.
     browser: () => {
       const live = span("hc-livedot");
       const tabs = [row(glyph("globe", 16), "Flights to Lisbon", "Your tab · signed in"), row(glyph("globe", 16), "Mail", "Your tab · signed in"), row(face("pulse"), "Ava's tab", "Ava is working in it", live)];
-      const mine = card("wn-yb", box("hc-ch", part("span", "hc-ico", '<span class="halo wn-halo" aria-hidden="true"><i></i><i></i><i></i></span>'), span("hc-ct", "Your Browser")), list(...tabs));
+      const mine = card("wn-yb", box("hc-ch", part("span", "hc-ico", '<span class="halo wn-halo" aria-hidden="true"><i></i><i></i><i></i></span>'), span("hc-ct", "DGC Browser")), list(...tabs));
       const site = (name, who, tag) => { const li = span("hc-li wn-site", span("hc-tx", span("yb-site-name", name), span("hc-meta", who))); if (tag) li.append(span("yb-site-tag", tag)); return li; };
       const sites = [site("mail.example", "Every Pip"), site("shop.example", "Ava"), site("bank.example", "No Pip", "Bank")];
       return { nodes: [mine, card("wn-sites wn-w", head("Sites Pips can use"), list(...sites))],

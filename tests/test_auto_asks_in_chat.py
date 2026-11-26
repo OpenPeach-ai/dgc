@@ -190,6 +190,22 @@ class TheirWords(Case):
         self.assertIsNone(ask("https://another.example"), "the rest of the session: no more asking, any site")
         self.assertIsNone(ask("https://third.example"))
 
+    def test_dgc_browser_is_asked_about_once_for_the_whole_session_too(self):
+        # 26 Nov: Work sessions use DGC Browser, where the user is signed in; auto mode asks once, as for their Chrome.
+        harness = self.harness()
+        agent, secrets = harness.agent, harness.agent._secret_values()
+        def ask(url, said_yes=False):
+            args = {"op": "open", "url": url}
+            return agent._auto_ask("dgc_browser", args, "DGC Browser: each new site asks, in every mode", "d1", args,
+                                   secrets, said_yes)
+        self.assertIn(WAITING, ask("https://shop.example"))
+        self.assertIn("DGC Browser, are each asked about once for the whole session", agent.system_prompt())
+        agent._turn_notes_given = set()
+        agent._note_turn_origin(continuing=False)
+        self.assertIn("using DGC Browser, where you're signed in, for this session", agent._turn_notes())
+        self.assertIsNone(ask("https://shop.example", said_yes=True), "\"use the DGC browser\"")
+        self.assertIsNone(ask("https://another.example"), "the rest of the session: no more asking, any site")
+
     def test_a_helper_inherits_the_users_yes(self):
         harness = self.harness()
         harness.config.permissions = {"allow": [], "ask": ["Bash(echo*)"], "deny": []}

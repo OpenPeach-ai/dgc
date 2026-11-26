@@ -725,7 +725,7 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .composer-ctx-pct{font-size:11px;font-variant-numeric:tabular-nums}
 /* DGC's working row: (time · ↓ tokens) after what the Pip is doing; and what each reply took. */
 .pip-working-meta{margin-left:-4px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted)}
-/* Watch on the working line of a run at work in Your Browser, and among a live post's answers: the shared small button
+/* Watch on the working line of a run at work in DGC Browser, and among a live post's answers: the shared small button
    (.dgc-btn.small: the one corner, the small height), as wide as its word, never stretched across the line. */
 .dgc-btn.small.pip-working-watch{flex:none;justify-self:start;align-self:center;width:auto;min-width:0;max-width:max-content}
 @keyframes pip-working-shimmer{0%{background-position:120% 0}25%,100%{background-position:-20% 0}}
@@ -976,6 +976,13 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .simple-pips.chat-open .pip-conversation.chat-style .pip-composer{--tray-lift:var(--lift-box)}
 .rail-pop .chat-queue-box{margin:0;padding:0 8px 8px;border-radius:0;background:transparent}
 .rail-pop .chat-queue-head{display:none}
+/* The "needs you" pill (26 Nov, option A): "Needs you" and its count in the purple badge Home's tab and the Pips list
+   use (.attention-count), the bar's own pill around them. */
+#chat-tray .rail-chip[data-kind="needs"] .chip-num{min-width:18px;padding:0 6px;border-radius:9px;background:var(--pip-accent);color:#fff;font-size:11px;font-weight:600;line-height:16px;text-align:center;box-sizing:border-box}
+/* The "needs you" pill's cards (26 Nov): the chat's own cards, one under the other in the bar's popover, as wide as it. */
+.tray-needs{display:flex;flex-direction:column;gap:8px;min-width:0;padding:4px 8px 8px}
+.tray-needs>.dgc-card{flex:none;max-width:none;margin:0}
+.tray-needs>.pip-found-line{max-width:none;margin:0 4px}
 /* A Pip's chat follows as Work's does (pipsFollow.js): Work's Latest pill (media/main.css #to-latest) and its pinned prompt (main.css "0.47 pinned prompt"). The pill's ground is the field's colour over the page's own, so it is solid in a theme whose field colour is see-through (16 Nov). */
 .conversation-log{isolation:isolate}
 /* A plain block, so the messages' margins meet as they did before there were boxes. */

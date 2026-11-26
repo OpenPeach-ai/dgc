@@ -161,7 +161,7 @@ body.pc-screen-mode{padding:0}
 .dgc-btn.pc-tool{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:5px;width:auto;min-width:26px;padding:0 7px;overflow:visible}
 .pc-tool svg{flex:none;display:block}
 .pc-tool[aria-pressed="true"],.pc-tool[aria-expanded="true"]{background:var(--wash);border-color:var(--btn-line-hover);color:var(--text-strong)}
-/* Fit and 100% are the shared pair (src/screenView.css), the same as Your Browser's. */
+/* Fit and 100% are the shared pair (src/screenView.css), the same as DGC Browser's. */
 .pc-tools-end{flex:1 1 0;min-width:0}.pc-measure .pc-tools-end{flex:none}
 .pc-using{color:var(--muted);font-size:var(--t-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 /* Something new was copied there: one small live mark on Clipboard. */

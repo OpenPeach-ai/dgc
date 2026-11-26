@@ -13,10 +13,13 @@ export const P = "ws_" + hex("1"), SHOP = "ws_" + hex("2"), GARDEN = "ws_" + hex
 export const CORE = "pip_" + hex("a"), MORNINGS = "pip_" + hex("b"), GST = "pip_" + hex("c"), ERP = "pip_" + hex("d"), BEDS = "pip_" + hex("e");
 export const HERE = "/home/me/code/shop", GARDEN_DIR = "/home/me/code/garden", LIME_DIR = "/home/me/code/lime_tiles", NOTES = "/home/me/code/notes";
 export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run_" + hex("3"), FIX = "pipfix_" + hex("1"), CHANGE = "pchange_" + hex("1"), WAIT = "pipwait_" + hex("1");
+export const WAIT2 = "pipwait_" + hex("2"), WAIT3 = "pipwait_" + hex("3");
 
 /** The stand-in DGC. Self-contained (it is also sent into a browser page as source): `o` chooses the scene.
  *    fix      "none" | "ask" | "declined" | "running" | "ready" | "applied" (by itself, at Do it all): GST watchdog's fix
  *    waiting  the GSP wallet waits on you (true by default)
+ *    more     that many more things only you can do (up to 2), from checks that are not in the chat (no fix of theirs
+ *             is listed): WAIT2 "Portal password expired", WAIT3 "Bank asks for a new mandate"
  *    box      GST watchdog has its own computer (true by default); false: a machine without boxes
  *    plain    lime_tiles isn't a Git project (its list_project_folders row says git: false; a Pip works in any folder)
  *    level    its level ("ask" by default)
@@ -42,6 +45,8 @@ export const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run
  *    chat     {[pip id]: {messages, active_run, waiting}}: that Pip's chat as given (each message needs only its id,
  *             role, text, run_id and status); kept in state.chat, so a test changes it as the reply goes on. A message
  *             sent while its `active_run` runs joins it as one sent mid-reply (steered, not read yet)
+ *    posts    false: GST watchdog's checks posted nothing; true: its posts show even beside a `chat` given for it
+ *             (a given chat alone leaves them out)
  *    activity {[run id]: events}: a run's live events ({event_type, payload}); kept in state.activity
  *    model    every Pip's own model, by name; thinking: the chat's thinking level ("off" by default)
  *    computers that many computers for GST watchdog, each with its name (Pips API 86; add_pip_computer and
@@ -66,7 +71,8 @@ export function makeBackend(o = {}) {
   const CHECK = "run_" + hex("1"), FIXRUN = "run_" + hex("2"), OLDER = "run_" + hex("3"), FIX = "pipfix_" + hex("1"), CHANGE = "pchange_" + hex("1"), WAIT = "pipwait_" + hex("1");
   const sub = !!o.sub, AGENT = "pipagent_" + hex("1"), NAME = sub ? "Tile checker" : "GST watchdog";
   const now = Date.now(), ago = (minutes) => new Date(now - minutes * 60000).toISOString();
-  const state = { slots: o.slots || 1, agentsOwn: { model_choice: { mode: "default" }, thinking: "", context_size: 0, fallback: { provider: "", model: "" }, ...(o.agentsOwn || {}) }, fix: o.fix || "none", waiting: o.waiting === false ? "none" : "waiting", level: o.level || "ask", change: o.fix === "applied" ? "applied" : "pending", committed: false,
+  const state = { slots: o.slots || 1, agentsOwn: { model_choice: { mode: "default" }, thinking: "", context_size: 0, fallback: { provider: "", model: "" }, ...(o.agentsOwn || {}) }, fix: o.fix || "none", waiting: o.waiting === false ? "none" : "waiting",
+    more: [["2", "Portal password expired", "uploads are blocked"], ["3", "Bank asks for a new mandate", ""]].slice(0, o.more || 0).map(([c, title, blocks]) => ({ id: "pipwait_" + hex(c), title, blocks, state: "waiting" })), level: o.level || "ask", change: o.fix === "applied" ? "applied" : "pending", committed: false,
     order: o.order || [GST, ERP, MORNINGS, BEDS], requests: [], unread: o.unread || {}, made: [], helper: 0, left: false, again: 0,
     paying: o.paying || "ask", limits: o.limits === false ? null : { usd_per_day: null, max_count: null, sites: null, ...(o.limits || {}) }, spent: o.spent || 0,
     total: { usd_per_day: null, spent_today: 0, ...(o.total || {}) }, knows: {}, notes: (o.notes || []).slice(),
@@ -159,7 +165,8 @@ export function makeBackend(o = {}) {
         { text: "Running the e-way tests in its copy", state: "doing" }, { text: "Round-off, then the retry loop", state: "next" }] } : {}),
       ...(done ? { change_id: CHANGE, tests: "passed", findings: [{ ...findings[0], verdict: "fixed" }, { ...findings[1], verdict: "fixed" }, { ...findings[2], verdict: "needs_you", why: "Stopping on error 4012 would also stop the nightly re-send." }] } : {}) }];
   };
-  const waitingNow = () => state.waiting === "none" ? [] : [{ id: WAIT, fix_id: FIX, title: "GSP wallet is empty", blocks: "filings are blocked", since: ago(4400), state: state.waiting, can_undo: state.waiting === "dismissed" }];
+  const waitingNow = () => [...(state.waiting === "none" ? [] : [{ id: WAIT, fix_id: FIX, title: "GSP wallet is empty", blocks: "filings are blocked", since: ago(4400), state: state.waiting, can_undo: state.waiting === "dismissed" }]),
+    ...state.more.map((w) => ({ ...w, since: ago(900), can_undo: w.state === "dismissed" }))];
   const change = () => ({ id: CHANGE, workspace_id: LIME, name: "lime_tiles", status: state.change, digest: "c1", more: 0, created_at: ago(3), updated_at: ago(2), tests: "passed",
     files: sub ? [{ path: "totals.py", change: "modified", plus: 6, minus: 2 }, { path: "cart.py", change: "modified", plus: 9, minus: 3 }] : [{ path: "billing/eway.py", change: "modified", plus: 12, minus: 1 }, { path: "billing/billing_routes.py", change: "modified", plus: 5, minus: 3 }],
     result: state.change === "applied" ? { applied: sub ? ["totals.py", "cart.py"] : ["billing/eway.py", "billing/billing_routes.py"], held_back: [], ...(state.fix === "applied" ? { by: "pip-level:full" } : {}) }
@@ -177,6 +184,7 @@ export function makeBackend(o = {}) {
     return [...(state.fix === "ask" ? [item("fix_ask", FIX, of(GST), "Wants to fix 3 things", "E-way bills, round-off and the retry loop in lime_tiles", 8)] : []),
       ...(state.fix === "ready" && state.change === "pending" ? [item("fix_ready", CHANGE, of(GST), "A fix is ready: 2 files", "billing/eway.py and billing/billing_routes.py", 2)] : []),
       ...(state.waiting === "waiting" ? [item("waiting", WAIT, of(GST), "GSP wallet is empty", "Only you can do this", 4400)] : []),
+      ...state.more.filter((w) => w.state === "waiting").map((w) => item("waiting", w.id, of(GST), w.title, "Only you can do this", 900)),
       item("email", "maildraft_" + hex("9"), of(MORNINGS), "Send this morning's brief to the team?", "Ready to send", 50)];
   };
   const messages = (id) => {
@@ -231,7 +239,7 @@ export function makeBackend(o = {}) {
     list_pip_runs: (r) => ({ runs: r.pip_id === GST ? runs : [] }),
     run_pip: () => ({ run: runs[0] }),
     get_pip_run: (r) => ({ run: { ...runs.find((x) => x.id === r.run_id), result: { summary: "Three findings.", findings: [], limitations: [] } } }),
-    list_pip_run_posts: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, posts: r.pip_id === GST && o.posts !== false && !state.chat[GST] ? [older, post] : [], next_before_id: null }),
+    list_pip_run_posts: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, posts: r.pip_id === GST && o.posts !== false && (!state.chat[GST] || o.posts === true) ? [older, post] : [], next_before_id: null }),
     list_pip_run_fixes: (r) => ({ pip_id: r.pip_id, workspace_id: pips.find((x) => x.id === r.pip_id)?.workspace_id || P, fixes: [] }),
     list_pip_messages: (r) => messages(r.pip_id),
     list_pip_attention: (r) => { const all = attention(), items = all.filter((i) => i.workspace_id === P || r.projects === "all" || r.projects === i.workspace_id);
@@ -287,7 +295,8 @@ export function makeBackend(o = {}) {
     start_pip_work_helper: () => { state.helper++; if (!sub) return { asks: state.level !== "full" }; state.work = true; state.fix = "running"; return { fix: fixNow()[0] }; },
     undo_pip_agent_job: (r) => { if (r.job_id === SOLO) state.soloUndone = true; else state.undone = true;
       const agent = r.job_id === SOLO ? soloAgent() : agentNow(); return { agent, undo: agent.undo }; },
-    answer_pip_waiting: (r) => { state.waiting = { done: "done", later: "later", not_a_problem: "dismissed", undo: "waiting" }[r.answer]; return { waiting: waitingNow() }; },
+    answer_pip_waiting: (r) => { const to = { done: "done", later: "later", not_a_problem: "dismissed", undo: "waiting" }[r.answer], extra = state.more.find((w) => w.id === r.waiting_id);
+      if (extra) extra.state = to; else state.waiting = to; return { waiting: waitingNow() }; },
     // ---- its sub-agents (Pips API 97), and the one command still to come from DGC (retry_pip_fix) ----
     // Pips API 104: a Pip's sub-agents' own model, thinking, window and fallback ride along (an older DGC sends only slots;
     // the editor reads them only from 104).

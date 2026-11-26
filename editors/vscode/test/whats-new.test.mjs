@@ -2,12 +2,12 @@
 // bar the first time 0.52's side bar is shown. Each slide is a card: a picture on top (the slide's scene as a glass
 // panel on a soft two-stop backdrop in the slide's own hue, gently moving; × at its top right, the dots on its bottom
 // edge), a quiet eyebrow, the title, three rows (an icon, a heading, a muted line), and a footer under a hairline: the
-// slide's own action on the left (Open Pips, Open Your Browser, Open Library, Open Work, Open Settings), Next on the
+// slide's own action on the left (Open Pips, Open DGC Browser, Open Library, Open Work, Open Settings), Next on the
 // right (Done on the last). ×, Done and Esc close it for good, and so does a slide's action, which also takes the side
 // bar there (the host's {type: "sideTab"}) or opens Settings. Never again by itself once answered, kept in the editor's
 // global state so every window of this editor agrees; opened again from the DGC view's ⋯ menu ("What's New").
 //
-// Since 24 Nov (user test round 2) the eight slides say what 0.52 ships, Your Browser, comments, the canvas and
+// Since 24 Nov (user test round 2) the eight slides say what 0.52 ships, DGC Browser, comments, the canvas and
 // checklists among them, in a new user's words; and the picture has a narrow form, so it can be read in a 290 px side
 // bar: 4:3, the one part that tells the story, no word under 10 px.
 import { after, before, test } from "node:test";
@@ -158,10 +158,10 @@ const SLIDES = [
     ["Its own chat, its own computer", "A Pip tells you what it found in its chat, and works on a desktop of its own, in its own copy of a folder you give it."],
     ["You choose how much it asks", "Ask me first, Approve for me, or Do it all. Set it for each Pip, in its prompt box."],
     ["A daily limit in dollars", "The most a Pip may pay by itself in a day. Always allow on a card lets that same step run next time without asking."]] },
-  { scene: "browser", hue: "teal", title: "Your Browser", go: ["Open Your Browser", "browser"], rows: [
+  { scene: "browser", hue: "teal", title: "DGC Browser", go: ["Open DGC Browser", "browser"], rows: [
     ["Chrome, with your sign-ins", "Sign in to your sites once. It opens beside the editor, or in a tab when DGC runs on another computer."],
-    ["A Pip works in its own tab", "Only on the sites you let it use, never in your tabs. The dock says “Ava is working in it”, and you can watch."],
-    ["You decide, from the dock", "Your Browser's menu there has Sites Pips can use and Clear browsing data."]] },
+    ["Pips and Work, each in its own tab", "Say “use the DGC browser” in Work, or let a Pip: only on sites you allow, never in your tabs. You can watch."],
+    ["You decide, from the dock", "DGC Browser's menu there has Sites Pips can use and Clear browsing data."]] },
   { scene: "comments", hue: "amber", title: "Comment on anything DGC made", go: ["Open Library", "library"], rows: [
     ["Point at a part and say it", "Pick words in a doc, cells in a sheet, a slide, part of a page or a checklist item, and comment."],
     ["Ask DGC", "DGC answers in the thread, or makes the change and says so."],
@@ -232,7 +232,7 @@ const now = (page) => page.evaluate(() => {
 const seen = (x) => x.posted("whatsNewSeen");
 const went = (x) => x.posted("whatsNewGo");
 const open = async (options = {}, message = { type: "whatsNew", auto: true, release: "0.52" }) => {
-  // (Pips API 113: a DGC that has Your Browser, as 0.52's own is; Open Your Browser is offered there.)
+  // (Pips API 113: a DGC that has DGC Browser, as 0.52's own is; Open DGC Browser is offered there.)
   const x = await openHome(browser, { width: 300, height: 760, api: 113, ...options });
   x.page.setDefaultTimeout(10000);
   try {
@@ -280,7 +280,7 @@ test("the card: a picture on top with × and the dots on it, the eyebrow, a larg
       if (!last) await x.page.click("#whats-new .wn-next");
     }
     assert.deepEqual(scenes, SLIDES.map((s) => s.scene), "each slide has its own picture");
-    assert.deepEqual(hues, SLIDES.map((s) => s.hue), "in its own hue: the Pips' violet, Your Browser's teal, comments' amber, the canvas's blue, checklists' green, the Library's azure, Work's copper");
+    assert.deepEqual(hues, SLIDES.map((s) => s.hue), "in its own hue: the Pips' violet, DGC Browser's teal, comments' amber, the canvas's blue, checklists' green, the Library's azure, Work's copper");
     assert.deepEqual(await seen(x), [], "nothing is remembered until it is answered");
     await x.page.click("#whats-new .wn-next");                      // Done
     assert.equal(await now(x.page), null);
@@ -307,7 +307,7 @@ test("the words: eight slides for what 0.52 ships, three rows each, in a new use
     assert.deepEqual(got.api, ["mount", "slides"], "no line is held back: nothing here is `ships: false`");
     // What 0.52's biggest new things are, each told (user test round 2, N1).
     const all = got.titles.concat(got.rows.flat(2)).join("\n");
-    for (const said of ["Your Browser", "Sites Pips can use", "Clear browsing data", "Comment", "Ask DGC", "suggestion", "canvas", "artboard", "prototype", "checklist", "what done means", "proof", "Output",
+    for (const said of ["DGC Browser", "Sites Pips can use", "Clear browsing data", "Comment", "Ask DGC", "suggestion", "canvas", "artboard", "prototype", "checklist", "what done means", "proof", "Output",
       "/goal", "steps", "link", "Archive", "Library", "favorites", "model picker", "Always allow", "daily limit"]) assert.ok(all.toLowerCase().includes(said.toLowerCase()), `it says “${said}”`);
     // In a new user's words (N3, N5): no "one kind", no "Personal", nothing that reads as inside a setting, no
     // internal names; and never the two-letter word DGC doesn't use for itself.
@@ -396,17 +396,17 @@ test("the canvas at 290 px: the one artboard that reads best, the real desktop p
   }
 });
 
-test("Open Your Browser is offered where Your Browser is, and opens it as the dock does; a DGC without it shows the slide and no action", async (t) => {
+test("Open DGC Browser is offered where DGC Browser is, and opens it as the dock does; a DGC without it shows the slide and no action", async (t) => {
   if (skipOrFail(t)) return;
   let x = await open({ width: 440 });
   try {
     await goTo(x, 1);
-    assert.deepEqual((await now(x.page)).buttons, ["Open Your Browser", "Next"]);
+    assert.deepEqual((await now(x.page)).buttons, ["Open DGC Browser", "Next"]);
     await x.page.click("#whats-new .wn-go");
     assert.equal(await now(x.page), null);
     assert.deepEqual(await went(x), [{ type: "whatsNewGo", to: "browser" }]);
     await x.send({ type: "sideTab", tab: "home", open: "browser" });           // (the host's answer, src/whatsNew.ts)
-    await x.page.waitForFunction(() => window.__requests.some((r) => r.type === "open_your_browser"));
+    await x.page.waitForFunction(() => window.__requests.some((r) => r.type === "open_dgc_browser"));
     assert.equal(await x.page.evaluate(() => document.querySelector("#side-tabs [role='tab'][aria-selected='true']")?.dataset.tab), "home", "Home stays in sight");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
@@ -414,8 +414,8 @@ test("Open Your Browser is offered where Your Browser is, and opens it as the do
   try {
     await goTo(x, 1);
     const s = await now(x.page);
-    assert.equal(s.title, "Your Browser");
-    assert.deepEqual(s.buttons, ["Next"], "no Open Your Browser where there is none to open");
+    assert.equal(s.title, "DGC Browser");
+    assert.deepEqual(s.buttons, ["Next"], "no Open DGC Browser where there is none to open");
   } finally { await x.close(); }
 });
 
@@ -527,7 +527,7 @@ test("× and Esc close it for good; the arrows and the dots move; a click outsid
 test("a slide's action goes there and closes the news for good: Open Pips, Open Library, Open Work, Open Settings", async (t) => {
   if (skipOrFail(t)) return;
   for (const [i, slide] of SLIDES.entries()) {
-    if (slide.go[1] === "browser") continue;                       // (Open Your Browser has its own test, above)
+    if (slide.go[1] === "browser") continue;                       // (Open DGC Browser has its own test, above)
     const x = await open({ width: 440 });
     try {
       if (i) await goTo(x, i);
@@ -561,7 +561,7 @@ test("motion: each scene tells its story in a calm loop of 5-7 s with transforms
       // The story is the scene's own loop (Web Animations); a Pip's face breathing and blinking, or a running session's
       // mark, is the real part's own life (its stylesheet's CSS animations), drawn as it is everywhere else.
       const pic = document.querySelector("#whats-new .wn-stage"), list = pic.getAnimations({ subtree: true }), story = list.filter((a) => !(a instanceof CSSAnimation));
-      // (What moves: the story, and a part's own life while it runs. A part at rest is still: Your Browser's halo, as on the dock.)
+      // (What moves: the story, and a part's own life while it runs. A part at rest is still: DGC Browser's halo, as on the dock.)
       const props = new Set(); for (const a of list.filter((a) => a.playState === "running")) for (const k of a.effect.getKeyframes()) for (const p of Object.keys(k)) if (!["offset", "easing", "composite", "computedOffset"].includes(p)) props.add(p);
       // (A part at rest, a session's mark that isn't at work, keeps its own motion paused, as it does on its page.)
       return { n: story.length, states: [...new Set(story.map((a) => a.playState))], all: [...new Set(list.map((a) => a.playState))], loops: list.every((a) => a.effect.getTiming().iterations === Infinity),
@@ -644,7 +644,7 @@ test("each picture is made of DGC's own parts: the real Pip faces, file sheets, 
     assert.deepEqual(pips.faces.slice(0, 3), ["core", "scout", "quill"], "slide 1: the Pips list wears the real faces, by their kinds' names");
     assert.equal(pips.star, 1, "slide 1: Core is the one with the star");
     assert.ok(pips.apps === 3 && pips.icons >= 3, "slide 1: what a Pip has of its own: its chat, its computer (its apps' own icons), its level");
-    assert.ok(yb.halo === 1 && yb.faces.length === 1 && yb.tags >= 1, "slide 2: Your Browser's own halo, the Pip's face on its tab, the Sites panel's own tag");
+    assert.ok(yb.halo === 1 && yb.faces.length === 1 && yb.tags >= 1, "slide 2: DGC Browser's own halo, the Pip's face on its tab, the Sites panel's own tag");
     assert.ok(comments.thread === 2 && comments.buttons === 2 && comments.sheets.includes("doc"), "slide 3: the rail's own thread (a message, a suggestion with Accept and Reject), the doc's sheet");
     assert.ok(canvas.boards === 2 && canvas.sheets.includes("design") && canvas.buttons === 2, "slide 4: two artboards, the design's sheet, Play and Download");
     // The artboards are a real design DGC drew (a bakery's landing page, desktop and phone), not grey blocks: pictures

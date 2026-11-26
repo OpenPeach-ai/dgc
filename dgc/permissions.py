@@ -56,6 +56,7 @@ DISPLAY = {
     "wake_later": "WakeLater", "wake_cancel": "WakeCancel",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
     "browser": "Browser",
+    "dgc_browser": "DGCBrowser",
     "todo": "Todo", "notes": "Notes", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
     "remember": "Remember", "forget": "Forget", "keep_lesson": "KeepLesson",
     "mcp_search": "MCPSearch", "mcp_call": "MCPCall",
@@ -87,6 +88,7 @@ RULE_ARG = {
     "glob": "pattern", "grep": "pattern", "repo_map": "path", "code_intel": "path", "git_diff": "path",
     "web_fetch": "url", "web_search": "query", "skill": "name", "add_skill": "url",
     "browser": "url",
+    "dgc_browser": "url",
     "mcp_search": "query", "mcp_call": "name",
     "save_memory": "scope", "remember": "fact", "forget": "id", "keep_lesson": "lesson", "artifact": "path", "task": "description", "notes": "query",
     "continue_task": "description",
@@ -492,6 +494,12 @@ def _permission_subject(tool: str, args: dict) -> tuple[str, dict]:
     if tool == "troupe" and isinstance(args, dict) and args.get("routine") is not None:
         # Scheduling one is its own permission: Always allow on running review troupes never schedules any.
         return tool, {**args, "template": "routine"}
+    if tool == "dgc_browser" and isinstance(args, dict):
+        # DGC Browser (dgc_browser_work): opening a site is the permission, one site at a time; "allow always" saves
+        # DGCBrowser(dgc-browser:https://site). A step that goes nowhere acts on a site the session already allowed.
+        if dgc_browser_navigates(args):
+            return tool, {**args, "url": DGC_BROWSER + _origin(str(args.get("url") or ""))}
+        return tool, {k: v for k, v in args.items() if k != "url"}
     if tool == "browser" and isinstance(args, dict) and args.get("signed_in") is True:
         # The user's own Chrome (browser_user) is its own permission: a rule written for the throwaway browser never
         # covers it, and "allow always" saves Browser(signed-in:https://site) -- one site, any page of it. A call that
@@ -501,6 +509,13 @@ def _permission_subject(tool: str, args: dict) -> tuple[str, dict]:
 
 
 SIGNED_IN = "signed-in:"
+DGC_BROWSER = "dgc-browser:"
+
+
+def dgc_browser_navigates(args: dict) -> bool:
+    """A DGC Browser call that goes to a new address: open, or tabs with action open."""
+    op = str(args.get("op", "")).strip().lower()
+    return op == "open" or (op == "tabs" and str(args.get("action", "")).strip().lower() == "open")
 
 
 def _signed_in_where(args: dict) -> str:
@@ -589,6 +604,8 @@ def rule_for(tool: str, args: dict) -> str:
         return f"{name}({value})"
     if tool == "browser" and value.startswith(SIGNED_IN):
         return f"{name}({value})"      # never a bare Browser rule: that would allow the browser everywhere
+    if tool == "dgc_browser":
+        return f"{name}({value or DGC_BROWSER})"      # never a bare DGCBrowser rule: one site each
     return name
 
 
@@ -719,6 +736,14 @@ class PermissionEngine:
             subjects.append(("browser", {**args, "url": where}))
             if origin:
                 subjects.append(("browser", {**args, "url": SIGNED_IN + origin + rest}))
+        dgc_browser = policy_tool == "dgc_browser"
+        if dgc_browser and dgc_browser_navigates(args):
+            # Deny and ask rules see the whole address too, as for the signed-in Chrome.
+            where = str(args.get("url") or "")
+            origin, rest = _canonical(where)
+            subjects.append(("dgc_browser", {**args, "url": where}))
+            if origin:
+                subjects.append(("dgc_browser", {**args, "url": DGC_BROWSER + origin + rest}))
         deny = rule_for_action(DENY)
         ext_deny = self._rule_action("external_directory", ext_args, DENY) if external else None
         if deny or ext_deny:
@@ -771,6 +796,29 @@ class PermissionEngine:
             if saved:
                 return ALLOW, f"rule: {saved.render()}"
             return ASK, "the user's signed-in Chrome: each new site asks, in every mode"
+
+        if dgc_browser:
+            # DGC Browser, where the user is signed in: opening a site this session hasn't used asks them in every mode
+            # (auto mode asks once for the session: Agent._auto_ask), unless a rule saved it
+            # (DGCBrowser(dgc-browser:https://...)). Its tab opens nothing else (dgc_browser_work), so the steps there
+            # don't ask again.
+            asked = rule_for_action(ASK)
+            if asked:
+                return ASK, f"rule: {asked.render()}"
+            if not dgc_browser_navigates(args):
+                return ALLOW, "DGC Browser, on a site this session allowed"
+            origin = _origin(str(args.get("url") or ""))
+            if not origin:
+                return ASK, "DGC Browser: an address DGC can't read as one site asks"
+            from urllib.parse import urlsplit
+            from .dgc_browser import site_key
+            if site_key(urlsplit(origin).hostname or "") in set(args.get("_session_sites") or ()):
+                return ALLOW, "DGC Browser: a site the user allowed this session"
+            saved = next((r for r in self.rules if r.action == ALLOW and r.tool == "dgc_browser"
+                          and (r.pattern or "").startswith(DGC_BROWSER) and self._matches(r, policy_tool, policy_args)), None)
+            if saved:
+                return ALLOW, f"rule: {saved.render()}"
+            return ASK, "DGC Browser: each new site asks, in every mode"
 
         # Security precedence is deny -> ask -> allow. A narrow ask must beat a broad allow.
         for action in (ASK, ALLOW):

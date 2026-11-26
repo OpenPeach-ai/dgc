@@ -537,7 +537,7 @@ dialog.hc-library:not([open]) { display: none; }
 }
 
 /* Browser (decided 17 Nov): the search field across the card (a field at every size, as Notes is), then the last two
-   or three links visited in Your Browser. Its mark is the maintainer's Halo (media/icons/browser-halo/halo.css), still unless the
+   or three links visited in DGC Browser. Its mark is the maintainer's Halo (media/icons/browser-halo/halo.css), still unless the
    card is pointed at. One design language: the field and Go are the cards' own field and button. */
 .halo.hc-halo { --size: 14px; --halo-play: paused; flex: none; }
 .hc-card[data-card="browser"]:hover .halo.hc-halo, .hc-card[data-card="browser"]:focus-within .halo.hc-halo { --halo-play: running; }

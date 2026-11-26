@@ -102,7 +102,7 @@ import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
 import {carefulPage,carefulMarkup,carefulWords,heldRequestAnswers,reviewWords,wordsHtml,addressHtml,settledWords,isPayment,asksEveryTime,offersAlways,limitWords,asksWords,coversWords,coversDetail,isCode,codeWords,codeProblem,codeFieldMarkup,takeCode,tidyCodeField,pasteCode} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
-import {ybPipSitesMarkup,ybPipChange} from './pipYourBrowser.js';   // its sites in Your Browser, and the one Sites panel (media/shared/ybsites.js)
+import {ybPipSitesMarkup,ybPipChange} from './pipDgcBrowser.js';   // its sites in DGC Browser, and the one Sites panel (media/shared/ybsites.js)
 import {pipLogins,pipLogin,SLOW_READ} from './pipsModel.js';
 import {mergeChatPage} from './pipsModel.js';
 import {livePlan,livePlanFromText,livePip} from './pipsModel.js';
@@ -1236,14 +1236,14 @@ function workingWords(sending){
   const delay=600-(Date.now()-workingVerbAt);
   return `<span class="pip-working-verb" style="--shimmer-delay:${Math.round(delay)}ms">${name} · ${esc(label)}</span>${Number.isFinite(since)?`<span class="pip-working-meta" data-since="${since}" data-chars="${chars}">${workingMeta(since,chars)}</span>`:''}${ybWatchMarkup()}`;
 }
-// Its run at work in Your Browser (Pips API 113): the working line has Watch, which opens its tab there streamed into an
+// Its run at work in DGC Browser (Pips API 113): the working line has Watch, which opens its tab there streamed into an
 // editor tab, the one the dock's "Watch Ava's tab" opens. Asked every few seconds while its run is live.
 const ybWatch={pip:'',working:false,asking:false,at:0};
 const ybWatchShown=()=>S.apiVersion>=113&&!remoteHost&&hasBox();
 async function checkYbWatch(){
  if(!ybWatchShown()||!ybRunLive()||ybWatch.asking||disposed)return;
  const pip=S.selected,token=scope();ybWatch.asking=true;ybWatch.at=Date.now();
- try{const said=await send('get_your_browser_lanes',{});if(token!==scope()||S.selected!==pip)return;
+ try{const said=await send('get_dgc_browser_lanes',{});if(token!==scope()||S.selected!==pip)return;
   const working=ybRunLive()&&Array.isArray(said?.lanes)&&said.lanes.some(l=>l&&l.pip_id===pip&&l.working===true);
   if(ybWatch.pip!==pip||ybWatch.working!==working){ybWatch.pip=pip;ybWatch.working=working;render();}}
  catch{/* (no Watch this time: asked again in a moment) */}
@@ -1254,7 +1254,7 @@ const ybRunLive=()=>!!S.chatActiveRun||!!(S.live&&S.live.pipId===S.selected&&S.l
 const ybWatchTimer=window.setInterval(()=>{if(ybRunLive()&&S.visible!==false&&Date.now()-ybWatch.at>=1800)void checkYbWatch();},2000);
 function ybWatchMarkup(chip=false){
  if(!ybWatchShown()||ybWatch.pip!==S.selected||!ybWatch.working||!ybRunLive())return '';
- const said=`Watch ${S.pip.name}’s tab in Your Browser`;
+ const said=`Watch ${S.pip.name}’s tab in DGC Browser`;
  // (The shared small button, as wide as its word: beside the working line's words, or among a live post's answers.)
  return `<button type="button" class="dgc-btn small pip-working-watch${chip?' run-post-watch':''}" data-yb-watch="1" aria-label="${esc(said)}" title="${esc(said)}">Watch</button>`;
 }
@@ -2065,12 +2065,14 @@ function chatQueueSendText(text,marks){
 // busy with another request and what a paste was cleaned of are each a pill; a pill opens its detail just above. A fix
 // DGC is making is no pill (decided 14 Nov night): it is the sub-agent's row in the chat and the count under the box.
 // Nothing going on: no bar. What its computer holds for your okay stays a card above the bar: it asks you something.
+// What only you can do whose check is not in the chat is a pill here too (26 Nov, "needs"): at the chat's end those
+// cards sat under every new reply and, in a narrow side bar, pushed the reply out of sight. The pill opens the cards.
 const TRAY_ICONS={queue:'<path d="M2.5 4h1M2.5 8h1M2.5 12h1M6 4h7.5M6 8h7.5M6 12h7.5"/>',routine:'<circle cx="8" cy="8" r="6"/><path d="M6.7 5.6v4.8L10.6 8Z"/>',
  computer:'<rect x="2" y="3" width="12" height="8" rx="1.2"/><path d="M6 13.5h4M8 11v2.5"/>',
  paste:'<path d="M1.8 8S4 4.2 8 4.2 14.2 8 14.2 8 12 11.8 8 11.8 1.8 8 1.8 8Z"/><circle cx="8" cy="8" r="1.7"/><path d="M3 13 13 3"/>',up:'<path d="m4 10 4-4 4 4"/>'};
 const trayIcon=name=>`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TRAY_ICONS[name]||''}</svg>`;
-const TRAY_TITLES={queue:'Queued messages',routine:'Routine running',computer:'Its computer',paste:'Pasted text'};
-let chatTray=null,chatTrayParts=null,chatTrayHome=null,chatTrayNote=null,chatTraySig='',chatTrayPip='';
+const TRAY_TITLES={queue:'Queued messages',routine:'Routine running',computer:'Its computer',paste:'Pasted text',needs:'Only you can do these'};
+let chatTray=null,chatTrayParts=null,chatTrayHome=null,chatTrayNote=null,chatTrayNeeds=null,chatTrayNeedsSig='',chatTraySig='',chatTrayPip='';
 function trayRoutine(){return routineRunning();}
 // Its computer is busy with another request of yours: the run says so itself ("Waiting for its computer: it's finishing ...").
 function trayComputer(){const run=S.chatActiveRun,act=run&&S.stream?.runId===run.id?S.stream.activity:null,m=/^Waiting for its computer(?::\s*(.*))?$/.exec(String(act?.label||''));return m?{line:String(act.label),doing:m[1]||''}:null;}
@@ -2083,12 +2085,47 @@ function traySpec(kind){
  if(kind==='computer'){const c=trayComputer();if(!c)return null;
   return {icon:'computer',num:'Computer busy',detail:c.doing?c.doing.replace(/^it.s /,''):'',label:c.line,tip:c.line};}
  if(kind==='paste'){const c=chatBox?.cleaned,said=c&&globalThis.DgcPasteClean?.pill(c.n,c.counts);return said?{icon:'paste',...said}:null;}
+ // "Needs you" and its count in the purple badge Home's tab and the Pips list use (decided 26 Nov, option A of three
+ // drawn): no icon, no amber warning, no card's title squeezed in. Short of room it folds to the badge alone.
+ if(kind==='needs'){const aside=waitingAside(),list=aside.filter(w=>w.state==='waiting'),count=list.length;
+  // The last one called "Not a problem": its Undo lasts a while (as on its line in the chat before), so the pill stays,
+  // saying Undo, until nothing is left to undo.
+  if(!count)return aside.some(w=>w.can_undo)?{word:'Undo',label:'Undo your Not a problem',tip:'Not a problem · Undo'}:null;
+  const what=`${count} ${count===1?'thing':'things'} only you can do`;
+  return {word:'Needs you',num:String(count),label:what,tip:what};}
  return null;
+}
+// The cards the "needs you" pill opens: the chat's own cards (waitingCards), so every answer is the chat's own button
+// and the page's one click handler takes it. One you just called "Not a problem" keeps its line here while its Undo
+// lasts. Drawn only while the pill is open: closed, none of it is on the page. A redraw keeps the keyboard where it was.
+function drawTrayNeeds(){
+ if(!chatTrayNeeds)return;
+ const open=chatTray?.open?.kind==='needs',html=open?waitingCards(waitingAside().filter(w=>w.state==='waiting'||w.can_undo)):'';
+ if(chatTrayNeedsSig===html)return;
+ const at=chatTrayNeeds.getRootNode().activeElement,held=at&&chatTrayNeeds.contains(at)?{id:at.dataset.flowWaitingId,answer:at.dataset.flowWaitingAnswer}:null;
+ chatTrayNeedsSig=html;chatTrayNeeds.innerHTML=html;
+ if(!held||!open)return;
+ const buttons=[...chatTrayNeeds.querySelectorAll('button:not(:disabled)')];
+ (buttons.find(b=>b.dataset.flowWaitingId===held.id&&b.dataset.flowWaitingAnswer===held.answer)||buttons.find(b=>b.dataset.flowWaitingId===held.id)||buttons[0]||chatTrayParts.pop).focus({preventScroll:true});
+}
+// From a Needs attention row: the pill opens at that card, the keyboard on its first answer. False: it isn't in the pill
+// (its check is in the chat, or it was answered meanwhile), so the chat has it.
+async function revealNeeds(id){
+ const token=scope(),pip=S.selected;
+ for(let i=0;i<30&&flowOn()&&(!flowNow()||chatPosts()&&!S.postsLoaded);i++){await new Promise(r=>window.setTimeout(r,150));if(token!==scope()||S.selected!==pip)return true;}
+ if(!waitingAside().some(w=>w.id===id&&w.state==='waiting'))return false;
+ drawChatTray();
+ if(!chatTray?.kinds.includes('needs'))return false;
+ if(chatTray.open?.kind!=='needs')chatTray.openKind('needs');
+ const card=[...chatTrayNeeds.querySelectorAll('[data-flow-waiting]')].find(e=>e.dataset.flowWaiting===id);
+ if(card){card.scrollIntoView?.({block:'nearest'});card.classList.add('attention-flash');window.setTimeout(()=>card.classList.remove('attention-flash'),2400);card.querySelector('button:not(:disabled)')?.focus({preventScroll:true});}
+ return true;
 }
 // A kind's detail: the queue's own rows, or what it is in words with the one thing to do about it.
 function trayDetail(kind){
  if(kind==='queue')return chatTrayHome.querySelector('#chat-queue-box')||chatTrayParts.popBody.querySelector('#chat-queue-box');
  if(kind==='paste')return chatBox?.note||null;
+ if(kind==='needs')return traySpec('needs')?chatTrayNeeds:null;
  const name=S.pip?.name||'This Pip',lines=[],acts=[];
  if(kind==='routine'){const r=trayRoutine();if(!r)return null;
   lines.push(`${name} is running its routine “${r.title}”.`,'Its post in the chat says what it is doing.');
@@ -2111,9 +2148,10 @@ function mountChatTray(){
   chatTrayHome.innerHTML='<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages" hidden><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list"></ol></section>';
   if(chatBox?.note)chatTrayHome.append(chatBox.note);   // what a paste was cleaned of waits here until its pill opens it
   chatTrayNote=doc.createElement('div');chatTrayNote.className='tray-note';
-  chatTray=globalThis.DgcTray.create({...chatTrayParts,moreId:'chat-tray-more',keep:['queue','computer','routine','paste'],spec:traySpec,
+  chatTrayNeeds=doc.createElement('div');chatTrayNeeds.className='tray-needs';chatTrayHome.append(chatTrayNeeds);
+  chatTray=globalThis.DgcTray.create({...chatTrayParts,moreId:'chat-tray-more',keep:['needs','queue','computer','routine','paste'],spec:traySpec,opened:()=>drawTrayNeeds(),closed:()=>drawTrayNeeds(),
    solo:kind=>kind==='paste'?['Dismiss','Stop showing this notice',()=>chatBox?.note?.querySelector('button')?.click()]:null,detail:trayDetail,title:kind=>TRAY_TITLES[kind]||'',
-   icon:spec=>`<span class="codicon" aria-hidden="true">${trayIcon(spec.icon)}</span>`,caret:`<span class="chip-caret codicon" aria-hidden="true">${trayIcon('up')}</span>`,
+   icon:spec=>spec.icon?`<span class="codicon" aria-hidden="true">${trayIcon(spec.icon)}</span>`:'',caret:`<span class="chip-caret codicon" aria-hidden="true">${trayIcon('up')}</span>`,
    popFocus:(kind,node)=>node.querySelector('[data-tray-focus], .dgc-queue-handle, button:not(:disabled)'),
    input:()=>$('chatText'),popTop:()=>document.querySelector('.pip-topbar')?.getBoundingClientRect().bottom||0,over:'.dgc-menu, .dgc-queue-menu',
    words:{more:'Show the rest of what is going on',list:'The rest of what is going on with this Pip'}});
@@ -2124,17 +2162,19 @@ function mountChatTray(){
 function drawChatTray(){
  if(!mountChatTray())return;
  const kinds=[];
+ if(traySpec('needs'))kinds.push('needs');   // what needs you comes first on the line
  if(S.chatWaiting.length+chatQueue().length)kinds.push('queue');
  if(trayRoutine())kinds.push('routine');
  if(trayComputer())kinds.push('computer');
  if(chatBox?.cleaned.n)kinds.push('paste');
  const sig=JSON.stringify([S.selected,kinds.map(kind=>[kind,traySpec(kind)])]);
- if(sig===chatTraySig&&chatTray.kinds.join()===kinds.join())return;
+ if(sig===chatTraySig&&chatTray.kinds.join()===kinds.join()){drawTrayNeeds();return;}
  if(chatTrayPip!==S.selected){chatTrayPip=S.selected;chatTray.close({restore:false});}   // another Pip's chat: its details are its own
  chatTraySig=sig;
  chatTray.render(kinds);
  for(const kind of kinds)chatTray.paint(kind);
- const open=chatTray.open;if(open&&open.kind!=='more'&&open.kind!=='queue'&&open.kind!=='paste')trayDetail(open.kind);   // its words follow what it is doing
+ const open=chatTray.open;if(open&&open.kind!=='more'&&open.kind!=='queue'&&open.kind!=='paste'&&open.kind!=='needs')trayDetail(open.kind);   // its words follow what it is doing
+ drawTrayNeeds();
 }
 // ---- A question card under a Pip's reply (Pips API 106) ----
 // Work's own card (media/shared/askcard.js, DgcAskCard): the model asked with propose_options, and its reply keeps the
@@ -2967,15 +3007,15 @@ document.addEventListener('paste',event=>{const box=event.target;if(box?.dataset
 document.addEventListener('click',event=>{const id=event.target?.closest?.('[data-code-dismiss]')?.dataset.codeDismiss;if(!id)return;forgetCode(id);render();(chatBox?.el||$('chatText'))?.focus?.({preventScroll:true});});
 // From anywhere else on the Pip's page: its chat, at the card, with the keyboard in its field.
 async function showCodeCard(id){S.tab='chat';S.overview=false;rememberView();render();void loadMessages();await revealCard(cardSelector('code',id,v=>CSS.escape(v)));}
-// A sign-in card from a Pip's tab in Your Browser: the site opens in YOUR OWN tab there (its window, or with no screen here,
+// A sign-in card from a Pip's tab in DGC Browser: the site opens in YOUR OWN tab there (its window, or with no screen here,
 // your own tab in an editor tab), where you sign in yourself. Never the Pip's tab.
 async function ybOpenFromCard(id){
  const a=computerState.pip===S.selected?computerState.value?.actions?.find(x=>x.id===id):null;
  const page=String(a?.summary?.page||'');
  if(!a||a.summary?.kind!=='yb_sign_in'||!/^https?:\/\//.test(page)||S.busy||!usable())return;
  try{
-  const said=await send('open_your_browser',{url:page.slice(0,2000)});
-  if(said?.view==='tab')vscode.postMessage({type:'pipsOpenYourBrowser',own:true});
+  const said=await send('open_dgc_browser',{url:page.slice(0,2000)});
+  if(said?.view==='tab')vscode.postMessage({type:'pipsOpenDgcBrowser',own:true});
  }catch(error){setError(error);render();}
 }
 async function decideInChat(id,approve){
@@ -4803,15 +4843,15 @@ async function loginCall(type,fields,notice){
  finally{loginsState.busy=false;if(token===scope()){render();void loadLogins();}}
 }
 function pipNames(){return Object.fromEntries((S.jobs||[]).map(j=>[j.id,j.name]));}
-// Its sites in Your Browser (Pips API 113): the ones it may use with your sign-in there (Remove), the others (Let it
-// use), and All sites…, the Sites panel the dock's Your Browser menu opens too (media/shared/ybsites.js). Only for a Pip
-// whose runs reach Your Browser (beside its computer), and only on this computer.
+// Its sites in DGC Browser (Pips API 113): the ones it may use with your sign-in there (Remove), the others (Let it
+// use), and All sites…, the Sites panel the dock's DGC Browser menu opens too (media/shared/ybsites.js). Only for a Pip
+// whose runs reach DGC Browser (beside its computer), and only on this computer.
 const ybSitesState={pip:'',value:null,error:'',busy:false,seq:0,confirm:''};
 const ybSitesShown=()=>S.apiVersion>=113&&!remoteHost&&hasBox();
 async function loadYbSites(){
  if(!ybSitesShown()||!globalThis.DgcYbSites)return;
  const token=scope(),pip=S.selected,sequence=++ybSitesState.seq;
- try{const value=globalThis.DgcYbSites.read(await send('get_your_browser',{}));if(token!==scope()||sequence!==ybSitesState.seq||S.selected!==pip)return;
+ try{const value=globalThis.DgcYbSites.read(await send('get_dgc_browser',{}));if(token!==scope()||sequence!==ybSitesState.seq||S.selected!==pip)return;
   ybSitesState.pip=pip;ybSitesState.value=value;ybSitesState.error='';render();}
  catch(error){if(token===scope()&&sequence===ybSitesState.seq){ybSitesState.pip=pip;ybSitesState.error=errorText(error);render();}}
 }
@@ -4819,8 +4859,8 @@ async function ybSiteCall(kind,site){
  const pip=S.selected,fields=ybSitesState.pip===pip?ybPipChange(ybSitesState.value,kind,site,pip):null;
  if(!fields||ybSitesState.busy||!usable())return;
  const token=scope(),name=S.pip?.name||'It';ybSitesState.busy=true;ybSitesState.error='';render();
- try{await send('set_your_browser_site',fields);if(token!==scope()||S.selected!==pip)return;ybSitesState.confirm='';
-  S.notice=kind==='add'?`${name} may use ${site} in Your Browser now.`:`${name} won’t use ${site} in Your Browser now.`;}
+ try{await send('set_dgc_browser_site',fields);if(token!==scope()||S.selected!==pip)return;ybSitesState.confirm='';
+  S.notice=kind==='add'?`${name} may use ${site} in DGC Browser now.`:`${name} won’t use ${site} in DGC Browser now.`;}
  catch(error){if(token===scope())ybSitesState.error=errorText(error);}
  finally{ybSitesState.busy=false;if(token===scope()){render();void loadYbSites();}}
 }
@@ -4831,7 +4871,7 @@ function ybSitesPanel(){
 function ybSitesMarkup(p,off){
  if(!ybSitesShown())return '';
  const value=ybSitesState.pip===p.id?ybSitesState.value:null;
- // (Where Your Browser can't run here and no site was ever kept, there is nothing to choose.)
+ // (Where DGC Browser can't run here and no site was ever kept, there is nothing to choose.)
  if(value&&!value.available&&!value.sites.length)return '';
  return ybPipSitesMarkup(value,{esc,busy:off||ybSitesState.busy,error:ybSitesState.pip===p.id?ybSitesState.error:'',pipId:p.id,pipName:p.name,confirm:ybSitesState.confirm});
 }
@@ -4916,8 +4956,8 @@ async function navigateAttention(value){
  if(S.selected!==value.pip)return;
  if(computer){openComputerView();return;}
  if(value.reviewKind==='app_action'&&typeof value.review==='string'){await openMessageReview(value.review);return;}
- // What only you can do is under the line at the top of its chat: it is opened first.
- if(cardKind==='waiting'&&!flow.waitingOpen){flow.waitingOpen=true;await loadFlow();render();}
+ // What only you can do: under its check in the chat, or behind the bar's "needs you" pill, which is opened at it.
+ if(cardKind==='waiting'){await loadFlow();render();if(typeof card==='string'&&await revealNeeds(card))return;}
  if(typeof card==='string')await revealCard(cardSelector(cardKind,card,s=>CSS.escape(s)));
 }
 // The chat draws its cards as they load (drafts, plugins, apps): look for a few seconds, then show it.
@@ -5537,7 +5577,9 @@ function flowUnderPost(p){
 }
 // What only you can do (25 Nov, reported: answered lines stuck in a pinned area at the top of the chat): each card stands
 // in the chat where it came from, under the check whose fix found it, and once answered is one line there. One whose
-// check isn't in the chat (or from a DGC that doesn't say which fix found it) waits at the chat's end. Nothing is pinned.
+// check isn't in the chat (or from a DGC that doesn't say which fix found it) is not in the chat at all (26 Nov): it is
+// counted on the "needs you" pill of the bar over the prompt box, which opens its card (traySpec, drawTrayNeeds).
+// Nothing is pinned.
 function waitingUnder(runId){
  const page=flowNow();if(!page?.waiting.length)return [];
  const fixes=new Set(page.fixes.filter(f=>f.run_id===runId).map(f=>f.id));
@@ -5547,6 +5589,13 @@ function waitingPlaced(){
  const page=flowNow();if(!page?.waiting.length||!chatPosts())return new Set();
  const drawn=new Set(S.posts.map(p=>p.run_id)),runOf=new Map(page.fixes.map(f=>[f.id,f.run_id]));
  return new Set(page.waiting.filter(w=>w.fix&&drawn.has(runOf.get(w.fix))).map(w=>w.id));
+}
+// The ones whose check isn't in the chat. (Until the chat knows which checks it draws, none: no pill flashes up
+// for a card about to stand under its check.)
+function waitingAside(){
+ const page=flowNow();if(!page?.waiting.length||chatPosts()&&!S.postsLoaded)return [];
+ const placed=waitingPlaced();
+ return page.waiting.filter(w=>!placed.has(w.id));
 }
 function waitingCards(list){
  const off=archived()||!usable();
@@ -5630,16 +5679,15 @@ function flowFixMarkup(fix){
  return decided+fixEndedLine(fix,{esc})+said;
 }
 // A fix whose check is not among the runs drawn (an older one, or another conversation) still shows, at the chat's end.
+// What only you can do from such a check does not (26 Nov): it is on the bar's "needs you" pill (waitingAside).
 function flowTailMarkup(){
  const page=flowNow();if(!page)return soloWorkMarkup();
  const drawn=new Set(chatPosts()?S.posts.map(p=>p.run_id):[]);
- const placed=waitingPlaced();
  return page.fixes.filter(f=>!f.run_id||!drawn.has(f.run_id)).filter(f=>!['discarded','undone','unchanged','declined'].includes(f.state)).map(flowFixMarkup).join('')
-  +waitingCards(page.waiting.filter(w=>!placed.has(w.id)))
   +soloWorkMarkup()+(flow.error?`<p class="app-link-note" role="alert">${esc(flow.error)}</p>`:'');
 }
 // What only you can do used to be one line pinned at the top of its chat, its cards under it when shown; its cards are in
-// the chat now (waitingUnder, flowTailMarkup), and nothing is pinned.
+// the chat now, under their checks (waitingUnder), or behind the bar's "needs you" pill (waitingAside), and nothing is pinned.
 function flowPinnedMarkup(){
  return '';
 }
@@ -6322,7 +6370,7 @@ function render() {
   shell.classList.toggle('simple-pips',!intro&&simpleMode());
   const header=(embedded?`<header class="embedded-header${!intro&&scopeTabs()?' scoped':''}"><span class="workspace-name" title="${esc(S.workspace?.name||'Current workspace')}">${esc(S.workspace?.name||'Pips')}</span>${runnerMarkup()}</header>`:`<header><div class="heading"><div>${options.close?button('return-main','Back to DGC',false,'back-control'):''}<h1><span class="pips-wordmark">Pips</span></h1><p class="muted">${esc(S.workspace?.kind==='personal'?'Personal':S.workspace?.name||'Current workspace')}</p></div></div>${runnerMarkup()}</header>`)+(intro?'':scopeTabsMarkup());
   const markup=!intro&&simpleMode()?simpleMarkup():`${header}${chatView?'':pageNotesMarkup('page-note-pad')}${chatView?'':undoRejectMarkup()}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
-  if(markup===lastMarkup){syncChatBox();tellInsidePip();sayShown();drawQuestionCards();return;}   // (a card's own state isn't in the markup)
+  if(markup===lastMarkup){syncChatBox();tellInsidePip();sayShown();drawQuestionCards();drawChatTray();return;}   // (a card's own state isn't in the markup; nor are the cards behind the bar's "needs you" pill)
   lastMarkup=markup;
   const allAnchor=attentionAllAnchor();
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
@@ -8038,7 +8086,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.loginRemove){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginRemove);void loginCall('remove_pip_login',{login_id:target.dataset.loginRemove},`Removed. No Pip signs in to ${l?.site||'that site'} with it now.`);return;}
   if(target.dataset.loginShare){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginShare);if(l&&l.pips!=='all')void loginCall('grant_pip_login',{login_id:l.id,pips:[...l.pips,S.selected]},`${S.pip?.name||'It'} can use the login for ${l.site} now.`);return;}
   if(target.dataset.ybOpen){void ybOpenFromCard(target.dataset.ybOpen);return;}
-  if(target.dataset.ybWatch!==undefined){if(S.pip&&ybWatch.working)vscode.postMessage({type:'pipsOpenYourBrowser',pip:{id:S.pip.id,name:S.pip.name}});return;}
+  if(target.dataset.ybWatch!==undefined){if(S.pip&&ybWatch.working)vscode.postMessage({type:'pipsOpenDgcBrowser',pip:{id:S.pip.id,name:S.pip.name}});return;}
   if(target.dataset.ybPipAskRemove){ybSitesState.confirm=target.dataset.ybPipAskRemove;render();return;}
   if(target.dataset.ybPipKeep!==undefined){ybSitesState.confirm='';render();return;}
   if(target.dataset.ybPipRemove){void ybSiteCall('remove',target.dataset.ybPipRemove);return;}

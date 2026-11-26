@@ -2,7 +2,7 @@
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
 import {DRAWER,cardWords,cardTitle,drawerMarkup,bellMarkup} from './pipComputerDrawer.js';
-import {reviewWords,isYourBrowser,isCode,codeWords,codeProblem,takeCode,tidyCodeField,pasteCode,keepCodeFields} from './pipCareful.js';
+import {reviewWords,isDgcBrowser,isCode,codeWords,codeProblem,takeCode,tidyCodeField,pasteCode,keepCodeFields} from './pipCareful.js';
 import {loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {computerPortal} from './pipComputerNames.js';
 // One set of tokens for every page, first, so each page's own stylesheet can lean on it (media/shared/tokens.css).
@@ -83,8 +83,8 @@ const settledCard=id=>S.settled.find(c=>c.a.id===id);
 // (A code to type, the code card of Pips API 98: an older DGC has none; and past its ten minutes it no longer waits.)
 const CODE_API=98,CODE_WAIT=100000,CODE_NOTE_STAYS=9000;
 const codeGone=a=>isCode(a.summary)&&(S.apiVersion<CODE_API||Date.parse(a.expires_at)<=Date.now());
-// (What a Pip's tab in Your Browser waits for is shown in its chat, never as its own computer's.)
-const pending=()=>(S.computer?.actions||[]).filter(a=>a.status==='pending'&&!settledCard(a.id)&&!codeGone(a)&&!isYourBrowser(a.summary));
+// (What a Pip's tab in DGC Browser waits for is shown in its chat, never as its own computer's.)
+const pending=()=>(S.computer?.actions||[]).filter(a=>a.status==='pending'&&!settledCard(a.id)&&!codeGone(a)&&!isDgcBrowser(a.summary));
 const CLIP_BYTES=1000000,TYPE_CHARS=5000;
 const tabTitle=()=>`${S.pip?.name||'Pip'} · ${computerName()}`;
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
@@ -345,7 +345,7 @@ function terminalMarkup(){
  return `<section class="pc-pane pc-terminal" aria-label="Terminal"><div class="pc-log" id="pc-log" role="log" aria-live="polite">${rows||'<p class="pc-muted">Commands you and the Pip run show here.</p>'}</div>${t.error?`<p class="pc-error" role="alert">${esc(t.error)}</p>`:''}<form id="pc-run" class="pc-bar"><span aria-hidden="true">$</span><input id="pc-command" aria-label="Command" autocomplete="off" spellcheck="false" value="${esc(t.draft)}"${t.running?' disabled':''}><button type="submit"${t.running?' disabled':''}>${t.running?'Running…':'Run'}</button></form><p class="pc-muted">Online: commands can reach public websites (to download or install, for example), never this computer or your home network. It works in its Files.</p></section>`;
 }
 // The screen's bytes ride the extension host's messages; noVNC sees a WebSocket-like channel (src/screenView.js, the
-// one screen piece Your Browser's own tab uses too).
+// one screen piece DGC Browser's own tab uses too).
 let channel=null,viewer=null;
 // Stop computer (user test P12). The stop is the user's own: its screen closing is what was asked for, so the tab shows
 // the stopped state where the screen was and nothing else. The closing stream's own words are not shown (DGC has taken

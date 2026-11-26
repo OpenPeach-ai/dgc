@@ -23,7 +23,7 @@
 
 /* ---- the picture ------------------------------------------------------------------------------------------------- */
 /* Each hue's pair: dark (deep, quiet) first, light (pale) below. The Pips' slide takes Core's violet (a Pip's own tint,
-   src/pipProfile.js, mixed into the ground: never the brand's purple, which lives in tokens.css), Your Browser teal,
+   src/pipProfile.js, mixed into the ground: never the brand's purple, which lives in tokens.css), DGC Browser teal,
    comments amber, the canvas blue, checklists green, Home and the Library azure (h213, the chart marks'), Work copper;
    "Also new" a quiet grey. */
 .wn-picture { --wn-a: #353a44; --wn-b: #22252b; --wn-core: #A07ABD;
@@ -134,7 +134,7 @@ body.vscode-light .wn-picture[data-hue="blue"] { --wn-a: #e6e9fc; --wn-b: #cdd4f
 @media (prefers-reduced-motion: reduce) { .wn-stage *, .wn-stage *::before, .wn-stage *::after { animation: none !important; transition: none !important; } }
 .wn-stage.wn-paused *, .wn-stage.wn-paused *::before, .wn-stage.wn-paused *::after { animation-play-state: paused !important; }
 
-/* Your Browser: its halo (the dock's own), and the sites' rows in the Sites panel's own words. */
+/* DGC Browser: its halo (the dock's own), and the sites' rows in the Sites panel's own words. */
 .wn-stage .halo.wn-halo { --size: 20px; --halo-play: paused; display: block; }   /* (at rest, as on the dock: its own motion is more than a transform) */
 .wn-site .yb-site-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

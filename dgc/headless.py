@@ -90,7 +90,7 @@ _MAX_PIPS_PENDING = 64
 # URI) and nothing else, or a list of nothing but those, is passed as it is; anything else in the field is redacted
 # like every other field.
 _BINARY_EVENT_FIELDS = {"voice_audio": ("audio",), "pip_desktop_data": ("data",), "tool_images": ("images",),
-                        "image": ("image",), "your_browser_screen_data": ("data",)}
+                        "image": ("image",), "dgc_browser_screen_data": ("data",)}
 _BASE64 = re.compile(r"(?:data:image/[A-Za-z0-9.+-]+;base64,)?[A-Za-z0-9+/]*={0,2}\Z")
 
 
@@ -122,11 +122,11 @@ def sanitize_event(event: dict, secrets) -> dict:
         secrets = catalog_secrets(secrets, names)
     binary = {key: event[key] for key in _BINARY_EVENT_FIELDS.get(event.get("type"), ())
               if _only_bytes(event.get(key))}
-    # A streamed tab's picture (use_your_browser_view, Pips API 107: a Pip's tab, or your own where there is no screen)
+    # A streamed tab's picture (use_dgc_browser_view, Pips API 107: a Pip's tab, or your own where there is no screen)
     # is bytes too, inside the result: up to thirty a second, each would otherwise be a broken picture now and then.
     picture = None
     result = event.get("result")
-    if event.get("type") == "pips_result" and event.get("command") == "use_your_browser_view" and isinstance(result, dict) \
+    if event.get("type") == "pips_result" and event.get("command") == "use_dgc_browser_view" and isinstance(result, dict) \
             and _only_bytes(result.get("image")) and str(result.get("image")).startswith("data:image/jpeg;base64,"):
         picture = result["image"]
         event = {**event, "result": {key: value for key, value in result.items() if key != "image"}}
@@ -617,12 +617,12 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # fallback ({provider, model}, model "" none); it answers {slots, model_choice, thinking, context_size, fallback}, and
 # list_pip_agents carries the same four beside agents and slots. A sub-agent job's run runs on them and carries on with
 # that fallback in place of the Pip's; every run of the Pip gives DGC's own helpers inside it the same settings.
-# API 105 (0.52, Your Browser, the model and the API): get_your_browser {} (R: kind host_profile, weaker true, available,
+# API 105 (0.52, DGC Browser, the model and the API): get_dgc_browser {} (R: kind host_profile, weaker true, available,
 # reason, chrome installed | dgc_copy | "", sites [{site, shown, mode all | chosen, money, pips [{pip_id, name}],
-# sso_hosts, added_by, added_at, used_at}], signing_out, yours {open, tabs}, lanes); set_your_browser_site {site, mode,
-# pips} and sign_out_your_browser_site {site} (M: sign_out "waiting" until Your Browser clears it); open_your_browser
-# {url, pip_id} and use_your_browser_view {op, x, y, text, key, dy, url, pip_id} (M) answer not_ready until its window
-# exists. All local only. list_pip_sent's sites gain `your_browser` (how many of its lines came from the Pip's lane
+# sso_hosts, added_by, added_at, used_at}], signing_out, yours {open, tabs}, lanes); set_dgc_browser_site {site, mode,
+# pips} and sign_out_dgc_browser_site {site} (M: sign_out "waiting" until DGC Browser clears it); open_dgc_browser
+# {url, pip_id} and use_dgc_browser_view {op, x, y, text, key, dy, url, pip_id} (M) answer not_ready until its window
+# exists. All local only. list_pip_sent's sites gain `dgc_browser` (how many of its lines came from the Pip's lane
 # there) and `not_allowed` (pages or writes there refused: not one of the Pip's sites).
 # API 106 (0.52, a question card in a Pip's chat, as Work has it): send_pip_message takes `questions` (true: this client
 # draws the card), and a conversation whose client wrote so last is offered Work's propose_options (Work's schema and
@@ -630,18 +630,18 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # answered | dismissed | closed), answers}. answer_pip_questions {pip_id, message_id, idempotency_key, answers |
 # dismissed, chat_options?} (M) sends the answers as the user's own next message there (R: questions, run, message), or
 # closes the card with nothing sent (R: questions); only while its reply is the conversation's last message.
-# API 107 (0.52, Your Browser's window; 106 is the question card in a Pip's chat, another 0.52 feature): open_your_browser {url, pip_id, editor_bounds} (M) opens its window (or brings
+# API 107 (0.52, DGC Browser's window; 106 is the question card in a Pip's chat, another 0.52 feature): open_dgc_browser {url, pip_id, editor_bounds} (M) opens its window (or brings
 # it forward) through the Pips runner, to the right of the editor (editor_bounds {x, y, width, height, screen?} as the
 # editor measured them), at what was typed (an address, else a Google search) or at a Pip's own tab; it answers {ok, kind,
 # weaker, url, open}, `unavailable` with the reason where it can't run here, `runner_required` without the runner.
-# use_your_browser_view {op, pip_id, ...} streams one Pip's lane: op `frame` (new) answers {ok, pip_id, url, title,
-# width, height, image, lanes}; the person's own tabs are never streamed (pip_id is required). get_your_browser_recent {}
+# use_dgc_browser_view {op, pip_id, ...} streams one Pip's lane: op `frame` (new) answers {ok, pip_id, url, title,
+# width, height, image, lanes}; the person's own tabs are never streamed (pip_id is required). get_dgc_browser_recent {}
 # (R): {links [{url, title, host, at}] (the newest three of the person's own tabs, never a lane), open, available,
-# reason, lanes [{pip_id, name, title, url}]}. get_your_browser's `yours` gains `error`, and `yours.tabs` / `lanes` [{pip_id, name, title, url}] are filled
-# while it runs. All local only. Also in 107 (decided 18 Nov): where Google Chrome is needed, get_your_browser(_recent)
+# reason, lanes [{pip_id, name, title, url}]}. get_dgc_browser's `yours` gains `error`, and `yours.tabs` / `lanes` [{pip_id, name, title, url}] are filled
+# while it runs. All local only. Also in 107 (decided 18 Nov): where Google Chrome is needed, get_dgc_browser(_recent)
 # carry `install` {how password|terminal, state, error, line} and install_google_chrome {} (M) installs it through the
 # system's own password prompt (pkexec), one root step; `view` "window"|"tab" says how it opens here; with no screen
-# (Remote-SSH) Chrome runs headless and use_your_browser_view {own: true, op frame|input|go|back|forward|reload|new_tab|
+# (Remote-SSH) Chrome runs headless and use_dgc_browser_view {own: true, op frame|input|go|back|forward|reload|new_tab|
 # tab|close_tab|size|close, seq, events, tab, width, height} streams the person's own tab to the editor, for the editor's
 # own actor only.
 # API 108 (0.52, Save to Library on a picture in a Pip's chat): library_pip_message_image {pip_id, message_id, index,
@@ -675,20 +675,20 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # chat shows, so apply/discard/undo_pip_project_change in either place are one), list_pip_jobs {pip_id} (R: jobs),
 # start_pip_job and decline_pip_job {pip_id, job_id} (M: R job). list_pip_messages carries `asking_jobs` and a reply's
 # `pip_jobs` (the jobs it handed other Pips). The older handoff_to_pip is no longer offered. Local only.
-# API 112 (0.52, Clear browsing data in Your Browser): clear_your_browser {history, sign_ins, passwords}
-# (M, local only, at least one true) clears what was ticked from DGC's own profile for Your Browser, never the person's
+# API 112 (0.52, Clear browsing data in DGC Browser): clear_dgc_browser {history, sign_ins, passwords}
+# (M, local only, at least one true) clears what was ticked from DGC's own profile for DGC Browser, never the person's
 # own Chrome: history (pages visited, the downloads list, Home's last links), sign_ins (cookies and site data) and
 # passwords (Chrome's saved passwords there). Chrome's files are cleared only with Chrome stopped: with the runner on, the
 # supervisor closes it, clears and opens it again if it was open. Answers {ok, cleared, reopened, chrome_account}.
-# get_your_browser and get_your_browser_recent gain `chrome_account` (Chrome is signed in to a Google account there: with
-# sync on, the account keeps its own copy). Also in 0.52 (capability your_browser_screen): where there is no screen,
-# Your Browser's own tab streams Chrome's real window on a VNC screen of its own over your_browser_screen /
-# your_browser_screen_data, as a Pip computer's screen streams; Pip lanes there open in a window off that screen.
-# Pips API 113: the sites Pips may use in Your Browser, in one panel. seen_your_browser_sites {} (M, local only): the person
-# opened it, so the sites noticed from their own sign-ins until now are no longer new. get_your_browser's sites carry
-# `new`, and it lists `pips` (every Pip the person may choose, never an archived one); get_your_browser_recent carries
-# `new_sites` (how many are new). A site the person signs in to in Your Browser joins the list by itself.
-# get_your_browser_lanes {} (R, local only): the Pips working there now and whether any run is live (the dock's look).
+# get_dgc_browser and get_dgc_browser_recent gain `chrome_account` (Chrome is signed in to a Google account there: with
+# sync on, the account keeps its own copy). Also in 0.52 (capability dgc_browser_screen): where there is no screen,
+# DGC Browser's own tab streams Chrome's real window on a VNC screen of its own over dgc_browser_screen /
+# dgc_browser_screen_data, as a Pip computer's screen streams; Pip lanes there open in a window off that screen.
+# Pips API 113: the sites Pips may use in DGC Browser, in one panel. seen_dgc_browser_sites {} (M, local only): the person
+# opened it, so the sites noticed from their own sign-ins until now are no longer new. get_dgc_browser's sites carry
+# `new`, and it lists `pips` (every Pip the person may choose, never an archived one); get_dgc_browser_recent carries
+# `new_sites` (how many are new). A site the person signs in to in DGC Browser joins the list by itself.
+# get_dgc_browser_lanes {} (R, local only): the Pips working there now and whether any run is live (the dock's look).
 PIPS_API_VERSION = 113
 
 
@@ -3312,9 +3312,9 @@ class Backend:
                           "pips_desktop": 1,
                           # pip_desktop open takes `number`: which of the Pip's computers (Pips API 86).
                           "pips_desktop_numbers": 1,
-                          # Your Browser's own tab (no screen here) streams Chrome's real window over
-                          # your_browser_screen / your_browser_screen_data, as a Pip computer's screen does.
-                          "your_browser_screen": 1,
+                          # DGC Browser's own tab (no screen here) streams Chrome's real window over
+                          # dgc_browser_screen / dgc_browser_screen_data, as a Pip computer's screen does.
+                          "dgc_browser_screen": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
                           "troupe": 1,
                           # /learn (dgc/skill_learn.py): learn_skill drafts a skill (skill_draft), save_skill writes
@@ -6537,7 +6537,7 @@ class Backend:
         # Its background shells are killed below, and their ends are news to nobody now: a closed
         # chat publishes no more task lists.
         self._background_shells_on = False
-        for name in ("_desktop_streams", "_your_browser_screens"):
+        for name in ("_desktop_streams", "_dgc_browser_screens"):
             streams = self.__dict__.get(name)
             if streams is not None:
                 streams.close_all()
@@ -8335,10 +8335,10 @@ class Backend:
         except RegistryError as exc:
             self._pips_failure(cmd, exc.code, str(exc))
             return
-        if detached.get("type") == "pips_control" and detached["request"].get("type") in ("use_your_browser_view",
-                                                                                         "clear_your_browser"):
+        if detached.get("type") == "pips_control" and detached["request"].get("type") in ("use_dgc_browser_view",
+                                                                                         "clear_dgc_browser"):
             # (Clear browsing data waits for Chrome to close and open again: never in front of the other Pip controls.)
-            self._your_browser_view(detached)
+            self._dgc_browser_view(detached)
             return
         # Separate from chat's foreground worker: jobs never mutate its Agent.
         lock = self.__dict__.setdefault("_pips_command_lock", threading.Lock())
@@ -8362,11 +8362,11 @@ class Backend:
                 pending.pop()
                 self._pips_failure(detached, "runner_error", "The local Pip control worker could not start.")
 
-    def _your_browser_view(self, cmd):
-        """use_your_browser_view on threads of its own (Pips API 107): a streamed tab asks for up to thirty pictures a
+    def _dgc_browser_view(self, cmd):
+        """use_dgc_browser_view on threads of its own (Pips API 107): a streamed tab asks for up to thirty pictures a
         second and sends the person's own clicks and keys, so it never waits behind the other Pip controls, and none of
         them waits behind it. At most four at once (a picture waited for, an input, and room)."""
-        gate = self.__dict__.setdefault("_your_browser_gate", threading.BoundedSemaphore(4))
+        gate = self.__dict__.setdefault("_dgc_browser_gate", threading.BoundedSemaphore(4))
         if not gate.acquire(blocking=False):
             self._pips_failure(cmd, "busy", "Still waiting for the last picture.")
             return
@@ -8377,15 +8377,15 @@ class Backend:
             except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
                 self._pips_failure(cmd, getattr(exc, "code", "runner_error"), str(exc))
             except Exception:
-                self._pips_failure(cmd, "runner_error", "Your Browser's tab didn't answer; try again.")
+                self._pips_failure(cmd, "runner_error", "DGC Browser's tab didn't answer; try again.")
             finally:
                 gate.release()
 
         try:
-            threading.Thread(target=run, daemon=True, name="dgc-your-browser-view").start()
+            threading.Thread(target=run, daemon=True, name="dgc-dgc-browser-view").start()
         except Exception:
             gate.release()
-            self._pips_failure(cmd, "runner_error", "Your Browser's tab couldn't start; try again.")
+            self._pips_failure(cmd, "runner_error", "DGC Browser's tab couldn't start; try again.")
 
     def _drain_pips_commands(self):
         finished = False
@@ -8432,28 +8432,28 @@ class Backend:
                 streams = self._desktop_streams = DesktopStreams(self.em.emit, self.config)
         streams.handle(cmd)
 
-    def _your_browser_screen(self, cmd):
-        """Your Browser's own tab, streamed where this computer has no screen: refused exactly where Pips controls are,
+    def _dgc_browser_screen(self, cmd):
+        """DGC Browser's own tab, streamed where this computer has no screen: refused exactly where Pips controls are,
         and where it has a screen (its window beside the editor is the way). One stream, the person's own window."""
         from .sandbox import AGENT_SHELL
         from .pip_access import restricted, MESSAGE
-        from . import your_browser
+        from . import dgc_browser
         refusal = ("This chat closed." if getattr(self, "_pips_closing", False)
                    else AGENT_SHELL_PIPS_REFUSAL if os.environ.get(AGENT_SHELL) == "1"
                    else MESSAGE if restricted(self.config)
                    else "Pips are off." if self.config.get("pips_enabled", False) is not True
-                   else "On this computer Your Browser is its own window beside the editor." if your_browser.has_screen()
+                   else "On this computer DGC Browser is its own window beside the editor." if dgc_browser.has_screen()
                    else "")
         if refusal:
             if cmd.get("op") == "open":
-                self.em.emit("your_browser_screen_closed", reason=refusal[:300], pictures=False)
+                self.em.emit("dgc_browser_screen_closed", reason=refusal[:300], pictures=False)
             return
-        from .pip_screen_stream import YourBrowserScreen
+        from .pip_screen_stream import DgcBrowserScreen
         lock = self.__dict__.setdefault("_pips_command_lock", threading.Lock())
         with lock:
-            streams = self.__dict__.get("_your_browser_screens")
+            streams = self.__dict__.get("_dgc_browser_screens")
             if streams is None:
-                streams = self._your_browser_screens = YourBrowserScreen(self.em.emit, self.config)
+                streams = self._dgc_browser_screens = DgcBrowserScreen(self.em.emit, self.config)
         streams.handle(cmd)
 
     def _pips_policy_refusal(self, cmd):
@@ -8881,8 +8881,8 @@ class Backend:
             self._pip_desktop(cmd)
             return
 
-        if t == "your_browser_screen":
-            self._your_browser_screen(cmd)
+        if t == "dgc_browser_screen":
+            self._dgc_browser_screen(cmd)
             return
 
         if t in ("images_list", "images_update", "images_generate", "images_library"):

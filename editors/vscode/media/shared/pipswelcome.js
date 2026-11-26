@@ -140,7 +140,7 @@
 
   // ---- the Mac dialog -----------------------------------------------------------------------------------------------
   const MAC_TITLE = "Pips’ own computers need a Mac with Apple silicon on macOS 26.";
-  const MAC_SAYS = "Until then, folder Pips can only read their folder, and Your Browser runs as a separate Chrome profile on this Mac (less walled off than a computer). A Pip can still use your own Chrome when you allow it.";
+  const MAC_SAYS = "Until then, folder Pips can only read their folder, and DGC Browser runs as a separate Chrome profile on this Mac (less walled off than a computer). A Pip can still use your own Chrome when you allow it.";
   function macNote(layer, { onSeen } = {}) {
     let back = null;
     const dialog = el("div", "pw-dialog pw-mac dgc-dialog");

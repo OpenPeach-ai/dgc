@@ -21,9 +21,9 @@
 // card in a wide side bar. Adding Weather always asks for the place (the saved one is in the field); Change place is on
 // every size (a card with no room for the field opens whole at it); a weather that could not be read offers Try again
 // and is asked again after a minute.
-// Browser (decided 17 Nov): a search field, and under it the last two or three links visited in Your Browser (the
-// person's own tabs, never a Pip's); what is typed (a search or an address) opens Your Browser with it. Only where DGC has
-// Your Browser (Pips API 107): an older DGC lists no such card and Home leaves it out. Where Google Chrome is needed (his
+// Browser (decided 17 Nov): a search field, and under it the last two or three links visited in DGC Browser (the
+// person's own tabs, never a Pip's); what is typed (a search or an address) opens DGC Browser with it. Only where DGC has
+// DGC Browser (Pips API 107): an older DGC lists no such card and Home leaves it out. Where Google Chrome is needed (his
 // call, 18 Nov) the card offers ONE button, Install Google Chrome (a small dialog first, then the computer's own password
 // prompt), says it is installing, and where no prompt can open (Remote-SSH) or it was closed, shows the one terminal line
 // with Copy; once Chrome is there it is the field and the links again, by itself.
@@ -254,7 +254,7 @@
     // (A Clock of three or four is a Large card where there are Large cards: two rows of two, nothing cut.)
     const large = (id) => (id === "clock" ? zonesNow().length >= 2 : !!CARDS[id].large);
     const formOf = (id, g) => (g === "l" ? (large(id) ? "l" : "m") : g);
-    /** Whether this DGC has what a card shows: Browser only with Your Browser (Pips API 107). */
+    /** Whether this DGC has what a card shows: Browser only with DGC Browser (Pips API 107). */
     const offered = (id, d) => id !== "browser" || d.browser?.offered === true;
 
     // ---- what each card draws -----------------------------------------------------------------------------------------
@@ -355,7 +355,7 @@
       return `${headOf("Running now", rows.length ? '<span class="hc-livedot"></span>' : "")}${shown.length ? `<div class="hc-list">${shown.map((r) => li(r, '<span class="hc-btn hc-open-word">Open</span>')).join("")}</div>${rows.length > shown.length ? `<span class="hc-more-n">${rows.length - shown.length} more</span>` : ""}` : '<p class="hc-quiet">Nothing running. A session at work, or a chat answering, shows here.</p>'}`;
     }
     // Browser: the field, then the last links (Small two, Medium three, two where a wide side bar's row is short). A field at
-    // every size, as Notes is: a Small card never opens on a click. Where Your Browser can't run here it says why: with
+    // every size, as Notes is: a Small card never opens on a click. Where DGC Browser can't run here it says why: with
     // Install Google Chrome where it is needed (b.install), and the terminal line with Copy where no password prompt can
     // open or the last one was closed.
     const HALO = '<span class="halo hc-halo" aria-hidden="true"><i></i><i></i><i></i></span>';
@@ -376,19 +376,19 @@
     function browserCard(form, d, tight) {
       const b = d.browser || {}, links = Array.isArray(b.links) ? b.links.slice(0, form === "s" || tight ? 2 : 3) : [];
       const head = form === "s" ? `<span class="hc-lbl">${HALO}Browser</span>`
-        : headOf("Browser", "", b.reason ? "" : `<button type="button" class="hc-lnk hc-browse-open" title="${b.view === "tab" ? "Open Your Browser in a tab here" : "Open Your Browser beside the editor"}">Open</button>`);
+        : headOf("Browser", "", b.reason ? "" : `<button type="button" class="hc-lnk hc-browse-open" title="${b.view === "tab" ? "Open DGC Browser in a tab here" : "Open DGC Browser beside the editor"}">Open</button>`);
       if (b.install) return `${head}${installBlock(form, b)}`;
       const field = b.reason ? "" : `<form class="hc-browse" role="search" data-fk="browse-form"><input class="hc-url hc-field" type="text" data-fk="browse" enterkeyhint="go" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2000"`
-        + ` placeholder="${form === "s" ? "Search or address" : "Search Google or type an address"}" aria-label="Search Google or type an address, then Enter: it opens in Your Browser">`
-        + (form === "s" ? "" : '<button type="submit" class="hc-btn hc-go" title="Open in Your Browser (Enter)">Go</button>') + "</form>";
+        + ` placeholder="${form === "s" ? "Search or address" : "Search Google or type an address"}" aria-label="Search Google or type an address, then Enter: it opens in DGC Browser">`
+        + (form === "s" ? "" : '<button type="submit" class="hc-btn hc-go" title="Open in DGC Browser (Enter)">Go</button>') + "</form>";
       const why = b.reason ? (form === "s" ? `<span class="hc-sub hc-browse-why" title="${esc(b.reason)}">Not available here</span>` : `<p class="hc-quiet hc-browse-why">${esc(b.reason)}</p>`) : "";
       const said = b.error ? `<p class="hc-quiet hc-browse-why" role="status">${esc(b.error)}</p>` : "";
       const glyph = shared("globe", 14);
       // Each link wears its site's own icon (media/shared/siteicon.js), else the globe.
       const mark = (l) => { const icon = view.DgcSiteIcon?.ok(l.icon) || ""; return icon ? `<span class="hc-ico hc-site"><img class="hc-siteimg" src="${esc(icon)}" alt="" width="16" height="16" decoding="async" draggable="false"></span>` : `<span class="hc-ico hc-globe">${glyph}</span>`; };
-      const rows = b.reason ? "" : links.map((l) => `<button type="button" class="hc-li hc-link" data-browse="${esc(l.url)}" title="${esc(`Open ${l.url} in Your Browser`)}">${mark(l)}`
+      const rows = b.reason ? "" : links.map((l) => `<button type="button" class="hc-li hc-link" data-browse="${esc(l.url)}" title="${esc(`Open ${l.url} in DGC Browser`)}">${mark(l)}`
         + `<span class="hc-tx"><span class="hc-nm">${esc(l.title || l.host || l.url)}</span>${form === "s" || tight ? "" : `<span class="hc-meta">${esc(l.host || "")}</span>`}</span></button>`).join("");
-      const none = !links.length && !b.reason ? `<p class="hc-quiet hc-browse-none">${form === "s" ? "Your last links show here" : "The last sites you visit in Your Browser show here."}</p>` : "";
+      const none = !links.length && !b.reason ? `<p class="hc-quiet hc-browse-none">${form === "s" ? "Your last links show here" : "The last sites you visit in DGC Browser show here."}</p>` : "";
       return `${head}${field}${why}${said}${rows ? `<div class="hc-links">${rows}</div>` : none}`;
     }
     function quickCard(form, d) {
@@ -930,7 +930,7 @@
     function drawLibrary(d) {
       if (!library) return;
       const types = TYPES.filter((id) => offered(id, d)), groups = [...new Set(types.map((id) => CARDS[id].group))], list = library.querySelector(".hc-lib-list");
-      // (Drawn again when what this DGC offers changes: Browser comes with a DGC that has Your Browser.)
+      // (Drawn again when what this DGC offers changes: Browser comes with a DGC that has DGC Browser.)
       if (!list.childElementCount || list.__types !== types.join()) { list.__types = types.join(); list.innerHTML = groups.map((g) => `<div class="hc-lib-grp">${esc(g)}</div><div class="hc-lib-grid">${types.filter((id) => CARDS[id].group === g).map((id) => `<div class="hc-lib-item" data-card="${id}"></div>`).join("")}</div>`).join(""); }
       for (const item of list.querySelectorAll(".hc-lib-item")) {
         const id = item.dataset.card, on = layout.order.includes(id), adding = libraryAdding === id && !on;
@@ -1088,7 +1088,7 @@
       if (card.dataset.form === "s" && card.parentNode === grid && id !== "quick" && id !== "browser" && !t.closest("button, a, input, select, textarea, .dgc-hub-card, form")) open(id);
     });
     host.addEventListener("submit", (e) => {
-      // Browser: what was typed (a search or an address) opens Your Browser with it; the field is emptied for the next.
+      // Browser: what was typed (a search or an address) opens DGC Browser with it; the field is emptied for the next.
       const browse = e.target.closest(".hc-browse");
       if (browse) {
         e.preventDefault();
@@ -1096,7 +1096,7 @@
         if (!text) { field?.focus(); return; }
         act?.("browse", text);
         if (field) field.value = "";
-        say(`Opening “${text.slice(0, 80)}” in Your Browser.`);
+        say(`Opening “${text.slice(0, 80)}” in DGC Browser.`);
         return;
       }
       const form = e.target.closest(".hc-cityform"); if (!form) return;

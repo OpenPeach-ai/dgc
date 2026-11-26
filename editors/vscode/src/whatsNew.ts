@@ -30,8 +30,8 @@ export function whatsNewMessage(auto: boolean): { type: "whatsNew"; auto: boolea
   return { type: "whatsNew", auto, release: WHATS_NEW_RELEASE };
 }
 
-/** Where a slide's own action goes (Open Pips, Open Your Browser, Open Library, Open Work, Open Settings): the side bar's
- *  own tabs, as Home's buttons open them; Your Browser, as the dock's tile opens it (and Home's Cards library, for a
+/** Where a slide's own action goes (Open Pips, Open DGC Browser, Open Library, Open Work, Open Settings): the side bar's
+ *  own tabs, as Home's buttons open them; DGC Browser, as the dock's tile opens it (and Home's Cards library, for a
  *  page that asks for it); DGC's Settings tab. What the page or the host is told, or null for a place it doesn't know
  *  (the news is still answered: the page has closed it). */
 const WHATS_NEW_PLACES: Record<string, { tab: string; open?: string }> = {

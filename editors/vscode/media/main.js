@@ -1495,24 +1495,25 @@
     if (page) page.scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? page.clientHeight : 1);
   }
   if (chatPlace === "home") $("side-tabs")?.addEventListener("wheel", glassWheel, { passive: true });
-  // ---- Your Browser (Pips API 107; decided 17 Nov): pinned to the dock for good, just before "+", and Home's Browser
-  // card (a search field and the last links visited there). Either opens Your Browser's window, Google Chrome with
+  // ---- DGC Browser (Pips API 107; decided 17 Nov): pinned to the dock for good, just before "+", and Home's Browser
+  // card (a search field and the last links visited there). Either opens DGC Browser's window, Google Chrome with
   // DGC's own profile, to the right of this editor: the page measures where the editor's window is and the screen it is
   // on, and DGC places the window from that. An older DGC (or Pips off) shows neither. ----
   // Where Google Chrome is needed (decided 18 Nov): ONE button, Install Google Chrome, on Home's card and the dock's
   // tile; a small dialog says what it does first, then the computer's own password prompt does the one root step (DGC
   // never sees the password). Where no prompt can open (Remote-SSH, a server) or it was closed, the one terminal line, with
   // Copy. While it installs the card asks again every couple of seconds, and becomes the field and the links by itself.
-  // Where the computer DGC runs on has no screen (view "tab"), "Open Your Browser" opens an editor tab that streams your
+  // Where the computer DGC runs on has no screen (view "tab"), "Open DGC Browser" opens an editor tab that streams your
   // own tab instead of a window.
-  // Clear browsing data (Pips API 112): a right-click on Your Browser in the dock offers it; one small dialog ticks what
+  // Clear browsing data (Pips API 112): a right-click on DGC Browser in the dock offers it; one small dialog ticks what
   // goes, each kind with one line of what it removes, and the button says what it clears. Nothing is cleared before it.
   const YB_API = 107, YB_CLEAR_API = 112, YB_SITES_API = 113, YB_POLL_MS = 60000, YB_INSTALL_POLL_MS = 2000;
   const yb = { generation: 0, connected: false, api: 0, links: [], lanes: [], available: true, reason: "", open: false, error: "", seq: 0, pending: new Map(), asked: 0,
     install: null, view: "window", installTimer: 0, account: false, newSites: 0, runsLive: false, lanesAsked: 0, lanesAsking: false };
   const YB_LANES_LIVE_MS = 2000, YB_LANES_IDLE_MS = 5000;
-  /** The Pips with a tab in Your Browser as DGC says them: each named, and whether its run is working in it now. */
-  const ybLanesOf = (said) => (Array.isArray(said?.lanes) ? said.lanes.filter((l) => l && /^pip_[A-Za-z0-9]{1,64}$/.test(String(l.pip_id)) && typeof l.name === "string" && l.name.trim()).slice(0, 8)
+  /** The Pips (and Work sessions, 26 Nov: "work:<session>", named "Work · <project>") with a tab in DGC Browser as DGC
+   *  says them: each named, and whether its run is working in it now. */
+  const ybLanesOf = (said) => (Array.isArray(said?.lanes) ? said.lanes.filter((l) => l && /^(?:pip_[A-Za-z0-9]{1,64}|work:[A-Za-z0-9_-]{1,64})$/.test(String(l.pip_id)) && typeof l.name === "string" && l.name.trim()).slice(0, 8)
     .map((l) => ({ pip_id: String(l.pip_id), name: String(l.name).trim().slice(0, 120), working: l.working === true })) : []);
   const ybOffered = () => yb.connected && yb.api >= YB_API;
   /** Where this editor's window is and the work area of its screen, in screen pixels; null where the page can't tell. */
@@ -1525,7 +1526,7 @@
   }
   function ybAsk(type, fields = {}, wait = 20000) {
     return new Promise((resolve, reject) => {
-      const id = `your-browser-${yb.generation}-${++yb.seq}`;
+      const id = `dgc-browser-${yb.generation}-${++yb.seq}`;
       const timer = setTimeout(() => { yb.pending.delete(id); reject(new Error("DGC didn't answer. Try again.")); }, wait);
       yb.pending.set(id, { resolve, reject, timer });
       vscode.postMessage({ type: "pipsRequest", id, generation: yb.generation, request: { type, ...fields }, documentId: document.documentElement.dataset.pipsDocumentId });
@@ -1536,7 +1537,7 @@
   function ybRecent() {
     if (!ybOffered() || document.hidden) return;
     yb.asked = Date.now();
-    ybAsk("get_your_browser_recent").then((said) => {
+    ybAsk("get_dgc_browser_recent").then((said) => {
       const links = Array.isArray(said?.links) ? said.links.filter((l) => l && typeof l.url === "string" && /^https?:\/\//i.test(l.url)).slice(0, 3)
         .map((l) => ({ url: String(l.url).slice(0, 2000), title: String(l.title || "").slice(0, 200), host: String(l.host || "").slice(0, 253), icon: window.DgcSiteIcon?.ok(l.icon, 32001) || "" })) : [];
       yb.links = links; yb.available = said?.available !== false; yb.reason = yb.available ? "" : String(said?.reason || "").slice(0, 600); yb.open = said?.open === true;
@@ -1629,7 +1630,7 @@
   const YB_KINDS = [
     { id: "history", name: "Browsing history", line: "Pages you visited, the downloads list and the recent links on Home’s Browser card.", on: true, one: "Clear history" },
     { id: "sign_ins", name: "Sign-ins", line: "Cookies and site data: you’ll be signed out of sites.", on: false, one: "Clear sign-ins" },
-    { id: "passwords", name: "Saved passwords", line: "Passwords Chrome saved in Your Browser.", on: false, one: "Clear passwords" },
+    { id: "passwords", name: "Saved passwords", line: "Passwords Chrome saved in DGC Browser.", on: false, one: "Clear passwords" },
   ];
   let ybClearing = null;
   function ybCloseClear(refocus = true) {
@@ -1650,8 +1651,8 @@
     dialog.setAttribute("aria-labelledby", "yb-clear-title");
     // (A Pip's tab there closes with it: said before, and again once it is done.)
     const pipTabs = yb.open && yb.lanes.length > 0;
-    const notes = [yb.open ? `Your Browser closes for a moment and opens again.${pipTabs ? ` ${yb.lanes.length === 1 ? "A Pip’s tab" : "Your Pips’ tabs"} there ${yb.lanes.length === 1 ? "closes" : "close"} with it.` : ""}` : "",
-      yb.account ? "Chrome is signed in to a Google account in Your Browser: if its sync is on, your account keeps its own copy." : ""].filter(Boolean);
+    const notes = [yb.open ? `DGC Browser closes for a moment and opens again.${pipTabs ? ` ${yb.lanes.length === 1 ? "A Pip’s tab" : "Your Pips’ tabs"} there ${yb.lanes.length === 1 ? "closes" : "close"} with it.` : ""}` : "",
+      yb.account ? "Chrome is signed in to a Google account in DGC Browser: if its sync is on, your account keeps its own copy." : ""].filter(Boolean);
     dialog.innerHTML = `<div class="new-session-body"><h2 id="yb-clear-title">Clear browsing data</h2>
       <fieldset class="yb-clear-kinds"><legend class="yb-clear-legend">What to clear</legend>${YB_KINDS.map((k) => `<label class="yb-clear-kind"><input type="checkbox" name="${k.id}"${k.on ? " checked" : ""}><span class="yb-clear-words"><span class="yb-clear-name">${esc(k.name)}</span><span class="yb-clear-line">${esc(k.line)}</span></span></label>`).join("")}</fieldset>
       ${notes.map((n) => `<p class="new-session-intro yb-clear-note">${esc(n)}</p>`).join("")}<p class="yb-clear-error" role="alert" hidden></p></div>
@@ -1668,13 +1669,13 @@
       for (const box of boxes) box.disabled = true;
       // (Closing Chrome, clearing and opening it again takes some seconds: DGC itself waits up to a minute.)
       const wasOpen = yb.open, tabs = pipTabs ? yb.lanes.length : 0;
-      ybAsk("clear_your_browser", Object.fromEntries(YB_KINDS.map((k) => [k.id, t.includes(k.id)])), 70000).then((said) => {
+      ybAsk("clear_dgc_browser", Object.fromEntries(YB_KINDS.map((k) => [k.id, t.includes(k.id)])), 70000).then((said) => {
         const done = YB_KINDS.filter((k) => (Array.isArray(said?.cleared) ? said.cleared : t).includes(k.id)).map((k) => k.name.toLowerCase());
         // It says it is done where the person is looking, and stays until Done: Chrome closing and opening again takes
         // the eye, and a note on the dock went by unseen (user test, round 2).
         if (ybClearing?.dialog === dialog) {
           delete go.dataset.busy;
-          const after = wasOpen || said?.reopened === true ? `Your Browser opened again.${tabs ? ` ${tabs === 1 ? "A Pip’s tab there closed with it: the Pip opens a new one" : "Your Pips’ tabs there closed with it: each Pip opens a new one"} when it next works there.` : ""}` : "";
+          const after = wasOpen || said?.reopened === true ? `DGC Browser opened again.${tabs ? ` ${tabs === 1 ? "A Pip’s tab there closed with it: the Pip opens a new one" : "Your Pips’ tabs there closed with it: each Pip opens a new one"} when it next works there.` : ""}` : "";
           dialog.querySelector(".new-session-body").innerHTML = `<h2 id="yb-clear-title">Browsing data cleared</h2><p class="new-session-intro yb-clear-done" role="status">${esc(`Cleared: ${done.join(", ") || "nothing"}.`)}</p>${after ? `<p class="new-session-intro yb-clear-after">${esc(after)}</p>` : ""}`;
           dialog.querySelector(".new-session-buttons").innerHTML = `<button type="button" class="act primary yb-clear-ok">Done</button>`;
           const ok = dialog.querySelector(".yb-clear-ok");
@@ -1687,7 +1688,7 @@
         delete go.dataset.busy;
         for (const box of boxes) box.disabled = false;
         words();
-        error.textContent = String(problem?.message || "Your Browser couldn’t clear that.").slice(0, 400); error.hidden = false;
+        error.textContent = String(problem?.message || "DGC Browser couldn’t clear that.").slice(0, 400); error.hidden = false;
       });
     };
     dialog.addEventListener("cancel", (e) => { e.preventDefault(); if (!go.dataset.busy) ybCloseClear(); });
@@ -1698,7 +1699,7 @@
     boxes[0].focus();
     setTimeout(() => { if (ybClearing?.dialog === dialog && !dialog.contains(document.activeElement)) boxes[0].focus(); }, 0);
   }
-  /** Sites Pips can use (Pips API 113): the one panel of every site on Your Browser's list and which Pips
+  /** Sites Pips can use (Pips API 113): the one panel of every site on DGC Browser's list and which Pips
       may use it (media/shared/ybsites.js, the same one a Pip's page opens). Opening it is looking: the dock's "N new" goes. */
   function ybSitesOpen() {
     if (!ybOffered() || yb.api < YB_SITES_API || !window.DgcYbSites) return;
@@ -1706,38 +1707,38 @@
     window.DgcYbSites.panel({ ask: (type, fields) => ybAsk(type, fields), doc: document,
       onSeen: () => { if (yb.newSites) { yb.newSites = 0; ybPaint(); } } });
   }
-  /** Open Your Browser with what was typed (a search or an address), a link, or nothing (its window comes forward). */
+  /** Open DGC Browser with what was typed (a search or an address), a link, or nothing (its window comes forward). */
   function ybOpen(text) {
     if (!ybOffered()) return;
     if (yb.install) { ybInstall(); return; }               // (Google Chrome first: the one button)
     const bounds = editorBounds(), url = String(text || "").trim().slice(0, 2000);
     yb.error = "";
-    ybAsk("open_your_browser", { ...(url ? { url } : {}), ...(bounds ? { editor_bounds: bounds } : {}) }).then((said) => {
+    ybAsk("open_dgc_browser", { ...(url ? { url } : {}), ...(bounds ? { editor_bounds: bounds } : {}) }).then((said) => {
       yb.open = true; ybPaint();
       // No screen where DGC runs (Remote-SSH): your own tab, streamed into an editor tab.
-      if (said?.view === "tab") { yb.view = "tab"; vscode.postMessage({ type: "pipsOpenYourBrowser", own: true, documentId: document.documentElement.dataset.pipsDocumentId }); }
+      if (said?.view === "tab") { yb.view = "tab"; vscode.postMessage({ type: "pipsOpenDgcBrowser", own: true, documentId: document.documentElement.dataset.pipsDocumentId }); }
       setTimeout(ybRecent, 3000);
     }, (error) => {
-      yb.error = String(error?.message || "Your Browser didn't open.").slice(0, 600);
+      yb.error = String(error?.message || "DGC Browser didn't open.").slice(0, 600);
       dock?.note?.("browser", yb.error);
       ybPaint();
     });
   }
   /** A Pip asked to work from this side bar (a message in its chat, Run now, an answer, a card's Allow): the dock looks at
-      Your Browser every couple of seconds from now, so the Pip's tab there is on it at once. */
+      DGC Browser every couple of seconds from now, so the Pip's tab there is on it at once. */
   function ybAskedOfPip(message) {
     try {
       if (message?.type === "pipsRequest" && ["send_pip_message", "run_pip", "answer_pip_questions", "decide_pip_computer_action", "start_pip_job"].includes(message.request?.type)) {
         yb.runsLive = true; yb.lanesAsked = 0;
       }
-    } catch { /* (before Your Browser's part of the page is up: its first look comes with the connection) */ }
+    } catch { /* (before DGC Browser's part of the page is up: its first look comes with the connection) */ }
   }
-  /** The quick look at the Pips working in Your Browser (Pips API 113): asked every few seconds while any Pip's run is
+  /** The quick look at the Pips working in DGC Browser (Pips API 113): asked every few seconds while any Pip's run is
       live or one is working there, so a Pip's new tab is on the dock at once (Watch), and seldom otherwise. */
   function ybLanes() {
     if (!ybOffered() || yb.api < YB_SITES_API || yb.lanesAsking || document.hidden) return;
     yb.lanesAsked = Date.now(); yb.lanesAsking = true;
-    ybAsk("get_your_browser_lanes").then((said) => {
+    ybAsk("get_dgc_browser_lanes").then((said) => {
       yb.lanesAsking = false;
       const lanes = ybLanesOf(said), live = said?.runs_live === true;
       const changed = JSON.stringify(lanes) !== JSON.stringify(yb.lanes);
@@ -1759,7 +1760,7 @@
     if (msg.type !== "pipsReply") return;
     const p = yb.pending.get(msg.id); if (!p) return;
     yb.pending.delete(msg.id); clearTimeout(p.timer);
-    if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error?.message || "Your Browser didn't answer."));
+    if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error?.message || "DGC Browser didn't answer."));
   }
   if (chatPlace === "home") {
     setInterval(() => { if (ybOffered() && !document.hidden && Date.now() - yb.asked >= YB_POLL_MS) ybRecent(); }, 5000);
@@ -1772,7 +1773,7 @@
   const HALO = '<span class="halo dgc-dock-halo" aria-hidden="true"><i></i><i></i><i></i></span>';
   // (While a Pip works in it, its halo moves as a busy session's mark does: dock.css .is-live.)
   const HALO_LIVE = '<span class="halo dgc-dock-halo is-live" aria-hidden="true"><i></i><i></i><i></i></span>';
-  /** The dock's one item that is always there (decided 17 Nov): Your Browser, just before "+". */
+  /** The dock's one item that is always there (decided 17 Nov): DGC Browser, just before "+". */
   function dockFixed() {
     if (!ybOffered()) return [];
     const here = yb.view === "tab" ? "in a tab here" : "to the right of the editor";
@@ -1784,15 +1785,15 @@
       : who ? `${who} ${working.length === 1 ? "is" : "are"} working in it` : yb.open ? `Open, ${here}` : `Opens ${here}`;
     // Its menu: Open (or, where it is needed, Install Google Chrome), then each Pip working in it, to watch that Pip's tab
     // in an editor tab beside the chat.
-    const watch = yb.lanes.map((l) => ({ id: `lane:${l.pip_id}`, label: `Watch ${l.name}'s tab`, icon: "open-in-editor" }));
-    const first = yb.install ? { id: "open", label: "Install Google Chrome…", icon: "save" } : { id: "open", label: "Open Your Browser", icon: "open" };
+    const watch = yb.lanes.map((l) => ({ id: `lane:${l.pip_id}`, label: l.pip_id.startsWith("work:") ? `Watch ${l.name}` : `Watch ${l.name}'s tab`, icon: "open-in-editor" }));
+    const first = yb.install ? { id: "open", label: "Install Google Chrome…", icon: "save" } : { id: "open", label: "Open DGC Browser", icon: "open" };
     // Sites Pips can use (Pips API 113): which Pips may use each site you're signed in to there; "N new" for sites noticed
     // from your own sign-ins since you last looked.
     const sites = yb.api >= YB_SITES_API ? [{ id: "sites", label: yb.newSites ? `Sites Pips can use… (${yb.newSites} new)` : "Sites Pips can use…", icon: "globe" }] : [];
     // Clear browsing data (Pips API 112): only where it can run here, and with DGC that has it.
     const clear = yb.api >= YB_CLEAR_API && yb.available && !yb.install ? [{ id: "clear", label: "Clear browsing data…", icon: "delete" }] : [];
     const last = [...sites, ...clear];
-    return [{ key: "browser", kind: "browser", title: "Your Browser", state, icon: who ? HALO_LIVE : HALO, dot: who ? "live" : "",
+    return [{ key: "browser", kind: "browser", title: "DGC Browser", state, icon: who ? HALO_LIVE : HALO, dot: who ? "live" : "",
       menu: [[first], ...(watch.length ? [watch] : []), ...(last.length ? [last] : [])] }];
   }
   /** The dock itself, made once on the side bar's page: the last thing on it, under every screen. */
@@ -1806,7 +1807,7 @@
     if (typeof MutationObserver === "function") new MutationObserver(glassRoom).observe(host, { attributes: true, attributeFilter: ["data-show", "data-state", "hidden"] });
     dock = window.DgcDock.create({ host,
       onOpen: (key) => {
-        if (key === "browser") { ybOpen(""); return; }          // Your Browser: its window, to the right of the editor
+        if (key === "browser") { ybOpen(""); return; }          // DGC Browser: its window, to the right of the editor
         const pin = dockState.pins.find((p) => p.key === key);
         if (!pin) return;
         if (pin.kind === "pip") openPipsAt({ pip: pin.id });
@@ -1819,9 +1820,9 @@
         if (key === "browser") {
           if (what === "clear") { ybClear(); return; }
           if (what === "sites") { ybSitesOpen(); return; }
-          // A Pip's own tab in Your Browser, streamed into an editor tab beside the chat.
+          // A Pip's own tab in DGC Browser, streamed into an editor tab beside the chat.
           const lane = String(what).startsWith("lane:") ? yb.lanes.find((l) => l.pip_id === String(what).slice(5)) : null;
-          if (lane) vscode.postMessage({ type: "pipsOpenYourBrowser", pip: { id: lane.pip_id, name: lane.name }, documentId: document.documentElement.dataset.pipsDocumentId });
+          if (lane) vscode.postMessage({ type: "pipsOpenDgcBrowser", pip: { id: lane.pip_id, name: lane.name }, documentId: document.documentElement.dataset.pipsDocumentId });
           return;
         }
         const pin = dockState.pins.find((p) => p.key === key), folder = String(pin?.ref?.folder || "");
@@ -2491,7 +2492,7 @@
       // What the Library lists: a widget's Folio in the palette it wears, an artifact's sheet by its kind (as the dock and the Library show them).
       widgets: { mark: (id) => { wearMarks("widget", [{ id: String(id) }]); return markHtml("widget", String(id), false); } },
       artifacts: { sheet: (type) => window.DgcFileSheet?.html?.(String(type || "file")) || "" },
-      // Your Browser's card: offered only by a DGC that has it (Pips API 107).
+      // DGC Browser's card: offered only by a DGC that has it (Pips API 107).
       browser: { offered: ybOffered(), links: yb.links, reason: yb.available ? "" : yb.reason, open: yb.open, error: yb.error, install: yb.install, view: yb.view },
     };
   }
@@ -2570,7 +2571,7 @@
       onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry() });
     hubNew = window.DgcHub.create({ host: newHost, groups: ["new"], empty: "",
       onAct: hubAct, onClear: hubClear, onMore: () => homePips?.openAll(), onPips: () => showSideTab("pips"), onRetry: () => homePips?.retry() });
-    // The side bar's own lines that say what went wrong (a list that couldn't be read, a Home note, Your Browser's
+    // The side bar's own lines that say what went wrong (a list that couldn't be read, a Home note, DGC Browser's
     // card) can be closed. Not a note with Retry in it, an install that is running, or the line that goes with an
     // install's own buttons.
     if (window.DgcDismiss && $("sessions-host")) window.DgcDismiss.watch({ root: $("sessions-host"), lines: [
@@ -3925,7 +3926,7 @@
     code_intel: "braces", git_diff: "file-diff", write_file: "file-plus", create_file: "file-plus",
     edit_file: "pencil", apply_patch: "pencil", multi_edit: "pencil", save_memory: "bookmark", remember: "bookmark", forget: "bookmark",
     bash: "square-terminal", bash_output: "square-terminal", bash_kill: "square-terminal", python: "code",
-    web_search: "globe", web_fetch: "globe", deep_research: "globe", browser: "globe", view_image: "image",
+    web_search: "globe", web_fetch: "globe", deep_research: "globe", browser: "globe", dgc_browser: "globe", view_image: "image",
     present_plan: "clipboard-list", present_document: "file-text", propose_options: "circle-help",
     task: "bot", todo: "list-todo", skill: "sparkle", add_skill: "sparkle", notes: "notebook-pen",
     monitor: "activity", monitor_stop: "activity", artifact: "app-window", update_goal: "target",
@@ -6781,8 +6782,13 @@
     finished._turnAt = turn.t0 != null ? turn.t0 : turn.promptAt > 0 ? turn.promptAt : NaN;
     pipSetupCards?.finish(finished);
     pipDigestBar?.refresh();
-    // Its plan's card stops: nothing turns in it, and its clocks stand where the turn left them.
-    if (turn.plan) turn.plan.view.paint(turn.plan.view.rows, { running: false, why: turn.plan.why });
+    // Its plan's card stops: nothing turns in it, and its clocks stand where the turn left them. It says how its turn
+    // ended, for the card that may carry its list on (supersedePlan).
+    if (turn.plan) {
+      turn.plan.view.paint(turn.plan.view.rows, { running: false, why: turn.plan.why });
+      turn.plan.card.dataset.ended = String(reason || "completed");
+      lastPlanCard = turn.plan.card;
+    }
     turn = null;
     placeGoalEnds();                             // a goal that ended in this turn says so under it
     // Repaint the checklist now that no turn is live. The row hides itself only when it renders
@@ -7612,6 +7618,29 @@
     };
     return card;
   }
+  // The card of the last turn that had a list, once its turn ended: a later turn's list supersedes it.
+  let lastPlanCard = null;
+  // A later turn wrote the list (seen on a test machine, 26 Nov: a turn stopped on the provider's usage limit and
+  // "continue" carried its list on, condensed, while the stopped turn's card still showed its steps open). The earlier
+  // card says where its list went, with Show it, and the steps it hadn't finished are marked as moved on: carried on if
+  // its turn stopped (failed, stopped, paused or moved), replaced if it finished. A list with every step done says
+  // nothing: nothing of it looks undone.
+  function supersedePlan(old, fresh) {
+    if (!old || old === fresh) return;              // (a reopened chat draws its history off the page first: never isConnected)
+    const open = [...old.querySelectorAll("li.todo:not(.todo-gone)")].filter((li) => !["done", "cancelled"].includes(li.dataset.status));
+    if (!open.length) return;
+    const how = ["error", "cancelled", "paused", "moved"].includes(old.dataset.ended) ? "carried" : "replaced";
+    old.dataset.superseded = how;
+    for (const li of open) li.setAttribute("data-moved", "");
+    let note = old.querySelector(":scope > .todos-moved");
+    if (!note) { note = el("p", "todos-moved"); (old.querySelector(":scope > .todos-body") || old.lastElementChild).after(note); }
+    note.innerHTML = `<span>${how === "carried" ? "Carried on in a later turn." : "Replaced by a newer list."}</span> `
+      + '<button type="button" class="link todos-moved-go">Show it</button>';
+    note.querySelector(".todos-moved-go").addEventListener("click", () => {
+      fresh.scrollIntoView?.({ block: "nearest" });
+      fresh.classList.remove("prompt-flash"); void fresh.offsetWidth; fresh.classList.add("prompt-flash");
+    });
+  }
   // Draw the live turn's plan: its card, made where the plan first appears in the turn (between the steps around it, like
   // a question the model asked) and changed in place after that. An empty plan takes its card away. Returns whether a
   // card was drawn just now, which is new content in the transcript.
@@ -7631,6 +7660,7 @@
     }
     if (why) turn.plan.why = why;
     turn.plan.view.paint(rows, { running: !replaying, why: turn.plan.why });
+    if (drawn && lastPlanCard) { supersedePlan(lastPlanCard, turn.plan.card); lastPlanCard = null; }
     return drawn;
   }
   // The step DGC is running now changed: the step in progress says so, in the section and in the live turn's card.
@@ -7957,7 +7987,7 @@
     read_file: "read", grep: "searched", glob: "searched", repo_map: "mapped",
     code_intel: "mapped", write_file: "created", create_file: "created",
     edit_file: "edited", apply_patch: "edited", multi_edit: "edited",
-    bash: "ran", browser: "looked", web_search: "web", web_fetch: "fetched",
+    bash: "ran", browser: "looked", dgc_browser: "looked", web_search: "web", web_fetch: "fetched",
     view_image: "viewed",
   };
   // The pages web_fetch read, by site: "read a page on example.com", "read 3 pages on 2 sites". A fetch is no search,
@@ -9000,6 +9030,17 @@ function permissionChoices(ev) {
   }
   function plainPermission(name, args) {
     const a = args && typeof args === "object" ? args : {};
+    // DGC Browser (26 Nov): opening a site in a Work session's own tab there, where you're signed in. The site, what it
+    // may do there, and Always allow for that site alone.
+    if (name === "dgc_browser") {
+      let site = "";
+      try { site = new URL(String(a.url || "")).host; } catch { site = ""; }
+      return { name: "DGC Browser", title: `Use <b>${esc(site || "this site")}</b> in DGC Browser?`,
+        detail: `<p>DGC wants to open <b>${esc(site || "a site")}</b> in a tab of its own in DGC Browser, where you're signed in. It can read and act on that site as you; it never types a password and never pays.</p><pre>${esc(String(a.url || ""))}</pre>`,
+        // (The site is in the title: the button says Always allow, its name for a screen reader and on hover names the
+        // site; "Always allow www.tiles-shop.com" was cut to "Always allow …" beside the title, seen live 26 Nov.)
+        labels: { always: "Always allow", alwaysSays: site ? `Always allow ${site} in DGC Browser` : "" }, edit: null };
+    }
     if (name === "generate_image" && typeof a.generator === "string" && a.generator) {
       const count = Number.isSafeInteger(a.count) && a.count > 0 ? a.count : 1;
       const price = String(a.price || "");
@@ -11116,7 +11157,7 @@ function permissionChoices(ev) {
         const buttons = fixFile
           ? `<button type="button" class="act" data-d="deny">Not now</button><button type="button" class="act primary" data-d="once">Copy it</button>`
           : (plain?.edit != null && offered.has("deny") ? '<button type="button" class="act" data-edit-prompt aria-expanded="false">Edit</button>' : "")
-            + (offered.has("always") ? `<button type="button" class="act" data-d="always"${projectRules.length ? ' aria-label="Always allow edits in this project" title="Always allow edits in this project: DGC stops asking before it edits a file here. Remove the rule in Settings → Security."' : ""}>${signedIn ? `Always allow ${esc(site || "this site")}` : esc(plain?.labels.always || "Always allow")}</button>` : "")
+            + (offered.has("always") ? `<button type="button" class="act" data-d="always"${projectRules.length ? ' aria-label="Always allow edits in this project" title="Always allow edits in this project: DGC stops asking before it edits a file here. Remove the rule in Settings → Security."' : plain?.labels.alwaysSays ? ` aria-label="${esc(plain.labels.alwaysSays)}" title="${esc(plain.labels.alwaysSays)}"` : ""}>${signedIn ? `Always allow ${esc(site || "this site")}` : esc(plain?.labels.always || "Always allow")}</button>` : "")
             + (offered.has("deny") ? `<button type="button" class="act" data-d="deny">${esc(plain?.labels.deny || "Deny")}</button>` : "")
             + (offered.has("once") ? `<button type="button" class="act primary" data-d="once"${plain?.blocked ? ' disabled title="It would pass this month\'s limit"' : ""}>${esc(plain?.labels.once || "Allow once")}</button>` : "");
         // Edit: the prompt in a box; "Ask again with this prompt" answers the card with the new prompt for the model,
@@ -14863,7 +14904,7 @@ function permissionChoices(ev) {
   window.DgcPictureFold?.host((message) => vscode.postMessage(message));
   // "What's new" (media/shared/whatsnew.js): the dialog the side bar shows once per release, and again from the DGC
   // view's menu. ×, Done or Esc tells the host, which never shows it by itself again (src/whatsNew.ts). A slide's own
-  // action (Open Pips, Open Your Browser, Open Library, Open Work, Open Settings) is an answer too: the host keeps it and says where to go
+  // action (Open Pips, Open DGC Browser, Open Library, Open Work, Open Settings) is an answer too: the host keeps it and says where to go
   // ({type: "sideTab"}, below).
   let whatsNew = null;
   // DGC's version and "What's new" at the far right of the logo line, where that line holds nothing of a session's: every
@@ -14883,7 +14924,7 @@ function permissionChoices(ev) {
     if (!layer || !window.DgcWhatsNew || chatPlace !== "home") return;
     whatsNew = whatsNew || window.DgcWhatsNew.mount(layer, { onSeen: () => vscode.postMessage({ type: "whatsNewSeen" }),
       onGo: (to) => vscode.postMessage({ type: "whatsNewGo", to }), icon: (name) => icon(name), planMark: (mark, running) => planMark(mark, running),
-      // (Open Your Browser is offered where Your Browser is: a DGC that has it, on a computer where it can open.)
+      // (Open DGC Browser is offered where DGC Browser is: a DGC that has it, on a computer where it can open.)
       can: (to) => to !== "browser" || (ybOffered() && (yb.available || !!yb.install)) });
     whatsNew.open({ release: msg?.release });
   }
@@ -15040,13 +15081,13 @@ function permissionChoices(ev) {
     if (msg.type === "whatsNew") { openWhatsNew(msg); return; }
     // The host's way to a tab of the side bar (What's new's slide actions, src/whatsNew.ts): the tab as Home's buttons
     // choose it, with the keyboard on it; `open: "cards"` opens Home's Cards library, as its Cards button does, and
-    // `open: "browser"` Your Browser, as the dock's tile does.
+    // `open: "browser"` DGC Browser, as the dock's tile does.
     if (msg.type === "sideTab") {
       if (chatPlace !== "home") return;
       const tab = String(msg.tab || "");
       showSideTab(tab, msg.open !== "cards");
       if (tab === "home" && msg.open === "cards") home?.openCards?.();
-      // Open Your Browser: Home stays, and its window opens as the dock's own tile opens it.
+      // Open DGC Browser: Home stays, and its window opens as the dock's own tile opens it.
       if (tab === "home" && msg.open === "browser") ybOpen("");
       return;
     }

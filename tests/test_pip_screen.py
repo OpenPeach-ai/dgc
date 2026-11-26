@@ -132,7 +132,9 @@ class DesktopBoxTests(unittest.TestCase):
         self.assertIn("echo browser > /run/dgc/sock/control", apps["browser"])
         self.assertNotIn("chrome", apps["browser"].lower(), "the dock never starts a browser of its own")
         self.assertIn("pcmanfm /home/pip/Files", apps["files"])
-        self.assertIn("cd /home/pip/Files", apps["terminal"])
+        # Its Terminal opens in Files: lxterminal where this machine or DGC's own download has it, else xterm.
+        self.assertIn(pip_screen.terminal_command(), apps["terminal"])
+        self.assertIn("/home/pip/Files", pip_screen.terminal_command())
         for look in ("light", "dark"):          # the dock's day and night glass (16 Nov), the same three apps
             rc = (conf / f"tint2rc-{look}").read_text()
             self.assertIn("panel_position = bottom center horizontal", rc)

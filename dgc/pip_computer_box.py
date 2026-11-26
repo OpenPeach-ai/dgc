@@ -13,9 +13,9 @@ posts outside that window, and browser telemetry, pass through so ordinary pages
 WebSockets are blocked because the gate cannot inspect their messages, and the box has no UDP.
 A payment initiated by the Pip is held for the user, with card details identified in its review.
 
-The gate's state is per tab (0.52, for Your Browser): each tab has an owner (a Pip, or the person), its own last
+The gate's state is per tab (0.52, for DGC Browser): each tab has an owner (a Pip, or the person), its own last
 action, sign-in pass and dialog, and each owner its own careful-mode gate, so two Pips in one browser never bleed into
-each other. A browser shared with the person (``shared``: Your Browser) never gates the person's own tabs; each Pip's
+each other. A browser shared with the person (``shared``: DGC Browser) never gates the person's own tabs; each Pip's
 tab there (its lane) is gated on that tab alone through Chrome's own controls, and confined to the sites the person let
 that Pip use.
 
@@ -869,7 +869,7 @@ class HeldWrite:
     payment: bool = False           # carries a payment card number: the review says so
     site: bool = False              # careful mode: a page on a site this Pip hasn't visited (pip_careful)
     card_missing: bool = False      # a payment form sent with its card number empty (see card_missing)
-    owner: str = PERSON             # whose tab sent it: a Pip's id (its lane in Your Browser), or the person
+    owner: str = PERSON             # whose tab sent it: a Pip's id (its lane in DGC Browser), or the person
 
     def summary(self) -> dict:
         parts = urlsplit(self.url)
@@ -990,13 +990,13 @@ class _Tab:
 
 @dataclass
 class Lane:
-    """One owner's settings in a browser: a Pip's (its lane in Your Browser, or its own computer) or the person's."""
+    """One owner's settings in a browser: a Pip's (its lane in DGC Browser, or its own computer) or the person's."""
     owner: str = PERSON
     site_gate: object = None        # careful mode during its run (pip_careful): url -> whether its site may load
     hold_dialogs: bool = False      # during its run a confirm or prompt waits for its answer (dialog)
-    grants: object = None           # Your Browser: the sites its lane may use (your_browser.Grants); None, no confinement
+    grants: object = None           # DGC Browser: the sites its lane may use (dgc_browser.Grants); None, no confinement
     refused: list = field(default_factory=list)    # why its lane was refused a page or a write, newest last
-    # The same refusals, for its run to act on (Your Browser's tool): (counter, host shown, a write?, address, why), newest
+    # The same refusals, for its run to act on (DGC Browser's tool): (counter, host shown, a write?, address, why), newest
     # last.
     refusals: list = field(default_factory=list)
 
@@ -1007,7 +1007,7 @@ class BoxedBrowser(BrowserSession):
     def __init__(self, home: Path, egress_socket: Path, *, chrome: Path | None, log_path: Path,
                  viewport: tuple[int, int] = DEFAULT_VIEWPORT, on_write=None, shared: bool = False):
         super().__init__(chrome, allow_unsandboxed=True, viewport=viewport)
-        # Who each tab is (owner_of): a Pip's computer is one owner's, every tab gated. Your Browser (shared) is the
+        # Who each tab is (owner_of): a Pip's computer is one owner's, every tab gated. DGC Browser (shared) is the
         # person's, whose own tabs DGC never gates, plus a lane per Pip (open_lane), gated and confined on that tab.
         self.shared = bool(shared)
         self.default_owner = PERSON
@@ -1015,7 +1015,7 @@ class BoxedBrowser(BrowserSession):
         self._lanes: dict[str, Lane] = {}         # owner -> its settings
         self._loose = _Tab()                      # what is set before any tab exists, and for a request with no tab
         self._opened: set[str] = set()            # tabs DGC opened itself: only those become a Pip's lane
-        self.lane_sent = None                     # Your Browser: what each lane sent (your_browser.LaneSent)
+        self.lane_sent = None                     # DGC Browser: what each lane sent (dgc_browser.LaneSent)
         self._lane_requests: dict[tuple, tuple] = {}   # (session, requestId) -> (owner, host, bytes up)
         self._dialog_seq = 0
         self.home = Path(home)
@@ -1152,10 +1152,10 @@ class BoxedBrowser(BrowserSession):
         tab = self._tab_of(self._session_target(session)) if session else None
         return self._tabs.get(tab, self._loose) if tab else self._loose
 
-    # -- Your Browser: a lane per Pip ---------------------------------------------------------
+    # -- DGC Browser: a lane per Pip ---------------------------------------------------------
 
     def open_lane(self, pip_id: str, url: str, grants=None) -> str:
-        """A new tab for a Pip (its lane), at ``url``, gated and confined to ``grants`` (your_browser.Grants) from its
+        """A new tab for a Pip (its lane), at ``url``, gated and confined to ``grants`` (dgc_browser.Grants) from its
         first request, and driven by DGC without bringing it to the front: the person's view stays theirs. Returns its
         target id."""
         self.start()
@@ -1182,7 +1182,7 @@ class BoxedBrowser(BrowserSession):
             raise BrowserError("the new tab did not open")
 
     def _make_lane(self, target: str, pip_id: str, grants=None) -> None:
-        """Make a blank tab DGC just opened a Pip's lane: its owner, its settings, and (in Your Browser) its gate on that
+        """Make a blank tab DGC just opened a Pip's lane: its owner, its settings, and (in DGC Browser) its gate on that
         tab alone, before it loads anything. A tab the person uses, or another Pip's, never becomes one."""
         if not isinstance(pip_id, str) or not pip_id or pip_id == PERSON:
             raise BrowserError("a lane is a Pip's")
@@ -1202,8 +1202,8 @@ class BoxedBrowser(BrowserSession):
             self._guard_lane(session)
 
     def _guard_lane(self, session: str) -> None:
-        """A Pip's lane in Your Browser, on its own tab (and each frame and worker in it): what the gate can't see is
-        off (a WebSocket, WebTransport or WebRTC connection carries whatever the page puts in it, and Your Browser has
+        """A Pip's lane in DGC Browser, on its own tab (and each frame and worker in it): what the gate can't see is
+        off (a WebSocket, WebTransport or WebRTC connection carries whatever the page puts in it, and DGC Browser has
         the computer's own network), no service worker answers for it around the gate, and third-party cookies are off
         there whatever the profile says (decision 2)."""
         from .pip_borrow import _OFF_JS
@@ -1226,9 +1226,9 @@ class BoxedBrowser(BrowserSession):
         if not ((top and not write) or (write and (kind == "Document" or self._acting_for(tab)))):
             return False
         shown = host or url.split(":", 1)[0][:20]
-        reason = (f"DGC didn't open {shown} for this Pip: in Your Browser it uses only the sites you allowed it "
+        reason = (f"DGC didn't open {shown} for this Pip: in DGC Browser it uses only the sites you allowed it "
                   f"({lane.grants.words()})." if not write else
-                  f"DGC didn't send this to {shown}: in Your Browser this Pip sends only to the sites you allowed it "
+                  f"DGC didn't send this to {shown}: in DGC Browser this Pip sends only to the sites you allowed it "
                   f"({lane.grants.words()}).")
         lane.refused.append(reason)
         del lane.refused[:-20]
@@ -1408,7 +1408,7 @@ class BoxedBrowser(BrowserSession):
                     self._tabs.setdefault(target, _Tab(owner=owner))
                 owner = self.owner_of(str(info.get("targetId", "")))
                 if not (self.shared and owner == PERSON):
-                    # Your Browser never gates the person's own tabs; everything else is gated before it runs.
+                    # DGC Browser never gates the person's own tabs; everything else is gated before it runs.
                     self._guard(child)
                     if self.shared:
                         self._guard_lane(child)
@@ -1558,7 +1558,7 @@ class BoxedBrowser(BrowserSession):
                   "default": str(params.get("defaultPrompt", ""))[:500], "session": session,
                   "url": str(params.get("url", ""))[:500]}
         if self.shared and state.owner == PERSON:
-            # The person's own tab in Your Browser: they answer it in its window; DGC only knows it is open.
+            # The person's own tab in DGC Browser: they answer it in its window; DGC only knows it is open.
             state.dialog = opened
             return
         if lane is not None and lane.hold_dialogs and kind in ("confirm", "prompt"):
@@ -1729,7 +1729,7 @@ class BoxedBrowser(BrowserSession):
         return self._tab_name(follow)
 
     def _may_activate(self, target: str) -> bool:
-        """Whether DGC may bring a tab to the front: never a Pip's lane in Your Browser (the window is the person's)."""
+        """Whether DGC may bring a tab to the front: never a Pip's lane in DGC Browser (the window is the person's)."""
         return not (self.shared and self.owner_of(target) != PERSON)
 
     def switch_tab(self, target: str, *, settle: float = 8.0, activate: bool = True) -> None:
@@ -1780,7 +1780,7 @@ class BoxedBrowser(BrowserSession):
 
     def open_tab(self, url: str) -> str:
         """A new tab at ``url``, made the one in front. Returns its target id. A tab a Pip's step opens from its lane
-        in Your Browser is its lane too, and stays out of the person's view."""
+        in DGC Browser is its lane too, and stays out of the person's view."""
         self.start()
         owner = self._front_owner()
         made = str(self._browser_call("Target.createTarget", {"url": "about:blank"}).get("targetId", ""))

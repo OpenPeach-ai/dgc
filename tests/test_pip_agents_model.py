@@ -185,7 +185,7 @@ class WhatItRefuses(ModelWorld, unittest.TestCase):
 
     def test_the_command_takes_its_fields_and_the_api_says_so(self):
         from dgc.headless import PIPS_API_VERSION
-        self.assertGreaterEqual(PIPS_API_VERSION, 104)       # (105: Your Browser came after)
+        self.assertGreaterEqual(PIPS_API_VERSION, 104)       # (105: DGC Browser came after)
         self.assertEqual(pips._COMMAND_ARGS["set_pip_agents"],
                          {"pip_id", "slots", "model_choice", "thinking", "context_size", "fallback"})
 

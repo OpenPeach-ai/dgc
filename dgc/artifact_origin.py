@@ -89,6 +89,6 @@ def _pip(origin) -> tuple[str, list]:
     with WorkspaceRegistry(state_directory()) as registry:
         rows = registry.db.execute("SELECT role,text FROM pip_chat_messages WHERE pip_id=? ORDER BY seq DESC LIMIT ?",
                                    (pip_id, MAX_MESSAGES)).fetchall()
-        from .your_browser import _pip_names
+        from .dgc_browser import _pip_names
         name = _pip_names(registry, [pip_id]).get(pip_id, "")
     return (f"{name}'s chat" if name else "A Pip's chat"), [(r[0], r[1]) for r in reversed(rows)]

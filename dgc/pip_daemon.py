@@ -311,14 +311,14 @@ def _computer_tick(registry, config) -> None:
         print(f"[pip computers] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
 
 
-def _your_browser_tick(registry) -> None:
-    """Your Browser (your_browser, 0.52): open its window when the person asked (open_your_browser), close it when idle,
+def _dgc_browser_tick(registry) -> None:
+    """DGC Browser (dgc_browser, 0.52): open its window when the person asked (open_dgc_browser), close it when idle,
     clear sites signed out of, say how it is. A failure is recorded and never stops the supervisor."""
     try:
-        from . import your_browser
-        your_browser.tick(registry)
+        from . import dgc_browser
+        dgc_browser.tick(registry)
     except Exception as exc:                      # noqa: BLE001 - isolated by design
-        print(f"[your browser] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
+        print(f"[dgc browser] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
 
 
 def _app_approvals_tick(registry, config) -> None:
@@ -444,7 +444,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
                         routine_tick = RoutineTick(runtime_config, directory, clock)
                         routine_tick.start()
                     _computer_tick(registry, runtime_config)
-                    _your_browser_tick(registry)
+                    _dgc_browser_tick(registry)
                     webhooks = _webhooks_tick(registry, directory, clock, webhooks)
                     _goals_tick(registry, runtime_config)
                     _app_approvals_tick(registry, runtime_config)

@@ -197,6 +197,38 @@ test("a signed-in Chrome card names the site and what it can do there", async (t
   }
 });
 
+// DGC Browser in a Work session (26 Nov): opening a site in its own tab there asks with the site and what it may do,
+// never "Run dgc_browser" and the tool's JSON; Always saves that site and nothing else.
+test("a DGC Browser card names the site, what it can do there, and Always allow for that site", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await scene("dark-modern", {}, []);
+  try {
+    await s.send({ type: "permission_request", id: "req-dgcb", name: "dgc_browser",
+      args: { op: "open", url: "https://www.tiles-shop.com/orders" },
+      summary: "DGC Browser · open https://www.tiles-shop.com/orders", suggested_rule: "DGCBrowser(dgc-browser:https://www.tiles-shop.com)" });
+    await s.send({ type: "permission_request", id: "req-dgcb-evil", name: "dgc_browser",
+      args: { op: "open", url: "https://<b>x</b>.example/" }, suggested_rule: "DGCBrowser(dgc-browser:https://x.example)" });
+    const card = s.card("dgcb");
+    assert.equal((await card.locator(".q").innerText()).trim(), "Use www.tiles-shop.com in DGC Browser?");
+    assert.match(await card.innerText(), /DGC wants to open www\.tiles-shop\.com in a tab of its own in DGC Browser, where you're signed in\. It can read and act on that site as you; it never types a password and never pays\./);
+    assert.deepEqual(await card.locator("button").allInnerTexts(), ["Always allow", "Deny", "Allow once"]);
+    assert.equal(await card.locator('button[data-d="always"]').getAttribute("aria-label"), "Always allow www.tiles-shop.com in DGC Browser",
+      "its name says the site (the title shows it; the button's words were cut to Always allow … beside it)");
+    const fits = await card.locator('button[data-d="always"]').evaluate((b) => b.scrollWidth <= b.clientWidth + 1);
+    assert.ok(fits, "its words fit the button");
+    assert.equal(await card.locator("pre").innerText(), "https://www.tiles-shop.com/orders");
+    assert.equal(await s.card("dgcb-evil").locator(".q b b").count(), 0, "a name is text, never markup");
+    await card.locator('button[data-d="always"]').click();
+    await s.page.waitForFunction(() => window.__posted.some((m) => m.type === "permission_response" && m.id === "req-dgcb"),
+      null, { timeout: 5000 });
+    const posted = await s.page.evaluate(() => window.__posted.filter((m) => m.type === "permission_response" && m.id === "req-dgcb"));
+    assert.deepEqual(posted.map((m) => [m.decision, m.rule]), [["always", "DGCBrowser(dgc-browser:https://www.tiles-shop.com)"]]);
+    assert.deepEqual(s.errors, []);
+  } finally {
+    await s.page.close();
+  }
+});
+
 // A paid picture's card (generate_image), in plain words as ChatDGC's card is: what it makes, with which generator, how
 // many at what size, the price and this month's spend, and the prompt as written; never "Run generate_image" and the
 // tool's JSON. Edit asks again with a changed prompt (the model calls again, so its new card shows that prompt).

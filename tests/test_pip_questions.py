@@ -338,7 +338,7 @@ class TheVersion(unittest.TestCase):
     def test_pips_api_106_says_so_in_the_reference(self):
         from pathlib import Path
         from dgc.headless import PIPS_API_VERSION
-        self.assertGreaterEqual(PIPS_API_VERSION, 106)      # (107: Your Browser's window, merged after it)
+        self.assertGreaterEqual(PIPS_API_VERSION, 106)      # (107: DGC Browser's window, merged after it)
         doc = (Path(__file__).resolve().parents[1] / "sdk" / "PIPS.md").read_text(encoding="utf-8")
         row = next(line for line in doc.splitlines() if line.startswith("| 106 |"))
         for word in ("answer_pip_questions", "propose_options", "`questions`", "offer_choices"):

@@ -1,5 +1,5 @@
 // The dock at the foot of DGC's side bar (media/shared/dock.css is how it looks): what you pinned, then "+", which is
-// always last. What is always there (`fixed`: Your Browser, decided 17 Nov) sits just before "+", on the right of the
+// always last. What is always there (`fixed`: DGC Browser, decided 17 Nov) sits just before "+", on the right of the
 // "|" divider with it: it can't be unpinned or moved, and nothing is dropped past it. Pointed at, the tiles swell toward the pointer and the one under it is named;
 // a click opens it; a right-click (or the menu key, or Shift+F10) offers Open, Unpin, Move left and Move right, and a
 // session's colours. Tab reaches the dock as one stop: Left and Right move between its items, Home and End jump to the
@@ -419,7 +419,7 @@
       if (state.offers) offers = { ...offers, ...state.offers };
       draw(); layout();
     }
-    /** A few words on an item, shown in its name's place for a while and said to a screen reader (Your Browser couldn't
+    /** A few words on an item, shown in its name's place for a while and said to a screen reader (DGC Browser couldn't
      *  open, and why). */
     function note(key, words) {
       const button = buttons.find((b) => keyOf(b) === key), item = button ? itemOf(button) : null;

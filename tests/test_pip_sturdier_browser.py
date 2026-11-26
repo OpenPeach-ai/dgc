@@ -201,7 +201,7 @@ class WordingTests(unittest.TestCase):
         # when it goes quiet, and its end is told in the chat) fit in at no growth: the description's lines the notice
         # already says (approval, close_browser) cut.
         # 2026-11-24: +50 (about 12 tokens a request) for its browser's one name: a Pip called the two browsers it
-        # can use "my own browser", "your browser" and "Your Browser" in one chat (user test 2, P9); the notice now
+        # can use "my own browser", "your browser" and "DGC Browser" in one chat (user test 2, P9); the notice now
         # names its own "my computer's browser" and no longer says "your own browser" itself.
         size = len(json.dumps(pip_computer.schema(None))) + len(pip_computer.NOTICE)
         self.assertLessEqual(size, 6042, size)

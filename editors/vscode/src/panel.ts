@@ -6384,7 +6384,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsReconnect":
       case "pipsRequest":
       case "pipsOpenComputer":
-      case "pipsOpenYourBrowser":     // a Pip's tab in Your Browser, streamed into an editor tab (Pips API 107)
+      case "pipsOpenDgcBrowser":     // a Pip's tab in DGC Browser, streamed into an editor tab (Pips API 107)
       // Open in editor on a Pip's chat, and what is typed in its box, told to the chat's other pages (15 Nov).
       case "pipsOpenChat":
       case "pipsChatDraft":
@@ -6740,8 +6740,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         await whatsNewAnswered(this.context);
         break;
       case "whatsNewGo": {
-        // A slide's own action (Open Pips, Open Your Browser, Open Library, Open Work, Open Settings): an answer, as × and
-        // Done are, and the side bar goes there by its own navigation (the tab, as Home's buttons choose it; Your Browser,
+        // A slide's own action (Open Pips, Open DGC Browser, Open Library, Open Work, Open Settings): an answer, as × and
+        // Done are, and the side bar goes there by its own navigation (the tab, as Home's buttons choose it; DGC Browser,
         // as the dock opens it), or DGC's Settings tab opens, as the header's gear opens it.
         await whatsNewAnswered(this.context);
         const go = whatsNewGoMessage(msg.to);
@@ -12047,7 +12047,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const homeCardsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "homecards.js"));
     // A site's own icon beside its link (Home's Browser card) or tab (media/shared/siteicon.js, window.DgcSiteIcon).
     const siteIconJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "siteicon.js"));
-    // The sites Pips may use in Your Browser: the Sites panel, the same here and on a Pip's page (media/shared/ybsites.js, window.DgcYbSites).
+    // The sites Pips may use in DGC Browser: the Sites panel, the same here and on a Pip's page (media/shared/ybsites.js, window.DgcYbSites).
     const ybSitesJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "ybsites.js"));
     // The header row every page of the side bar wears (media/shared/pagehead.js, window.DgcPageHead).
     const pageHeadJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "shared", "pagehead.js"));

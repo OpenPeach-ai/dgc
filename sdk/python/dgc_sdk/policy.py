@@ -30,7 +30,7 @@ _DISPLAY = {
     "code_intel": "CodeIntel", "git_diff": "GitDiff", "bash": "Bash", "bash_output": "BashOutput",
     "bash_kill": "BashKill", "python": "Python", "monitor": "Monitor", "monitor_stop": "MonitorStop", "wake_later": "WakeLater", "wake_cancel": "WakeCancel",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
-    "browser": "Browser", "todo": "Todo", "notes": "Notes", "skill": "Skill",
+    "browser": "Browser", "dgc_browser": "DGCBrowser", "todo": "Todo", "notes": "Notes", "skill": "Skill",
     "add_skill": "AddSkill", "save_memory": "SaveMemory", "remember": "Remember", "forget": "Forget", "keep_lesson": "KeepLesson", "troupe": "Troupe", "use_pips": "UsePips", "pips_context": "PipsContext",
     "pips_setup": "PipsSetup", "pips_workflow": "PipsWorkflow", "pips_propose": "PipsPropose", "pips_settings": "PipsSettings", "dgc_settings": "DGCSettings", "dgc_settings_read": "DGCSettingsRead", "dgc_docs": "DGCDocs", "pips_adapt": "PipsAdapt", "run_pip_now": "PipsRun",
     "handoff_to_pip": "PipsHandoff", "draft_pip_email": "PipsEmailDraft",
@@ -62,7 +62,7 @@ _SEARCH_TOOLS = frozenset({"grep", "glob", "repo_map", "code_intel", "git_diff"}
 # Rules match these tools' `path` argument, in absolute and project-relative spellings.
 _PATH_RULE_TOOLS = ("Read", "ViewImage", "ShowFile", "Write", "Edit", "MultiEdit", "ApplyPatch", "Artifact",
                     "CodeIntel", "GitDiff")
-_NETWORK_TOOLS = ("WebFetch", "WebSearch", "Browser", "AddSkill")
+_NETWORK_TOOLS = ("WebFetch", "WebSearch", "Browser", "DGCBrowser", "AddSkill")
 _APP_SERVER = "app"
 
 _MCP_EXACT_RE = re.compile(r"mcp__[A-Za-z0-9_-]{1,506}\Z")

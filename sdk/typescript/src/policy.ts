@@ -25,7 +25,7 @@ export const DISPLAY: Readonly<Record<string, string>> = {
   code_intel: "CodeIntel", git_diff: "GitDiff", bash: "Bash", bash_output: "BashOutput",
   bash_kill: "BashKill", python: "Python", monitor: "Monitor", monitor_stop: "MonitorStop", wake_later: "WakeLater", wake_cancel: "WakeCancel",
   glob: "Glob", grep: "Grep", web_fetch: "WebFetch", web_search: "WebSearch",
-  browser: "Browser", todo: "Todo", notes: "Notes", skill: "Skill",
+  browser: "Browser", dgc_browser: "DGCBrowser", todo: "Todo", notes: "Notes", skill: "Skill",
   add_skill: "AddSkill", save_memory: "SaveMemory", remember: "Remember", forget: "Forget", keep_lesson: "KeepLesson", troupe: "Troupe", use_pips: "UsePips", pips_context: "PipsContext", pips_setup: "PipsSetup", pips_workflow: "PipsWorkflow", pips_propose: "PipsPropose", pips_settings: "PipsSettings", dgc_settings: "DGCSettings", dgc_settings_read: "DGCSettingsRead", dgc_docs: "DGCDocs", pips_adapt: "PipsAdapt",
   run_pip_now: "PipsRun", handoff_to_pip: "PipsHandoff", draft_pip_email: "PipsEmailDraft",
   draft_pip_calendar_event: "PipsCalendarDraft", draft_pip_connector_action: "PipsConnectorDraft", mcp_search: "MCPSearch",
@@ -52,7 +52,7 @@ const SEARCH_TOOLS = new Set(["grep", "glob", "repo_map", "code_intel", "git_dif
 // Rules match these tools' `path` argument, in absolute and project-relative spellings.
 const PATH_RULE_TOOLS = ["Read", "ViewImage", "ShowFile", "Write", "Edit", "MultiEdit", "ApplyPatch", "Artifact",
   "CodeIntel", "GitDiff"];
-const NETWORK_TOOLS = ["WebFetch", "WebSearch", "Browser", "AddSkill"];
+const NETWORK_TOOLS = ["WebFetch", "WebSearch", "Browser", "DGCBrowser", "AddSkill"];
 const APP_SERVER = "app";
 
 const MCP_EXACT = /^mcp__[A-Za-z0-9_-]{1,506}$/;

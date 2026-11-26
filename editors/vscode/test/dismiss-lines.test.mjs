@@ -117,7 +117,7 @@ test("every page loads the one shared piece", () => {
   assert.equal(chat.split('asset("media/shared/dismiss.js")').length - 1, 2, "ChatDGC's page and the Library's own tab");
   assert.match(read("src/artifacts.ts"), /s\("media\/shared\/dismiss\.js"\)/);
   assert.match(read("media/main.css"), /@import url\("\.\/shared\/dismiss\.css"\);/);
-  for (const bundle of ["src/pipsClient.js", "src/settingsClient.js", "src/pipComputerClient.js", "src/yourBrowserTab.js"]) {
+  for (const bundle of ["src/pipsClient.js", "src/settingsClient.js", "src/pipComputerClient.js", "src/dgcBrowserTab.js"]) {
     const source = read(bundle);
     assert.match(source, /import '\.\.\/media\/shared\/dismiss\.css';/, `${bundle}: the look`);
     assert.match(source, /import '\.\.\/media\/shared\/dismiss\.js';/, `${bundle}: the piece`);

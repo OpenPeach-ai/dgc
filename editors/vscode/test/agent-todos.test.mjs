@@ -350,3 +350,77 @@ test("the plan's look is DGC's own: its tokens, its working shimmer, nothing blu
   assert.match(reduced, /\.todo-glyph[^{]*\{[^}]*animation:\s*none/, "and the check is simply there");
   assert.match(todos, /@media \(forced-colors: active\)/, "high contrast keeps every mark");
 });
+
+// Seen on a test machine (26 Nov): a turn's plan stopped on the model provider's usage limit; "continue" started a turn
+// whose list carried the old one on, condensed. The stopped turn's card still showed its steps open and in progress, as
+// if nothing had become of them. Once a later turn writes the list, the earlier card says where it went (carried on, if
+// its turn stopped; replaced, if it finished), with Show it, and its unfinished steps no longer look live.
+const CARRIED = [
+  { content: "Read the settings store + write the v2 to v3 migration", status: "done" },
+  { content: "Tests for both directions", status: "in_progress" },
+  { content: "Update the changelog", status: "pending" },
+];
+test("a list carried on in a later turn: the stopped turn's card says so, Show it goes there, its open steps stop looking live", () => {
+  const w = work();
+  w.event({ type: "turn_start", turn_id: "t1", prompt: "Ship the migration", kind: "prompt" });
+  w.plan(PLAN);
+  w.event({ type: "turn_end", turn_id: "t1", reason: "error" });
+  w.event({ type: "turn_start", turn_id: "t2", prompt: "continue", kind: "prompt" });
+  w.plan(CARRIED);
+  const [old, fresh] = w.cards();
+  assert.ok(old && fresh, "two cards: the stopped turn's and the new one");
+  assert.equal(old.dataset.superseded, "carried");
+  assert.equal(fresh.dataset.superseded, undefined, "the new list is the live one");
+  const note = old.querySelector(".todos-moved");
+  assert.ok(note, "a line on the old card");
+  assert.equal(note.textContent.replace(/\s+/g, " ").trim(), "Carried on in a later turn. Show it");
+  const seen = [];
+  fresh.scrollIntoView = (o) => seen.push(o);
+  note.querySelector("button.todos-moved-go").click();
+  assert.equal(seen.length, 1, "Show it goes to the new list");
+  assert.ok(fresh.classList.contains("prompt-flash"), "and points it out (the flash Work uses)");
+  assert.deepEqual(w.rows(old).filter((li) => li.dataset.status !== "done").map((li) => li.hasAttribute("data-moved")), [true, true, true, true],
+    "each step it hadn't finished is marked as moved on");
+  assert.ok(w.rows(old).filter((li) => li.dataset.status === "done").every((li) => !li.hasAttribute("data-moved")), "what it did stays done");
+});
+
+test("a newer list after a turn that finished says Replaced; an earlier list with every step done says nothing", () => {
+  const w = work();
+  w.event({ type: "turn_start", turn_id: "t1", prompt: "Ship the migration", kind: "prompt" });
+  w.plan(PLAN);
+  w.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  w.event({ type: "turn_start", turn_id: "t2", prompt: "now the docs", kind: "prompt" });
+  w.plan([{ content: "Write the docs page", status: "in_progress" }]);
+  w.event({ type: "turn_end", turn_id: "t2", reason: "completed" });
+  const [first, second] = w.cards();
+  assert.equal(first.dataset.superseded, "replaced");
+  assert.equal(first.querySelector(".todos-moved").textContent.replace(/\s+/g, " ").trim(), "Replaced by a newer list. Show it");
+  w.event({ type: "turn_start", turn_id: "t3", prompt: "and the site", kind: "prompt" });
+  w.plan([{ content: "Publish the site", status: "pending" }]);
+  assert.equal(second.dataset.superseded, "replaced", "the docs list had a step open: replaced too");
+  const w2 = work();
+  w2.event({ type: "turn_start", turn_id: "t1", prompt: "a", kind: "prompt" });
+  w2.plan([{ content: "Only step", status: "done" }]);
+  w2.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  w2.event({ type: "turn_start", turn_id: "t2", prompt: "b", kind: "prompt" });
+  w2.plan([{ content: "Next", status: "pending" }]);
+  assert.equal(w2.cards()[0].dataset.superseded, undefined, "every step done: nothing to say");
+  assert.equal(w2.cards()[0].querySelector(".todos-moved"), null);
+});
+
+test("a reopened chat marks the earlier card the same way", () => {
+  const w = work();
+  const plan = (id, todos) => [{ type: "tool_call", call_id: id, name: "todo", args: { todos }, summary: "" },
+    { type: "tool_result", call_id: id, name: "todo", output: "todo list updated", is_error: false, is_diff: false }];
+  w.event({ type: "history", complete: true, items: [
+    { type: "turn_start", turn_id: "h1", prompt: "Ship the migration", kind: "prompt" }, ...plan("p1", PLAN),
+    { type: "turn_end", turn_id: "h1", reason: "error" },
+    { type: "turn_start", turn_id: "h2", prompt: "continue", kind: "prompt" }, ...plan("p2", CARRIED),
+    { type: "text_delta", text: "Done." }, { type: "stream_end", message_id: "h2:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h2", reason: "completed", final_message_id: "h2:1" }] });
+  const cards = w.cards();
+  assert.equal(cards.length, 2);
+  assert.equal(cards[0].dataset.superseded, "carried");
+  assert.ok(cards[0].querySelector(".todos-moved"));
+  assert.equal(cards[1].dataset.superseded, undefined);
+});

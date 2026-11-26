@@ -566,7 +566,10 @@ TOOL_SCHEMAS = [
     _fn("browser", "Drive a real browser to look at a live page: open a URL and read its "
         "structure, find elements, check the console and network responses, click and type. "
         "Use this for a deployed or locally served site — anything that needs JavaScript to "
-        "run, or that you need to interact with. web_fetch is cheaper for plain article text.",
+        "run, or that you need to interact with. web_fetch is cheaper for plain article text. "
+        "This browser is signed in to nothing: it is the one for any page, the user's \"browser\" included. "
+        "When it can't show what the user means (their account's page shows a sign-in instead), try DGC "
+        "Browser (the dgc_browser tool), where they are signed in, and say which browser you used.",
         {"operation": {"type": "string", "enum": BROWSER_OPS,
                        "description": "open · snapshot · find · click · type · press · select · "
                                       "wait · console · requests · screenshot · close"},
@@ -578,8 +581,12 @@ TOOL_SCHEMAS = [
                  "description": "element ref from a snapshot, such as e12, for click/type/select"},
          "key": {"type": "string", "description": "key name for press, such as Enter or Escape"},
          "seconds": {"type": "number", "description": "wait timeout, capped at 30"},
-         "signed_in": {"type": "boolean", "description": "true: the user's own signed-in Chrome; only for their logins"}},
+         "signed_in": {"type": "boolean", "description": "true: the user's everyday Chrome, signed in as them (they "
+                       "allow remote debugging in it), when they name their own Chrome; only for their logins"}},
         ["operation"]),
+    # DGC Browser (dgc_browser_work, 26 Nov): a Work session's own tab in the Chrome DGC keeps for the user, signed in to
+    # their accounts; the same tool and steps a Pip has (dgc_browser_schema).
+    __import__("dgc.dgc_browser_schema", fromlist=["schema"]).schema("own", work=True),
     _fn("web_search", "Search the web for current information (news, docs, versions, facts). Returns titles, "
         "URLs and snippets; follow up with web_fetch on a result URL to read the full page. Uses the user's "
         "configured provider (DuckDuckGo by default; Brave/Tavily/SearXNG if set up).",
@@ -3535,6 +3542,74 @@ def _signed_in_denied(ctx, url: str) -> str:
     return reason if decision == DENY else ""
 
 
+# --------------------------------------------------------------------------- DGC Browser (dgc_browser_work)
+
+_DGC_BROWSER_SITES: dict[str, set] = {}     # tool owner -> the sites the user allowed this session (by site)
+_DGC_BROWSER_LOCK = _threading.Lock()
+
+
+def dgc_browser_sites(ctx) -> set:
+    """The sites the user allowed this Work session in DGC Browser so far (the permission check reads them too)."""
+    with _DGC_BROWSER_LOCK:
+        return set(_DGC_BROWSER_SITES.get(_tool_owner(ctx), ()))
+
+
+def dgc_browser_navigates(args) -> bool:
+    """A dgc_browser call that goes to a new address: open, or tabs with action open."""
+    if not isinstance(args, dict):
+        return False
+    op = str(args.get("op", "")).strip().lower()
+    return op == "open" or (op == "tabs" and str(args.get("action", "")).strip().lower() == "open")
+
+
+def dgc_browser_tool(args: dict, ctx) -> str:
+    """A Work session's step in its own tab in DGC Browser. Opening a site got here only past the permission check
+    (permissions.py: each new site asks, in every mode), so a site it opens joins the session's sites, which go to the
+    supervisor with every step: its tab opens nothing else. Never raises."""
+    from urllib.parse import urlsplit
+    from . import dgc_browser, dgc_browser_schema, dgc_browser_work
+    from .workspace_registry import RegistryError, WorkspaceRegistry, state_directory
+    args = args if isinstance(args, dict) else {}
+    op = str(args.get("op", "")).strip().lower()
+    if op not in dgc_browser_schema.OPS:
+        return f"error: unknown op {op!r}; use one of {', '.join(dgc_browser_schema.OPS)}"
+    step = {k: v for k, v in args.items() if k not in ("op", "question") and not str(k).startswith("_")}
+    owner = _tool_owner(ctx)
+    if dgc_browser_navigates(args):
+        site = dgc_browser.site_key(urlsplit(str(args.get("url") or "")).hostname or "")
+        if not site:
+            return dgc_browser_work.NOT_A_SITE.format(host=str(args.get("url") or "that address")[:200])
+        with _DGC_BROWSER_LOCK:
+            _DGC_BROWSER_SITES.setdefault(owner, set()).add(site)
+    root = Path(getattr(ctx, "project_root", None) or ".")
+    try:
+        with WorkspaceRegistry(state_directory()) as registry:
+            workspace = str(registry.resolve(root)["id"])
+    except (OSError, RegistryError, KeyError) as error:
+        return f"error: DGC Browser couldn't find this project among DGC's workspaces ({str(error)[:200]})."
+    reply = dgc_browser_work.step(state_directory(), owner, op, step, name=root.name, workspace_id=workspace,
+                                  sites=dgc_browser_sites(ctx))
+    text = str(reply.get("text", ""))
+    image = reply.get("image")
+    if isinstance(image, (bytes, bytearray)) and image:
+        stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}-{os.urandom(3).hex()}"
+        saved = ""
+        try:
+            target = _screenshot_dir(ctx) / f"dgc-browser-{stamp}.jpg"
+            target.write_bytes(bytes(image))
+            saved = str(target)
+        except OSError:
+            pass
+        _queue_image(owner, _image_entry(bytes(image), name=Path(saved).name if saved else "dgc-browser.jpg",
+                                         source="browser", path=saved, label="your tab in DGC Browser"))
+        if _vision_available(ctx):
+            text += "\n\nThe picture of your tab follows this batch, so you can look at it directly."
+        else:
+            text += ("\n\nThis model does not accept images: read gives the page as text instead."
+                     + (" The user can see the picture in the chat." if _shows_images(ctx) else ""))
+    return _safe_output(text, ctx)
+
+
 _CONNECTION_GONE = ("devtools connection closed", "Session with given id not found", "No target with given id",
                     "Target closed", "the browser session is not running", "timed out", "said no", "Nobody answered",
                     "can't reach the user's Chrome", "isn't running", "couldn't use the user's Chrome")
@@ -3600,6 +3675,7 @@ def _signed_in_operation(args: dict, ctx) -> str:
         return _browser_operation(plain, ctx, session=session, guard=guard)
     except (BrowserError, OSError) as error:
         said = str(error) if isinstance(error, BrowserError) else f"the connection to the user's Chrome ended ({error})"
+        said += _dgc_browser_instead(error)
         if isinstance(error, OSError) or any(sign in said for sign in _CONNECTION_GONE):
             # The user's Chrome went away, closed DGC's window, or said no: start again next time (Chrome asks again).
             with _BROWSERS_LOCK:
@@ -3610,6 +3686,25 @@ def _signed_in_operation(args: dict, ctx) -> str:
                 except Exception:          # noqa: BLE001
                     pass
         return f"error: {said}"
+
+
+def _dgc_browser_instead(error) -> str:
+    """When the user's everyday Chrome can't be reached (not running, no remote debugging, nobody answered), where else
+    their sign-ins may be: DGC Browser, where it can run here (decided 26 Nov: "check my browser" tries their Chrome
+    first, then DGC Browser). Only when connecting failed: never after they said no in Chrome (that was their answer),
+    and never for a step's own error or a connection that dropped mid-task (their Chrome was reached; the next call
+    reconnects)."""
+    from .browser_user import FAILED, NOT_RUNNING, UNANSWERED
+    if getattr(error, "kind", "") not in (NOT_RUNNING, UNANSWERED, FAILED):
+        return ""
+    try:
+        from . import dgc_browser
+        if dgc_browser._availability()[0] is not True:
+            return ""
+    except Exception:                    # noqa: BLE001 -- can't tell: say nothing of it
+        return ""
+    return (" DGC Browser, the Chrome DGC keeps signed in to the user's accounts, may have what they mean: try it "
+            "there with the dgc_browser tool (opening a site asks them), and say which browser you used.")
 
 
 def _browser_args_error(operation: str, args: dict) -> str:
@@ -5518,7 +5613,7 @@ EXECUTORS = {
     "glob": glob_tool, "grep": grep_tool, "repo_map": repo_map, "code_intel": code_intel,
     "git_diff": git_diff,
     "web_fetch": web_fetch,
-    "web_search": web_search, "browser": browser_tool,
+    "web_search": web_search, "browser": browser_tool, "dgc_browser": dgc_browser_tool,
     "todo": todo, "notes": notes_tool, "skill": skill_tool, "add_skill": add_skill,
     "save_memory": save_memory, "remember": remember_tool, "forget": forget_tool, "keep_lesson": keep_lesson_tool,
 }

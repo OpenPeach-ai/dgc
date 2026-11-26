@@ -64,30 +64,30 @@ export function pipJobsRefusal(request: any, apiVersion: number): string {
   if (request.type === 'list_pip_jobs') return pip ? '' : 'Choose a Pip.';
   return pip && job ? '' : 'Choose a job.';
 }
-/** Your Browser from the side bar (Pips API 107): the dock's and Home's Browser open it (open_your_browser {url?,
- *  editor_bounds?}), Home's card reads the newest of your own tabs (get_your_browser_recent {}), and its Install button
+/** DGC Browser from the side bar (Pips API 107): the dock's and Home's Browser open it (open_dgc_browser {url?,
+ *  editor_bounds?}), Home's card reads the newest of your own tabs (get_dgc_browser_recent {}), and its Install button
  *  installs Google Chrome through the system's own password prompt (install_google_chrome {}). Only those fields; a Pip's
  *  own tab opens through its own editor tab, never from here. An older DGC is sent none of them. */
-export const YOUR_BROWSER_HOME_COMMANDS = ['open_your_browser', 'get_your_browser_recent', 'install_google_chrome', 'clear_your_browser'];
-/** Clear browsing data (Pips API 112), from Your Browser's dock menu: clear_your_browser {history?, sign_ins?,
+export const DGC_BROWSER_HOME_COMMANDS = ['open_dgc_browser', 'get_dgc_browser_recent', 'install_google_chrome', 'clear_dgc_browser'];
+/** Clear browsing data (Pips API 112), from DGC Browser's dock menu: clear_dgc_browser {history?, sign_ins?,
  *  passwords?}, each true or false, at least one true. An older DGC is sent none. */
-export const YOUR_BROWSER_CLEAR_API = 112;
+export const DGC_BROWSER_CLEAR_API = 112;
 const CLEAR_KINDS = ['history', 'sign_ins', 'passwords'];
 const BOX_KEYS = ['x', 'y', 'width', 'height'];
 /** A box the side bar measured: {x, y, width, height} as finite numbers, nothing else. */
 const isBox = (b: any) => !!b && typeof b === 'object' && !Array.isArray(b) && Object.keys(b).every((key) => BOX_KEYS.includes(key))
   && BOX_KEYS.every((key) => typeof b[key] === 'number' && Number.isFinite(b[key]));
-export function yourBrowserHomeRefusal(request: any, apiVersion: number): string {
-  if (!YOUR_BROWSER_HOME_COMMANDS.includes(request?.type)) return '';
-  if (apiVersion < YOUR_BROWSER_API) return 'Update DGC to use Your Browser.';
-  const refused = 'Your Browser can\'t be asked that from here.';
+export function dgcBrowserHomeRefusal(request: any, apiVersion: number): string {
+  if (!DGC_BROWSER_HOME_COMMANDS.includes(request?.type)) return '';
+  if (apiVersion < DGC_BROWSER_API) return 'Update DGC to use DGC Browser.';
+  const refused = 'DGC Browser can\'t be asked that from here.';
   const keys = Object.keys(request).filter((key) => key !== 'type');
-  if (request.type === 'clear_your_browser') {
-    if (apiVersion < YOUR_BROWSER_CLEAR_API) return 'Update DGC to clear Your Browser\'s data.';
+  if (request.type === 'clear_dgc_browser') {
+    if (apiVersion < DGC_BROWSER_CLEAR_API) return 'Update DGC to clear DGC Browser\'s data.';
     if (keys.some((key) => !CLEAR_KINDS.includes(key) || typeof request[key] !== 'boolean')) return refused;
     return keys.some((key) => request[key] === true) ? '' : 'Choose what to clear.';
   }
-  if (request.type !== 'open_your_browser') return keys.length ? refused : '';
+  if (request.type !== 'open_dgc_browser') return keys.length ? refused : '';
   if (keys.some((key) => key !== 'url' && key !== 'editor_bounds')) return refused;
   if ('url' in request && (typeof request.url !== 'string' || request.url.length > 2000)) return refused;
   if ('editor_bounds' in request) {
@@ -97,29 +97,29 @@ export function yourBrowserHomeRefusal(request: any, apiVersion: number): string
   }
   return '';
 }
-/** The sites Pips may use in Your Browser (Pips API 105 commands, 113 for seen): the Sites panel from the dock's Your
- *  Browser menu and a Pip's own page read them (get_your_browser {}), change one (set_your_browser_site {site, mode
- *  all|chosen, pips?}), sign out of one (sign_out_your_browser_site {site}) and say the panel was opened
- *  (seen_your_browser_sites {}); and the dock's and a Pip chat's quick look at the Pips working there
- *  (get_your_browser_lanes {}). Only those fields; an older DGC is sent none of them. */
-export const YOUR_BROWSER_SITES_COMMANDS = ['get_your_browser', 'set_your_browser_site', 'sign_out_your_browser_site', 'seen_your_browser_sites', 'get_your_browser_lanes'];
-export const YOUR_BROWSER_SITES_API = 113;
+/** The sites Pips may use in DGC Browser (Pips API 105 commands, 113 for seen): the Sites panel from the dock's DGC
+ *  Browser menu and a Pip's own page read them (get_dgc_browser {}), change one (set_dgc_browser_site {site, mode
+ *  all|chosen, pips?}), sign out of one (sign_out_dgc_browser_site {site}) and say the panel was opened
+ *  (seen_dgc_browser_sites {}); and the dock's and a Pip chat's quick look at the Pips working there
+ *  (get_dgc_browser_lanes {}). Only those fields; an older DGC is sent none of them. */
+export const DGC_BROWSER_SITES_COMMANDS = ['get_dgc_browser', 'set_dgc_browser_site', 'sign_out_dgc_browser_site', 'seen_dgc_browser_sites', 'get_dgc_browser_lanes'];
+export const DGC_BROWSER_SITES_API = 113;
 const isSite = (v: any) => typeof v === 'string' && v.length >= 1 && v.length <= 253 && /^[A-Za-z0-9.-]+$/.test(v);
-export function yourBrowserSitesRefusal(request: any, apiVersion: number): string {
-  if (!YOUR_BROWSER_SITES_COMMANDS.includes(request?.type)) return '';
-  if (apiVersion < YOUR_BROWSER_SITES_API) return 'Update DGC to choose which sites Pips may use in Your Browser.';
-  const refused = 'Your Browser can\'t be asked that from here.';
+export function dgcBrowserSitesRefusal(request: any, apiVersion: number): string {
+  if (!DGC_BROWSER_SITES_COMMANDS.includes(request?.type)) return '';
+  if (apiVersion < DGC_BROWSER_SITES_API) return 'Update DGC to choose which sites Pips may use in DGC Browser.';
+  const refused = 'DGC Browser can\'t be asked that from here.';
   const keys = Object.keys(request).filter((key) => key !== 'type');
-  if (['get_your_browser', 'seen_your_browser_sites', 'get_your_browser_lanes'].includes(request.type)) return keys.length ? refused : '';
-  if (request.type === 'sign_out_your_browser_site') return keys.length === 1 && isSite(request.site) ? '' : refused;
+  if (['get_dgc_browser', 'seen_dgc_browser_sites', 'get_dgc_browser_lanes'].includes(request.type)) return keys.length ? refused : '';
+  if (request.type === 'sign_out_dgc_browser_site') return keys.length === 1 && isSite(request.site) ? '' : refused;
   if (keys.some((key) => !['site', 'mode', 'pips'].includes(key)) || !isSite(request.site) || !['all', 'chosen'].includes(request.mode)) return refused;
   if ('pips' in request && !(Array.isArray(request.pips) && request.pips.length <= 500
     && request.pips.every((id: any) => typeof id === 'string' && /^pip_[A-Za-z0-9]{1,64}$/.test(id)))) return refused;
   return request.mode === 'all' && Array.isArray(request.pips) && request.pips.length ? refused : '';
 }
-/** What a page is told of get_your_browser: the sites, the Pips that may be chosen, the sites waiting to be signed out
+/** What a page is told of get_dgc_browser: the sites, the Pips that may be chosen, the sites waiting to be signed out
  *  of, and whether it can run here. Never the person's own tabs (their titles and addresses), nor the Pips' pages. */
-export function yourBrowserSitesReply(result: any): any {
+export function dgcBrowserSitesReply(result: any): any {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
   const { kind, weaker, available, reason, sites, pips, signing_out } = result;
   return { kind, weaker, available, reason, sites, pips, signing_out };
@@ -258,7 +258,7 @@ export function workSessionTitles(list: unknown): WorkSessionTitle[] {
 }
 /** A Project Pip a session owns, as list_session_pips lists it. */
 export interface OwnedPip { id: string; name: string; pip_type: string; status: string }
-const commands = new Set([...AGENT_COMMANDS,'set_pip_pay_limits','set_pip_knows_you','list_pip_sent','get_pip_import_prompt','import_pip_source','get_pip_skills','set_pip_skill','get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','fill_pip_code','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','library_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'answer_pip_questions', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen', 'get_pip_webhook', 'replace_pip_webhook_address', 'set_pip_webhook_signing', 'send_pip_webhook_test', 'get_webhook_reach', 'set_webhook_reach', ...OWNER_COMMANDS, ...GOAL_COMMANDS, ...PROJECT_COMMANDS, ...FOLDER_COMMANDS, ...MOVE_COMMANDS, ...FLOW_COMMANDS, ...JOB_COMMANDS, ...YOUR_BROWSER_HOME_COMMANDS, ...YOUR_BROWSER_SITES_COMMANDS]);
+const commands = new Set([...AGENT_COMMANDS,'set_pip_pay_limits','set_pip_knows_you','list_pip_sent','get_pip_import_prompt','import_pip_source','get_pip_skills','set_pip_skill','get_pip_apps','set_pip_app','add_pip_app_account','list_pip_conversations','create_pip_conversation','rename_pip_conversation','archive_pip_conversation','add_pip_computer','list_pip_keys','save_pip_key','decline_pip_key','remove_pip_key','list_pip_flows','get_pip_flow','create_pip_flow','set_pip_flow','get_pip_artifacts','set_pip_artifacts','list_pip_run_fixes','list_pip_templates','decide_pip_template_change','list_app_events','list_apps','accept_app_update','list_pip_borrows','allow_pip_borrow','decline_pip_borrow','stop_pip_borrow','get_pip_level','set_pip_level','get_pip_working_notes','set_pip_working_notes','list_pip_daily_log','list_pip_logins','save_pip_login','remove_pip_login','grant_pip_login','fill_pip_code','get_pip_computer_apps','set_pip_computer_apps','get_pip_eyes','set_pip_eyes','list_pip_run_posts','list_pip_unread','mark_pip_read','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','library_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_backup','set_pips_backup','get_pip_backup','set_pip_backup','undo_pip_change','get_pips_payments','set_pips_payments','set_pip_paying','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'delete_archived_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'answer_pip_questions', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context', 'rename_pip_computer', 'set_pip_computer_screen', 'get_pip_webhook', 'replace_pip_webhook_address', 'set_pip_webhook_signing', 'send_pip_webhook_test', 'get_webhook_reach', 'set_webhook_reach', ...OWNER_COMMANDS, ...GOAL_COMMANDS, ...PROJECT_COMMANDS, ...FOLDER_COMMANDS, ...MOVE_COMMANDS, ...FLOW_COMMANDS, ...JOB_COMMANDS, ...DGC_BROWSER_HOME_COMMANDS, ...DGC_BROWSER_SITES_COMMANDS]);
 /** Images sent with a Pip message, as data URIs: 2 MiB of image, base64, plus headers. */
 const MAX_IMAGE_URI_CHARS = 2_800_000;
 /** Pips API 52: photos and files go the Work chat's way. The host writes them into the backend's spool
@@ -481,43 +481,43 @@ export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', mark
 export function computerDocument(scriptUri = '', styleUri = '', cspSource = '', title = 'Computer'): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>${attr(title)}</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><script type="module" src="${attr(scriptUri)}"></script></body></html>`;
 }
-/** A Pip's tab in Your Browser, streamed into an editor tab (Pips API 107; decided 17 Nov: a VS Code tab beside the
+/** A Pip's tab in DGC Browser, streamed into an editor tab (Pips API 107; decided 17 Nov: a VS Code tab beside the
  *  chat shows a Pip's tab live, with DGC's own address bar). Its page may ask for its own Pip's lane and nothing else: a
  *  frame, the person's own hand in it, and bringing that tab forward in the window. Never the person's own tabs. */
-export const YOUR_BROWSER_API = 107;
-const YOUR_BROWSER_OPS = new Set(['frame', 'click', 'type', 'key', 'scroll', 'go', 'back', 'forward', 'reload', 'close']);
-const YOUR_BROWSER_VIEW_FIELDS = new Set(['type', 'pip_id', 'op', 'x', 'y', 'text', 'key', 'dy', 'url']);
-export function yourBrowserTabRefusal(request: any, pipId: string): string {
-  const refused = 'This tab only shows this Pip\'s own tab in Your Browser.';
+export const DGC_BROWSER_API = 107;
+const DGC_BROWSER_OPS = new Set(['frame', 'click', 'type', 'key', 'scroll', 'go', 'back', 'forward', 'reload', 'close']);
+const DGC_BROWSER_VIEW_FIELDS = new Set(['type', 'pip_id', 'op', 'x', 'y', 'text', 'key', 'dy', 'url']);
+export function dgcBrowserTabRefusal(request: any, pipId: string): string {
+  const refused = 'This tab only shows this Pip\'s own tab in DGC Browser.';
   if (!request || typeof request !== 'object' || request.pip_id !== pipId) return refused;
-  if (request.type === 'use_your_browser_view') return YOUR_BROWSER_OPS.has(request.op) && Object.keys(request).every((key) => YOUR_BROWSER_VIEW_FIELDS.has(key)) ? '' : refused;
-  if (request.type === 'open_your_browser') return Object.keys(request).every((key) => key === 'type' || key === 'pip_id') ? '' : refused;
+  if (request.type === 'use_dgc_browser_view') return DGC_BROWSER_OPS.has(request.op) && Object.keys(request).every((key) => DGC_BROWSER_VIEW_FIELDS.has(key)) ? '' : refused;
+  if (request.type === 'open_dgc_browser') return Object.keys(request).every((key) => key === 'type' || key === 'pip_id') ? '' : refused;
   return refused;
 }
-/** Your own tabs in Your Browser, streamed into an editor tab where the computer DGC runs on has no screen (Remote-SSH;
+/** Your own tabs in DGC Browser, streamed into an editor tab where the computer DGC runs on has no screen (Remote-SSH;
  *  decided 18 Nov). Its page may ask for your own tab and nothing else (a frame, your own hand in it, the address bar,
  *  your tabs, its size), and no other page may ask for your own tab at all. */
 const YOUR_OWN_OPS = new Set(['frame', 'input', 'go', 'back', 'forward', 'reload', 'new_tab', 'tab', 'close_tab', 'size', 'close', 'selection']);
 const YOUR_OWN_FIELDS = new Set(['type', 'own', 'op', 'seq', 'events', 'tab', 'width', 'height', 'url']);
 export function yourOwnTabRefusal(request: any): string {
-  const refused = 'This tab only shows your own tabs in Your Browser.';
-  if (!request || typeof request !== 'object' || request.type !== 'use_your_browser_view' || request.own !== true) return refused;
+  const refused = 'This tab only shows your own tabs in DGC Browser.';
+  if (!request || typeof request !== 'object' || request.type !== 'use_dgc_browser_view' || request.own !== true) return refused;
   return YOUR_OWN_OPS.has(request.op) && Object.keys(request).every((key) => YOUR_OWN_FIELDS.has(key)) ? '' : refused;
 }
-/** Your own tab's screen (capability your_browser_screen): open, the viewer's bytes (base64, as a Pip computer's), close;
+/** Your own tab's screen (capability dgc_browser_screen): open, the viewer's bytes (base64, as a Pip computer's), close;
  *  only from your own tab. Why it is refused, or ''. */
-export function yourBrowserScreenRefusal(message: any, own: boolean): string {
-  const refused = 'Only Your Browser\'s own tab shows its screen.';
+export function dgcBrowserScreenRefusal(message: any, own: boolean): string {
+  const refused = 'Only DGC Browser\'s own tab shows its screen.';
   if (!own || !message || typeof message !== 'object' || !['open', 'send', 'close'].includes(message.op)) return refused;
   if (Object.keys(message).some((key) => !['type', 'op', 'data'].includes(key))) return refused;
   if (message.op === 'send') return typeof message.data === 'string' && message.data && message.data.length <= 1_400_000 && /^[A-Za-z0-9+/=]+$/.test(message.data) ? '' : refused;
   return Object.prototype.hasOwnProperty.call(message, 'data') ? refused : '';
 }
-/** Whether a page other than Your Browser's own tab asks for your own tab: never let through. */
+/** Whether a page other than DGC Browser's own tab asks for your own tab: never let through. */
 export function asksForYourOwnTab(request: any): boolean {
-  return !!request && typeof request === 'object' && request.type === 'use_your_browser_view' && Object.prototype.hasOwnProperty.call(request, 'own');
+  return !!request && typeof request === 'object' && request.type === 'use_dgc_browser_view' && Object.prototype.hasOwnProperty.call(request, 'own');
 }
-export function yourBrowserDocument(scriptUri = '', styleUri = '', cspSource = '', title = 'Your Browser'): string {
+export function dgcBrowserDocument(scriptUri = '', styleUri = '', cspSource = '', title = 'DGC Browser'): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>${attr(title)}</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><script type="module" src="${attr(scriptUri)}"></script></body></html>`;
 }
 /** "Open in editor" for a Pip's chat: the Pip and the conversation a page names, each checked here. */
@@ -535,6 +535,15 @@ export function chatPip(value: any, whole = true): ChatPip | undefined {
   // (`body`: the character chosen for it, as the page knows it, for its tab's first icon. DGC's own word follows.)
   return { id: value.id, name: value.name.trim(), pip_type: whole ? value.pip_type : String(value.pip_type || ''),
     ...(whole && typeof value.body === 'string' && CHAT_PIP_TYPES.includes(value.body) ? { body: value.body } : {}) };
+}
+/** A tab in DGC Browser as a page names it: a Pip's (chatPip), or a Work session's own tab there (26 Nov:
+ *  "work:<session>", named "Work · <project>"), which the dock's Watch shows too. */
+export function browserLane(value: any): { id: string; name: string } | undefined {
+  const pip = chatPip(value, false);
+  if (pip) return { id: pip.id, name: pip.name };
+  if (!value || typeof value !== 'object' || typeof value.id !== 'string' || !/^work:[A-Za-z0-9_-]{1,64}$/.test(value.id)) return undefined;
+  if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 120 || /[\u0000-\u001f\u007f]/.test(value.name)) return undefined;
+  return { id: value.id, name: value.name.trim() };
 }
 /** A conversation as a page names it: undefined for none (the Pip's one chat, or its first), null for one that is not
  *  a conversation. Its id is DGC's, or '' for the Pip's first; its title a line of words, when the page knows it. */
@@ -683,7 +692,7 @@ export class PipsEditor implements vscode.Disposable {
    *  Pip's first conversation: "pip_x#"). Each is the Pips page itself, pinned to that chat and talking to DGC through
    *  this bridge as the Pips tab does: the same chat, never a copy. Closing one asks DGC nothing. */
   private chats = new Map<string, { panel: vscode.WebviewPanel; pip: ChatPip; conversation: string; face?: string }>();
-  /** A Pip's streamed tab of Your Browser, one per Pip (Pips API 107); and (key "own") your own tab, streamed where the
+  /** A Pip's streamed tab of DGC Browser, one per Pip (Pips API 107); and (key "own") your own tab, streamed where the
    *  computer DGC runs on has no screen, one per window. */
   private browserTabs = new Map<string, { panel: vscode.WebviewPanel; pip: { id: string; name: string } | null }>();
   /** The character each Pip wears, as DGC last said it in this window (get_pip, set_pip_profile): '' for its type's own. */
@@ -713,8 +722,8 @@ export class PipsEditor implements vscode.Disposable {
   private desktopOwner = new Map<string, string>();
   /** The CLI streams a Pip computer's full screen (ready.capabilities.pips_desktop). */
   private desktopStream = false;
-  /** Your Browser's own tab streams Chrome's real window as a Pip computer's screen streams (capability
-   *  your_browser_screen; where the computer DGC runs on has no screen). */
+  /** DGC Browser's own tab streams Chrome's real window as a Pip computer's screen streams (capability
+   *  dgc_browser_screen; where the computer DGC runs on has no screen). */
   private browserScreen = false;
   /** The CLI's screen stream takes which computer (ready.capabilities.pips_desktop_numbers). */
   private desktopNumbers = false;
@@ -1086,14 +1095,14 @@ export class PipsEditor implements vscode.Disposable {
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
     panel.webview.html = computerDocument(asset('pipComputer.js'), asset('pipComputer.css'), panel.webview.cspSource, title);
   }
-  /** A Pip's tab in Your Browser as an editor tab beside the chat ("Ava · Your Browser"), or its tab brought forward.
-   *  With no Pip (null): your own tab, streamed where the computer DGC runs on has no screen ("Your Browser"). */
-  openYourBrowserTab(pip: { id: string; name: string } | null): void {
+  /** A Pip's tab in DGC Browser as an editor tab beside the chat ("Ava · DGC Browser"), or its tab brought forward.
+   *  With no Pip (null): your own tab, streamed where the computer DGC runs on has no screen ("DGC Browser"). */
+  openDgcBrowserTab(pip: { id: string; name: string } | null): void {
     const key = pip ? pip.id : 'own';
     const open = this.browserTabs.get(key);
     if (open) { open.panel.reveal(pip ? vscode.ViewColumn.Beside : open.panel.viewColumn); return; }
-    const title = pip ? `${pip.name} · Your Browser` : 'Your Browser';
-    const panel = vscode.window.createWebviewPanel('dgc.yourBrowser', title, pip ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active, {
+    const title = pip ? `${pip.name} · DGC Browser` : 'DGC Browser';
+    const panel = vscode.window.createWebviewPanel('dgc.dgcBrowser', title, pip ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active, {
       enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [this.extensionUri],
     });
     try { panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'icons', 'browser-halo', 'halo-64.png'); } catch { /* the plain tab */ }
@@ -1103,54 +1112,54 @@ export class PipsEditor implements vscode.Disposable {
       this.browserTabs.delete(key);
       for (const [id, item] of this.pending) if (item.surface === surface) this.pending.delete(id);
       // Your own tab closed: DGC stops its stream and forgets its last picture.
-      if (!pip && this.state.connected && this.apiVersion >= YOUR_BROWSER_API) {
-        this.send({ type: 'pips_control', request: { type: 'use_your_browser_view', own: true, op: 'close', request_id: 'pips-browser-' + randomBytes(12).toString('hex') } }, this.backendIdentity);
-        if (this.browserScreen) this.send({ type: 'your_browser_screen', op: 'close' }, this.backendIdentity);
+      if (!pip && this.state.connected && this.apiVersion >= DGC_BROWSER_API) {
+        this.send({ type: 'pips_control', request: { type: 'use_dgc_browser_view', own: true, op: 'close', request_id: 'pips-browser-' + randomBytes(12).toString('hex') } }, this.backendIdentity);
+        if (this.browserScreen) this.send({ type: 'dgc_browser_screen', op: 'close' }, this.backendIdentity);
       }
     });
     panel.webview.onDidReceiveMessage(message => this.receive(message, surface));
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
-    panel.webview.html = yourBrowserDocument(asset('yourBrowserTab.js'), asset('yourBrowserTab.css'), panel.webview.cspSource, title);
+    panel.webview.html = dgcBrowserDocument(asset('dgcBrowserTab.js'), asset('dgcBrowserTab.css'), panel.webview.cspSource, title);
   }
-  /** What a Pip's streamed tab asks: its own Pip's lane only (yourBrowserTabRefusal), sent as the Pips page's are. Your
+  /** What a Pip's streamed tab asks: its own Pip's lane only (dgcBrowserTabRefusal), sent as the Pips page's are. Your
    *  own tab's: your own tab only (yourOwnTabRefusal). */
   private receiveBrowserTab(message: any, surface: string): void {
     const tab = this.browserTabs.get(surface.slice(8));
     if (!tab) return;
     if (message?.type === 'pipsReady' || message?.type === 'pipsReconnect') {
-      this.post(tab.pip ? { type: 'yourBrowserInit', pip: tab.pip } : { type: 'yourBrowserInit', own: true, screen: this.browserScreen }, surface);
+      this.post(tab.pip ? { type: 'dgcBrowserInit', pip: tab.pip } : { type: 'dgcBrowserInit', own: true, screen: this.browserScreen }, surface);
       this.post({ type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, ...this.state }, surface);
       return;
     }
-    if (message?.type === 'yourBrowserScreen') {
+    if (message?.type === 'dgcBrowserScreen') {
       // Your own tab's viewer: its screen's bytes in base64, from your own tab only (a Pip's tab never has one).
-      const refused = yourBrowserScreenRefusal(message, !tab.pip);
+      const refused = dgcBrowserScreenRefusal(message, !tab.pip);
       if (refused) return;
       if (!this.browserScreen || !this.state.connected || !this.state.supported || !this.state.enabled) {
-        // Answered, never dropped: the tab tries again a few times, then says why. Dropped, it waited on "Opening Your
+        // Answered, never dropped: the tab tries again a few times, then says why. Dropped, it waited on "Opening DGC
         // Browser…" for ever (25 Nov, Cursor over Remote-SSH).
         if (message.op === 'open') {
-          const reason = !this.browserScreen ? 'This DGC can’t show Your Browser’s screen. Update DGC.'
-            : !this.state.connected ? 'DGC is still connecting.' : 'Pips aren’t on, and Your Browser needs them.';
-          this.post({ type: 'yourBrowserScreenClosed', reason, pictures: false }, surface);
+          const reason = !this.browserScreen ? 'This DGC can’t show DGC Browser’s screen. Update DGC.'
+            : !this.state.connected ? 'DGC is still connecting.' : 'Pips aren’t on, and DGC Browser needs them.';
+          this.post({ type: 'dgcBrowserScreenClosed', reason, pictures: false }, surface);
         }
         return;
       }
-      this.send({ type: 'your_browser_screen', op: message.op, ...(message.op === 'send' ? { data: message.data } : {}) }, this.backendIdentity);
+      this.send({ type: 'dgc_browser_screen', op: message.op, ...(message.op === 'send' ? { data: message.data } : {}) }, this.backendIdentity);
       return;
     }
-    if (message?.type === 'pipsOpenYourBrowser') {
-      // Another Pip's tab, from this tab's row of Pips: its own editor tab.
-      const pip = chatPip(message.pip, false);
-      if (pip && this.apiVersion >= YOUR_BROWSER_API) this.openYourBrowserTab({ id: pip.id, name: pip.name });
+    if (message?.type === 'pipsOpenDgcBrowser') {
+      // Another Pip's tab (or a Work session's), from this tab's row of tabs: its own editor tab.
+      const lane = browserLane(message.pip);
+      if (lane && this.apiVersion >= DGC_BROWSER_API) this.openDgcBrowserTab(lane);
       return;
     }
     if (message?.type !== 'pipsRequest' || typeof message.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(message.id)) return;
     const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } }, surface);
-    const refused = tab.pip ? yourBrowserTabRefusal(message.request, tab.pip.id) : yourOwnTabRefusal(message.request);
+    const refused = tab.pip ? dgcBrowserTabRefusal(message.request, tab.pip.id) : yourOwnTabRefusal(message.request);
     if (refused) { fail(refused); return; }
     if (!this.state.connected || !this.state.supported || !this.state.enabled) { fail('Pips aren’t available. Update DGC, then reconnect.'); return; }
-    if (this.apiVersion < YOUR_BROWSER_API) { fail(tab.pip ? 'Update DGC to watch a Pip’s tab in Your Browser.' : 'Update DGC to use Your Browser here.'); return; }
+    if (this.apiVersion < DGC_BROWSER_API) { fail(tab.pip ? 'Update DGC to watch a Pip’s tab in DGC Browser.' : 'Update DGC to use DGC Browser here.'); return; }
     for (const [id, item] of this.pending) if (Date.now() - item.at > 60000) this.pending.delete(id);
     // (Your own tab: a frame waited for, your input in order, and its size.)
     if ([...this.pending.values()].filter((item) => item.surface === surface).length >= (tab.pip ? 4 : 6)) { fail('Still waiting for the last picture.'); return; }
@@ -1307,7 +1316,7 @@ export class PipsEditor implements vscode.Disposable {
     this.displayMentions = capabilities?.pip_display_mentions === 1;
     this.desktopStream = capabilities?.pips_desktop === 1;
     this.desktopNumbers = this.desktopStream && capabilities?.pips_desktop_numbers === 1 && this.apiVersion >= 86;
-    this.browserScreen = capabilities?.your_browser_screen === 1;
+    this.browserScreen = capabilities?.dgc_browser_screen === 1;
     this.desktopOwner.clear();
     this.learn = Number(capabilities?.learn?.version) >= 1;
     this.foldersOn = foldersOffered(capabilities);
@@ -1463,10 +1472,10 @@ export class PipsEditor implements vscode.Disposable {
         error: event.ok === true ? undefined : { message: String(event.message || 'DGC couldn’t do that.') } }, owner.surface);
       return true;
     }
-    if (event.type === 'your_browser_screen_data' || event.type === 'your_browser_screen_closed') {
-      // Your Browser's own screen goes to its own tab only (never a Pip's tab, never another page).
-      if (this.browserTabs.has('own')) this.post(event.type === 'your_browser_screen_data' ? { type: 'yourBrowserScreenData', data: event.data }
-        : { type: 'yourBrowserScreenClosed', reason: String(event.reason || ''), pictures: event.pictures === true }, 'browser:own');
+    if (event.type === 'dgc_browser_screen_data' || event.type === 'dgc_browser_screen_closed') {
+      // DGC Browser's own screen goes to its own tab only (never a Pip's tab, never another page).
+      if (this.browserTabs.has('own')) this.post(event.type === 'dgc_browser_screen_data' ? { type: 'dgcBrowserScreenData', data: event.data }
+        : { type: 'dgcBrowserScreenClosed', reason: String(event.reason || ''), pictures: event.pictures === true }, 'browser:own');
       return true;
     }
     if (event.type === 'pip_desktop_data' || event.type === 'pip_desktop_closed') {
@@ -1540,7 +1549,7 @@ export class PipsEditor implements vscode.Disposable {
     }
     this.post({ type: 'pipsReply', id: owner.client,
       ok: event.type !== 'command_rejected' && (event.type === 'pips_status' || event.ok === true),
-      result: event.type === 'pips_status' ? event : owner.command === 'get_your_browser' ? yourBrowserSitesReply(event.result) : event.result,
+      result: event.type === 'pips_status' ? event : owner.command === 'get_dgc_browser' ? dgcBrowserSitesReply(event.result) : event.result,
       error: event.type === 'command_rejected' ? {message: event.message} : event.error }, owner.surface);
     return true;
   }
@@ -1963,15 +1972,16 @@ export class PipsEditor implements vscode.Disposable {
     // (Copy too: a Pip tab's Copy puts its text on the clipboard as the side bar's does.)
     if (!computer && ['openFile', 'openExternal', 'openSettings', 'copy', 'codePreview'].includes(String(message?.type))) { this.pageActions?.(message); return; }
     if (message?.type === 'pipsSignIn' && !computer) { openEngineSignIn(String(message.engine || '')); return; }
-    if (message?.type === 'pipsOpenYourBrowser' && !computer) {
-      // A Pip's tab in Your Browser, watched in an editor tab beside the chat (Pips API 107; the dock's Browser menu); or
-      // (own) your own tab, where the computer DGC runs on has no screen: what open_your_browser answered (view "tab").
-      // Your own tab may be opened from a Pip's chat in its own editor tab too (a sign-in card's Open Your Browser), and
+    if (message?.type === 'pipsOpenDgcBrowser' && !computer) {
+      // A Pip's tab in DGC Browser, watched in an editor tab beside the chat (Pips API 107; the dock's Browser menu); or
+      // (own) your own tab, where the computer DGC runs on has no screen: what open_dgc_browser answered (view "tab").
+      // Your own tab may be opened from a Pip's chat in its own editor tab too (a sign-in card's Open DGC Browser), and
       // so may that Pip's own tab (its working line's Watch), never another Pip's.
-      if (this.apiVersion < YOUR_BROWSER_API) return;
-      if (message.own === true) { this.openYourBrowserTab(null); return; }
-      const pip = chatPip(message.pip, false);
-      if (pip && (!chat || pip.id === chat.pip.id)) this.openYourBrowserTab({ id: pip.id, name: chat ? chat.pip.name : pip.name });
+      if (this.apiVersion < DGC_BROWSER_API) return;
+      if (message.own === true) { this.openDgcBrowserTab(null); return; }
+      // (A Work session's tab, "work:<session>", only from the dock: a Pip's chat opens its own Pip's tab alone.)
+      const lane = browserLane(message.pip);
+      if (lane && (!chat || lane.id === chat.pip.id)) this.openDgcBrowserTab({ id: lane.id, name: chat ? chat.pip.name : lane.name });
       return;
     }
     if (message?.type === 'pipsOpenComputer' && !computer) {
@@ -2108,8 +2118,8 @@ export class PipsEditor implements vscode.Disposable {
     const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } }, surface);
     { const windowFolder = fullFolder(vscode.workspace?.workspaceFolders?.[0]?.uri?.fsPath);
       const refused = projectFoldersRefusal(message.request, this.apiVersion, (folder) => this.pickedFolders.has(folder) || this.listedFolders.has(folder) || (!!windowFolder && folder === windowFolder)); if (refused) { fail(refused); return; } }
-    // Your own tab in Your Browser: only its own editor tab asks for it (receiveBrowserTab), never this page.
-    if (asksForYourOwnTab(message.request)) { fail('Only Your Browser’s own tab shows your tabs.'); return; }
+    // Your own tab in DGC Browser: only its own editor tab asks for it (receiveBrowserTab), never this page.
+    if (asksForYourOwnTab(message.request)) { fail('Only DGC Browser’s own tab shows your tabs.'); return; }
     // The copy commands carry a path on this computer: no page sends one, whichever page it is.
     if (COMPUTER_COPY_COMMANDS.has(message.request?.type)) { fail(this.apiVersion < COMPUTER_COPY_API ? 'Update DGC to copy files over 2 MB.' : 'Use Add file… or Save to this computer… in the computer’s Files.'); return; }
     // A computer tab is pinned to its own Pip and to the computer's commands.
@@ -2177,9 +2187,9 @@ export class PipsEditor implements vscode.Disposable {
     { const refused = pipProjectsRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
     // @ a Pip (Pips API 111): a job's card in the Pips page reads the job and answers Start / Not now.
     { const refused = pipJobsRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
-    // Your Browser from the side bar (Pips API 107): the dock's and Home's Browser, and Install Google Chrome.
-    { const refused = yourBrowserHomeRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
-    { const refused = yourBrowserSitesRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
+    // DGC Browser from the side bar (Pips API 107): the dock's and Home's Browser, and Install Google Chrome.
+    { const refused = dgcBrowserHomeRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
+    { const refused = dgcBrowserSitesRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
     // A Project Pip's owner session (Pips API 89): an older DGC keeps no owner to read or set.
     { const refused = pipOwnersRefusal(request, this.apiVersion); if (refused) { fail(refused); return; } }
     // A Personal Pip's goal (Pips API 92): an older DGC has none to set, read or stop.

@@ -1,4 +1,4 @@
-// A site's own icon beside its tab or its link: Your Browser's tabs (src/yourBrowserTab.js) and Home's Browser card
+// A site's own icon beside its tab or its link: DGC Browser's tabs (src/dgcBrowserTab.js) and Home's Browser card
 // (media/shared/homecards.js). One check for both: what may be drawn (a small data: picture DGC downloaded, never an
 // address the page would fetch), and, on a dark editor, an icon that is dark and of one colour (black, near-black,
 // grey) is drawn light, as the site's own dark-mode icon would be; coloured icons stay as they are.

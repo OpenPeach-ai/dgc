@@ -497,13 +497,13 @@ READ_COMMANDS |= API101_READS
 # API 104: a Pip's own sub-agents model. set_pip_agents also takes model_choice, thinking, context_size and fallback
 # (what its sub-agents run on, and DGC's own helpers in its runs), each optional; it answers all five with slots.
 API104_FIELDS = {'set_pip_agents': frozenset({'model_choice', 'thinking', 'context_size', 'fallback'})}
-# API 105: Your Browser, the one shared browser you sign in to, each Pip in its own tab of it on the sites you let it
-# use. get_your_browser (kind host_profile, weaker, the sites with their Pips); set_your_browser_site (all, or the Pips
-# chosen) and sign_out_your_browser_site; open_your_browser and use_your_browser_view (its window and a Pip's streamed
+# API 105: DGC Browser, the one shared browser you sign in to, each Pip in its own tab of it on the sites you let it
+# use. get_dgc_browser (kind host_profile, weaker, the sites with their Pips); set_dgc_browser_site (all, or the Pips
+# chosen) and sign_out_dgc_browser_site; open_dgc_browser and use_dgc_browser_view (its window and a Pip's streamed
 # tab since API 107). Local only.
-API105_READS = frozenset({'get_your_browser'})
-API105_MUTATIONS = frozenset({'set_your_browser_site', 'sign_out_your_browser_site', 'open_your_browser',
-                              'use_your_browser_view'})
+API105_READS = frozenset({'get_dgc_browser'})
+API105_MUTATIONS = frozenset({'set_dgc_browser_site', 'sign_out_dgc_browser_site', 'open_dgc_browser',
+                              'use_dgc_browser_view'})
 READ_COMMANDS |= API105_READS
 MUTATION_COMMANDS |= API105_MUTATIONS
 # API 106: a question card in a Pip's chat, as Work has it. send_pip_message's `questions` (true: this client draws the
@@ -513,16 +513,16 @@ API106_MUTATIONS = frozenset({'answer_pip_questions'})
 API106_FIELDS = {'send_pip_message': frozenset({'questions'})}
 MUTATION_COMMANDS |= API106_MUTATIONS
 PIP_MESSAGE_ID = re.compile(r"message_[0-9a-f]{32}\Z")
-# API 107: Your Browser's window. get_your_browser_recent (the newest three links of your own tabs there, never a Pip's);
-# open_your_browser takes editor_bounds (its window opens to the right of the editor) and use_your_browser_view takes op
+# API 107: DGC Browser's window. get_dgc_browser_recent (the newest three links of your own tabs there, never a Pip's);
+# open_dgc_browser takes editor_bounds (its window opens to the right of the editor) and use_dgc_browser_view takes op
 # frame (a picture of one Pip's tab; your own tabs are never streamed). Local only.
 # Also 107 (18 Nov): install_google_chrome (through the system's own password prompt, or the one terminal line) and
-# use_your_browser_view's own tab where the computer has no screen (own, seq, events, tab, width, height; the editor's
+# use_dgc_browser_view's own tab where the computer has no screen (own, seq, events, tab, width, height; the editor's
 # own actor only).
-API107_READS = frozenset({'get_your_browser_recent'})
+API107_READS = frozenset({'get_dgc_browser_recent'})
 API107_MUTATIONS = frozenset({'install_google_chrome'})
-API107_FIELDS = {'open_your_browser': frozenset({'editor_bounds'}),
-                 'use_your_browser_view': frozenset({'own', 'seq', 'events', 'tab', 'width', 'height'})}
+API107_FIELDS = {'open_dgc_browser': frozenset({'editor_bounds'}),
+                 'use_dgc_browser_view': frozenset({'own', 'seq', 'events', 'tab', 'width', 'height'})}
 READ_COMMANDS |= API107_READS
 MUTATION_COMMANDS |= API107_MUTATIONS
 # API 108: Save to Library on a picture in a Pip's chat. library_pip_message_image {pip_id, message_id, index, keep?}
@@ -547,18 +547,18 @@ API111_READS = frozenset({'get_pip_job', 'list_pip_jobs'})
 API111_MUTATIONS = frozenset({'start_pip_job', 'decline_pip_job'})
 READ_COMMANDS |= API111_READS
 MUTATION_COMMANDS |= API111_MUTATIONS
-# API 112: Clear browsing data in Your Browser. clear_your_browser {history, sign_ins, passwords} clears what was ticked
-# from DGC's own profile there (never your own Chrome's), closing and opening it again where it runs; get_your_browser
-# and get_your_browser_recent carry chrome_account. Local only.
-API112_MUTATIONS = frozenset({'clear_your_browser'})
+# API 112: Clear browsing data in DGC Browser. clear_dgc_browser {history, sign_ins, passwords} clears what was ticked
+# from DGC's own profile there (never your own Chrome's), closing and opening it again where it runs; get_dgc_browser
+# and get_dgc_browser_recent carry chrome_account. Local only.
+API112_MUTATIONS = frozenset({'clear_dgc_browser'})
 MUTATION_COMMANDS |= API112_MUTATIONS
-# API 113: the sites Pips may use in Your Browser, in one panel. seen_your_browser_sites {} says the person opened it (the
-# sites noticed from their own sign-ins until now are no longer new); get_your_browser's sites carry new, it lists pips
-# (those the person may choose), and get_your_browser_recent carries new_sites. get_your_browser_lanes {} is the
+# API 113: the sites Pips may use in DGC Browser, in one panel. seen_dgc_browser_sites {} says the person opened it (the
+# sites noticed from their own sign-ins until now are no longer new); get_dgc_browser's sites carry new, it lists pips
+# (those the person may choose), and get_dgc_browser_recent carries new_sites. get_dgc_browser_lanes {} is the
 # dock's quick look: the Pips with a tab there, each named and saying whether its run is working in it now (working),
 # and whether any Pip's run is live (runs_live); every lane list carries working. Local only.
-API113_READS = frozenset({'get_your_browser_lanes'})
-API113_MUTATIONS = frozenset({'seen_your_browser_sites'})
+API113_READS = frozenset({'get_dgc_browser_lanes'})
+API113_MUTATIONS = frozenset({'seen_dgc_browser_sites'})
 READ_COMMANDS |= API113_READS
 MUTATION_COMMANDS |= API113_MUTATIONS
 PIP_OUTPUTS = frozenset({'auto', 'document', 'slides', 'spreadsheet', 'page', 'dashboard', 'checklist', 'design'})
@@ -725,17 +725,17 @@ COMMAND_FIELDS = {
     'retry_pip_fix': frozenset({'pip_id', 'fix_id', 'again'}),
     'undo_pip_agent_job': frozenset({'pip_id', 'job_id'}),
     'fill_pip_code': frozenset({'pip_id', 'action_id', 'expected_digest', 'code'}),
-    'get_your_browser': frozenset(),
-    'set_your_browser_site': frozenset({'site', 'mode', 'pips'}),
-    'sign_out_your_browser_site': frozenset({'site'}),
-    'open_your_browser': frozenset({'url', 'pip_id', 'editor_bounds'}),
-    'get_your_browser_recent': frozenset(),
-    'seen_your_browser_sites': frozenset(),
-    'get_your_browser_lanes': frozenset(),
-    'use_your_browser_view': frozenset({'op', 'x', 'y', 'text', 'key', 'dy', 'url', 'pip_id', 'own', 'seq', 'events', 'tab',
+    'get_dgc_browser': frozenset(),
+    'set_dgc_browser_site': frozenset({'site', 'mode', 'pips'}),
+    'sign_out_dgc_browser_site': frozenset({'site'}),
+    'open_dgc_browser': frozenset({'url', 'pip_id', 'editor_bounds'}),
+    'get_dgc_browser_recent': frozenset(),
+    'seen_dgc_browser_sites': frozenset(),
+    'get_dgc_browser_lanes': frozenset(),
+    'use_dgc_browser_view': frozenset({'op', 'x', 'y', 'text', 'key', 'dy', 'url', 'pip_id', 'own', 'seq', 'events', 'tab',
                                         'width', 'height'}),
     'install_google_chrome': frozenset(),
-    'clear_your_browser': frozenset({'history', 'sign_ins', 'passwords'}),
+    'clear_dgc_browser': frozenset({'history', 'sign_ins', 'passwords'}),
     'commit_pip_project_change': frozenset({'pip_id', 'change_id'}),
     'set_pip_goal': frozenset({'pip_id', 'objective', 'conversation_id'}),
     'get_pip_goal': frozenset({'pip_id', 'conversation_id'}),
@@ -1419,8 +1419,8 @@ class Pips:
                                         or not isinstance(values.get('idempotency_key'), str)):
                 raise DGCConfigError("answers is {question id: {selected: [indices], other: text}}, with an idempotency_key")
         if ((API107_FIELDS.get(command, frozenset()) & set(values))
-                or (command == 'use_your_browser_view' and values.get('op') == 'frame')) and version < 107:
-            raise DGCUnsupportedError("Your Browser's window beside the editor (editor_bounds), a Pip's streamed tab "
+                or (command == 'use_dgc_browser_view' and values.get('op') == 'frame')) and version < 107:
+            raise DGCUnsupportedError("DGC Browser's window beside the editor (editor_bounds), a Pip's streamed tab "
                                       "(op frame) and your own tab streamed (own) require a runtime advertising Pips API "
                                       "107 or newer")
         if API104_FIELDS.get(command, frozenset()) & set(values) and version < 104:

@@ -1,6 +1,6 @@
 // The Mac dialog (0.52; pips-sandbox-design §6, agreed 13 Nov): once, only on a Mac whose Pips can't have their own
 // computer (get_pip_runner's runner.boxes.available is false, Pips API 96): "Pips' own computers need a Mac with Apple
-// silicon on macOS 26. Until then, folder Pips can only read their folder, and Your Browser runs as a separate Chrome
+// silicon on macOS 26. Until then, folder Pips can only read their folder, and DGC Browser runs as a separate Chrome
 // profile on this Mac (less walled off than a computer). A Pip can still use your own Chrome when you allow it." with
 // OK. Never on other machines; never again after OK or Esc (the editor's global state, which every window shares).
 // Not in the same launch as What's new or the Pips welcome: only one thing opens by itself per launch.
@@ -15,7 +15,7 @@ const KEY = "dgc.pipsMacNoteSeen", NEWS = "dgc.whatsNewSeen", WELCOME_KEY = "dgc
 const NO_BOXES = { available: false, why: "Pips' own computers need macOS 26 on Apple silicon." }, BOXES = { available: true, why: "" };
 const MOVED = { had_pips: true, folders: [], personal: [{ id: pid("b"), name: "Mornings" }], do_it_all: [] }, NEW_USER = { had_pips: false, folders: [], personal: [], do_it_all: [] };
 const SAYS = ["Pips’ own computers need a Mac with Apple silicon on macOS 26.",
-  "Until then, folder Pips can only read their folder, and Your Browser runs as a separate Chrome profile on this Mac (less walled off than a computer). A Pip can still use your own Chrome when you allow it."];
+  "Until then, folder Pips can only read their folder, and DGC Browser runs as a separate Chrome profile on this Mac (less walled off than a computer). A Pip can still use your own Chrome when you allow it."];
 
 // ---- the host: when it shows, and that it never shows again -------------------------------------------------------------
 

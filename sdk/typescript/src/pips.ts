@@ -60,8 +60,8 @@ export type PipReadParams = {
   get_pip_computer_frame: { run_id: string; frame: string };
   get_pip_message_image: { pip_id: string; message_id: string; index: number; as_file?: boolean };
   get_pip_message_file: { pip_id: string; message_id: string; index: number };
-  get_your_browser: { [key: string]: never };
-  get_your_browser_recent: { [key: string]: never };
+  get_dgc_browser: { [key: string]: never };
+  get_dgc_browser_recent: { [key: string]: never };
   get_pip_job: { job_id: string };
   list_pip_jobs: { pip_id: string };
   list_pip_computer_frames: { run_id: string; pointers?: boolean };
@@ -237,11 +237,11 @@ export type PipMutationParams = {
   retry_pip_fix: { pip_id: string; fix_id: string; again: boolean };
   undo_pip_agent_job: { pip_id: string; job_id: string };
   fill_pip_code: { pip_id: string; action_id: string; expected_digest: string; code: string };
-  set_your_browser_site: { site: string; mode: "all" | "chosen"; pips?: string[] };
-  sign_out_your_browser_site: { site: string };
-  open_your_browser: { url?: string; pip_id?: string;
+  set_dgc_browser_site: { site: string; mode: "all" | "chosen"; pips?: string[] };
+  sign_out_dgc_browser_site: { site: string };
+  open_dgc_browser: { url?: string; pip_id?: string;
     editor_bounds?: { x: number; y: number; width: number; height: number; screen?: { x: number; y: number; width: number; height: number } } };
-  use_your_browser_view: { op: "frame" | "click" | "move" | "type" | "key" | "scroll" | "go" | "back" | "forward" | "reload" | "close"
+  use_dgc_browser_view: { op: "frame" | "click" | "move" | "type" | "key" | "scroll" | "go" | "back" | "forward" | "reload" | "close"
       | "input" | "new_tab" | "tab" | "close_tab" | "size";
     x?: number; y?: number; text?: string; key?: string; dy?: number; url?: string; pip_id?: string;
     /** API 107: your own tab, where the computer has no screen (the editor's own actor only). */
@@ -249,11 +249,11 @@ export type PipMutationParams = {
     events?: { t: "down" | "up" | "move" | "wheel" | "key" | "text"; x?: number; y?: number; button?: "left" | "middle" | "right" | "none";
       buttons?: number; clicks?: number; dx?: number; dy?: number; key?: string; code?: string; text?: string; mods?: number }[] };
   install_google_chrome: { [key: string]: never };
-  /** API 112: Clear browsing data in Your Browser (what was ticked; at least one true). */
-  clear_your_browser: { history?: boolean; sign_ins?: boolean; passwords?: boolean };
-  /** API 113: the person opened the panel of sites Pips may use in Your Browser (noticed ones are no longer new). */
-  seen_your_browser_sites: { [key: string]: never };
-  get_your_browser_lanes: { [key: string]: never };
+  /** API 112: Clear browsing data in DGC Browser (what was ticked; at least one true). */
+  clear_dgc_browser: { history?: boolean; sign_ins?: boolean; passwords?: boolean };
+  /** API 113: the person opened the panel of sites Pips may use in DGC Browser (noticed ones are no longer new). */
+  seen_dgc_browser_sites: { [key: string]: never };
+  get_dgc_browser_lanes: { [key: string]: never };
   library_pip_message_image: { pip_id: string; message_id: string; index: number; keep?: boolean };
   commit_pip_project_change: { pip_id: string; change_id: string };
   set_pip_goal: { pip_id: string; objective: string; conversation_id?: string };
@@ -482,16 +482,16 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   retry_pip_fix: ["pip_id", "fix_id", "again"],
   undo_pip_agent_job: ["pip_id", "job_id"],
   fill_pip_code: ["pip_id", "action_id", "expected_digest", "code"],
-  get_your_browser: [],
-  set_your_browser_site: ["site", "mode", "pips"],
-  sign_out_your_browser_site: ["site"],
-  open_your_browser: ["url", "pip_id", "editor_bounds"],
-  get_your_browser_recent: [],
-  use_your_browser_view: ["op", "x", "y", "text", "key", "dy", "url", "pip_id", "own", "seq", "events", "tab", "width", "height"],
+  get_dgc_browser: [],
+  set_dgc_browser_site: ["site", "mode", "pips"],
+  sign_out_dgc_browser_site: ["site"],
+  open_dgc_browser: ["url", "pip_id", "editor_bounds"],
+  get_dgc_browser_recent: [],
+  use_dgc_browser_view: ["op", "x", "y", "text", "key", "dy", "url", "pip_id", "own", "seq", "events", "tab", "width", "height"],
   install_google_chrome: [],
-  clear_your_browser: ["history", "sign_ins", "passwords"],
-  seen_your_browser_sites: [],
-  get_your_browser_lanes: [],
+  clear_dgc_browser: ["history", "sign_ins", "passwords"],
+  seen_dgc_browser_sites: [],
+  get_dgc_browser_lanes: [],
   library_pip_message_image: ["pip_id", "message_id", "index", "keep"],
   commit_pip_project_change: ["pip_id", "change_id"],
   set_pip_goal: ["pip_id", "objective", "conversation_id"],
@@ -1093,12 +1093,12 @@ for (const command of API101_READS) READS.add(command);
 // API 104: a Pip's own sub-agents model. set_pip_agents also takes model_choice, thinking, context_size and fallback
 // (what its sub-agents run on, and DGC's own helpers in its runs), each optional; it answers all five with slots.
 const API104_FIELDS: Record<string, readonly string[]> = { set_pip_agents: ["model_choice", "thinking", "context_size", "fallback"] };
-// API 105: Your Browser, the one shared browser you sign in to, each Pip in its own tab of it on the sites you let it
-// use. get_your_browser (kind host_profile, weaker, the sites with their Pips); set_your_browser_site (all, or the Pips
-// chosen) and sign_out_your_browser_site; open_your_browser and use_your_browser_view (its window and a Pip's streamed
+// API 105: DGC Browser, the one shared browser you sign in to, each Pip in its own tab of it on the sites you let it
+// use. get_dgc_browser (kind host_profile, weaker, the sites with their Pips); set_dgc_browser_site (all, or the Pips
+// chosen) and sign_out_dgc_browser_site; open_dgc_browser and use_dgc_browser_view (its window and a Pip's streamed
 // tab since API 107). Local only.
-const API105_READS = new Set(["get_your_browser"]);
-const API105_MUTATIONS = new Set(["set_your_browser_site", "sign_out_your_browser_site", "open_your_browser", "use_your_browser_view"]);
+const API105_READS = new Set(["get_dgc_browser"]);
+const API105_MUTATIONS = new Set(["set_dgc_browser_site", "sign_out_dgc_browser_site", "open_dgc_browser", "use_dgc_browser_view"]);
 for (const command of API105_READS) READS.add(command);
 for (const command of API105_MUTATIONS) MUTATIONS.add(command);
 // API 106: a question card in a Pip's chat, as Work has it. send_pip_message's `questions` (true: this client draws the
@@ -1106,16 +1106,16 @@ for (const command of API105_MUTATIONS) MUTATIONS.add(command);
 // answer_pip_questions sends the answers as the user's next message, or closes the card (dismissed: true).
 const API106_MUTATIONS = new Set(["answer_pip_questions"]);
 for (const command of API106_MUTATIONS) MUTATIONS.add(command);
-// API 107: Your Browser's window. get_your_browser_recent (the newest three links of your own tabs there, never a
-// Pip's); open_your_browser takes editor_bounds (its window opens to the right of the editor) and use_your_browser_view
+// API 107: DGC Browser's window. get_dgc_browser_recent (the newest three links of your own tabs there, never a
+// Pip's); open_dgc_browser takes editor_bounds (its window opens to the right of the editor) and use_dgc_browser_view
 // takes op frame (a picture of one Pip's tab; your own tabs are never streamed). Local only.
 // Also 107 (18 Nov): install_google_chrome (through the system's own password prompt, or the one terminal line) and
-// use_your_browser_view's own tab where the computer has no screen (own, seq, events, tab, width, height; the editor's
+// use_dgc_browser_view's own tab where the computer has no screen (own, seq, events, tab, width, height; the editor's
 // own actor only).
-const API107_READS = new Set(["get_your_browser_recent"]);
+const API107_READS = new Set(["get_dgc_browser_recent"]);
 const API107_MUTATIONS = new Set(["install_google_chrome"]);
-const API107_FIELDS: Record<string, readonly string[]> = { open_your_browser: ["editor_bounds"],
-  use_your_browser_view: ["own", "seq", "events", "tab", "width", "height"] };
+const API107_FIELDS: Record<string, readonly string[]> = { open_dgc_browser: ["editor_bounds"],
+  use_dgc_browser_view: ["own", "seq", "events", "tab", "width", "height"] };
 for (const command of API107_READS) READS.add(command);
 for (const command of API107_MUTATIONS) MUTATIONS.add(command);
 // API 108: Save to Library on a picture in a Pip's chat. library_pip_message_image {pip_id, message_id, index, keep?}
@@ -1140,18 +1140,18 @@ const API111_READS = new Set(["get_pip_job", "list_pip_jobs"]);
 const API111_MUTATIONS = new Set(["start_pip_job", "decline_pip_job"]);
 for (const command of API111_READS) READS.add(command);
 for (const command of API111_MUTATIONS) MUTATIONS.add(command);
-// API 112: Clear browsing data in Your Browser. clear_your_browser {history, sign_ins, passwords} clears what was ticked
-// from DGC's own profile there (never your own Chrome's), closing and opening it again where it runs; get_your_browser
-// and get_your_browser_recent carry chrome_account. Local only.
-const API112_MUTATIONS = new Set(["clear_your_browser"]);
+// API 112: Clear browsing data in DGC Browser. clear_dgc_browser {history, sign_ins, passwords} clears what was ticked
+// from DGC's own profile there (never your own Chrome's), closing and opening it again where it runs; get_dgc_browser
+// and get_dgc_browser_recent carry chrome_account. Local only.
+const API112_MUTATIONS = new Set(["clear_dgc_browser"]);
 for (const command of API112_MUTATIONS) MUTATIONS.add(command);
-// API 113: the sites Pips may use in Your Browser, in one panel. seen_your_browser_sites {} says the person opened it (the
-// sites noticed from their own sign-ins until now are no longer new); get_your_browser's sites carry new, it lists pips
-// (those the person may choose), and get_your_browser_recent carries new_sites. get_your_browser_lanes {} is the
+// API 113: the sites Pips may use in DGC Browser, in one panel. seen_dgc_browser_sites {} says the person opened it (the
+// sites noticed from their own sign-ins until now are no longer new); get_dgc_browser's sites carry new, it lists pips
+// (those the person may choose), and get_dgc_browser_recent carries new_sites. get_dgc_browser_lanes {} is the
 // dock's quick look: the Pips with a tab there, each named and saying whether its run is working in it now (working),
 // and whether any Pip's run is live (runs_live); every lane list carries working. Local only.
-const API113_READS = new Set(["get_your_browser_lanes"]);
-const API113_MUTATIONS = new Set(["seen_your_browser_sites"]);
+const API113_READS = new Set(["get_dgc_browser_lanes"]);
+const API113_MUTATIONS = new Set(["seen_dgc_browser_sites"]);
 for (const command of API113_READS) READS.add(command);
 for (const command of API113_MUTATIONS) MUTATIONS.add(command);
 /** What came with API 88 inside an existing command: use_pip_computer_view's op close (its tab closed).
@@ -1526,8 +1526,8 @@ export class Pips {
       }
     }
     if (((API107_FIELDS[command] ?? []).some((field) => Object.hasOwn(values, field))
-        || (command === "use_your_browser_view" && values.op === "frame")) && (this.caps.pips_api_version as number) < 107) {
-      throw new DGCUnsupportedError("Your Browser's window beside the editor (editor_bounds), a Pip's streamed tab (op frame) and your own tab streamed (own) require a runtime advertising Pips API 107 or newer");
+        || (command === "use_dgc_browser_view" && values.op === "frame")) && (this.caps.pips_api_version as number) < 107) {
+      throw new DGCUnsupportedError("DGC Browser's window beside the editor (editor_bounds), a Pip's streamed tab (op frame) and your own tab streamed (own) require a runtime advertising Pips API 107 or newer");
     }
     if ((API104_FIELDS[command] ?? []).some((field) => Object.hasOwn(values, field))
         && (this.caps.pips_api_version as number) < 104) {

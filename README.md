@@ -80,7 +80,7 @@ and folders you pin.
   tell you when it's done. `@Tile checker check the tax rounding` from any chat hands a Pip the job, and its answer
   comes back where you asked. Pips run on Linux, macOS and Windows (DGC inside WSL 2), in the CLI (`dgc pips`), the
   extension and the SDK. [vibedgc.com/pips](https://vibedgc.com/pips) · [guide](docs/PIPS.md)
-- **Your Browser** — one Chrome, signed in as you, in its own walled profile, from the dock. Your Pips use it for the
+- **DGC Browser** — one Chrome, signed in as you, in its own walled profile, from the dock. Your Pips use it for the
   sites you allow ("Let Scout use this site?"); you can watch the tab they work in. Over Remote-SSH it streams into an
   editor tab, sharp and one to one.
 

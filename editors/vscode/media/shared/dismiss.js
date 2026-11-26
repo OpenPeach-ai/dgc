@@ -1,6 +1,6 @@
 // One × for every line that stays: a warning, an error or a "done" note that a page keeps on screen until something
 // else replaces it can be closed, the same way on every surface (Work, ChatDGC, Home, the Library, Settings, the Pips
-// page and a Pip's chat, a Pip's computer, Your Browser's tab, an artifact's page). A classic script, like
+// page and a Pip's chat, a Pip's computer, DGC Browser's tab, an artifact's page). A classic script, like
 // media/shared/tip.js: the pages load it after icons.js, the bundles import it, and all share window.DgcDismiss.
 //
 // The button is the Close glyph in a 26px box with the 6px corner, titled "Dismiss" and named "Dismiss this message".
@@ -71,10 +71,22 @@
     if (fresh) level(line, b);
     return b;
   }
-  /** The × sits level with the line's first row of words, whatever the line's own padding and line height. */
-  function level(line, b) {
+  /** The × sits level with the line's first row, whatever the line's own padding and line height: a first row laid out
+   *  as a row of its own (a model error's toggle, with its chevron) by that row; else the first row of words. Measured once
+   *  the line is on the page: a line given its × before it is shown had no styles yet, and its × sat 2px off the
+   *  chevron (reported 26 Nov). */
+  function level(line, b, tries = 0) {
     const view = line.ownerDocument.defaultView;
     if (!view || typeof view.getComputedStyle !== "function") return;
+    if (!line.isConnected) {
+      if (tries < 30 && typeof view.requestAnimationFrame === "function") view.requestAnimationFrame(() => level(line, b, tries + 1));
+      return;
+    }
+    const first = line.firstElementChild;
+    if (first && first !== b && first.offsetParent === line && first.offsetHeight > 0 && first.offsetHeight <= 48) {
+      // (A row laid out as one: flex or grid. A paragraph or a block of words keeps the first row of words below.)
+      if (/^(inline-)?(flex|grid)$/.test(view.getComputedStyle(first).display)) { b.style.top = `${Math.round(first.offsetTop + (first.offsetHeight - 26) / 2)}px`; return; }
+    }
     const s = view.getComputedStyle(line), size = parseFloat(s.fontSize) || 13, row = parseFloat(s.lineHeight) || size * 1.45, pad = parseFloat(s.paddingTop) || 0;
     if (Number.isFinite(row) && Number.isFinite(pad)) b.style.top = `${Math.round(pad + (row - 26) / 2)}px`;
   }

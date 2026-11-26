@@ -253,20 +253,20 @@ class DesktopStreams:
             self._close_socket(stream)
 
 
-class YourBrowserScreen(DesktopStreams):
-    """Your Browser's own tab where this computer has no screen: ONE stream of Chrome's real window on its VNC screen,
+class DgcBrowserScreen(DesktopStreams):
+    """DGC Browser's own tab where this computer has no screen: ONE stream of Chrome's real window on its VNC screen,
     carried as a Pip computer's screen is (the same stream, the same viewer in the editor). Its bytes travel as base64
-    in `your_browser_screen` commands and `your_browser_screen_data` events; here they are joined to the supervisor's view
-    socket for Your Browser (token-checked, op "screen", own), which joins them to that screen's own socket. The editor
+    in `dgc_browser_screen` commands and `dgc_browser_screen_data` events; here they are joined to the supervisor's view
+    socket for DGC Browser (token-checked, op "screen", own), which joins them to that screen's own socket. The editor
     never gets a socket, a path or the token, and only the person's own window is ever on that screen."""
 
-    KEY = "your-browser"
-    NOT_OPEN = "Your Browser isn't open yet. Open it from the dock."
-    ENDED = "Your Browser's screen closed."
+    KEY = "dgc-browser"
+    NOT_OPEN = "DGC Browser isn't open yet. Open it from the dock."
+    ENDED = "DGC Browser's screen closed."
 
     @staticmethod
     def _key_ok(key) -> bool:
-        return key == YourBrowserScreen.KEY
+        return key == DgcBrowserScreen.KEY
 
     def handle(self, command: dict) -> None:
         op = command.get("op")
@@ -275,25 +275,25 @@ class YourBrowserScreen(DesktopStreams):
         super().handle({"pip_id": self.KEY, "op": op, **({"data": command.get("data")} if op == "send" else {})})
 
     def _closed(self, key: str, reason: str, pictures: bool = False) -> None:
-        self.emit("your_browser_screen_closed", reason=str(reason)[:300], pictures=bool(pictures))
+        self.emit("dgc_browser_screen_closed", reason=str(reason)[:300], pictures=bool(pictures))
 
     def _refused(self, key: str, reply: dict) -> None:
-        self._closed(key, str(reply.get("error") or "Your Browser's screen is not available."), reply.get("pictures") is True)
+        self._closed(key, str(reply.get("error") or "DGC Browser's screen is not available."), reply.get("pictures") is True)
 
     def _data(self, key: str, data: bytes) -> None:
-        self.emit("your_browser_screen_data", data=base64.b64encode(data).decode("ascii"))
+        self.emit("dgc_browser_screen_data", data=base64.b64encode(data).decode("ascii"))
 
     def _ask(self) -> dict:
         return {"own": True, "op": "screen"}
 
     def _endpoint(self, key: str, generation: int, number: int | None):
-        from . import your_browser
+        from . import dgc_browser
         with WorkspaceRegistry() as registry:
             deadline = time.monotonic() + OPEN_SECONDS
             while time.monotonic() < deadline:
                 if not self._current(key, generation):
                     return None
-                endpoint = your_browser.view_endpoint(registry)
+                endpoint = dgc_browser.view_endpoint(registry)
                 if endpoint is not None:
                     return endpoint
                 time.sleep(0.25)

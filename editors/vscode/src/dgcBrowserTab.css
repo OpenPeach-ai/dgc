@@ -1,0 +1,113 @@
+/* A Pip's tab in DGC Browser, streamed into an editor tab (src/dgcBrowserTab.js). One slim bar: the Pips' tabs, then
+   Back, Forward, Reload, DGC's own address bar and "show it in the window"; under it the picture of the Pip's tab, fitted
+   to the editor tab and never stretched. One design language: 6 px corners, the buttons' heights, never a pill. */
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg, var(--vscode-editor-background)); color: var(--text, var(--vscode-foreground)); font: var(--w-reg, 400) var(--t-sm, 12px)/1.3 var(--sans, system-ui, sans-serif); }
+#app { display: flex; flex-direction: column; height: 100%; min-width: 0; }
+.yb-bar { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--hair, rgba(128, 128, 128, .25)); min-width: 0; }
+.yb-tabs { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.yb-tabs:empty { display: none; }
+.yb-tab { appearance: none; flex: 0 1 200px; display: flex; align-items: baseline; gap: 6px; min-width: 0; height: var(--btn-h, 26px); padding: 0 10px; border: 1px solid var(--hair, rgba(128, 128, 128, .25));
+  border-radius: var(--btn-r, 6px); background: transparent; color: var(--text-2, inherit); font: inherit; cursor: pointer; }
+.yb-tab[aria-selected="true"] { background: var(--wash, rgba(128, 128, 128, .12)); border-color: var(--hair-strong, rgba(128, 128, 128, .4)); color: var(--text-strong, inherit); }
+.yb-tab-name { flex: none; font-weight: var(--w-semi, 600); line-height: var(--btn-h, 26px); }
+.yb-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint, inherit); }
+.yb-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.yb-btn { appearance: none; flex: none; display: grid; place-items: center; width: var(--btn-h, 26px); height: var(--btn-h, 26px); margin: 0; padding: 0; border: 1px solid transparent;
+  border-radius: var(--btn-r, 6px); background: transparent; color: var(--text-2, inherit); cursor: pointer; }
+.yb-btn:hover:not(:disabled) { background: var(--wash, rgba(128, 128, 128, .12)); color: var(--text-strong, inherit); }
+.yb-btn:disabled { opacity: .45; cursor: default; }
+.yb-btn[hidden] { display: none; }
+.yb-address { flex: 1 1 auto; min-width: 0; margin: 0 2px; }
+.yb-url { box-sizing: border-box; width: 100%; height: var(--btn-h, 26px); margin: 0; padding: 0 10px; border: 1px solid var(--hair-strong, rgba(128, 128, 128, .4)); border-radius: var(--btn-r, 6px);
+  background: var(--surface2, transparent); color: var(--text, inherit); font: inherit; }
+.yb-btn:focus-visible, .yb-tab:focus-visible, .yb-url:focus-visible, .yb-frame:focus-visible { outline: 1.5px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.yb-stage { position: relative; flex: 1 1 auto; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; min-height: 0; padding: 10px; overflow: hidden; }
+.yb-frame { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid var(--hair, rgba(128, 128, 128, .25)); border-radius: var(--btn-r, 6px); cursor: default; background: #fff; }
+.yb-frame[hidden] { display: none; }
+.yb-note { margin: 0; max-width: 60ch; color: var(--faint, inherit); text-align: center; overflow-wrap: anywhere; }
+.yb-frame:not([hidden]) ~ .yb-note { position: absolute; left: 50%; bottom: 18px; translate: -50% 0; max-width: calc(100% - 40px); padding: 6px 10px; border: 1px solid var(--hair, rgba(128, 128, 128, .25));
+  border-radius: var(--btn-r, 6px); background: var(--surface2, var(--vscode-editorWidget-background)); color: var(--text, inherit); box-shadow: var(--lift-1, none); }
+.yb-note[hidden] { display: none; }
+/* Your own tab, where the computer DGC runs on has no screen (18 Nov): your tabs in the row, each with its Close, then New
+   tab; Back, Forward, Reload and the address bar; one quiet line; your page, one to one. What you type lands in an unseen
+   field over nothing, so the keyboard, a composition and a paste all reach your tab. */
+.yb-own { flex: 0 1 200px; display: flex; align-items: center; min-width: 0; height: var(--btn-h, 26px); box-sizing: border-box; border: 1px solid var(--hair, rgba(128, 128, 128, .25));
+  border-radius: var(--btn-r, 6px); }
+.yb-own.yb-on { background: var(--wash, rgba(128, 128, 128, .12)); border-color: var(--hair-strong, rgba(128, 128, 128, .4)); }
+.yb-own .yb-tab { flex: 1 1 auto; height: calc(var(--btn-h, 26px) - 2px); border: 0; padding: 0 4px 0 10px; background: transparent; }
+.yb-own .yb-tab[aria-selected="true"] { background: transparent; }
+.yb-own.yb-on .yb-tab-title { color: var(--text-strong, inherit); }
+.yb-x { appearance: none; flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin: 0 2px 0 0; padding: 0; border: 0; border-radius: var(--btn-r, 6px);
+  background: transparent; color: var(--faint, inherit); cursor: pointer; }
+.yb-x svg { width: 12px; height: 12px; }
+.yb-x:hover { background: var(--wash, rgba(128, 128, 128, .12)); color: var(--text-strong, inherit); }
+.yb-x:focus-visible { outline: 1.5px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.yb-new { margin-left: 2px; }
+.yb-line { flex: none; margin: 0; padding: 4px 10px 5px; border-bottom: 1px solid var(--hair, rgba(128, 128, 128, .25)); color: var(--faint, inherit); font-size: var(--t-xs, 11px); line-height: 1.35;
+  overflow-wrap: anywhere; }
+.yb-line[hidden] { display: none; }
+.yb-own-mode .yb-bar { border-bottom: 0; padding-bottom: 6px; }
+/* Your tabs like Chrome's, in DGC's own shapes: a strip a shade apart from the address row; the current tab is the
+   address row's own colour, its 6 px top corners and small curved feet joining it to the row with no line between; the
+   others sit quiet on the strip, a thin divider between two of them, a wash on hover. Each wears its site's icon, its
+   title (faded at its end, as Chrome's) and its Close. On a dark editor the strip is the editor's colour and the row a
+   shade lighter; on a light one the strip is a shade darker. */
+.yb-own-mode { --yb-strip: color-mix(in srgb, var(--bg, #ffffff) 88%, #000); --yb-row: var(--bg, var(--vscode-editor-background)); }
+.yb-own-mode.yb-dark { --yb-strip: var(--bg, var(--vscode-editor-background)); --yb-row: color-mix(in srgb, var(--bg, #1e1e1e) 90%, #fff); }
+.yb-own-mode .yb-bar { padding-top: 0; background: var(--yb-row); border-bottom: 1px solid var(--hair, rgba(128, 128, 128, .25)); }
+.yb-own-mode .yb-tabs { gap: 0; align-items: flex-end; margin: 0 -10px; padding: 6px 14px 0; background: var(--yb-strip); border-bottom: 0; }
+.yb-own-mode .yb-own { position: relative; flex: 0 1 220px; height: var(--btn-h, 26px); margin-bottom: 0; border: 0;
+  border-radius: var(--btn-r, 6px) var(--btn-r, 6px) 0 0; background: transparent; }
+.yb-own-mode .yb-own.yb-on { background: var(--yb-row); }
+.yb-own-mode .yb-own.yb-on::before, .yb-own-mode .yb-own.yb-on::after { content: ""; position: absolute; bottom: 0; width: var(--btn-r, 6px);
+  height: var(--btn-r, 6px); pointer-events: none; }
+.yb-own-mode .yb-own.yb-on::before { left: calc(-1 * var(--btn-r, 6px)); background: radial-gradient(circle at 0 0, transparent calc(var(--btn-r, 6px) - .5px), var(--yb-row) var(--btn-r, 6px)); }
+.yb-own-mode .yb-own.yb-on::after { right: calc(-1 * var(--btn-r, 6px)); background: radial-gradient(circle at 100% 0, transparent calc(var(--btn-r, 6px) - .5px), var(--yb-row) var(--btn-r, 6px)); }
+.yb-own-mode .yb-own:not(.yb-on):hover { background: var(--wash, rgba(128, 128, 128, .12)); }
+.yb-own-mode .yb-own:not(.yb-on) + .yb-own:not(.yb-on)::before { content: ""; position: absolute; left: 0; top: 6px; width: 1px; height: calc(var(--btn-h, 26px) - 12px);
+  background: var(--hair-strong, rgba(128, 128, 128, .4)); }
+.yb-own-mode .yb-own:not(.yb-on):hover::before, .yb-own-mode .yb-own:hover + .yb-own:not(.yb-on)::before { opacity: 0; }
+.yb-own-mode .yb-tab-title { text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
+.yb-own-mode .yb-own:not(.yb-on) .yb-tab-title { color: var(--muted, var(--faint, inherit)); }
+.yb-own-mode .yb-own.yb-on .yb-tab-title { color: var(--text-strong, var(--text, inherit)); }
+/* A dark site's one-colour icon on a dark editor: its light side, as the site's own dark-mode icon looks. */
+.yb-fav.yb-fav-lift { filter: invert(1); }
+.yb-own-mode .yb-own .yb-tab { align-items: center; gap: 8px; height: 100%; padding: 0 2px 0 10px; }
+.yb-fav { flex: none; width: 16px; height: 16px; object-fit: contain; border-radius: 3px; }
+.yb-fav-none { display: grid; place-items: center; color: var(--faint, inherit); }
+.yb-fav-none svg { width: 14px; height: 14px; }
+.yb-own-mode .yb-new { align-self: center; margin-left: 4px; }
+.yb-own-mode .yb-stage { padding: 8px; }
+.yb-own-mode .yb-frame { cursor: default; user-select: none; -webkit-user-select: none; }
+.yb-keys { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; margin: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; }
+.yb-keys[hidden] { display: none; }
+/* Your own screen (yb-screen-mode): Chrome's real window fills the tab, its own bar and tabs in the picture, so DGC's own
+   bar steps aside for one slim row, a Pip computer's bar's height: the Pip computer's own Fit and 100% (src/screenView.css),
+   then the quiet line. The screen runs edge to edge (no editor gutter), one of its pixels for each of the tab's, the tab
+   scrolling to the rest (100%), or scaled into it (Fit). While it opens, or after it closed by itself, a small card over
+   it says so (Open it again). Elsewhere the row is the quiet line alone. */
+.yb-top { flex: none; min-width: 0; }
+.yb-zoom { flex: none; display: flex; }
+.yb-zoom[hidden] { display: none; }
+body.yb-screen-page { padding: 0; }
+.yb-screen-mode .yb-top { display: flex; align-items: center; gap: 10px; min-height: 36px; box-sizing: border-box; padding: 0 8px; border-bottom: 1px solid var(--hair, rgba(128, 128, 128, .25)); }
+.yb-screen-mode .yb-line { flex: 1 1 auto; min-width: 0; padding: 0; border-bottom: 0; }
+.yb-screen-mode .yb-bar { display: none; }
+.yb-screen-mode .yb-stage { padding: 0; place-items: stretch; }
+.yb-vnc { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg, var(--vscode-editor-background)); }
+.yb-vnc[hidden] { display: none; }
+.yb-vnc canvas { display: block; outline: none; }
+.yb-screen-mode .yb-note { position: absolute; left: 50%; top: 50%; translate: -50% -50%; max-width: calc(100% - 40px); padding: 6px 10px;
+  border: 1px solid var(--hair, rgba(128, 128, 128, .25)); border-radius: var(--btn-r, 6px); background: var(--surface2, var(--vscode-editorWidget-background));
+  color: var(--text, inherit); box-shadow: var(--lift-1, none); }
+.yb-again { position: absolute; left: 50%; top: 50%; translate: -50% -50%; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  max-width: calc(100% - 40px); padding: 12px 14px; border: 1px solid var(--hair, rgba(128, 128, 128, .25)); border-radius: var(--btn-r, 6px);
+  background: var(--surface2, var(--vscode-editorWidget-background)); color: var(--text, inherit); box-shadow: var(--lift-1, none); text-align: center; }
+.yb-again[hidden] { display: none; }
+.yb-again p { margin: 0; overflow-wrap: anywhere; }
+.yb-again-go { appearance: none; height: var(--btn-h, 26px); padding: 0 12px; border: 1px solid var(--hair-strong, rgba(128, 128, 128, .4)); border-radius: var(--btn-r, 6px);
+  background: var(--surface2, transparent); color: var(--text, inherit); font: inherit; cursor: pointer; }
+.yb-again-go:hover { background: var(--wash, rgba(128, 128, 128, .12)); }
+.yb-again-go:focus-visible { outline: 1.5px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }

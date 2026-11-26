@@ -238,7 +238,7 @@
           "type": "object",
           "properties": {
             "type": {
-              "const": "your_browser_screen_data"
+              "const": "dgc_browser_screen_data"
             },
             "seq": {
               "type": "integer",
@@ -265,7 +265,7 @@
           "type": "object",
           "properties": {
             "type": {
-              "const": "your_browser_screen_closed"
+              "const": "dgc_browser_screen_closed"
             },
             "seq": {
               "type": "integer",
@@ -10775,7 +10775,7 @@
           "type": "object",
           "properties": {
             "type": {
-              "const": "your_browser_screen"
+              "const": "dgc_browser_screen"
             },
             "chat_id": {
               "type": "string",

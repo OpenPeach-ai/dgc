@@ -1,13 +1,13 @@
-// The sites Pips may use in Your Browser (Pips API 105; "new" and seen_your_browser_sites since 113), as ONE module for
-// every place that shows them: the Sites panel, which the dock's Your Browser menu ("Sites Pips can use…") and a Pip's
-// page ("All sites…") open, and a Pip's own sites on its page (src/pipYourBrowser.js draws those from what this reads
+// The sites Pips may use in DGC Browser (Pips API 105; "new" and seen_dgc_browser_sites since 113), as ONE module for
+// every place that shows them: the Sites panel, which the dock's DGC Browser menu ("Sites Pips can use…") and a Pip's
+// page ("All sites…") open, and a Pip's own sites on its page (src/pipDgcBrowser.js draws those from what this reads
 // and says).
 //
-// Your Browser is the person's own Google Chrome. A site joins the list when they sign in to it there themselves (DGC
-// notices it) or when they Allow a Pip's "use this site in Your Browser?" card. A site let from a card has no sign-in
+// DGC Browser is the person's own Google Chrome. A site joins the list when they sign in to it there themselves (DGC
+// notices it) or when they Allow a Pip's "use this site in DGC Browser?" card. A site let from a card has no sign-in
 // DGC knows of (added_by "you"): its words never say "your sign-in", and it is removed, not signed out of. Each site is used by every Pip ("All
 // Pips"), by only the Pips they tick ("Some Pips"), or by none until they choose ("No Pips"; a bank or payment site
-// starts there). Sign out takes a site off the list and clears its sign-in in Your Browser. Nothing here is a Pip's say:
+// starts there). Sign out takes a site off the list and clears its sign-in in DGC Browser. Nothing here is a Pip's say:
 // the panel shows what DGC answers and asks DGC for what the person clicks, one site at a time.
 //
 // A classic script, like media/shared/pipjob.js: the side bar loads it before main.js and the Pips bundle imports it, so
@@ -29,7 +29,7 @@
     return { site: String(s.site), shown: words(s.shown, 300) || String(s.site), mode: s.mode, money: s.money === true, fresh: s.new === true, signedIn: s.added_by !== "you",
              pips: s.mode === "chosen" && Array.isArray(s.pips) ? s.pips.map(pipOf).filter(Boolean).slice(0, MAX_PIPS) : [] };
   }
-  /** get_your_browser's answer, as these pages use it: the sites (each with its Pips), every Pip that may be chosen, and
+  /** get_dgc_browser's answer, as these pages use it: the sites (each with its Pips), every Pip that may be chosen, and
       the sites still waiting for their sign-in to be cleared. Anything else in it is left out. */
   function read(said) {
     const list = (key, of, max) => (Array.isArray(said?.[key]) ? said[key].map(of).filter(Boolean).slice(0, max) : []);
@@ -59,7 +59,7 @@
     const mine = sites.filter((s) => s.mode === "all" || s.pips.some((p) => p.pip_id === pipId));
     return { mine, others: sites.filter((s) => !mine.includes(s)) };
   }
-  /** set_your_browser_site's fields that take one Pip off a site and leave the others as they were. An All Pips site
+  /** set_dgc_browser_site's fields that take one Pip off a site and leave the others as they were. An All Pips site
       becomes every other Pip's (the ones on this computer now; a Pip made later asks first). */
   function without(site, pipId, allPips) {
     const keep = (site.mode === "all" ? allPips : site.pips).map((p) => p.pip_id).filter((id) => id !== pipId);
@@ -90,7 +90,7 @@
     dialog.className = "yb-sites-dialog dgc-dialog";
     dialog.setAttribute("aria-labelledby", `${id}-title`);
     dialog.innerHTML = `<div class="yb-sites-body"><h2 id="${id}-title" tabindex="-1">Sites Pips can use</h2>
-      <p class="yb-sites-intro">The sites your Pips may use in Your Browser. A Pip works there in its own tab, with your sign-in where you have one, only on the sites you let it use; anywhere else it asks you first in its chat.</p>
+      <p class="yb-sites-intro">The sites your Pips may use in DGC Browser. A Pip works there in its own tab, with your sign-in where you have one, only on the sites you let it use; anywhere else it asks you first in its chat.</p>
       <p class="yb-sites-status" role="status">Loading…</p><ul class="yb-sites-list" hidden></ul>
       <p class="yb-sites-waiting" hidden></p><p class="yb-sites-error" role="alert" hidden></p><p class="yb-sites-hide yb-sites-said" role="status"></p></div>
       <div class="yb-sites-buttons"><button type="button" class="dgc-btn yb-sites-done">Done</button></div>`;
@@ -115,7 +115,7 @@
       const out = s.signedIn ? "Sign out" : "Remove", outOf = s.signedIn ? `Sign out of ${s.site}` : `Remove ${s.site}`;
       return `<div class="yb-site-top"><span class="yb-site-name" title="${esc(s.site)}">${esc(s.shown)}</span>${tags}`
         + (confirm ? "" : `<button type="button" class="dgc-btn small yb-site-out" data-k="out" aria-label="${esc(outOf)}"${off}>${out}</button>`) + "</div>"
-        + (confirm ? `<div class="yb-site-confirm" role="group" aria-label="${esc(outOf)}"><p>${esc(s.signedIn ? `Sign out of ${s.site}? No Pip can use it, and Your Browser clears your sign-in there.` : `Remove ${s.site}? No Pip can use it until you allow it again.`)}</p>`
+        + (confirm ? `<div class="yb-site-confirm" role="group" aria-label="${esc(outOf)}"><p>${esc(s.signedIn ? `Sign out of ${s.site}? No Pip can use it, and DGC Browser clears your sign-in there.` : `Remove ${s.site}? No Pip can use it until you allow it again.`)}</p>`
             + `<div class="yb-site-confirm-buttons"><button type="button" class="dgc-btn small" data-k="keep"${off}>Keep</button><button type="button" class="dgc-btn small danger" data-k="out-yes"${off}>${out}</button></div></div>` : "")
         + `<div class="yb-site-modes" role="radiogroup" aria-label="Which Pips may use ${esc(s.site)}">${MODES.map(([value, label]) =>
             `<label class="yb-site-mode"><input type="radio" name="${id}-m${at}" value="${value}" data-k="mode-${value}"${c === value ? " checked" : ""}${off}><span>${label}</span></label>`).join("")}</div>`
@@ -139,18 +139,18 @@
       list.hidden = !state.sites.length;
       list.innerHTML = state.sites.map((s) => `<li class="yb-site" data-site="${esc(s.site)}"></li>`).join("");
       for (const s of state.sites) paintRow(s.site);
-      status.textContent = state.sites.length ? "" : "No sites yet. Sign in to a site in Your Browser and it shows here, for you to choose which Pips may use it.";
+      status.textContent = state.sites.length ? "" : "No sites yet. Sign in to a site in DGC Browser and it shows here, for you to choose which Pips may use it.";
       status.hidden = !status.textContent;
       // (A site removed here that had no sign-in is not one being signed out of.)
       const leaving = state.waiting.filter((site) => !removed.has(site));
       waiting.hidden = !leaving.length;
-      waiting.textContent = leaving.length ? `Signing out of ${leaving.join(", ")}: Your Browser clears your sign-in there as soon as it runs.` : "";
+      waiting.textContent = leaving.length ? `Signing out of ${leaving.join(", ")}: DGC Browser clears your sign-in there as soon as it runs.` : "";
     }
     /** Ask DGC for one site's change; its row is off until DGC answers, then drawn from what it says. */
     function change(site, fields) {
       if (state.busy.has(site)) return;
       state.busy.add(site); state.errors.delete(site); paintRow(site);
-      ask("set_your_browser_site", { site, ...fields }).then((said) => {
+      ask("set_dgc_browser_site", { site, ...fields }).then((said) => {
         const next = siteOf(said?.site), s = siteNamed(site);
         if (next && s) { Object.assign(s, { ...next, fresh: s.fresh }); if (choice(s) !== "none") state.some.delete(site); }
         state.busy.delete(site); paintRow(site);
@@ -163,7 +163,7 @@
       if (state.busy.has(site)) return;
       state.busy.add(site); state.errors.delete(site); paintRow(site);
       const had = siteNamed(site)?.signedIn !== false;
-      ask("sign_out_your_browser_site", { site }).then(() => {
+      ask("sign_out_dgc_browser_site", { site }).then(() => {
         state.busy.delete(site); state.confirm = "";
         if (!had) removed.add(site);
         state.sites = state.sites.filter((s) => s.site !== site);
@@ -172,7 +172,7 @@
         say(had ? `Signed out of ${site}.` : `Removed ${site}.`);
         (list.querySelector('[data-k="out"]') || dialog.querySelector(".yb-sites-done")).focus();
       }, (problem) => {
-        state.busy.delete(site); state.errors.set(site, String(problem?.message || "Your Browser couldn’t sign out of that site. Try again.").slice(0, 400)); paintRow(site);
+        state.busy.delete(site); state.errors.set(site, String(problem?.message || "DGC Browser couldn’t sign out of that site. Try again.").slice(0, 400)); paintRow(site);
       });
     }
     list.addEventListener("change", (e) => {
@@ -208,7 +208,7 @@
     // the person didn't touch.)
     const title = dialog.querySelector("h2");
     title.focus();
-    ask("get_your_browser").then((said) => {
+    ask("get_dgc_browser").then((said) => {
       if (shown?.dialog !== dialog) return;
       const value = read(said);
       // (The sites noticed since you last looked come first, each with New.)
@@ -217,7 +217,7 @@
       paint();
       if (!dialog.contains(doc.activeElement)) title.focus();
       // (Opened: what was noticed until now is no longer new, here and on the dock.)
-      ask("seen_your_browser_sites").then(() => { try { onSeen?.(); } catch { /* (the page's own redraw) */ } }, () => {});
+      ask("seen_dgc_browser_sites").then(() => { try { onSeen?.(); } catch { /* (the page's own redraw) */ } }, () => {});
     }, (problem) => {
       if (shown?.dialog !== dialog) return;
       status.hidden = true;

@@ -1,4 +1,4 @@
-// One screen in an editor tab, shown with the RFB viewer. A Pip computer's desktop and Your Browser's own window (where
+// One screen in an editor tab, shown with the RFB viewer. A Pip computer's desktop and DGC Browser's own window (where
 // the computer DGC runs on has no screen) are this one piece: the screen's bytes ride the extension host's messages (the
 // page never holds a socket, a path or a token), Copy and Paste go straight through it, the page can ask the screen
 // for the size of the tab it is shown in, and the screen is shown and zoomed the same way in both (Fit or 100%).
@@ -75,7 +75,7 @@ export function askScreenSize(viewer, width, height) {
   return true;
 }
 
-/** How every screen is shown in its tab, the same for a Pip's computer and Your Browser's own screen: the viewer never
+/** How every screen is shown in its tab, the same for a Pip's computer and DGC Browser's own screen: the viewer never
  *  resizes the screen by itself, takes the keyboard on a click and paints no ground of its own; the stream is the
  *  viewer's own (its encodings, at quality 6 and compression 2, the viewer's defaults, said here so both stay the same);
  *  and the picture is the screen's own pixels, one for each of the tab's, the tab's room scrolling to the rest, unless

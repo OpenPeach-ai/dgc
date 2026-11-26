@@ -7,7 +7,7 @@
 // bytes, not 8 MB of raw pixels.
 //
 // `resizable`: the screen says its size the way a screen a viewer may resize does (ExtendedDesktopSize), and takes the
-// size a viewer asks for (SetDesktopSize, type 251), as Your Browser's own screen does; every size asked is in `sizes`.
+// size a viewer asks for (SetDesktopSize, type 251), as DGC Browser's own screen does; every size asked is in `sizes`.
 const u16 = (n) => [(n >> 8) & 255, n & 255];
 const u32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
 const ascii = (s) => [...s].map((c) => c.charCodeAt(0));

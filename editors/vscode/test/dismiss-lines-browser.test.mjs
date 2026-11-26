@@ -43,7 +43,13 @@ const lineNow = (page, sel) => page.evaluate((q) => {
   const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
   for (let t = walk.nextNode(); t; t = walk.nextNode()) { if (!t.nodeValue.trim() || t.parentElement.closest(".dgc-dismiss") || !t.parentElement.checkVisibility()) continue; range.selectNodeContents(t); for (const r of range.getClientRects()) { if (r.width < 1) continue; wordsTop = Math.min(wordsTop, r.top); if (r.top < (x ? x.getBoundingClientRect().bottom : 0) && r.bottom > (x ? x.getBoundingClientRect().top : 0)) wordsRight = Math.max(wordsRight, r.right); } }
   const s = x ? getComputedStyle(x) : null;
+  // What the × must line up with (26 Nov, reported: on a model's error the chevron and the × sat at two heights): the
+  // line's own chevron when it has one, else the middle of its first row of words.
+  const chevNode = [...line.querySelectorAll('[class*="chev"]')].find((n) => n.checkVisibility() && !n.closest(".dgc-dismiss"));
+  let firstRow = null; const walk2 = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+  for (let t = walk2.nextNode(); t && !firstRow; t = walk2.nextNode()) { if (!t.nodeValue.trim() || t.parentElement.closest(".dgc-dismiss") || !t.parentElement.checkVisibility()) continue; range.selectNodeContents(t); const r = [...range.getClientRects()].find((q) => q.width >= 1); if (r) firstRow = { top: r.top, bottom: r.bottom }; }
   return { shown: true, words: line.textContent.replace(/\s+/g, " ").trim(), line: box(line), wordsRight,
+    chev: chevNode ? box(chevNode) : null, firstRow,
     x: x ? { ...box(x), title: x.title, name: x.getAttribute("aria-label"), tag: x.tagName, type: x.type, radius: s.borderTopLeftRadius, glyph: x.querySelector("svg")?.dataset.icon || "", color: s.color } : null,
     wide: innerWidth, sideways: document.documentElement.scrollWidth > innerWidth + 1 };
 }, sel);
@@ -70,6 +76,9 @@ function theOne(m, what) {
   assert.ok(m.x.right <= m.wide && m.x.left >= 0, `${what}: inside the window`);
   assert.ok(m.wordsRight <= m.x.left + 1, `${what}: the words keep clear of it (${m.wordsRight} against ${m.x.left})`);
   assert.equal(m.sideways, false, `${what}: nothing scrolls sideways`);
+  const mid = (b) => (b.top + b.bottom) / 2;
+  if (m.chev) assert.ok(Math.abs(mid(m.chev) - mid(m.x)) <= 0.75, `${what}: the × on the chevron's line (chevron ${mid(m.chev).toFixed(1)}, × ${mid(m.x).toFixed(1)})`);
+  else if (m.firstRow) assert.ok(Math.abs(mid(m.firstRow) - mid(m.x)) <= 1.5, `${what}: the × on its first row of words (words ${mid(m.firstRow).toFixed(1)}, × ${mid(m.x).toFixed(1)})`);
 }
 const settled = (to, what) => assert.equal(to.body, false, `${what}: the focus is on something after closing (${to.tag}#${to.id})`);
 

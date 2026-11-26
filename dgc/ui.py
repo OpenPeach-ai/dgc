@@ -344,6 +344,13 @@ def arg_summary(name: str, args: dict, root=None) -> str:
         # The card DGC draws when a vision model looked at a prompt's attachments (dgc/vision.py).
         value = f"{args.get('path') or 'image'} · via {args['via']}".replace("\n", " ")
         return value[:120] + ("…" if len(value) > 120 else "")
+    if name == "dgc_browser" and isinstance(args, dict):
+        # A Work session's or a Pip's step in its tab in DGC Browser: the step and where (an address, a ref, a key);
+        # never what it types, which may be the user's own words on their account.
+        op = str(args.get("op") or "").strip()
+        where = next((str(args[k]) for k in ("url", "ref", "key", "action", "site") if args.get(k)), "")
+        value = (f"DGC Browser · {op} {where}" if where else f"DGC Browser · {op}").strip().replace("\n", " ")
+        return value[:120] + ("…" if len(value) > 120 else "")
     for key in ("path", "command", "pattern", "url", "name", "memory", "symbol", "operation"):
         if key in args:
             # A path is shortened; everything else is the model's own words and stays verbatim.

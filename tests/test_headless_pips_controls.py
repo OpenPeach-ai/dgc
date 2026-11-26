@@ -99,7 +99,7 @@ class LocalPipsBridgeTests(unittest.TestCase):
         self.assertIsNone(ep.event_error({"type": "ready", "seq": 0, **value}))
         self.assertTrue(value["capabilities"]["pips_supported"])
         self.assertEqual(value["capabilities"]["pips_api_version"], 113)
-        self.assertEqual(value["capabilities"]["your_browser_screen"], 1)
+        self.assertEqual(value["capabilities"]["dgc_browser_screen"], 1)
         self.assertFalse(value["capabilities"]["pips_enabled"])
         self.assertNotIn("pips_enabled", value)
         self.assertEqual(value["capabilities"]["workspace_identity"], {})

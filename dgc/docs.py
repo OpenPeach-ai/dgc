@@ -4262,17 +4262,25 @@ PIP --usd 50` (or `no_limit`), and `dgc pips payments 200` (or `none`) for all P
 - **Fallback model.** The ⋯ beside a model in a Pip's model picker: **Use as fallback**. When its model
   doesn't answer, its turn carries on with it, and its prompt box says so.
 
-## Your Browser
+## DGC Browser
 
-**Your Browser** is one Google Chrome, signed in as you, in a profile of its own that DGC keeps apart from
+**DGC Browser** is one Google Chrome, signed in as you, in a profile of its own that DGC keeps apart from
 your everyday Chrome. Open it from the dock or Home's Browser card; on a computer with no screen (over
 Remote-SSH) its tabs stream into an editor tab, one screen pixel per tab pixel, and a tab narrower than
 Chrome's window scrolls to the rest (**Fit** shows it all, smaller). Sign in to the sites your Pips may use.
 
-- **A Pip asks before a site.** The first time a Pip wants a site in Your Browser, its chat asks **Let
-  Scout use this site?**; Allow it once or always. While it works, Your Browser's tile says so, and
+- **A Pip asks before a site.** The first time a Pip wants a site in DGC Browser, its chat asks **Let
+  Scout use this site?**; Allow it once or always. While it works, DGC Browser's tile says so, and
   **Watch** shows the tab it works in.
-- **Sites Pips can use…** (right-click Your Browser on the dock) lists every site you allowed, with
+- **Work uses it too.** Say "use the DGC browser" in a Work session: it gets a tab of its own there, and
+  the first time it opens a site it asks **Use example.com in DGC Browser?** (in every mode; auto mode asks
+  once for the session). Allow once covers that site for the rest of the session; **Always allow** saves
+  it. It never types a password or a code (sign in yourself, in DGC Browser), and it never pays or sends
+  anything on a bank or payment site: it says what it was about to send, and you do that part. DGC Browser
+  runs with Pips, so start Pips first. **Watch** on the dock shows its tab too. Work's own browser is still
+  the one for any page; when it lands on a sign-in page where your account should be, Work tries DGC Browser
+  and says which browser it used.
+- **Sites Pips can use…** (right-click DGC Browser on the dock) lists every site you allowed, with
   **Remove**.
 - **Clear browsing data…** (the same menu) clears history (ticked), sign-ins or saved passwords (not
   ticked), and says what it cleared. A Pip's visits are in the history too, so they go with it.

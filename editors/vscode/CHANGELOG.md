@@ -2,6 +2,20 @@
 
 ## 0.36.0 — unreleased (the date goes in on release day)
 
+- **Work sessions use DGC Browser.** Opening a site there asks **Use example.com in DGC Browser?** with what it may do
+  (read and act as you; never a password, never a payment), **Always allow** for that site alone, Deny and Allow once.
+  Its steps read "DGC Browser · open …". The dock's Watch lists a Work session's tab ("Watch Work · lime_tiles").
+- **A list carried on in a later turn says so.** When a turn stops (the provider's limit, Stop) and "continue" carries
+  its Tasks on in a new list, the stopped turn's card says "Carried on in a later turn" with Show it, and the steps it
+  hadn't finished step back instead of looking open; a list a later one replaced says "Replaced by a newer list". A list
+  with every step done says nothing. The same after a reload.
+- **A model error's chevron and × are on one line**: the × was measured before the error was shown, and sat 2px above
+  the chevron. Every line's × is now set once the line is on the page, level with its first row (a row like the error's
+  toggle by that row, else the first row of words).
+- **A Pip's "Only you can do this" cards whose check isn't in its chat are a pill over its prompt box**, "Needs you" with
+  the purple count Home's tab and the Pips list use, instead of cards at the chat's end, where a new reply in a narrow
+  side bar went out of sight above them. The pill opens the same cards with the same answers; a card under its check
+  stays in the chat.
 - **A Pip's runs read as replies.** A run or a routine's result is a reply like any other: its whole text (a long result
   is fetched whole), what a check found as a list in its words, and the row every reply ends with (its time, Copy, Read
   aloud, Trace). No Open result, Report, See what happened or Ask DGC to fix: ask the Pip. A fix DGC made in a Work chat
@@ -10,7 +24,7 @@
   instead of coming back page after page of open steps.
 - **A background command a restart stopped is on the agent map**, with Run again on its card; the map's button says
   "Agent map · 1 stopped". The chat has no line for it.
-- **Your Browser at one to one**, as on a Pip's computer: sharp, never shrunk or cut off; a narrow tab scrolls to the
+- **DGC Browser at one to one**, as on a Pip's computer: sharp, never shrunk or cut off; a narrow tab scrolls to the
   rest of Chrome's window, and Fit / 100% is in a slim bar.
 - **A Pip's page**: Edit sits under its face, and its top bar no longer slides under DGC's logo line.
 - **Home says "Checking your Pips…"** until it has read them, never a false "Nothing needs you" at start.
@@ -67,7 +81,7 @@
 - **No bright scrollbars**: every page keeps the slim bars (a slides editor's strip had a standard bar with arrows).
 - **The Edited card starts folded** to its header after a reply, in Work and in a Pip's chat: its count, Undo and Session
   changes (or Review and Apply) stay in sight, and its chevron or its title opens the files.
-- **Your Browser never waits on "Opening Your Browser…" for ever**: a screen the window couldn't ask for yet was dropped
+- **DGC Browser never waits on "Opening DGC Browser…" for ever**: a screen the window couldn't ask for yet was dropped
   without a word; the tab is told why, tries again, then says so with Try again. And it always opens its own Chrome
   profile: a second profile in its folder (a Chrome sign-in or profile prompt makes one) opened Chrome's profile picker,
   no tab came, and it gave up after 15 seconds.
@@ -99,8 +113,8 @@
   work. A chat on it steers while it works (Enter to steer) and shows DGC's context window, as on any model.
 - **A typed `/goal <objective>` starts that goal**, as Goal chosen from the `/` menu does. `/goal` alone shows the goal
   there is; `/goal pause`, `resume`, `clear` and `budget N` stay commands.
-- **Sites Pips can use…** in Your Browser's dock menu ("(N new)" while any is new): each site with All Pips, Some Pips
-  or No Pips, and Sign out. A Pip's page lists its own sites with Remove. While a Pip works in Your Browser, the dock
+- **Sites Pips can use…** in DGC Browser's dock menu ("(N new)" while any is new): each site with All Pips, Some Pips
+  or No Pips, and Sign out. A Pip's page lists its own sites with Remove. While a Pip works in DGC Browser, the dock
   tile says so ("Ava is working in it") and the Pip's chat has a small Watch button.
 - **Comments on artifacts**: pick part of a doc, sheet, deck, page or checklist and a Comment button appears by it
   (Ctrl+Alt+M too); write a comment, or Ask DGC, which answers in that thread or makes the change and says so ("Changed
@@ -110,8 +124,8 @@
 - **Compare in Versions answers again**: its answer never reached the panel, so Compare waited for nothing.
 - **A page with no colours of its own is white in a dark editor**, as a browser shows it (its black words showed on
   the editor's dark ground); a page that does dark follows the editor.
-- **A Pip working in Your Browser**: a card in its chat asks to let it use a site there (Allow, Not now), and a sign-in
-  card opens the site in your own tab (Open Your Browser, I've signed in, Not now). Watch a Pip's tab from Your
+- **A Pip working in DGC Browser**: a card in its chat asks to let it use a site there (Allow, Not now), and a sign-in
+  card opens the site in your own tab (Open DGC Browser, I've signed in, Not now). Watch a Pip's tab from DGC
   Browser's dock menu.
 
 - **Designs**: a design DGC makes opens as a canvas you pan (drag, two fingers, Space and drag) and zoom (Ctrl and
@@ -131,10 +145,10 @@
   unpin it: each is saved at once as your version, and if DGC changed the list meanwhile your change is made on the
   newer list. The Library lists checklists with their own icon and a Checklists kind, and Work shows the project's
   pinned checklists above its sessions, each with how far along it is and what is next (or which item needs you).
-- **Your Browser's tab as quick as a Pip's computer** (no screen where DGC runs, as over Remote-SSH): the tab shows
+- **DGC Browser's tab as quick as a Pip's computer** (no screen where DGC runs, as over Remote-SSH): the tab shows
   Chrome's real window as it changes, with the Pip computer's own viewer; your clicks and keys go straight to it. Copy
   there lands on your clipboard; a paste brings yours.
-- **Clear browsing data…** in Your Browser's dock menu (right-click it): tick Browsing history, Sign-ins or Saved
+- **Clear browsing data…** in DGC Browser's dock menu (right-click it): tick Browsing history, Sign-ins or Saved
   passwords, each with one line of what it removes, then the button that says what it clears. Nothing is cleared
   before that button.
 - **Small things made right**: on light themes the green of added lines, ticks and dots is deep enough to read (the
@@ -157,11 +171,11 @@
 - **ChatDGC's @ list is as tall as its rows**, as a Pip's chat's is: one match is one row, never a tall empty box.
 - **Every warning can be closed**: a line that says what went wrong, or what was done, and stays on screen now has a ×
   ("Dismiss"), the same one everywhere: Work's error lines, ChatDGC's notice, Home and the Work and Chat lists, the
-  Library, Settings, the Pips page and a Pip's chat, a Pip's computer, Your Browser's tab and an artifact's page.
+  Library, Settings, the Pips page and a Pip's chat, a Pip's computer, DGC Browser's tab and an artifact's page.
   Closing one hides that message only; the next one shows again, and the keyboard's focus moves to the next control.
 - **What's new, whenever you want it**: DGC's version and "What's new" sit at the far right of the side bar's logo
   line (Home and the Library), in grey; a click opens the slides again.
-- **Your Browser's tabs read like Chrome's**: the current tab is the address row's colour and joins it, on a strip a
+- **DGC Browser's tabs read like Chrome's**: the current tab is the address row's colour and joins it, on a strip a
   shade apart; the others are quieter, their titles fade at the end. A dark site's one-colour icon (GitHub's) is drawn
   light on a dark editor, as its own dark-mode icon looks.
 - **Download works in the desktop app**: the Library's Save a copy stayed on "Preparing…", and a card's, a picture's or a
@@ -175,7 +189,7 @@
 - **A Pip's chat in the side bar gets everything its editor tab gets**: a picture's Download in the pop-up, Copy, a file's
   "saved" note and commit links (the side bar passed on only a list, and those five were missing).
 - **Wake-ups list one row each**: its time, what it's for, and Cancel at the end.
-- **Your Browser opens from the dock and Home's card, also over Remote-SSH.** The editor now passes their requests to
+- **DGC Browser opens from the dock and Home's card, also over Remote-SSH.** The editor now passes their requests to
   DGC (it answered "Unknown Pips command." before), and a click starts the Pips runner when it isn't running.
 - **Keep Pips running says what it's doing**: "Turning on…" while the system's service manager works (up to a few
   minutes), and plain words when that manager was busy, never a switch that looks stuck.
@@ -191,7 +205,7 @@
 - **DGC's products named and coloured**: VIBE after the side bar's and ChatDGC's wordmark, in Geist; the SDK's mark in olive; Home's GitHub, Docs, DGC-SDK and Settings always live in its ⋯.
 - **The side bar's chosen tab is its name in purple**, with nothing behind it.
 - **A question card in a Pip's chat** (Work's card): one question at a time, Next, Skip, Submit, Something else…
-- **Your Browser** on the dock and Home: Install Google Chrome, and your own tab streamed over Remote-SSH.
+- **DGC Browser** on the dock and Home: Install Google Chrome, and your own tab streamed over Remote-SSH.
 - **A sub-agent with Work tools from a Pip's fix card**, shown in the Pip's chat with Undo, and **a model that can see** for every chat (Settings > Models > A model that can see).
 - **A Pip at Do it all asks in its chat**: no cards from it at that level.
 - **Start a sub-agent with Work tools, from a Pip's fix card.** The card's More (its three dots) has the one row; the sub-agent's row and the agent map say "Work tools" beside its name, with its model; when it ends, what it changed in your folder is Work's changed-files card with Undo, and Undo names any file it left because you changed it since. Offered only by a DGC that runs one.

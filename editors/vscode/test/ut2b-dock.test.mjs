@@ -1,6 +1,6 @@
-// User test round 2, B3, the dock. "Clear browsing data…" was the one row of Your Browser's menu with no icon (it named
+// User test round 2, B3, the dock. "Clear browsing data…" was the one row of DGC Browser's menu with no icon (it named
 // a mark the menu does not have). And a tile's name stopped coming after the dock had been used: the dock draws its
-// tiles again whenever something on it changes (a Pip starts working in Your Browser, a session's state), and a drawing
+// tiles again whenever something on it changes (a Pip starts working in DGC Browser, a session's state), and a drawing
 // dropped the name that was up, and the one about to come to a resting pointer.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -43,12 +43,12 @@ test("B3: a tile's name still comes to a resting pointer when the dock draws its
 
 const withBrowser = () => ({ ...homeState(), browser: { recent: { links: [{ url: "https://news.example.org/", title: "News", host: "news.example.org" }], open: false, available: true, reason: "", install: null } } });
 for (const theme of ["dark-modern", "light-modern"]) for (const width of [300, 700]) {
-  test(`B3: every row of Your Browser's menu wears an icon (${theme}, ${width}px)`, async (t) => {
+  test(`B3: every row of DGC Browser's menu wears an icon (${theme}, ${width}px)`, async (t) => {
     if (C.skipOrFail(t)) return;
     const x = await openDock(C.state.browser, { width, height: 700, theme: theme.split("-")[0] === "light" ? "light-modern" : "dark-modern", api: 113, state: withBrowser() });
     try {
       const p = x.page;
-      await p.waitForFunction(() => /Your Browser/.test(document.querySelector('#dgc-dock .dgc-dock-item[data-key="browser"]')?.getAttribute("aria-label") || ""), null, { timeout: 15000 });
+      await p.waitForFunction(() => /DGC Browser/.test(document.querySelector('#dgc-dock .dgc-dock-item[data-key="browser"]')?.getAttribute("aria-label") || ""), null, { timeout: 15000 });
       await p.locator('#dgc-dock .dgc-dock-item[data-key="browser"]').click({ button: "right" });
       await p.waitForSelector(".dgc-pop .dgc-menu-row");
       const rows = await p.evaluate(() => [...document.querySelectorAll(".dgc-pop .dgc-menu-row")].map((r) => { const svg = r.querySelector(".dgc-pop-icon svg"), b = svg?.getBoundingClientRect();

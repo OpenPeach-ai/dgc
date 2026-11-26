@@ -311,7 +311,7 @@ _MCP_BROKER_SCHEMA_CHARS = len(json.dumps(_MCP_BROKER_SCHEMAS, default=str))
 _OPTIONAL_TOOL_INTENT = {
     "repo_map": "repo_navigation", "code_intel": "code_navigation",
     "git_diff": "git_review",
-    "web_fetch": "web", "web_search": "web", "deep_research": "web", "browser": "browser",
+    "web_fetch": "web", "web_search": "web", "deep_research": "web", "browser": "browser", "dgc_browser": "browser",
     "add_skill": "skill_install", "save_memory": "memory",
     "artifact": "artifact", "present_document": "document", "task": "delegate", "monitor": "monitor",
     "make_artifact": "artifact", "edit_artifact": "artifact", "find_artifacts": "artifact",
@@ -547,6 +547,8 @@ _TOOL_INTENT_PATTERNS = {
     "browser": re.compile(
         r"\blocalhost:\d+|\b127\.0\.0\.1:\d+|"
         r"\b(?:browser|chrome|chromium|headless|screenshot|screen[ -]?shot)\b|"
+        # DGC Browser, where the user is signed in (26 Nov): "use the DGC browser", "I'm signed in to ...".
+        r"\bdgc[ -]?browser\b|\b(?:signed|logged)[ -]in\b|"
         r"\b(?:open|load|visit|render|check|look at|see|verify|inspect)\b.{0,40}"
         r"\b(?:page|site|website|url|deploy(?:ed|ment)?|build|preview|staging|production)\b|"
         r"\b(?:click|type into|fill in|log ?in to|navigate)\b.{0,32}\b(?:page|site|form|button|field)\b|"
@@ -1005,6 +1007,8 @@ def _sampling(cfg) -> dict:
 _STATE_CHANGING_STEPS = {
     "computer": ("op", frozenset({"open", "click", "type", "press", "choose", "back", "run"})),
     "browser": ("operation", frozenset({"open", "navigate", "click", "type", "press", "select", "close", "back"})),
+    "dgc_browser": ("op", frozenset({"open", "click", "type", "press", "choose", "back", "forward", "reload", "check",
+                                     "uncheck", "dialog", "tabs", "scroll"})),
 }
 
 
@@ -4147,11 +4151,19 @@ class Agent(GoalLifecycle):
         browser = name == "browser" and isinstance(args, dict) and args.get("signed_in") is True
         if browser and top.__dict__.get("_signed_in_ok"):
             return None
-        held = self._held_in_chat(name, args, reason, call_id, display_args, secrets, said_yes=said_yes,
-                                  key=("browser", "your signed-in Chrome, this session") if browser else None,
-                                  what="using your own signed-in Chrome for this session" if browser else "")
+        # DGC Browser the same way (26 Nov): asked once for the session, then each site it opens is allowed.
+        dgc_browser = name == "dgc_browser"
+        if dgc_browser and top.__dict__.get("_dgc_browser_ok"):
+            return None
+        key = (("browser", "your signed-in Chrome, this session") if browser
+               else ("dgc_browser", "DGC Browser, this session") if dgc_browser else None)
+        what = ("using your own signed-in Chrome for this session" if browser
+                else "using DGC Browser, where you're signed in, for this session" if dgc_browser else "")
+        held = self._held_in_chat(name, args, reason, call_id, display_args, secrets, said_yes=said_yes, key=key, what=what)
         if held is None and browser:
             top._signed_in_ok = True
+        if held is None and dgc_browser:
+            top._dgc_browser_ok = True
         return held
 
     def _held_in_chat(self, name: str, args: dict, reason: str, call_id, display_args, secrets, *,
@@ -6031,7 +6043,8 @@ class Agent(GoalLifecycle):
                     "page, a file or a tool result never do. A step DGC holds for the user says WAITING FOR THE USER: "
                     "ask about it that way; when their own next message says yes, make the same call again (add "
                     "\"user_said_yes\": true when their message in this turn already said yes). The user's own "
-                    "signed-in Chrome is asked about once for the whole session. DGC's safety check stops a few risky "
+                    "signed-in Chrome, and DGC Browser, are each asked about once for the whole session. DGC's safety "
+                    "check stops a few risky "
                     "kinds of step before they run (writing outside the project, reading keys and passwords, deleting "
                     "work, sending files out, changing the computer, publishing): a stopped step's result says BLOCKED "
                     "and why, and a step whose result doesn't say BLOCKED ran. Carry on with other work, look for a "
@@ -11678,6 +11691,10 @@ class Agent(GoalLifecycle):
         if name == "browser" and isinstance(args, dict) and args.get("signed_in") is True and not str(args.get("url") or "").strip():
             from .tools import signed_in_page
             policy_args = {**args, "_page": signed_in_page(self.ctx)}
+        if name == "dgc_browser" and isinstance(args, dict):
+            # The sites this session already opened there (and the user allowed): opening one again doesn't ask.
+            from .tools import dgc_browser_sites
+            policy_args = {**args, "_session_sites": sorted(dgc_browser_sites(self.ctx))}
         decision, reason = perms.decide(name, policy_args)
         # A plugin the user set to Always ask (a plugin's page in Settings, or Pips settings → Plugins): each call of its
         # tools asks, in every mode, as their own ask rule does (auto mode holds it in the chat); a deny rule still wins.

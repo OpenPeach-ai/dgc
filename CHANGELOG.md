@@ -6,6 +6,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.52.0 — unreleased (the date goes in on release day)
 
+- **Work sessions use DGC Browser.** Say "use the DGC browser" in a Work session: a new `dgc_browser` tool, the same
+  steps a Pip's has, drives a tab of its own in DGC Browser, the Chrome DGC keeps signed in to your accounts. Opening a
+  site asks first, in every mode ("Use example.com in DGC Browser?"; auto mode asks once for the session); Allow once
+  covers that site for the session, Always allow saves `DGCBrowser(dgc-browser:https://site)`. Its tab opens nothing
+  else, never types a password or a code, and never pays or sends anything on a bank or payment site: the step says
+  what wasn't sent. DGC Browser belongs to the Pips supervisor, so a Work session asks it for its tab (a private socket
+  of its own); with Pips off it says so. The dock's Watch shows its tab. Work's own browser stays the one for any page
+  ("check my browser" included); when it can't show what you mean (your account's page is a sign-in page), Work tries
+  DGC Browser and says which browser it used.
 - **Switched off, a Pip's computer closes.** A Pip that is off (or archived) runs nothing on its own, its computer
   included: each of its computers closes as soon as nothing uses it (no answer of it at work, no card waiting on it),
   instead of waiting to idle out. Its sign-ins and Files stay; written to, it still answers and opens its computer again.
@@ -17,7 +26,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   a long turn; it now begins with that turn's own start, so the turn replays whole and folds.
 - **"Show me here in the Canvas" makes a design.** DGC's docs say what the canvas is, `dgc_docs` weighs a rare word over
   common ones, and `make_artifact` says a design's page is what the user calls the Canvas.
-- **Your Browser's `size` answer says the screen's size** (`screen` {width, height}): as large as the tab and Chrome's
+- **DGC Browser's `size` answer says the screen's size** (`screen` {width, height}): as large as the tab and Chrome's
   whole window, so a tab narrower than Chrome's least width scrolls to the rest at one to one.
 - **The line when DGC skips a step the model repeated is in plain words**, without the tool's name.
 
@@ -47,21 +56,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   Dev Mode off, each turn is handed to the CLI as before. Kimi Code, Qwen Code and Copilot CLI run as before, and say
   why once. The terminal app, the classic prompt and `dgc -p` follow the same switch (`dgc -p`'s `--model` and
   `--think` go to the CLI for that run only), and `/status` says when the CLI is the model only.
-- **Sites Pips can use in Your Browser** (Pips API 113: `seen_your_browser_sites`, `get_your_browser_lanes`): the sites
+- **Sites Pips can use in DGC Browser** (Pips API 113: `seen_dgc_browser_sites`, `get_dgc_browser_lanes`): the sites
   you are signed in to, each with All Pips, Some Pips or No Pips; a site you sign in to yourself is noticed (a bank or
   payment site starts at No Pips, others at All Pips); a grant from a chat card can be taken back. While a Pip's run
   works in its tab, the editor hears within seconds.
 - **A Pip's tab on a computer with a screen acts**: hidden in your Chrome window, its clicks and typing were ignored and
   a scroll timed out after 30 s; its steps now act inside the page (scroll 0.6 s).
-- **Your Browser fetches a Pip computer's screen program where it isn't here** (no password, DGC's own folder), so over
+- **DGC Browser fetches a Pip computer's screen program where it isn't here** (no password, DGC's own folder), so over
   Remote-SSH it is the same fast screen as a Pip's computer from its next start; pictures until then.
 - **A reopened chat shows each image where it was viewed**: with a model that reuses short step ids, images viewed later
   under an earlier step's id all went after the chat's last reply in one row ("Viewed 141 images").
-- **A Pip's runs drive its own tab in Your Browser**, only on the sites you let it use there: a new `your_browser` tool
+- **A Pip's runs drive its own tab in DGC Browser**, only on the sites you let it use there: a new `dgc_browser` tool
   (open, read, click, type, choose, press, scroll, back, forward, reload, wait, tabs, status, dialog, sign_in, and
   look for a Pip that can see). Its tab is a Pip computer's browser in every rule: its level, careful mode, Always
   allow and cards. It never reads or drives your own tabs or another Pip's; a page outside its sites never loads and a
-  write outside them is never sent (a card in its chat asks "Let Ava use this site in Your Browser?"); it never types
+  write outside them is never sent (a card in its chat asks "Let Ava use this site in DGC Browser?"); it never types
   into or reads a password, code or card field, and a sign-in is yours, in your own tab, from a card; a payment, an
   order or anything sent on a bank or payment site waits for your yes every time; downloads from its tab are
   cancelled. Its tab's title says whose it is, what it sent is in its "Sent to the web" log, and it closes after ten
@@ -98,12 +107,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   by that at its next look. It is pinned to its project: a new chat there carries on from the first item not done,
   Work lists it with how far along it is, and `/goal checklist` runs from it item by item, ending when every item is
   Done or stopping when one needs you (it says which and why).
-- **Your Browser over Remote-SSH is as quick as a Pip's computer**: where the computer has no screen, its Chrome draws
+- **DGC Browser over Remote-SSH is as quick as a Pip's computer**: where the computer has no screen, its Chrome draws
   on the same kind of screen a Pip's computer uses, and the editor's tab streams it the same way, with no wait for each
   picture. It is Chrome's real window (its tabs, address bar, menus, dropdowns and password manager). A Pip's tab opens
   in a window of its own, off that screen. Without that screen program here it is as before.
-- **Clear browsing data in Your Browser** (`clear_your_browser`, Pips API 112): browsing history, sign-ins (cookies and
-  site data) or saved passwords, only from DGC's own profile for it. Your Browser closes and opens again to clear them.
+- **Clear browsing data in DGC Browser** (`clear_dgc_browser`, Pips API 112): browsing history, sign-ins (cookies and
+  site data) or saved passwords, only from DGC's own profile for it. DGC Browser closes and opens again to clear them.
 - **Showing a dashboard no longer adds a "Page" beside it in the Library**: its view, served to show it, was taken for
   a page of its own with the dashboard's name. Ones made that way go to DGC's trash, where they can be recovered.
 - **One artifact per name**: asked to change something it made, a model changes that one (a new version you can go
@@ -113,15 +122,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   (new `find_artifacts`), so "change yesterday's report" changes yesterday's report. `edit_artifact` can rename, and
   your own Rename in the Library follows the same rule. A Pip sees and changes only its own. In ChatDGC a chat never
   holds two files with one name: a file keeps no versions, so a second is named apart and the first stays.
-- **Your Browser's tabs look like Chrome's**: each wears its site's icon (a globe until DGC has it), its title and its
+- **DGC Browser's tabs look like Chrome's**: each wears its site's icon (a globe until DGC has it), its title and its
   Close; the current tab stands on the address row. The icon is the site's own, fetched once without cookies.
 - **A link to a private address wears DGC's own sharp globe**: a link to an IP address, localhost or a private or
   Tailscale name asked Google's icon service, which can't reach it and sent a soft stand-in; it never leaves the
   machine now. DGC's link marks are the size of a site's icon.
-- **Your Browser signs in to Google over Remote-SSH**: with no screen where DGC runs, it was headless Chrome, which
+- **DGC Browser signs in to Google over Remote-SSH**: with no screen where DGC runs, it was headless Chrome, which
   Google's sign-in and reCAPTCHA turn away; now it's a real Chrome window on a screen of its own (where Xvfb is), as
   a Pip's computer is, drawn at twice the pixels so it's sharp on a Retina screen.
-- **Copy and paste both ways**: Copy or Cut in Your Browser's tab puts the page's selected text on your editor's
+- **Copy and paste both ways**: Copy or Cut in DGC Browser's tab puts the page's selected text on your editor's
   clipboard (it went to Chrome's on the other computer); on a Pip's computer, your Copy there lands on your clipboard
   and Ctrl+V pastes yours in, without the clipboard panel (still there for the rest).
 - A file link's icon sits on the middle of the text and wraps with its name (the Markdown mark floated above it).
@@ -185,7 +194,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   needed. None of it restarts by itself.
 - **New work you send mid-turn goes on the checklist**, and "Checklist still open" comes after the first step without
   an update and then every third, not after every step.
-- **Opening Your Browser starts the Pips runner** when it isn't running (an emergency stop is never cleared), and the
+- **Opening DGC Browser starts the Pips runner** when it isn't running (an emergency stop is never cleared), and the
   editor passes the dock's and Home's requests through (over Remote-SSH they were refused).
 - **Keep Pips running waits for a busy service manager**: changes to the user service manager may take a minute (a
   reload of thousands of short-lived units took 17 s); a timeout says it was busy and to try again, not that the
@@ -199,7 +208,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **A Pip's helpers' model by your words.** "Use qwen for your helpers" sets that Pip's Sub-agents model from your saved connections.
 - **Folder Pips' scheduled runs have everything their chat has.**
 - **Check-ins instead of time limits.** A long job gets an expected time: in Work (a background command, a sub-agent) and in a Pip's computer, DGC checks in when it runs past that or goes quiet for 10 minutes, and the model decides to keep going, correct it or start it again; a Pip's background command that ends tells it in its chat.
-- **Your Browser opens.** Its window beside the editor; Install Google Chrome through the system's own password prompt (or one terminal line); over Remote-SSH your own tab streams into an editor tab; a locked keyring no longer stalls Chrome's start. Pips API 107.
+- **DGC Browser opens.** Its window beside the editor; Install Google Chrome through the system's own password prompt (or one terminal line); over Remote-SSH your own tab streams into an editor tab; a locked keyring no longer stalls Chrome's start. Pips API 107.
 - **An older install's Pips runner moves to this install at the editor's first look**, not only at the next run, so a Pip's computer opened first no longer shows the old desktop.
 - **A sub-agent with Work tools, from a Pip's chat.** For a fix its copy can't do (it needs a file Git ignores, like .env, or a service to run), a Pip's fix card has "Start a sub-agent with Work tools" in its menu: a real Work run on your real folder, on the Pip's Sub-agents model, in auto mode with its safety check on (the brief is DGC's words; only your own words it quotes count as yours). It is shown in the Pip's chat and agent map, never in your Work sessions. The Pip checks what it changed; what it changed is already in your folder, with Undo (never over a file you changed since). Your press is the yes at every level; at Do it all the Pip may start one itself. A folder you haven't trusted is trusted for that run only, never saved; a run that says nothing for 75 minutes (longer than any one command may take) is stopped and the Pip says why. `dgc -p` gains `--engine native` and `--api-mode` for one run. Pips API 109.
 - **Save to Library for a picture in a chat.** A person keeps a picture of a chat in the Library's Images (kept by you, with the chat it came from), through the one module that keeps images (`dgc/image_keep.py`); a picture already there, made by DGC or kept before, is found by its bytes and never kept twice, and nothing is kept on its own beyond the pictures DGC makes. Work: `library_picture` {request_id, ref | path, keep} answered by one `library_picture` event (`ready.capabilities.library_picture`). ChatDGC: `chatdgc_library_picture` (`capabilities.chatdgc.library_picture`). Pips API 108: `library_pip_message_image`. Index rows now carry the picture's digest.

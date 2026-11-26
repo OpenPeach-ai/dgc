@@ -100,10 +100,10 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_artifacts", "set_pip_artifacts",
     "get_pip_computer_apps", "set_pip_computer_apps",
     "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "fill_pip_code",
-    "get_your_browser", "set_your_browser_site", "sign_out_your_browser_site", "open_your_browser",
-    "use_your_browser_view", "get_your_browser_recent", "install_google_chrome", "clear_your_browser",
-    "seen_your_browser_sites",
-    "get_your_browser_lanes",
+    "get_dgc_browser", "set_dgc_browser_site", "sign_out_dgc_browser_site", "open_dgc_browser",
+    "use_dgc_browser_view", "get_dgc_browser_recent", "install_google_chrome", "clear_dgc_browser",
+    "seen_dgc_browser_sites",
+    "get_dgc_browser_lanes",
     "get_pip_level", "set_pip_level",
     "list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow",
     "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
@@ -222,20 +222,20 @@ _COMMAND_ARGS = {
     "get_pip_computer": {"pip_id"}, "list_pip_computer_actions": {"pip_id", "limit"},
     "decide_pip_computer_action": {"action_id", "expected_digest", "approve"},
     "fill_pip_code": {"pip_id", "action_id", "expected_digest", "code"},
-    # Your Browser (your_browser, API 105): the one shared browser the person signs in to, a lane per Pip.
-    "get_your_browser": set(), "set_your_browser_site": {"site", "mode", "pips"}, "sign_out_your_browser_site": {"site"},
+    # DGC Browser (dgc_browser, API 105): the one shared browser the person signs in to, a lane per Pip.
+    "get_dgc_browser": set(), "set_dgc_browser_site": {"site", "mode", "pips"}, "sign_out_dgc_browser_site": {"site"},
     # API 107: its window opens to the right of the editor (editor_bounds), and Home's card reads the last links.
-    "open_your_browser": {"url", "pip_id", "editor_bounds"}, "get_your_browser_recent": set(),
+    "open_dgc_browser": {"url", "pip_id", "editor_bounds"}, "get_dgc_browser_recent": set(),
     # (API 107, decided 18 Nov) your own tab streamed where there is no screen (own, seq, events, tab, width, height),
     # and Install Google Chrome through the system's own password prompt.
-    "use_your_browser_view": {"op", "x", "y", "text", "key", "dy", "url", "pip_id", "own", "seq", "events", "tab", "width",
+    "use_dgc_browser_view": {"op", "x", "y", "text", "key", "dy", "url", "pip_id", "own", "seq", "events", "tab", "width",
                               "height"},
     "install_google_chrome": set(),
-    # API 112: Clear browsing data in Your Browser (what was ticked; at least one true).
-    "clear_your_browser": {"history", "sign_ins", "passwords"},
-    # Pips API 113: the person opened the panel of sites Pips may use in Your Browser (noticed ones are no longer new).
-    "seen_your_browser_sites": set(),
-    "get_your_browser_lanes": set(),
+    # API 112: Clear browsing data in DGC Browser (what was ticked; at least one true).
+    "clear_dgc_browser": {"history", "sign_ins", "passwords"},
+    # Pips API 113: the person opened the panel of sites Pips may use in DGC Browser (noticed ones are no longer new).
+    "seen_dgc_browser_sites": set(),
+    "get_dgc_browser_lanes": set(),
     "always_allow_pip_computer_action": {"action_id", "expected_digest"},
     "get_pip_computer_frame": {"run_id", "frame"}, "list_pip_computer_frames": {"run_id", "pointers"},
     "stop_pip_computer": {"pip_id"}, "open_pip_computer": {"pip_id", "number"},
@@ -3336,12 +3336,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                                                          else kind in FOLDER_WORLD_RUNS) else None)
     apps_pin = manifest.get('app_socket') if (kind in ('personal_task', 'conversation') if personal
                                               else kind in FOLDER_WORLD_RUNS) else None
-    # Its own tab in Your Browser (your_browser_lane, 0.52): only beside its computer, a socket and a token, nothing else.
-    lane_pin = manifest.get('your_browser_socket') if computer_pin is not None else None
+    # Its own tab in DGC Browser (dgc_browser_lane, 0.52): only beside its computer, a socket and a token, nothing else.
+    lane_pin = manifest.get('dgc_browser_socket') if computer_pin is not None else None
     if lane_pin is not None and (not isinstance(lane_pin, dict) or set(lane_pin) != {'socket', 'token'}
                                  or not all(isinstance(v, str) for v in lane_pin.values())):
-        raise RegistryError('invalid_manifest', 'The Your Browser connection is malformed.')
-    from . import your_browser_lane
+        raise RegistryError('invalid_manifest', 'The DGC Browser connection is malformed.')
+    from . import dgc_browser_lane
     # 'desktop' (optional): its computer shows a whole desktop on this machine, so a Pip that sees gets its steps.
     if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) - {'desktop'} != {'socket', 'token'}
                                      or computer_pin.get('desktop', False) not in (True, False)):
@@ -3748,7 +3748,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             # One kind of Pip (16 Nov): every Pip's chat has the Personal chat's tools; a Pip with a folder has its
             # project reads (the Agent's own, below) besides. A run that isn't a chat (an audit, a draft, a reviewed
             # execution) pins none of these, so it has only its reviewed tools.
-            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + ([your_browser_lane.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None)] if lane_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.PIP_SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_questions.schema()] if conversation is not None and conversation.get('questions') is True and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_work_agents.schema()] if isinstance(work_pin, dict) else []) + ([pip_jobs.schema()] if jobs_pin else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + ([dgc_browser_lane.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None)] if lane_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.PIP_SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_questions.schema()] if conversation is not None and conversation.get('questions') is True and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_work_agents.schema()] if isinstance(work_pin, dict) else []) + ([pip_jobs.schema()] if jobs_pin else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             if personal:
                 return own
             schemas = [*super()._tool_schemas(*args, **kwargs), *own]
@@ -3938,7 +3938,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if computer_pin.get('desktop') is True and self._pip_eyes() in ('own', 'relay'):
                         base_instructions += '\n' + pip_computer.DESKTOP_NOTICE
                     if lane_pin is not None:
-                        base_instructions += '\n' + your_browser_lane.NOTICE
+                        base_instructions += '\n' + dgc_browser_lane.NOTICE
                     keys_pin = manifest.get('terminal_keys')
                     if isinstance(keys_pin, list) and keys_pin:
                         from . import pip_keys
@@ -4317,8 +4317,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     label=(f"your computer's screen (the whole desktop) after {op} (points are {where}, for the desktop steps)"
                            if desk else f"your computer's screen after {op} (points are {where})"))])
                 return reply['text']
-            if lane_pin is not None and call.name == your_browser_lane.TOOL:
-                # Its own tab in Your Browser: the controller's socket for this run and this Pip (it names no other).
+            if lane_pin is not None and call.name == dgc_browser_lane.TOOL:
+                # Its own tab in DGC Browser: the controller's socket for this run and this Pip (it names no other).
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 op = str(arguments.get('op', ''))
                 question = arguments.get('question')
@@ -4328,7 +4328,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     return self._cannot_see()
                 shown = getattr(self, 'ui', None)
                 reply = pip_computer.worker_step(lane_pin, op, args, on_wait=(
-                    (lambda line: shown.turn_activity('waiting', line.replace('its computer', 'its tab in Your Browser')))
+                    (lambda line: shown.turn_activity('waiting', line.replace('its computer', 'its tab in DGC Browser')))
                     if hasattr(shown, 'turn_activity') else None))
                 if reply.get('card') or 'below your reply' in str(reply.get('text', '')):
                     cards_shown.append(call.name)
@@ -4338,9 +4338,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     return self._relay_look(reply, question, "the agent's tab in the user's browser")
                 from .tools import _image_entry
                 self._forget_old_screens()
-                self._deliver_images(call.id, your_browser_lane.TOOL, [_image_entry(
-                    reply['image'], name='your-browser.jpg', source='browser',
-                    label=f"your tab in Your Browser after {op} ({reply['width']}x{reply['height']} pixels)")])
+                self._deliver_images(call.id, dgc_browser_lane.TOOL, [_image_entry(
+                    reply['image'], name='dgc-browser.jpg', source='browser',
+                    label=f"your tab in DGC Browser after {op} ({reply['width']}x{reply['height']} pixels)")])
                 return reply['text']
             if personal:
                 self.ui.tool_denied(call.name, {}, "Personal Pips have no model-callable tools.", call.id)
@@ -5586,12 +5586,12 @@ def _execute_run(registry, row, config):
                             unattended=row['requested_by'] in pip_careful.UNATTENDED,
                             user_turn=manifest.get('user_turn') is True, config=config)
         computer_socket = pip_computer.RunSocket(computer_host, row['id'])
-        # Its own tab in Your Browser (your_browser_lane, 0.52): the same run's settings, its own socket pinned to this
-        # run and this Pip; only where Your Browser can run here.
-        from . import your_browser_lane
+        # Its own tab in DGC Browser (dgc_browser_lane, 0.52): the same run's settings, its own socket pinned to this
+        # run and this Pip; only where DGC Browser can run here.
+        from . import dgc_browser_lane
         try:
-            lane_socket = your_browser_lane.run_socket(
-                registry, row, run_dir / 'artifacts' / 'your-browser', careful=careful, said=said, label=doing,
+            lane_socket = dgc_browser_lane.run_socket(
+                registry, row, run_dir / 'artifacts' / 'dgc-browser', careful=careful, said=said, label=doing,
                 sites=pip_careful.known(registry, row['pip_id']) if careful else (),
                 carry=pip_careful.carry_sites(registry, row['pip_id']) if careful else (),
                 level=pip_levels.level(registry, row['pip_id']), level_now=pip_levels.follow(registry.directory, row['pip_id']),
@@ -5600,7 +5600,7 @@ def _execute_run(registry, row, config):
         except (OSError, RegistryError):
             lane_socket = None                  # (no lane this run: its computer as before)
         if lane_socket is not None:
-            manifest = {**manifest, 'your_browser_socket': lane_socket.pin()}
+            manifest = {**manifest, 'dgc_browser_socket': lane_socket.pin()}
         from . import pip_desktop_eyes, pip_screen
         try:
             whole = pip_desktop_eyes.supported() and pip_screen.availability()["available"] is True
@@ -5870,7 +5870,7 @@ def _execute_run(registry, row, config):
                       "usage": result.get("usage") if isinstance(result.get("usage"), dict) else {},
                       "tools_called": 0, "snapshot": snapshot_info}
         if computer_socket is not None:
-            # (What its tab in Your Browser left waiting for the user is its computer's to show, the same cards.)
+            # (What its tab in DGC Browser left waiting for the user is its computer's to show, the same cards.)
             lane_held = lane_socket.waiting() if lane_socket is not None else []
             result["computer"] = {"calls": computer_socket.calls + (lane_socket.calls if lane_socket is not None else 0),
                                   "held": (computer_host.waiting_for(row["id"]) + lane_held)[:8]}
@@ -5991,8 +5991,8 @@ def _execute_run(registry, row, config):
             computer_socket.close()
             computer_host.end(row['id'])
         if lane_socket is not None:
-            from . import your_browser_lane
-            your_browser_lane.end_run(lane_socket)      # its lane idles: closed later, when nothing of it waits
+            from . import dgc_browser_lane
+            dgc_browser_lane.end_run(lane_socket)      # its lane idles: closed later, when nothing of it waits
         if app_socket is not None:
             app_socket.close()
         if not proc.stdin.closed:
@@ -6662,7 +6662,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_webhook_reach", "set_webhook_reach", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "fill_pip_code", "get_your_browser", "set_your_browser_site", "sign_out_your_browser_site", "open_your_browser", "use_your_browser_view", "get_your_browser_recent", "install_google_chrome", "clear_your_browser", "seen_your_browser_sites", "get_your_browser_lanes", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention", "get_pips_welcome", "list_related_pips", "get_pip_job", "list_pip_jobs", "start_pip_job", "decline_pip_job") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_webhook_reach", "set_webhook_reach", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "fill_pip_code", "get_dgc_browser", "set_dgc_browser_site", "sign_out_dgc_browser_site", "open_dgc_browser", "use_dgc_browser_view", "get_dgc_browser_recent", "install_google_chrome", "clear_dgc_browser", "seen_dgc_browser_sites", "get_dgc_browser_lanes", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "list_pip_keys", "save_pip_key", "decline_pip_key", "remove_pip_key", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "export_pip_team", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "add_pip_computer", "rename_pip_computer", "set_pip_computer_screen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention", "get_pips_welcome", "list_related_pips", "get_pip_job", "list_pip_jobs", "start_pip_job", "decline_pip_job") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -6912,22 +6912,22 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 from . import pip_computer
                 result = pip_computer.fill_code(registry, request.get('pip_id'), request.get('action_id'),
                                                 request.get('expected_digest'), request.get('code'), actor)
-            elif command in ('get_your_browser', 'set_your_browser_site', 'sign_out_your_browser_site',
-                             'open_your_browser', 'use_your_browser_view', 'get_your_browser_recent',
-                             'install_google_chrome', 'clear_your_browser', 'seen_your_browser_sites',
-                             'get_your_browser_lanes'):
-                # Your Browser (0.52, API 105): its sites and which Pips use each; (API 107) its window, opened by the
+            elif command in ('get_dgc_browser', 'set_dgc_browser_site', 'sign_out_dgc_browser_site',
+                             'open_dgc_browser', 'use_dgc_browser_view', 'get_dgc_browser_recent',
+                             'install_google_chrome', 'clear_dgc_browser', 'seen_dgc_browser_sites',
+                             'get_dgc_browser_lanes'):
+                # DGC Browser (0.52, API 105): its sites and which Pips use each; (API 107) its window, opened by the
                 # supervisor to the right of the editor, a Pip's tab streamed, Home's last visited links, your own tab
                 # streamed where there is no screen, and Install Google Chrome; (API 112) Clear browsing data; (API 113)
                 # the Sites panel's seen, and the dock's quick look at the Pips working there. Local only.
-                from . import your_browser
-                if command == 'open_your_browser' and actor in ('editor-user', 'local-console') \
-                        and not your_browser._runner_live(registry):
+                from . import dgc_browser
+                if command == 'open_dgc_browser' and actor in ('editor-user', 'local-console') \
+                        and not dgc_browser._runner_live(registry):
                     # Opening it is the person's own ask: the runner it opens with starts by itself (as it does for a
                     # job a chat hands a Pip). An emergency stop is never cleared; it says so in its own words.
                     from .pip_jobs import ensure_runner
                     ensure_runner(config)
-                result = your_browser.control(registry, command, request, actor)
+                result = dgc_browser.control(registry, command, request, actor)
             elif command in ('list_pip_logins', 'save_pip_login', 'remove_pip_login', 'grant_pip_login'):
                 # Saved logins (pip_logins): kept sealed on this computer, typed into a page by DGC when the Pip signs
                 # in; a save from the card in its chat also answers that card (the Pip then signs in by itself).
@@ -7262,11 +7262,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError("local_only", "See what a Pip sent on this computer.")
                 store._job(pip_id)
                 from .leak_guard import SENT_FILE, sent_summary
-                from .your_browser import folder as your_browser_folder
+                from .dgc_browser import folder as dgc_browser_folder
                 computers = registry.directory / "computers"
                 paths = [computers / pip_id / SENT_FILE, *sorted(computers.glob(pip_id + ".c*/" + SENT_FILE))]
-                # API 105: and what its lane in Your Browser sent (one log for every lane: this Pip's lines only).
-                result = {"pip_id": pip_id, **sent_summary(paths, lanes=your_browser_folder(registry.directory) / SENT_FILE,
+                # API 105: and what its lane in DGC Browser sent (one log for every lane: this Pip's lines only).
+                result = {"pip_id": pip_id, **sent_summary(paths, lanes=dgc_browser_folder(registry.directory) / SENT_FILE,
                                                            pip_id=pip_id)}
             elif command == "get_pips_welcome":
                 # Pips API 96: the Pips tab's one-time welcome after the update, only for someone who had Pips.

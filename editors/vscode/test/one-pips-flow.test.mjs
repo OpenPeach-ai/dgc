@@ -166,13 +166,13 @@ test('what only you can do is a card in the chat, under the check whose fix foun
  assert.equal(x.$('.pip-found-findings')?.textContent.includes('GSP wallet')||false,false,'it is never one of the findings');
 });
 
-test('one whose check is not in the chat waits at its end, never at the top',async()=>{
+// Changed on purpose (26 Nov): one whose check is not in the chat stood at the chat's very end, where every new reply
+// landed above it and, in a narrow side bar, scrolled out of sight. It is out of the chat now, behind the "needs you"
+// pill of the bar over the prompt box (test/pip-needs-pill.test.mjs).
+test('one whose check is not in the chat is not in the chat: not at its end, never at the top',async()=>{
  const x=await chat({fix:'none'});
  assert.equal(x.$('.pip-found-pinned, .pip-found-waiting-line'),null);
- const card=x.$(`.pip-found-waiting[data-flow-waiting="${WAIT}"]`);
- assert.ok(card,'its card');
- const items=[...x.d.querySelectorAll('.conversation-log [data-message], .conversation-log [data-run-post]')];
- assert.ok(!items.length||items.at(-1).compareDocumentPosition(card)&4,'after the last message');
+ assert.equal(x.$(`.conversation-log [data-flow-waiting="${WAIT}"]`),null,'no card or line of it in the conversation');
 });
 
 for(const [word,answer,said] of [['I’ve done it','done',/You said it’s done: GSP wallet is empty\. Its next check looks again\./],['Remind me later','later',/It reminds you later: GSP wallet is empty\./],['Not a problem','not_a_problem',/Not a problem: GSP wallet is empty\. It won’t come up again\./]]){

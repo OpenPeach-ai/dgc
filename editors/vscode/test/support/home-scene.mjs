@@ -124,28 +124,28 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
       accept_pip_update: (r) => { waitsNoMore(r.proposal_id); return { pip: { id: r.pip_id } }; },
       reject_pip_update: (r) => { waitsNoMore(r.proposal_id); return { pip: { id: r.pip_id } }; },
       mark_pip_news_seen: (r) => { S().digest = (S().digest || []).filter((p) => !r.pip_ids.includes(p.pip_id)); return { seen: r.pip_ids.map((pip_id) => ({ pip_id, seen_until: r.until })) }; },
-      // Your Browser (Pips API 107): the last links from the state's `browser.recent`, and an open the state may refuse.
-      get_your_browser_recent: () => ({ links: [], open: false, available: true, reason: "", ...(S().browser?.recent || {}) }),
-      open_your_browser: (r) => (S().browser?.refuse ? { __error: S().browser.refuse } : { ok: true, kind: "host_profile", weaker: true, url: r.url || "", open: true, view: S().browser?.recent?.view || "window" }),
+      // DGC Browser (Pips API 107): the last links from the state's `browser.recent`, and an open the state may refuse.
+      get_dgc_browser_recent: () => ({ links: [], open: false, available: true, reason: "", ...(S().browser?.recent || {}) }),
+      open_dgc_browser: (r) => (S().browser?.refuse ? { __error: S().browser.refuse } : { ok: true, kind: "host_profile", weaker: true, url: r.url || "", open: true, view: S().browser?.recent?.view || "window" }),
       // Install Google Chrome (18 Nov): it starts (the card says so), unless the state answers otherwise.
       install_google_chrome: () => S().browser?.installAnswer || { available: false, install: { ...(S().browser?.recent?.install || {}), state: "running", error: "" } },
       // Clear browsing data (Pips API 112): what was ticked is cleared, unless the state refuses it.
-      clear_your_browser: (r) => (S().browser?.clearRefuse ? { __error: S().browser.clearRefuse }
+      clear_dgc_browser: (r) => (S().browser?.clearRefuse ? { __error: S().browser.clearRefuse }
         : { ok: true, cleared: ["history", "sign_ins", "passwords"].filter((k) => r[k] === true), reopened: S().browser?.recent?.open === true, chrome_account: S().browser?.recent?.chrome_account === true }),
       // The dock's quick look at the Pips working there (Pips API 113): the state's `browser.lanes` and `browser.runsLive`.
-      get_your_browser_lanes: () => ({ lanes: S().browser?.lanes || [], runs_live: S().browser?.runsLive === true }),
+      get_dgc_browser_lanes: () => ({ lanes: S().browser?.lanes || [], runs_live: S().browser?.runsLive === true }),
       // The Sites panel (Pips API 113): the state's `browser.sites` / `browser.pips`, changed as DGC would; a site in
       // `browser.refuseSite` is refused.
-      get_your_browser: () => ({ kind: "host_profile", weaker: true, available: true, reason: "", sites: S().browser?.sites || [], pips: S().browser?.pips || [],
+      get_dgc_browser: () => ({ kind: "host_profile", weaker: true, available: true, reason: "", sites: S().browser?.sites || [], pips: S().browser?.pips || [],
         signing_out: S().browser?.signingOut || [], yours: { open: false, tabs: [{ title: "Bank", url: "https://bank.example/" }], error: "" }, lanes: [] }),
-      set_your_browser_site: (r) => { const b = S().browser, s = (b?.sites || []).find((x) => x.site === r.site);
-        if (!s) return { __error: `You aren't signed in to ${r.site} in Your Browser.` };
+      set_dgc_browser_site: (r) => { const b = S().browser, s = (b?.sites || []).find((x) => x.site === r.site);
+        if (!s) return { __error: `You aren't signed in to ${r.site} in DGC Browser.` };
         if (b.refuseSite === r.site) return { __error: "DGC couldn't change that site just now." };
         s.mode = r.mode; s.pips = r.mode === "chosen" ? (r.pips || []).map((id) => ({ pip_id: id, name: (b.pips || []).find((p) => p.pip_id === id)?.name || "" })) : [];
         return { site: s }; },
-      sign_out_your_browser_site: (r) => { const b = S().browser; if (!(b?.sites || []).some((x) => x.site === r.site)) return { __error: "Not there." };
+      sign_out_dgc_browser_site: (r) => { const b = S().browser; if (!(b?.sites || []).some((x) => x.site === r.site)) return { __error: "Not there." };
         b.sites = b.sites.filter((x) => x.site !== r.site); b.signingOut = [...(b.signingOut || []), r.site]; return { site: r.site, sign_out: "waiting" }; },
-      seen_your_browser_sites: () => { for (const s of S().browser?.sites || []) s.new = false; if (S().browser?.recent) S().browser.recent.new_sites = 0; return { ok: true }; },
+      seen_dgc_browser_sites: () => { for (const s of S().browser?.sites || []) s.new = false; if (S().browser?.recent) S().browser.recent.new_sites = 0; return { ok: true }; },
     };
     function waitsNoMore(card) { const a = S().attention; if (!a) return;
       for (const list of ["items", "reviews"]) { const at = (a[list] || []).findIndex((i) => i.card === card); if (at < 0) continue;
@@ -159,7 +159,7 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
       window.__posted.push(JSON.parse(JSON.stringify(m)));
       if (m?.type === "pipsReady") { setTimeout(connect, 1); return; }
       // A scene that opens the Pips view on this page answers its requests itself (dock-scene.mjs); the home's own keep theirs.
-      if (window.__pipsApp && m?.type === "pipsRequest" && !/^(home-pips|your-browser)-/.test(String(m.id))) { window.__pipsApp(m); return; }
+      if (window.__pipsApp && m?.type === "pipsRequest" && !/^(home-pips|dgc-browser)-/.test(String(m.id))) { window.__pipsApp(m); return; }
       const make = m?.type === "pipsRequest" && answers[m.request.type];
       if (m?.type === "pipsRequest") window.__requests.push(JSON.parse(JSON.stringify(m.request)));
       // (What the home asked and has had answered is noted, so a test can wait for a whole poll.)

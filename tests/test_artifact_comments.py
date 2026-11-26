@@ -661,7 +661,7 @@ class TheChatThatMadeIt(Base):
                 return False
 
         with patch("dgc.workspace_registry.WorkspaceRegistry", Registry), \
-                patch("dgc.your_browser._pip_names", lambda registry, ids: {"pip_ava": "Ava"}):
+                patch("dgc.dgc_browser._pip_names", lambda registry, ids: {"pip_ava": "Ava"}):
             said = artifact_origin.conversation({"surface": "pip", "pip": "pip_ava"})
         self.assertTrue(said.startswith("Ava's chat"), said)
         self.assertIn("The Lotus Inn, 3500 a night", said)
