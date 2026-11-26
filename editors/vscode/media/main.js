@@ -2465,10 +2465,14 @@
         folder: typeof item.projectName === "string" ? item.projectName : "", meta: [item.waiting === true ? "Wants your okay" : item.windowless ? "Running, no window" : running ? "Running" : item.open ? "Open in a tab" : "", count].filter(Boolean).join(" · ") }; });
     const chats = (chatsAvailable ? chatItems : []).map((item) => { const id = String(item.id || ""), answering = answeringChats.has(id);
       return { key: `chat:${id}`, icon: markHtml("chat", id, answering), name: String(item.title || "New chat"), at: Date.parse(item.updated_at) || 0, age: chatAge(item.updated_at), live: answering, running: answering,
-        fresh: hubNews.chat[id] !== undefined, meta: answering ? "Answering" : plainPreview(item.preview) || "" }; });
+        fresh: hubNews.chat[id] !== undefined, pinned: item.pinned === true, meta: answering ? "Answering" : plainPreview(item.preview) || "" }; });
     const pips = dockPips.pips.map((p, k) => ({ key: `pipopen:${p.id}`, icon: pipFace(p.body, p.name, p.waiting ? "waiting_approval" : "idle", p.id), name: p.name, star: p.body === "core" && k === dockPips.pips.findIndex((q) => q.body === "core"),
-      count: p.waiting || 0, waiting: p.waiting || 0, meta: p.waiting ? `${p.waiting} waiting for you` : p.line || "Ready when you are" }));
-    pips.sort((a, b) => (b.star ? 1 : 0) - (a.star ? 1 : 0) || (b.waiting ? 1 : 0) - (a.waiting ? 1 : 0));
+      count: p.waiting || 0, waiting: p.waiting || 0, at: Number(p.at) || 0, meta: p.waiting ? `${p.waiting} waiting for you` : p.line || "Ready when you are" }));
+    // The lists' cards go as a messaging app's do, Recent's way (asked 26 Nov): the latest first. Core stays on top of the
+    // Pips (the Pips list's own rule), a pinned chat on top of the chats, and a session at work or a chat answering is
+    // active now. A Pip that waits for you is not lifted: its ask is its latest message, and Needs you has it.
+    const latest = (a, b) => (b.at || 0) - (a.at || 0);
+    pips.sort((a, b) => (b.star ? 1 : 0) - (a.star ? 1 : 0) || latest(a, b));
     const waitingPip = pips.find((p) => p.waiting), folderNow = projectFolders?.choice ? window.DgcFolderPick?.valueOf(projectFolders.rows, projectFolders.choice) || "" : projectFolders ? "All projects" : "";
     const recent = [...work.map((r) => ({ ...r, live: false, meta: ["Work", r.folder].filter(Boolean).join(" · ") })), ...chats.map((r) => ({ ...r, live: false, fresh: false, meta: "Chat" }))]
       .filter((r) => !isNew.has(r.key)).sort((a, b) => b.at - a.at).slice(0, 30);
@@ -2482,8 +2486,9 @@
       // (On the card's own rows, the short way to say where it is from: a row has less room than an opened card. H2.)
       news: fresh.map((c) => ({ key: `hub:${c.key}`, at: Number(c.at) || 0, icon: c.who?.html || "", name: c.title, meta: Array.isArray(c.fromShort) && typeof c.fromShort.at(-1) === "string" ? c.fromShort.at(-1) : c.from, title: `Open: ${c.title} · ${c.from}` })),
       recent,
-      work: { rows: [...work].sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0)), total: work.length, more: sessionsMoreToLoad, running: work.filter((r) => r.running).length, folder: folderNow, empty: "No sessions yet. Start one with New." },
-      chats: { offered: chatsAvailable, why: "Chats aren’t set up in this DGC.", rows: chats, total: chats.length, fresh: chats.filter((r) => r.fresh).length, empty: "No chats yet. Start one with New chat." },
+      work: { rows: [...work].sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0) || latest(a, b)), total: work.length, more: sessionsMoreToLoad, running: work.filter((r) => r.running).length, folder: folderNow, empty: "No sessions yet. Start one with New." },
+      chats: { offered: chatsAvailable, why: "Chats aren’t set up in this DGC.", rows: [...chats].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
+        || (b.running ? 1 : 0) - (a.running ? 1 : 0) || latest(a, b)), total: chats.length, fresh: chats.filter((r) => r.fresh).length, empty: "No chats yet. Start one with New chat." },
       pips: { offered: !!window.DgcPips?.mount, why: "Pips aren’t set up in this DGC.", rows: pips, total: pips.length, waiting: pips.filter((p) => p.waiting).length, say: pips[0] ? `${pips[0].name} is ready` : "", empty: "No Pips yet." },
       running: [...work.filter((r) => r.running).map((r) => ({ ...r, live: false, meta: ["Work", r.meta].filter(Boolean).join(" · ") })), ...chats.filter((r) => r.running).map((r) => ({ ...r, live: false, meta: "Chat · answering" }))],
       quick: { work: quickMark("work"), chat: chatsAvailable ? quickMark("chat") : "", pip: quickMark("pip") },
@@ -5004,6 +5009,7 @@
   const PIN_JUMP_DELAY_MS = 300;   // a single click waits this long for a second one (the reference's 300ms)
   function fitPin(head, room) {
     if (!(head._pinH > 0)) return;
+    head._pinFor = head._pinH;      // the whole height this was decided on (pinFit decides again only when it is new)
     const was = head.classList.contains("pin-off");
     if (head.classList.toggle("pin-off", head._pinH + PIN_GROUND_PX > room) !== was && head.classList.contains("turn-head")) setPinned(head);
   }
@@ -5027,7 +5033,10 @@
       const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect?.height ?? 0;
       // 0: not rendered (agent page, hidden panel); keep the last. Small while it is stuck: its whole height is kept.
       if (height > 0 && !entry.target.classList.contains("pinned")) entry.target._pinH = height;
-      fitPin(entry.target, room);
+      // Decided again only when its whole height is new. Going small as it sticks, and whole again as it leaves, is the
+      // pin's own doing and changes nothing it was decided on; deciding then read a transcript a draft had shortened, and
+      // a short prompt stopped pinning the moment it stuck (26 Nov): a draft never flips a pin (the observer below).
+      if (entry.target._pinH !== entry.target._pinFor) fitPin(entry.target, room);
     }
   }) : null;
   const refitPins = () => {
@@ -6130,8 +6139,8 @@
       }else note.append(el('span','','Pip created'));
       appendTarget.appendChild(note);head=note;
     } else if (kind === "resume" && /^Goal · turn \d{1,7}$/.test(String(prompt || ""))) {
-      // A goal's own next turn (DGC names it "Goal · turn 3"): nothing in the chat, its work and answer just follow (his
-      // call, 21 Nov: "Goal · turn 64" lines are the goal's own business). The goal pill above the box says where it is.
+      // A goal's own next turn (DGC names it "Goal · turn 3"): nothing in the chat, its work and answer just follow
+      // (decided 21 Nov: "Goal · turn 64" lines are the goal's own business). The goal pill above the box says where it is.
     } else if (kind === "resume" || kind === "continue") {
       const note = el("div", replaying ? "resume-note hist" : "resume-note");
       note.innerHTML = `<span class="note-icon" data-icon="play">${icon("play")}</span>`

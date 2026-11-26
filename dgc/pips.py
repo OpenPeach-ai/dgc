@@ -905,6 +905,22 @@ def _user_clock(now=None) -> str:
             "Use this time zone for any time you suggest.")
 
 
+def activity_sql(db, pip="p") -> str:
+    """A Pip's latest activity, as SQL over the pips row `pip`: the newest of its chat messages (either side), its run
+    posts (reports, findings) and its own last change. The one measure every "most recent first" list of Pips uses:
+    every Pip (list_pips scope all), one folder's or the Personal ones (order recent), and Home's Pips card, which
+    list_pips gives it to as active_at. Like a messaging app's, as asked: "latest message thread always come on top.
+    Except of Core Pip, so core always stays on top." (A folder's list went by its last change alone: a Pip that
+    had just replied stayed where it was, 26 Nov.)"""
+    have = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                                         "('pip_chat_messages','pip_run_posts')")}
+    said = (f"coalesce((SELECT max(m.created_at) FROM pip_chat_messages m WHERE m.pip_id={pip}.id),'')"
+            if "pip_chat_messages" in have else "''")
+    posted = (f"coalesce((SELECT max(r.posted_at) FROM pip_run_posts r WHERE r.pip_id={pip}.id),'')"
+              if "pip_run_posts" in have else "''")
+    return f"max({pip}.updated_at, {said}, {posted})"
+
+
 class PipStore:
     def __init__(self, registry: WorkspaceRegistry):
         self.registry = registry
@@ -1057,8 +1073,8 @@ class PipStore:
             params += [pattern, pattern, pattern, json.dumps(sorted(chats or {}))]
         if count:
             return sql, params
-        # Most recent first keeps the Primary Pip (Core) at the top, as the Pips home shows it.
-        sql += (" ORDER BY (json_extract(v.definition,'$.pip_type')='core') DESC, p.updated_at DESC, p.id DESC"
+        # Most recent first keeps the Primary Pip (Core) at the top, as the Pips home shows it, then the latest activity.
+        sql += (f" ORDER BY (json_extract(v.definition,'$.pip_type')='core') DESC, {activity_sql(self.db)} DESC, p.id DESC"
                 if order == "recent" else " ORDER BY p.created_at, p.id")
         return sql + " LIMIT ? OFFSET ?", params + [limit, offset]
 
@@ -7589,10 +7605,17 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result["total"] = total
                     result["next_offset"] = offset + len(result["pips"]) if offset + len(result["pips"]) < total else None
                 looks = profiles(registry.db, [item["id"] for item in result["pips"]])
+                # Each with its latest activity (activity_sql): Home's Pips card puts the latest first across the folders
+                # it lists, as this list does within one (26 Nov).
+                ids = [item["id"] for item in result["pips"]]
+                active = dict(registry.db.execute(
+                    f"SELECT p.id, {activity_sql(registry.db)} FROM pips p WHERE p.id IN ({','.join('?' * len(ids))})",
+                    ids).fetchall()) if ids else {}
                 for item in result["pips"]:
                     item["goal"] = item["goal"][:240]
                     item.pop("proposals", None)
                     item["profile"] = looks[item["id"]]
+                    item["active_at"] = active.get(item["id"]) or item.get("updated_at")
             elif command == "create_pip":
                 personal = registry.get(workspace_id)["kind"] == "personal"
                 result = {"pip": store.create(workspace_id, request.get("name"), request.get("goal"), actor,

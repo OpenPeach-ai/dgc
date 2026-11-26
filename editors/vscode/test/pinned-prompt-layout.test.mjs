@@ -43,6 +43,17 @@ function pageHelpers() {
   const frames = (n = 2) => new Promise((done) => { const f = () => (--n <= 0 ? done() : requestAnimationFrame(f)); requestAnimationFrame(f); });
   const laidOut = (head) => head.parentElement.getBoundingClientRect().top + parseFloat(getComputedStyle(head).marginTop || 0);
   const heads = () => [...log.querySelectorAll(".turn > .msg.user.turn-head")];
+  // The panel marks a stuck prompt .pinned (one line, a hairline) when an IntersectionObserver tells it, and the browser
+  // tells observers in a task of its own, which a loaded machine can run after the next two frames (two suite runs in
+  // November measured a stuck prompt at its three lines). Every observer is told in that one task, in the order they
+  // were made, so a probe made now is told last: once it has spoken, and a task later, the panel has heard too. Two
+  // frames after that, the size observers have seen what it did (a pin decided again then shows here: 26 Nov, a draft
+  // turned a short prompt's pin off a frame after this file had read it).
+  const observed = () => new Promise((done) => {
+    const probe = new IntersectionObserver(() => { probe.disconnect(); setTimeout(done, 0); }, { root: log });
+    probe.observe(log);
+  });
+  const scrolled = async () => { await frames(2); await observed(); await frames(2); };
   window.__pin = {
     log, frames, laidOut, heads,
     rest: () => log.getBoundingClientRect().top + parseFloat(getComputedStyle(log).paddingTop),
@@ -53,8 +64,8 @@ function pageHelpers() {
       return drawn.top - laidOut(head) > 1 && drawn.bottom > log.getBoundingClientRect().top;
     }),
     rel: (node) => node.getBoundingClientRect().top - log.getBoundingClientRect().top,
-    async scrollTo(top) { log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = Math.round(top); await frames(2); },
-    async scrollBy(dy) { log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop += Math.round(dy); await frames(2); },
+    async scrollTo(top) { log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = Math.round(top); await scrolled(); },
+    async scrollBy(dy) { log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop += Math.round(dy); await scrolled(); },
     // Puts `node`'s top `y` px below the log's top edge.
     async bring(node, y) { await window.__pin.scrollBy(window.__pin.rel(node) - y); },
   };

@@ -8,7 +8,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openGrid, DEFAULT, EVERY, usageDays, WEATHER, FOLDERS, LISBON, NOTES } from "./support/home-grid-scene.mjs";
 import { DOCK_SESSIONS } from "./support/dock-scene.mjs";
-import { CHATS, homeState } from "./support/home-scene.mjs";
+import { CHATS, homeState, pipId } from "./support/home-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -607,6 +607,42 @@ test("Recent is newest first: a reply nobody saw days ago keeps its New mark but
     const reply = rows.findIndex((r) => r.key === `hub:work:${DOCK_SESSIONS[3].id}`);
     if (reply >= 0) assert.equal(rows[reply].fresh, true, "the old unseen reply keeps its New mark where it falls");
     assert.match(await x.page.locator('.hc-grid .hc-card[data-card="recent"] .hc-ch').innerText(), /1 new/, "and the card still says one thing is new");
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+});
+
+// Asked 26 Nov: "their sessions on this list on the card should be recent ones first, like the ones that have recent
+// reply or chat comes on top ... like how our Recent card works". The Work, Chats and Pips cards go by the latest
+// activity, as Recent does. Kept on top: a session at work (active now), a pinned chat, Core (the Pips list's rule:
+// "latest message thread always come on top. Except of Core Pip"). A Pip that waits for you is not lifted over newer ones.
+test("Work, Chats and Pips put the latest first, as Recent does: a running session, a pinned chat and Core on top", async (t) => {
+  if (skipOrFail(t)) return;
+  const S = DOCK_SESSIONS;
+  // (Listed out of order on purpose: each card orders its rows itself.)
+  const sessions = [{ ...S[3], when: "2026-11-01 09:00" }, { ...S[1], when: "2026-11-05 10:00", running: false },
+    { ...S[0], when: "2026-11-04 08:00", running: true }, { ...S[2], when: "2026-11-06 12:00", waiting: false }];
+  const state = homeState("busy"), at = { Core: "2026-11-01", "Mail watch": "2026-11-02", "Morning brief": "2026-11-05", "Garden notes": "2026-11-04", "Billing review": "2026-11-06" };
+  for (const list of Object.values(state.list)) for (const p of list) p.active_at = `${at[p.name]}T09:00:00.000Z`;
+  const x = await openGrid(browser, { width: 300, layout: ["work", "chats", "pips"], sessions, state });
+  try {
+    await x.send({ type: "chatdgc_list", available: true, open: [], items: [
+      { id: "chat_b", title: "Rent or buy: the numbers", preview: "", updated_at: "2026-11-05T09:00:00Z" },
+      { id: "chat_a", title: "A week in Goa in March", preview: "", updated_at: "2026-11-01T09:00:00Z", pinned: true },
+      { id: "chat_c", title: "Tide tables for the weekend", preview: "", updated_at: "2026-11-06T09:00:00Z" }] });
+    // Each card opened to its full form, every row in it; then Back.
+    const rows = async (card, all) => {
+      await x.page.click(`.hc-grid .hc-card[data-card="${card}"]`); await x.rest(300);
+      await x.page.waitForFunction((n) => document.querySelectorAll(".hc-open .hc-card .hc-li").length >= n, all, { timeout: 15000 });
+      const keys = await x.page.evaluate(() => [...document.querySelectorAll(".hc-open .hc-card .hc-li")].map((r) => r.dataset.open));
+      await x.page.click("#home-hub .hc-back"); await x.rest(300);
+      return keys;
+    };
+    const want = { work: [S[0], S[2], S[1], S[3]].map((s) => `work:${s.id}`), chats: ["chat:chat_a", "chat:chat_c", "chat:chat_b"],
+      // (Mail watch waits for you and has a message from 3 Nov: it comes after the Pips active since.)
+      pips: ["a", "e", "c", "d", "b"].map((c) => `pipopen:${pipId(c)}`) };
+    assert.deepEqual(await rows("work", 4), want.work, "Work: the running session, then the latest");
+    assert.deepEqual(await rows("chats", 3), want.chats, "Chats: the pinned chat, then the latest reply");
+    assert.deepEqual(await rows("pips", 5), want.pips, "Pips: Core, then the latest message, the one waiting not lifted");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }
 });

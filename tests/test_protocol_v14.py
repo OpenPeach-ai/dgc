@@ -185,6 +185,9 @@ class HeadlessSharedTests(unittest.TestCase):
                 backend.em = types.SimpleNamespace(emit=lambda kind, **fields: events.append({"type": kind, **fields}))
                 backend.start()
             finally:
+                # close(), not only MCP: a started backend's Pip reports thread polls the registry every 5 s, in whatever
+                # home the next test sets (it made a later test's .dgc/pips, 26 Nov).
+                backend.close()
                 backend.agent.mcp.stop_all()
         ready = next(event for event in events if event["type"] == "ready")
         self.assertTrue(valid(ready), ep.event_error({"seq": 0, **ready}))

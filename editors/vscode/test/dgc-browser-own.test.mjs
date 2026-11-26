@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { openDock, dockNow } from "./support/dock-scene.mjs";
-import { openHome, homeState } from "./support/home-scene.mjs";
+import { openHome, homeState, cardAtRest } from "./support/home-scene.mjs";
 import { THEMES } from "./support/agent-lines-scene.mjs";
 
 const require = createRequire(import.meta.url), src = fileURLToPath(new URL("../src/", import.meta.url));
@@ -317,6 +317,7 @@ async function homeWithCard(width, theme, state) {
   const x = await openHome(browser, { width, height: 900, theme, api: 107, state, grid: true, tab: "home" });
   await x.send({ type: "homeCards", order: ["browser", "needs", "quick"], settings: {} });
   await waitFor(x.page, (c) => !!document.querySelector(`${c} .hc-browse-why`), CARD);
+  await cardAtRest(x.page, CARD);   // measured at rest, after its entrance
   return x;
 }
 const cardNow = (page) => page.evaluate((c) => {

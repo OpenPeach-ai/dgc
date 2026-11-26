@@ -6,7 +6,7 @@ decides what happens next, and there is no "Fix it" card and no hidden Work sess
   Ask me first      a fix waits at the ordinary Allow card (Allow · Not now)
   Approve for me    it starts fixing in its own copy by itself, new findings only (approved); the change waits at Apply
   Do it all         it fixes and applies by itself, with Undo, never over a file you changed ("Do it all applies all":
-                    his no to a size, delete or test fuse, 14 Nov); the card says when its tests failed in its copy
+                    no size, delete or test fuse, decided 14 Nov); the card says when its tests failed in its copy
 
 A fix is an ordinary turn of that Pip in its own chat (a message from DGC under FIX_KEY, like a routine's), so it runs
 in its own computer on its own copy of the folder, with its own helpers, and its change is the copy's change card

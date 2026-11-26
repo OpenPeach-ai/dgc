@@ -2088,9 +2088,11 @@ function traySpec(kind){
  // "Needs you" and its count in the purple badge Home's tab and the Pips list use (decided 26 Nov, option A of three
  // drawn): no icon, no amber warning, no card's title squeezed in. Short of room it folds to the badge alone.
  if(kind==='needs'){const aside=waitingAside(),list=aside.filter(w=>w.state==='waiting'),count=list.length;
-  // The last one called "Not a problem": its Undo lasts a while (as on its line in the chat before), so the pill stays,
-  // saying Undo, until nothing is left to undo.
-  if(!count)return aside.some(w=>w.can_undo)?{word:'Undo',label:'Undo your Not a problem',tip:'Not a problem · Undo'}:null;
+  // Nothing left waiting: no pill. Only while it is open, with a "Not a problem" whose Undo is on its line in there, it
+  // stays, saying All done, so a wrong answer can be put back; closed, it is gone. (It said "Undo" and stayed on the bar
+  // for the ten minutes DGC keeps any answer undoable, closed too, and opened on lines with no Undo in them: nine "I've
+  // done it" left a pill that said Undo and listed them, 26 Nov.)
+  if(!count)return chatTray?.open?.kind==='needs'&&aside.some(undoable)?{word:'All done',label:'Nothing left that only you can do',tip:'All done'}:null;
   const what=`${count} ${count===1?'thing':'things'} only you can do`;
   return {word:'Needs you',num:String(count),label:what,tip:what};}
  return null;
@@ -2149,7 +2151,7 @@ function mountChatTray(){
   if(chatBox?.note)chatTrayHome.append(chatBox.note);   // what a paste was cleaned of waits here until its pill opens it
   chatTrayNote=doc.createElement('div');chatTrayNote.className='tray-note';
   chatTrayNeeds=doc.createElement('div');chatTrayNeeds.className='tray-needs';chatTrayHome.append(chatTrayNeeds);
-  chatTray=globalThis.DgcTray.create({...chatTrayParts,moreId:'chat-tray-more',keep:['needs','queue','computer','routine','paste'],spec:traySpec,opened:()=>drawTrayNeeds(),closed:()=>drawTrayNeeds(),
+  chatTray=globalThis.DgcTray.create({...chatTrayParts,moreId:'chat-tray-more',keep:['needs','queue','computer','routine','paste'],spec:traySpec,opened:()=>drawTrayNeeds(),closed:()=>drawChatTray(),   // (closed: an All done pill goes with it)
    solo:kind=>kind==='paste'?['Dismiss','Stop showing this notice',()=>chatBox?.note?.querySelector('button')?.click()]:null,detail:trayDetail,title:kind=>TRAY_TITLES[kind]||'',
    icon:spec=>spec.icon?`<span class="codicon" aria-hidden="true">${trayIcon(spec.icon)}</span>`:'',caret:`<span class="chip-caret codicon" aria-hidden="true">${trayIcon('up')}</span>`,
    popFocus:(kind,node)=>node.querySelector('[data-tray-focus], .dgc-queue-handle, button:not(:disabled)'),
@@ -5592,6 +5594,9 @@ function waitingPlaced(){
 }
 // The ones whose check isn't in the chat. (Until the chat knows which checks it draws, none: no pill flashes up
 // for a card about to stand under its check.)
+// An answer you can still put back from its line: only "Not a problem" has an Undo there (pipFlow waitingCardMarkup).
+// DGC calls every answer undoable for ten minutes; I've done it and Remind me later say what happens instead.
+function undoable(w){return w.state==='dismissed'&&w.can_undo===true;}
 function waitingAside(){
  const page=flowNow();if(!page?.waiting.length||chatPosts()&&!S.postsLoaded)return [];
  const placed=waitingPlaced();

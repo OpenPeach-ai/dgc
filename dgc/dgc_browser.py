@@ -1126,8 +1126,8 @@ def _view_socket(registry, request: dict) -> dict:
 def view_call(registry, request, actor: str = "editor-user") -> dict:
     """use_dgc_browser_view: the editor's side of a streamed tab, one request to the supervisor's view socket.
 
-    A Pip's lane (``pip_id``), as in phase 3. Or, where this computer has no screen, YOUR OWN tab (``own`` true: his
-    call, 18 Nov): only you drive it, through that editor tab (the editor's own actor, never the command line, a Pip, a
+    A Pip's lane (``pip_id``), as in phase 3. Or, where this computer has no screen, YOUR OWN tab (``own`` true:
+    decided 18 Nov): only you drive it, through that editor tab (the editor's own actor, never the command line, a Pip, a
     model or a tool); where there is a screen your tabs are in its window, never streamed."""
     _check_view(request)
     pip_id, op = request.get("pip_id"), request["op"]

@@ -93,6 +93,36 @@ class PipLimitTests(unittest.TestCase):
         found, _ = self.control("list_pips", workspace_id=ws, query="introduce yourself")
         self.assertEqual(found["pips"], [], "DGC's own turns are not your chat")
 
+    def test_a_folders_recent_list_puts_the_pip_that_last_spoke_first_and_says_when(self):
+        # One folder's list (order recent) went by each Pip's last change alone: a Pip that had just replied stayed
+        # where it was, while every Pip at once (scope all) had it on top. Both go by its latest activity now, and each
+        # Pip says when that was (active_at), for Home's Pips card to order across folders (26 Nov).
+        from dgc import pip_chat
+        ws = self.registry.personal()["id"]
+        old, changed, quiet = self.make(3)
+        core = self.store.create(ws, "Core", "", "local-console", pip_type="core")
+        for pip, when in ((old, "2020-01-01"), (changed, "2021-06-01"), (quiet, "2020-03-01"), (core, "2019-01-01")):
+            self.registry.db.execute("UPDATE pips SET updated_at=? WHERE id=?", (f"{when}T00:00:00.000Z", pip["id"]))
+        before, _ = self.control("list_pips", workspace_id=ws, order="recent")
+        self.assertEqual([p["name"] for p in before["pips"]], ["Core", "Helper 0001", "Helper 0002", "Helper 0000"])
+        self.assertEqual(before["pips"][1]["active_at"], "2021-06-01T00:00:00.000Z", "a Pip that never spoke: its last change")
+        run = pip_chat.send(self.store, old["id"], "Is the invoice run done?", "first", "editor-user", self.cfg)["run"]
+        said = self.registry.db.execute("SELECT max(created_at) FROM pip_chat_messages WHERE pip_id=?", (old["id"],)).fetchone()[0]
+        self.assertGreater(said, "2021-06-01", "(the message is today's)")
+        mine, _ = self.control("list_pips", workspace_id=ws, order="recent")
+        self.assertEqual([p["name"] for p in mine["pips"]], ["Core", "Helper 0000", "Helper 0001", "Helper 0002"],
+                         "the Pip spoken to comes first, under Core")
+        self.assertEqual(mine["pips"][1]["active_at"], said)
+        every, _ = self.control("list_pips", scope="all")
+        self.assertEqual([p["name"] for p in every["pips"]], [p["name"] for p in mine["pips"]], "every Pip at once: the same order")
+        self.assertEqual([p["active_at"] for p in every["pips"]], [p["active_at"] for p in mine["pips"]])
+        self.store.claim_next()
+        self.store.finish(run["id"], result={"text": "Yes, 14 invoices went out."})
+        created, _ = self.control("list_pips", workspace_id=ws)
+        keys = [(p["created_at"], p["id"]) for p in created["pips"]]
+        self.assertEqual(keys, sorted(keys), "the default order is unchanged: oldest first")
+        self.assertTrue(all(p["active_at"] for p in created["pips"]), "and every row says when it was last active")
+
     def test_the_pip_picker_reads_past_a_hundred(self):
         from dgc import pip_references
         pip_limits.set_limit(self.registry, 1000, "local-console")

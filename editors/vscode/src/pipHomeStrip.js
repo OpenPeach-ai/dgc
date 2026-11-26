@@ -89,7 +89,9 @@ export function mountHomePips(options) {
    ? p.routine_health.blocked.text.slice(0, 120) : '';
   return {id: p.id, name: p.name.trim(), type: p.pip_type, profile: profile(p.profile), reviews: pendingReviews(p), waiting: 0, blocked,
    version: Number.isSafeInteger(p.current_version) && p.current_version > 0 ? p.current_version : 0,
-   workspace: typeof p.workspace_id === 'string' && WORKSPACE_ID.test(p.workspace_id) ? p.workspace_id : ''};
+   workspace: typeof p.workspace_id === 'string' && WORKSPACE_ID.test(p.workspace_id) ? p.workspace_id : '',
+   // When it last spoke, reported or changed (list_pips active_at, 26 Nov): Home's Pips card puts the latest first.
+   active: typeof p.active_at === 'string' ? Date.parse(p.active_at) || 0 : 0};
  }
  // What is new for a Pip since you last looked, from the digest: how urgent (1 an alert, 2 failed runs,
  // 3 new findings) and a few words.
@@ -122,7 +124,9 @@ export function mountHomePips(options) {
   const unreadNow = pips ? shownUnread() : [];
   const list = (pips || []).map(pip => { const waiting = waitingOn(attention, pip.id, pip.reviews), fresh = waiting ? null : news(pip.id);
    return {id: pip.id, name: pip.name, body: (pip.profile || profile(null)).body || pip.type, waiting, line: pip.blocked ? `Can't run: ${pip.blocked}` : fresh ? fresh.line : '',
-    unread: unreadNow.find(item => item.pip_id === pip.id)?.count || 0}; });
+    unread: unreadNow.find(item => item.pip_id === pip.id)?.count || 0,
+    // When it was last active: its row's, or the newest message not read yet when that is later (a reply Home heard of).
+    at: Math.max(pip.active || 0, Date.parse(unreadNow.find(item => item.pip_id === pip.id)?.latest_at || '') || 0)}; });
   options.onPips({pips: list, complete: listedAll && !!pips, scopes: listedScopes});
  }
  // A Pip with cards waiting opens at the newest one (its chat, its computer), as Needs attention does.

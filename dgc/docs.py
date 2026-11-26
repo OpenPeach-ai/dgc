@@ -4277,7 +4277,8 @@ Chrome's window scrolls to the rest (**Fit** shows it all, smaller). Sign in to 
   once for the session). Allow once covers that site for the rest of the session; **Always allow** saves
   it. It never types a password or a code (sign in yourself, in DGC Browser), and it never pays or sends
   anything on a bank or payment site: it says what it was about to send, and you do that part. DGC Browser
-  runs with Pips, so start Pips first. **Watch** on the dock shows its tab too. Work's own browser is still
+  runs with Pips, so start Pips first: while they're off, Work asks nothing and tells you to start them.
+  **Watch** on the dock shows its tab too. Work's own browser is still
   the one for any page; when it lands on a sign-in page where your account should be, Work tries DGC Browser
   and says which browser it used.
 - **Sites Pips can use…** (right-click DGC Browser on the dock) lists every site you allowed, with

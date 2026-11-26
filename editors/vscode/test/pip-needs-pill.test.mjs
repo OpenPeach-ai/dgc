@@ -101,22 +101,46 @@ test('"Not a problem" keeps its Undo in the pill while another waits, and Undo p
  assert.ok(pop(x).querySelector(`.pip-found-waiting[data-flow-waiting="${WAIT2}"]`),'its card again');
 });
 
-// The last one called "Not a problem": its Undo (10 minutes) stays on the bar, as it did on its line in the chat; the pill
-// says Undo, no longer "needs you", and goes once nothing is left to undo.
-test('"Not a problem" on the last one leaves an Undo pill while its Undo lasts; Undo puts its card back',async()=>{
+// Every one answered "I've done it", as on a project Pip with nine (26 Nov): DGC keeps each answer undoable for ten
+// minutes, and the pill said Undo, stayed on the bar after it was closed, and opened on the nine "You said it's done"
+// lines, none with an Undo. Nothing is left waiting, so nothing is on the bar.
+test('every one answered "I’ve done it": the pill goes with the last, and its popover with it',async()=>{
+ const x=await chat({fix:'none',more:1});
+ assert.equal(said(x),'Needs you 2');
+ pill(x).click();await x.drain();
+ await press(x,WAIT2,'done');
+ assert.equal(said(x),'Needs you 1');
+ const last=[...pop(x).querySelectorAll('[data-flow-waiting-answer]')].find(b=>b.dataset.flowWaitingId===WAIT&&b.dataset.flowWaitingAnswer==='done');
+ last.focus();last.click();await x.drain();
+ assert.ok(x.state.more.every(w=>w.state==='done')&&x.state.waiting==='done','DGC has both as done (each still undoable there)');
+ assert.equal(pill(x),null,'no pill: not one saying Undo either');
+ assert.equal(pop(x).hidden,true,'its popover closed');
+ assert.equal(x.d.activeElement?.id,'chatText','the keyboard goes to the prompt box');
+ assert.equal(x.$('#chat-tray .rail-chips').hidden,true,'nothing else on the bar: no bar');
+ assert.deepEqual(inLog(x,'[data-flow-waiting]'),[],'and no answered line lands in the chat');
+});
+
+// The last one called "Not a problem": its line keeps its Undo while the pill is open, the pill saying All done, so a
+// wrong answer can be put back right there. Closed, the pill is gone, Undo with it.
+test('"Not a problem" on the last one: open, the pill says All done over its Undo line; closed, it is gone',async()=>{
  const x=await chat({fix:'none'});
  assert.equal(said(x),'Needs you 1');
  pill(x).click();await x.drain();
  await press(x,WAIT,'not_a_problem');
- assert.ok(pill(x),'the pill stays while its Undo lasts');
+ assert.equal(pop(x).hidden,false,'still open');
+ assert.equal(said(x),'All done ');
  assert.equal(pill(x).dataset.need,undefined,'no longer marked as needing you');
- assert.match(x.squash(pill(x).textContent),/Undo/);
- if(pop(x).hidden){pill(x).click();await x.drain();}
  const line=pop(x).querySelector(`.pip-found-line[data-flow-waiting="${WAIT}"]`);
  assert.ok(line,'its line, with Undo');
  await press(x,WAIT,'undo');
  assert.equal(x.requests('answer_pip_waiting').at(-1).answer,'undo');
  assert.equal(said(x),'Needs you 1','its card is back');
+ await press(x,WAIT,'not_a_problem');
+ assert.equal(said(x),'All done ');
+ x.$('#chat-tray-pop-close').click();await x.drain();
+ assert.equal(pill(x),null,'closed: the pill is gone');
+ assert.equal(x.$('#chat-tray .rail-chips').hidden,true,'and the bar with it');
+ assert.equal(x.state.waiting,'dismissed','(DGC still has it as Not a problem)');
 });
 
 test('a Needs attention row for one of them opens its Pip\'s chat with the pill open at its card',async()=>{

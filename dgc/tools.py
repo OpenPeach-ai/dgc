@@ -3573,6 +3573,11 @@ def dgc_browser_tool(args: dict, ctx) -> str:
     op = str(args.get("op", "")).strip().lower()
     if op not in dgc_browser_schema.OPS:
         return f"error: unknown op {op!r}; use one of {', '.join(dgc_browser_schema.OPS)}"
+    closed = args.get("_dgc_browser_closed")
+    if isinstance(closed, str) and closed:
+        # The agent found DGC Browser can't open anything now (dgc_browser_work.closed) and so asked nobody: say why,
+        # open nothing, and the site doesn't become one the user allowed this session. (Only the agent sets this.)
+        return closed
     step = {k: v for k, v in args.items() if k not in ("op", "question") and not str(k).startswith("_")}
     owner = _tool_owner(ctx)
     if dgc_browser_navigates(args):

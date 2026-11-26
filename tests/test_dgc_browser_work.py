@@ -254,6 +254,39 @@ class SessionSide(unittest.TestCase):
         self.assertIn("Google Chrome isn't installed", said["text"])
 
 
+class Closed(unittest.TestCase):
+    """dgc_browser_work.closed: why DGC Browser can't open a page for a Work session right now, or "" when it can. The
+    agent checks it before the site card (live, 26 Nov: "Use example.com in DGC Browser?" was asked with Pips off, and
+    the step then said Pips aren't running)."""
+
+    def setUp(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.state = Path(tmp.name) / "pips"
+        avail = patch.object(dgc_browser, "_availability", return_value=(True, "", ""))
+        avail.start()
+        self.addCleanup(avail.stop)
+
+    def test_pips_never_run_here_says_so_and_creates_nothing(self):
+        self.assertEqual(dgc_browser_work.closed(self.state), dgc_browser_work.PIPS_OFF)
+        self.assertFalse(self.state.exists(), "a check creates no registry")
+
+    def test_pips_off_says_how_to_start_them(self):
+        from dgc.workspace_registry import WorkspaceRegistry
+        WorkspaceRegistry(self.state).close()
+        with patch("dgc.dgc_browser_work._runner_online", return_value=False):
+            self.assertEqual(dgc_browser_work.closed(self.state), dgc_browser_work.PIPS_OFF)
+        with patch("dgc.dgc_browser_work._runner_online", return_value=True):
+            self.assertEqual(dgc_browser_work.closed(self.state), "", "Pips running: it can open the page")
+
+    def test_where_dgc_browser_cant_run_it_says_why(self):
+        with patch.object(dgc_browser, "_availability", return_value=(False, "Google Chrome isn't installed", "")):
+            said = dgc_browser_work.closed(self.state)
+        self.assertIn("can't run on this computer", said)
+        self.assertIn("Google Chrome isn't installed", said)
+
+
 class TheTool(unittest.TestCase):
     """tools.dgc_browser_tool: a site it opens joins the session's sites (the permission check already asked), which go
     to the supervisor with every step; a picture of its tab is shown in the chat."""
@@ -281,6 +314,12 @@ class TheTool(unittest.TestCase):
         self.assertEqual(tools.dgc_browser_sites(self.ctx), {"lanestore.com"})
         (session, op, args, kw) = self.sent[-1]
         self.assertEqual((session, op, kw["sites"], kw["workspace_id"], kw["name"]), (self.ctx.tool_owner, "read", {"lanestore.com"}, "ws_lime", "lime_tiles"))
+
+    def test_a_call_the_agent_found_it_cant_open_says_why_and_joins_nothing(self):
+        said = tools.dgc_browser_tool({"op": "open", "url": f"https://{SHOP}/orders", "_dgc_browser_closed": dgc_browser_work.PIPS_OFF}, self.ctx)
+        self.assertEqual(said, dgc_browser_work.PIPS_OFF)
+        self.assertEqual(self.sent, [], "nothing is sent")
+        self.assertEqual(tools.dgc_browser_sites(self.ctx), set(), "nobody was asked, so the site isn't the session's")
 
     def test_an_address_that_isnt_a_site_is_never_sent(self):
         said = tools.dgc_browser_tool({"op": "open", "url": "file:///etc/passwd"}, self.ctx)

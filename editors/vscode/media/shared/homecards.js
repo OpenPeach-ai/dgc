@@ -23,8 +23,8 @@
 // and is asked again after a minute.
 // Browser (decided 17 Nov): a search field, and under it the last two or three links visited in DGC Browser (the
 // person's own tabs, never a Pip's); what is typed (a search or an address) opens DGC Browser with it. Only where DGC has
-// DGC Browser (Pips API 107): an older DGC lists no such card and Home leaves it out. Where Google Chrome is needed (his
-// call, 18 Nov) the card offers ONE button, Install Google Chrome (a small dialog first, then the computer's own password
+// DGC Browser (Pips API 107): an older DGC lists no such card and Home leaves it out. Where Google Chrome is needed
+// (decided 18 Nov) the card offers ONE button, Install Google Chrome (a small dialog first, then the computer's own password
 // prompt), says it is installing, and where no prompt can open (Remote-SSH) or it was closed, shows the one terminal line
 // with Copy; once Chrome is there it is the field and the links again, by itself.
 // Token usage names the models with their provider and share, and links to Settings. Notes is many notes: a list, a
@@ -46,9 +46,9 @@
     needs: { name: "Needs you", line: "What waits for you: approvals, questions, Pip cards", group: "Now" },
     running: { name: "Running now", line: "Sessions, goals and chats at work", group: "Now" },
     recent: { name: "Recent", line: "Work, chats and Pips together, newest first", group: "Lists", large: true },
-    work: { name: "Work sessions", line: "This list’s sessions, running ones marked", group: "Lists" },
-    chats: { name: "Chats", line: "Your chats, newest first", group: "Lists" },
-    pips: { name: "Pips", line: "Core first, then the others and what waits", group: "Lists" },
+    work: { name: "Work sessions", line: "This list’s sessions, the latest first", group: "Lists" },
+    chats: { name: "Chats", line: "Your chats, the latest reply first", group: "Lists" },
+    pips: { name: "Pips", line: "Core first, then the latest message first", group: "Lists" },
     widgets: { name: "Widgets", line: "The widgets made for you, one at a time", group: "Made for you", large: true },
     artifacts: { name: "Artifacts", line: "Pages, documents, slides, sheets and dashboards", group: "Made for you", large: true },
     token: { name: "Token usage", line: "Tokens, requests and cache, the last 7 days", group: "Usage and start", large: true },

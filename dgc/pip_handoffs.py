@@ -660,8 +660,8 @@ def by_level(store, handoff, config):
 
 
 def _ask_in_chat(store, handoff, kind, config) -> None:
-    """A Project Pip at Do it all asks the user in its chat whether to take a job its level doesn't take by itself (his
-    call, 18 Nov): the handoff stays pending, with no card, until the user's own next message answers. One that can't be
+    """A Project Pip at Do it all asks the user in its chat whether to take a job its level doesn't take by itself
+    (decided 18 Nov): the handoff stays pending, with no card, until the user's own next message answers. One that can't be
     asked (the Pip is paused, its chat refused) stays a card."""
     from . import pip_holds
     from .pip_chat import ask_in_chat

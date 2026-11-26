@@ -10,7 +10,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { openDock, dockNow, PINS } from "./support/dock-scene.mjs";
-import { openHome, homeState } from "./support/home-scene.mjs";
+import { openHome, homeState, cardAtRest } from "./support/home-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -134,6 +134,7 @@ async function homeWithCard(width, theme = "dark-modern", state = withBrowser(),
   await x.send({ type: "homeCards", order: ["browser", "needs", "quick"], settings: {} });
   await waitFor(x.page, () => !!document.querySelector('#home-hub .hc-grid .hc-card[data-card="browser"] .hc-url'));
   await waitFor(x.page, () => document.querySelectorAll('#home-hub .hc-grid .hc-card[data-card="browser"] .hc-link').length > 0);
+  await cardAtRest(x.page, '#home-hub .hc-grid .hc-card[data-card="browser"]');   // measured at rest, after its entrance
   return x;
 }
 const card = (page) => page.evaluate(() => {

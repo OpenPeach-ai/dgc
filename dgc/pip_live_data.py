@@ -2,8 +2,8 @@
 what they printed.
 
 Reported 2026-10-18: "A Pip for live data (approved read-only commands + a model summary)"; Pips detect, the
-chat fixes; nothing it runs changes a live system. On his ERP the models had improvised a ``pip_watch.py`` that
-applied "AUTO-OK" fixes to a live database as superuser (ERP session review, 2026-10-18). This replaces it:
+chat fixes; nothing it runs changes a live system. In a user's business app the models had improvised a ``pip_watch.py``
+that applied "AUTO-OK" fixes to a live database as superuser (seen 18 Oct 2026). This replaces it:
 
 - **The list.** One to six exact command lines (``live_plan``), approved with the job like any other part of it;
   changing the list is a reviewed job change. The guarantee is the list: DGC runs only those exact lines, each

@@ -249,6 +249,26 @@ def _runner_online(registry) -> bool:
     return bool(state.get("online", True)) if isinstance(state, dict) else True
 
 
+def closed(state_directory) -> str:
+    """Why DGC Browser can't open a page for a Work session right now, in words for the model, or "" when it can (or
+    when it can't tell). The agent checks this before the site card: live on 26 Nov, "Use example.com in DGC Browser?"
+    was asked with Pips off, the user allowed it, and the step then said Pips aren't running. Creates nothing."""
+    try:
+        available, why = dgc_browser._availability()[:2]
+    except Exception:                                       # noqa: BLE001 - a check that can't run: ask as before
+        available = True
+    if available is not True:
+        return UNAVAILABLE.format(why=str(why or "it isn't set up here").rstrip("."))
+    try:
+        if not (Path(state_directory) / "registry.sqlite3").is_file():
+            return PIPS_OFF                                 # (Pips have never run here: no registry yet)
+        from .workspace_registry import WorkspaceRegistry
+        with WorkspaceRegistry(state_directory) as registry:
+            return "" if _runner_online(registry) else PIPS_OFF
+    except Exception:                                       # noqa: BLE001 - can't tell: ask as before
+        return ""
+
+
 def ask(state_directory, session_id: str, *, name: str, workspace_id: str, sites) -> None:
     """Say (again) that this session uses its tab, with the sites the person allowed it so far."""
     from .workspace_registry import WorkspaceRegistry

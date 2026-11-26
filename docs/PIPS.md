@@ -516,8 +516,8 @@ and the run reviews the ref's commit at the moment it is queued.
 
 Pips don't message you after every run. In the editor, Home's **Needs you** card holds what
 a Pip waits on you for, and **Recent** its new messages, beside your Work
-sessions and chats; the **Pips** card, if you add it, lists Core first, then the others and what
-waits. A number means something needs you: it's what Needs you counts, and each Pip's row
+sessions and chats; the **Pips** card, if you add it, lists Core first, then the Pip that spoke or
+reported last, as the Pips list does (the Work and Chats cards also put the latest first). A number means something needs you: it's what Needs you counts, and each Pip's row
 and the Pips tab say the same one. A dot means there's something new to read. A notification
 says when something is waiting for you. Once a day, when there is something to say, the
 digest gathers new findings, failed runs, reviews waiting, and earlier findings that

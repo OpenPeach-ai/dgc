@@ -39,8 +39,8 @@ const workTag = (a, esc, cls = 'pip-agent-tag') => a.kind === 'work' ? `<span cl
 export const fixWhat = (fix, folder = '') => `Fix ${plural(fix.count, 'thing')}${folder ? ` in ${folder}` : ''}`;
 
 /** What a check found, inside the Pip's message: a list, each finding with its file (a link that opens it at its
- *  line) and, after a fix, what became of it. Every finding the post carries is in it, and there is no Open report (his
- *  call, 25 Nov: a run's reply is the reply); only what it found beyond the post's own (up to 50) is a quiet link to
+ *  line) and, after a fix, what became of it. Every finding the post carries is in it, and there is no Open report
+ *  (decided 25 Nov: a run's reply is the reply); only what it found beyond the post's own (up to 50) is a quiet link to
  *  the rest, "See the other 14". */
 export function foundListMarkup({runId, findings, total = findings.length}, {esc = escape, off = false} = {}) {
   const shown = findings, more = Math.max(0, total - shown.length), id = esc(runId);

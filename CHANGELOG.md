@@ -6,13 +6,25 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.52.0 — unreleased (the date goes in on release day)
 
+- **Home's Work, Chats and Pips cards put the latest first**, as Recent does: the session or chat with the newest
+  reply on top, a session at work or a chat answering counted as active now, a pinned chat first. The Pips card lists
+  Core, then the Pip that spoke or reported last; a Pip waiting for you is no longer lifted over newer ones (Needs you
+  has it). A folder's Pips list and the Personal one go by the latest message too, as All Pips did: they went by each
+  Pip's last change. `list_pips` gives each Pip its `active_at`.
+- **The "Needs you" pill in a Pip's chat goes once nothing waits.** After the last answer it stayed on the bar for ten
+  minutes saying Undo, closed too, and opened on lines with no Undo in them (every answer can be undone for ten
+  minutes; only Not a problem has an Undo on its line). Now the pill goes with the last answer; after a last Not a
+  problem it stays open, saying All done over that Undo, until you close it.
+- **A long draft no longer stops a short prompt pinning.** With several lines in the prompt box, a prompt that reached
+  the top of the transcript turned its pin off a moment later: going small as it pinned, it was measured again against
+  the transcript the draft had shortened.
 - **Work sessions use DGC Browser.** Say "use the DGC browser" in a Work session: a new `dgc_browser` tool, the same
   steps a Pip's has, drives a tab of its own in DGC Browser, the Chrome DGC keeps signed in to your accounts. Opening a
   site asks first, in every mode ("Use example.com in DGC Browser?"; auto mode asks once for the session); Allow once
   covers that site for the session, Always allow saves `DGCBrowser(dgc-browser:https://site)`. Its tab opens nothing
   else, never types a password or a code, and never pays or sends anything on a bank or payment site: the step says
   what wasn't sent. DGC Browser belongs to the Pips supervisor, so a Work session asks it for its tab (a private socket
-  of its own); with Pips off it says so. The dock's Watch shows its tab. Work's own browser stays the one for any page
+  of its own); with Pips off it asks nothing and says to start them. The dock's Watch shows its tab. Work's own browser stays the one for any page
   ("check my browser" included); when it can't show what you mean (your account's page is a sign-in page), Work tries
   DGC Browser and says which browser it used.
 - **Switched off, a Pip's computer closes.** A Pip that is off (or archived) runs nothing on its own, its computer
@@ -2291,7 +2303,7 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   by one (still, with reduced motion), and a line for the hour (three each for morning, afternoon, evening and night;
   a temporary chat: "Off the record. Nothing here is kept."), chosen once a chat and kept in place across renders.
 - **ChatDGC's box, as main DGC's** (reported: the purple ring off, the model and thinking pickers and the context
-  meter as main DGC has them, thinking "something creative": he chose a dial). The box keeps its border on focus with
+  meter as main DGC has them, thinking "something creative": a dial was chosen). The box keeps its border on focus with
   main DGC's shadow; the tools are borderless. The two native selects stay as what a send reads, hidden behind one
   pill (the model's name, a 16px arc for the level) opening a menu: the models (menuitemradio) and a dial (an SVG
   `role="slider"`: five marks on a half circle, a needle, click, drag or arrow keys, Home and End), each level with a

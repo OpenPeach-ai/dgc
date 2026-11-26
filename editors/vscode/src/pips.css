@@ -1259,8 +1259,8 @@ button.danger, button.danger-text { color: var(--err-text, var(--btn-text)); }
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.msg.user{margin-top:24px}
 .simple-pips.chat-open .pip-conversation.chat-style .chat-time{margin:16px 0 12px;font-size:11px;color:var(--pc-quiet)}
 
-/* Bubbles: 8 x 12 inside, flat. Yours has the sent bubble's 10 on every corner (--r-bubble, as in Work and ChatDGC: his
-   call of 16 Nov); the Pip's reply has the same 10 and no tail (16 Nov): its face and name above it say who is talking. Yours is the shared grey (as Work's and ChatDGC's); the Pip's is a
+/* Bubbles: 8 x 12 inside, flat. Yours has the sent bubble's 10 on every corner (--r-bubble, as in Work and ChatDGC:
+   decided 16 Nov); the Pip's reply has the same 10 and no tail (16 Nov): its face and name above it say who is talking. Yours is the shared grey (as Work's and ChatDGC's); the Pip's is a
    wash of the text's own colour, with no line around it. */
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(calc(100% - 40px),600px);padding:8px 12px;border-radius:var(--r-bubble,10px);box-shadow:none}
 .simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split{gap:4px}
@@ -2143,8 +2143,8 @@ body.vscode-light .error,body.vscode-high-contrast-light .error,:host-context(bo
 .pip-folder-more .pip-link{display:inline;min-height:0!important;height:auto;padding:0;border:0;background:transparent;color:var(--vscode-textLink-foreground,var(--link));font:inherit;cursor:pointer}
 .pip-folder-more .pip-link:hover{text-decoration:underline}
 
-/* Load earlier messages at the top of a Pip's chat: a quiet button, centred, with room before the first message (his
-   report, 25 Nov: it sat against the replies). */
+/* Load earlier messages at the top of a Pip's chat: a quiet button, centred, with room before the first message
+   (reported 25 Nov: it sat against the replies). */
 .conversation-log > #older-messages{display:block;align-self:center;width:auto;min-height:24px;height:24px;margin:4px auto 18px;padding:0 12px;border:1px solid var(--line,var(--vscode-panel-border));border-radius:var(--btn-r,6px);background:transparent;color:var(--muted-firm,var(--muted));font-size:12px;line-height:22px;box-shadow:none}
 .conversation-log > #older-messages:hover:not(:disabled){color:var(--vscode-foreground);background:var(--wash,color-mix(in srgb,currentColor 8%,transparent))}
 

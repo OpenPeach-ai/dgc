@@ -165,8 +165,10 @@ export function makeBackend(o = {}) {
         { text: "Running the e-way tests in its copy", state: "doing" }, { text: "Round-off, then the retry loop", state: "next" }] } : {}),
       ...(done ? { change_id: CHANGE, tests: "passed", findings: [{ ...findings[0], verdict: "fixed" }, { ...findings[1], verdict: "fixed" }, { ...findings[2], verdict: "needs_you", why: "Stopping on error 4012 would also stop the nightly re-send." }] } : {}) }];
   };
-  const waitingNow = () => [...(state.waiting === "none" ? [] : [{ id: WAIT, fix_id: FIX, title: "GSP wallet is empty", blocks: "filings are blocked", since: ago(4400), state: state.waiting, can_undo: state.waiting === "dismissed" }]),
-    ...state.more.map((w) => ({ ...w, since: ago(900), can_undo: w.state === "dismissed" }))];
+  const waitingNow = () => [...(state.waiting === "none" ? [] : [{ id: WAIT, fix_id: FIX, title: "GSP wallet is empty", blocks: "filings are blocked", since: ago(4400), state: state.waiting, can_undo: state.waiting !== "waiting" }]),
+    // (As DGC says it, dgc/pip_fixes.py: ANY answer can be undone for ten minutes, I've done it and Remind me later too.
+    // Saying it only of Not a problem here hid a pill that said Undo over nine "I've done it", 26 Nov.)
+    ...state.more.map((w) => ({ ...w, since: ago(900), can_undo: w.state !== "waiting" }))];
   const change = () => ({ id: CHANGE, workspace_id: LIME, name: "lime_tiles", status: state.change, digest: "c1", more: 0, created_at: ago(3), updated_at: ago(2), tests: "passed",
     files: sub ? [{ path: "totals.py", change: "modified", plus: 6, minus: 2 }, { path: "cart.py", change: "modified", plus: 9, minus: 3 }] : [{ path: "billing/eway.py", change: "modified", plus: 12, minus: 1 }, { path: "billing/billing_routes.py", change: "modified", plus: 5, minus: 3 }],
     result: state.change === "applied" ? { applied: sub ? ["totals.py", "cart.py"] : ["billing/eway.py", "billing/billing_routes.py"], held_back: [], ...(state.fix === "applied" ? { by: "pip-level:full" } : {}) }

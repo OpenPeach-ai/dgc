@@ -170,8 +170,10 @@ class ProtocolShape(unittest.TestCase):
             backend._goal_snapshot = lambda: {}
             backend._context_window_size = lambda: 8192
             backend.em = Mock()
+            # (Not its Pip reports thread either: started, it polled the registry every 5 s for the rest of the run,
+            # in whatever home the next test set, and made a later test's .dgc/pips, 26 Nov.)
             for name in ("_emit_context", "_announce_peer", "_start_peer_heartbeat", "_emit_config",
-                         "_publish_model_capabilities"):
+                         "_publish_model_capabilities", "_start_pip_report_watch"):
                 setattr(backend, name, Mock())
             with patch.object(headless, "custom_command_names", return_value=[]):
                 backend.start()

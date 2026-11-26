@@ -2443,8 +2443,8 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.dgc > .
 .turn > .msg.user.turn-head.pinned { margin-bottom: var(--pin-give, 0px); }
 .turn > .msg.user.turn-head.pinned > .bubble { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding-bottom: var(--sp-2); }
 .turn > .msg.user.turn-head.pinned > .bubble:has(> .prompt-text) > .prompt-atts, .turn > .msg.user.turn-head.pinned > .bubble:has(> .prompt-text)::after, .turn > .msg.user.turn-head.pinned > .msg-time { display: none; }
-/* (A soft shadow, no line: a hairline here read as a stray white line across the panel under a folded long prompt, his
-   report 25 Nov.) */
+/* (A soft shadow, no line: a hairline here read as a stray white line across the panel under a folded long prompt,
+   reported 25 Nov.) */
 .turn > .msg.user.turn-head.pinned::before { bottom: calc(-1 * var(--sp-2)); -webkit-mask-image: none; mask-image: none; box-shadow: 0 8px 12px -10px rgba(0, 0, 0, .55); }
 body.vscode-light .turn > .msg.user.turn-head.pinned::before { box-shadow: 0 8px 12px -10px rgba(0, 0, 0, .22); }
 /* ---- end a pinned prompt looks pinned ------------------------------------------------------------ */

@@ -106,6 +106,9 @@ class OnTheWire(unittest.TestCase):
                 backend.start()
                 backend._dispatch({"type": "context_breakdown", "request_id": "ctx-breakdown-1"})
             finally:
+                # close(), not only MCP: a started backend's Pip reports thread polls the registry every 5 s, in whatever
+                # home the next test sets (it made a later test's .dgc/pips, 26 Nov).
+                backend.close()
                 backend.agent.mcp.stop_all()
         ready = next(e for e in events if e["type"] == "ready")
         self.assertTrue(ready["capabilities"]["correlated_state_requests"] and ready["capabilities"]["context_breakdown"])

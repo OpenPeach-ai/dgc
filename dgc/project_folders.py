@@ -140,12 +140,8 @@ def pips_all(store, *, limit=100, offset=0, query="") -> dict:
         (registry.runner_id,)) if r[1] == "personal" or not not_a_project(r[2])]
     if not spaces:
         return {"pips": [], "total": 0, "next_offset": None}
-    have = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN "
-                                         "('pip_chat_messages','pip_run_posts','pip_profiles')")}
-    said = ("coalesce((SELECT max(m.created_at) FROM pip_chat_messages m WHERE m.pip_id=p.id),'')"
-            if "pip_chat_messages" in have else "''")
-    posted = ("coalesce((SELECT max(r.posted_at) FROM pip_run_posts r WHERE r.pip_id=p.id),'')"
-              if "pip_run_posts" in have else "''")
+    from .pips import activity_sql
+    have = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pip_profiles'")}
     marks = ",".join("?" * len(spaces))
     where, params = f" WHERE p.workspace_id IN ({marks})", list(spaces)
     if query:
@@ -163,7 +159,7 @@ def pips_all(store, *, limit=100, offset=0, query="") -> dict:
               + (" LEFT JOIN pip_profiles f ON f.pip_id=p.id" if "pip_profiles" in have else ""))
     total = db.execute(f"SELECT count(*) {joined}{where}", params).fetchone()[0]
     rows = db.execute(
-        f"SELECT p.id, max(p.updated_at, {said}, {posted}) AS active {joined}{where} "
+        f"SELECT p.id, {activity_sql(db)} AS active {joined}{where} "
         "ORDER BY (json_extract(v.definition,'$.pip_type')='core' AND p.workspace_id IN "
         "(SELECT id FROM workspaces WHERE kind='personal')) DESC, active DESC, p.id DESC LIMIT ? OFFSET ?",
         params + [limit, offset]).fetchall()

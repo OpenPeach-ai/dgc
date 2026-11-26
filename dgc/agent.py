@@ -11696,6 +11696,18 @@ class Agent(GoalLifecycle):
             from .tools import dgc_browser_sites
             policy_args = {**args, "_session_sites": sorted(dgc_browser_sites(self.ctx))}
         decision, reason = perms.decide(name, policy_args)
+        browser_closed = ""
+        if name == "dgc_browser" and decision == ASK and isinstance(args, dict):
+            # Opening a site in DGC Browser asks, unless DGC Browser can't open anything now (Pips off, no Chrome it
+            # can run): then there is nothing to ask about (live, 26 Nov: the card was asked with Pips off, and the step
+            # then said Pips aren't running). The call says why and opens nothing; the site never joins the session's.
+            from .permissions import dgc_browser_navigates
+            if dgc_browser_navigates(args):
+                from . import dgc_browser_work
+                from .workspace_registry import state_directory
+                browser_closed = dgc_browser_work.closed(state_directory())
+                if browser_closed:
+                    decision, reason = ALLOW, "DGC Browser can't open a page now (the step says why): nothing to ask"
         # A plugin the user set to Always ask (a plugin's page in Settings, or Pips settings → Plugins): each call of its
         # tools asks, in every mode, as their own ask rule does (auto mode holds it in the chat); a deny rule still wins.
         route = (name if isinstance(name, str) and name.startswith("mcp__")
@@ -11928,6 +11940,11 @@ class Agent(GoalLifecycle):
                 return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
 
         exec_args = dict(args)
+        if name == "dgc_browser":
+            # Internal, never the model's: DGC Browser couldn't open anything, so nobody was asked (above).
+            exec_args.pop("_dgc_browser_closed", None)
+            if browser_closed and decision == ALLOW:
+                exec_args["_dgc_browser_closed"] = browser_closed
         if name == "pips_setup":
             # Internal, never the model's: a Pip setup allowed by auto mode, a rule or the user's own
             # Allow is created now; one allowed only to save its card (SETUP_CARD) waits for Create Pip.

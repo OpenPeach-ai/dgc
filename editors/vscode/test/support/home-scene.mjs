@@ -217,6 +217,12 @@ export async function openHome(browser, { state = homeState(), width = 300, heig
   return { page, errors, send, posted, refresh, kept, card, see, everyCard, tabs: () => tabsNow(page), hub: () => hubNow(page), close: () => context.close() };
 }
 
+/** Waits until the card `selector` has come in. A card that comes in grows from 96% on the spring, which overshoots its
+ *  size a little (a 28 px field measured up to 28.18 px): a size check made on the way read a moving card, and failed at
+ *  28.04 under a busy suite (26 Nov). What a test measures is the card at rest. */
+export const cardAtRest = (page, selector) => page.waitForFunction((c) => document.querySelector(c)?.getAnimations({ subtree: true })
+  .every((a) => a.playState !== "running" || a.effect?.getComputedTiming().endTime === Infinity), selector, { timeout: 15000 });
+
 /** The tab bar as it is on screen: each tab's name, whether it is chosen, in the tab order, shown, its box and colour. */
 export const tabsNow = (page) => page.evaluate(() => {
   const nav = document.getElementById("side-tabs"), rect = (n) => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
