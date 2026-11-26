@@ -59,7 +59,8 @@
   the chat's small type, in Work, ChatDGC and a Pip's chat alike; one setting in media/shared/doccard.css.
 - **A Pip's long run of passes is one line**: "Passed 200 times since Saturday, about every 30 minutes; the last at
   3:29 PM." instead of every time it ran; a few passes still list their times.
-- **A goal's prompt says "Goal" under its bubble**, first in its time row ("Goal · 1:22 PM"), not over it.
+- **A goal's prompt says "Goal" under its bubble**, first in its time row ("Goal · 1:22 PM"), not over it. A goal set
+  from the "/" menu's Goal row keeps the mark after a reload too (it sent its words alone, so the reopened chat lost it).
 - **A checklist pops up when it's made, and when an item needs you** ("“Release list” needs you: Pick the version
   name"), not at each tick: its ticks are on its card and the Tasks pill, and the pop-up covered the prompt box.
 - **Plain words**: the card offering Continue after a stop, and the line when DGC skips a repeated step.

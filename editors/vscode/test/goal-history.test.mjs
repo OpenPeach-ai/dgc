@@ -243,6 +243,36 @@ test("a goal's own next turn draws no line; any other resume keeps its words", (
 
 // User test round 2, W9: "1 cycle" is not a word a person uses (rounds, and nothing said of a single one), and the
 // message that started a goal looked like any other.
+// Seen live 26 Nov (the packaged release candidate): a goal set from the "/" menu's Goal row sends its words alone, so
+// after a reload its message lost its Goal mark (live it is marked as it is sent; a typed "/goal …" keeps it, from its
+// words). DGC's list of the session's goals says when each began (a goal's name is DGC's short form of its words, so
+// it is not matched): the message whose turn began as the goal did wears the mark again. The same words sent another
+// time, a goal the model set in the middle of a turn, and every other message don't.
+test("after a reload, the message that started a goal from the Goal row wears its mark again, from DGC's list of goals", () => {
+  const x = chat();
+  const turn = (id, at, prompt) => [{ type: "turn_start", turn_id: id, prompt, kind: "prompt" }, { role: "time", of: "prompt", at },
+    { type: "text_delta", text: `Reply to ${prompt}` }, { type: "stream_end", message_id: `${id}:1`, phase: "answer" }, { role: "time", of: "reply", at: at + 5 },
+    { type: "turn_end", turn_id: id, reason: "completed", final_message_id: `${id}:1` }];
+  const T = 1_794_000_000, WORDS = "add a one-line NOTES.md that says what this project is, then stop";
+  x.event({ type: "history", complete: true, items: [...turn("h1", T, "Fix the README"), ...turn("h2", T + 100, WORDS),
+    ...turn("h3", T + 900, WORDS), ...turn("h4", T + 2000, "/goal make the tests pass")] });
+  // (As goals.py names them: "then stop" is ", stop" in the name. g3: the model set a goal during h3's turn.)
+  x.event({ type: "goal_runs", runs: [run("g1", "completed", { name: "add a one-line NOTES.md that says what this project is, stop", started_at: T + 99.8, ended_at: T + 109, elapsed_seconds: 9, tokens: 105700, cycles: 1 }),
+    run("g3", "stopped", { name: "tidy the docs", started_at: T + 930, ended_at: T + 1990, elapsed_seconds: 60, tokens: 900, cycles: 1 }),
+    run("g2", "active", { name: "make the tests pass", started_at: T + 1999.9 })] });
+  const prompts = [...x.v.doc.querySelectorAll("#log .msg.user")];
+  assert.equal(prompts.length, 4);
+  const marked = prompts.map((m) => !!m.querySelector(".goal-mark"));
+  assert.deepEqual(marked, [false, true, false, true], "the Goal row's goal (its words alone) and the typed one; not the same words sent again later, not the turn a goal was set in, nor a plain message");
+  const time = prompts[1].querySelector(":scope > .msg-time");
+  assert.ok(time && time.firstChild === prompts[1].querySelector(".goal-mark"), "first in its time row, as live");
+  assert.match(text(time), /^Goal\s*([A-Z][a-z]{2} \d{1,2}, )?\d/, `"Goal · <time>", an older one with its date (${text(time)})`);
+  // Asked again (a goal ends, the list comes again): still one mark each.
+  x.event({ type: "goal_runs", runs: [run("g1", "completed", { name: "add a one-line NOTES.md that says what this project is, stop", started_at: T + 99.8, ended_at: T + 109, elapsed_seconds: 9, tokens: 105700, cycles: 1 })] });
+  assert.equal(x.v.doc.querySelectorAll("#log .goal-mark").length, 2);
+  assert.deepEqual(x.v.errors, []);
+});
+
 test("W9: the message that started a goal wears a small Goal mark; any other message has none", () => {
   const x = chat();
   const bubbles = () => [...x.v.doc.querySelectorAll("#log .msg.user")].map((m) => ({ words: text(m.querySelector(".bubble")), mark: text(m.querySelector(".goal-mark") || { textContent: "" }), title: m.querySelector(".goal-mark")?.getAttribute("title") || "" }));

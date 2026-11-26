@@ -14481,7 +14481,26 @@ function permissionChoices(ev) {
   function setGoalRuns(runs) {
     goalRuns = (Array.isArray(runs) ? runs : []).map(cleanGoalRun).filter(Boolean).slice(-200);
     noteGoalEnds(goalRuns);
+    markGoalStarts();
     if (goalHistoryShown) { paintRailChip("goalruns"); if (railOpenNow()?.kind === "goalruns") paintGoalRunsPanel(); }
+  }
+  // A goal set from the "/" menu's Goal row sends its words alone, so after a reload its message no longer said it
+  // started a goal (live it is marked as it is sent; a typed "/goal …" is marked from its words). DGC's list says when
+  // each goal began (its name is DGC's short form of the words, so it is not matched): the message whose turn began as
+  // the goal did, with no reply between them, wears the mark again (seen live 26 Nov). A goal the model set in the
+  // middle of a turn has no message of its own, and one whose turns aren't in this chat marks nothing.
+  function markGoalStarts() {
+    if (replaying || !goalRuns.length) return;
+    const prompts = [...log.querySelectorAll(".msg.user")];
+    const blocks = [...log.querySelectorAll(".msg.dgc")].filter((block) => Number.isFinite(block._turnAt));
+    for (const run of goalRuns) {
+      if (!run.started_at) continue;
+      const start = run.started_at * 1000, first = blocks.find((block) => block._turnAt >= start - 1500);
+      if (!first || first._turnAt > start + 5000) continue;                       // its first turn began as it was set
+      const m = prompts.filter((p) => p.compareDocumentPosition(first) & 4).at(-1);   // that turn's own message
+      if (!m || m.classList.contains("goal-started") || blocks.some((block) => (m.compareDocumentPosition(block) & 4) && (block.compareDocumentPosition(first) & 4))) continue;
+      markGoalBubble(m);
+    }
   }
   const goalEndKey = (run) => `${run.id || run.name}|${run.status}|${Math.round(run.ended_at || 0)}`;
   function noteGoalEnds(runs) {
