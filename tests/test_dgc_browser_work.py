@@ -320,6 +320,10 @@ class WhichBrowser(unittest.TestCase):
         self.assertIn("when they name their own Chrome", self.schema("browser")["parameters"]["properties"]["signed_in"]["description"])
         self.assertIn("when the browser tool couldn't show what they mean because the page needs their sign-in",
                       self.schema("dgc_browser")["description"])
+        # Decided 26 Nov: "check my browser" tries the browser tool first, even for a page that plainly needs a sign-in
+        # (a packaged-build check went straight to DGC Browser for github.com/notifications).
+        self.assertIn("Even for \"my browser\" or a page that needs a sign-in, open it with the browser tool first",
+                      self.schema("dgc_browser")["description"])
 
     def test_their_chrome_out_of_reach_points_to_dgc_browser_but_never_after_they_said_no(self):
         from dgc.browser_user import NOT_RUNNING, SAID_NO
