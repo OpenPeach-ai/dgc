@@ -533,7 +533,7 @@ async function run() {
     await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host agents probe" });
     await waitFor(() => posted().some((item) => item.eventType === "permission_request" && item.id === "agents-permission"));
     const waitingProbe = await probe();
-    assert.deepEqual([waitingProbe.state, waitingProbe.label], ["waiting", "2 agents"],
+    assert.deepEqual([waitingProbe.state, waitingProbe.label], ["waiting", "2 sub-agents"],
       "an agent waiting on a permission card turns the pill blue");
     await testApi.testOnlyWebviewMessage(testToken, { type: "permission_response", id: "agents-permission", decision: "once" });
     await waitFor(() => {
@@ -546,7 +546,8 @@ async function run() {
     assert.ok(agentFrames.filter((item) => item.eventType === "agent_ended").length >= 2, "agent_ended reaches the webview");
     assert.equal(protocolStops(), stopsBefore, "the extension accepts every agents frame");
     const idleProbe = await probe();
-    assert.deepEqual([idleProbe.state, idleProbe.label], ["idle", "0 agents"],
+    // (Since 14 Nov the pill says "N sub-agents", and with nothing running it is the map's door: "Agent map".)
+    assert.deepEqual([idleProbe.state, idleProbe.label], ["idle", "Agent map"],
       "agents that finished stay on the pill for the whole chat, none counted as working");
 
     // A reloaded webview asks the backend for the list again.
@@ -557,7 +558,7 @@ async function run() {
     await waitFor(() => restores() > restoresBefore);
     await waitFor(() => posted().some((item) => item.eventType === "agents"));
     const restoredProbe = await probe();
-    assert.deepEqual([restoredProbe.state, restoredProbe.label], ["idle", "0 agents"],
+    assert.deepEqual([restoredProbe.state, restoredProbe.label], ["idle", "Agent map"],
       "a reloaded chat's finished agents bring the pill back, counting none working");
 
     // A new chat hides it.
@@ -573,7 +574,7 @@ async function run() {
     await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host agents exit probe" });
     await waitFor(() => posted().filter((item) => item.type === "backend_exit").length > exitsBefore, 15_000);
     const stoppedProbe = await probe();
-    assert.deepEqual([stoppedProbe.state, stoppedProbe.label], ["idle", "0 agents"],
+    assert.deepEqual([stoppedProbe.state, stoppedProbe.label], ["idle", "Agent map"],
       "agents of a backend that exited are stopped, not working");
     const restoresBeforeRestart = restores();
     await waitFor(() => restores() > restoresBeforeRestart, 15_000);
