@@ -30,10 +30,17 @@ export function waiting() {
 }
 export const RUN = { ...DOCK_SESSIONS[2], name: "Plan the 0.52 release notes", waiting: true, running: true, ask: { id: "perm-1", command: "npm test -- --run" } };
 export const EDIT = { ...DOCK_SESSIONS[1], name: "Rename the watering helpers", waiting: true, running: true };
-export const K = { setup: `setup:${SETUP}`, change: `pip:${pipId("c")}`, visit: `pip:${pipId("d")}`, mail: `pip:${pipId("b")}`, run: `work:${RUN.id}`, edit: `work:${EDIT.id}` };
+export const K = { setup: `setup:${SETUP}`, change: `pip:${pipId("c")}`, visit: `pip:${pipId("d")}`, mail: `pip:${pipId("b")}`, core: `pip:${pipId("a")}`, run: `work:${RUN.id}`, edit: `work:${EDIT.id}` };
 
 /** One Home with them all: the cards answered where they are, and the news (Open / Mark read, Open / Dismiss). */
-export function everyCard() { const s = waiting(), busy = homeState("busy"); s.list = busy.list; s.unread = busy.unread; s.digest = busy.digest; return s; }
+// (27 Nov: a Pip that needs you offers Review alone, never Mark read, so every busy Pip here, each also waiting, lost its
+// Mark read. Core has only news: the one card whose quiet answer is Mark read.)
+export function everyCard() {
+  const s = waiting(), busy = homeState("busy"); s.list = busy.list; s.digest = busy.digest;
+  s.unread = { ...busy.unread, [P]: [...busy.unread[P], { pip_id: pipId("a"), workspace_id: P, name: "Core", pip_type: "core", count: 1, messages: 1, posts: 0,
+    latest: "Your week, in three lines.", latest_at: "2026-11-03T10:05:00Z", latest_message_id: "message_" + "a".repeat(32), latest_post_id: null }] };
+  return s;
+}
 export async function openCards(browser, options = {}) {
   const done = { ...DOCK_SESSIONS[0] };
   const x = await openDock(browser, { tab: "home", state: everyCard(), sessions: [RUN, EDIT, done], height: 1500, pages: made(), ...options });

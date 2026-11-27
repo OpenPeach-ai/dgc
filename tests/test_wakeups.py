@@ -144,6 +144,25 @@ class BookTests(unittest.TestCase):
         reopened.adopt()                    # opened again, by this DGC or another
         self.assertEqual([i["id"] for i in reopened.items()], [set_["id"]])
 
+    def test_an_id_is_never_one_already_beside_the_session(self):
+        # 27 Nov: the counter is the process's, so a reload started at wake1 again: one session said "Set wake1" three
+        # times, and a save drops another window's wake-up when it shares an id with one of this window's.
+        with patch.object(wakeups, "_ids", iter(range(1, 100))):     # the other window's DGC counts from 1 too
+            theirs = self.book.add(30, "Check the tests", "Run them.")
+        self.assertEqual(theirs["id"], "wake1")
+        other_window = {"pid": 4242, "stamp": "another"}
+        journal = self.session.with_suffix(".wakeups")
+        saved = json.loads(journal.read_text())
+        saved["records"][0]["owner"] = other_window          # that one is another window's, still running
+        journal.write_text(json.dumps(saved))
+        reloaded = wakeups.Book(lambda: (self.session, self.dir), clock=self.clock)
+        with patch.object(wakeups, "_ids", iter(range(1, 100))), \
+                patch.object(wakeups, "owner_alive", side_effect=lambda o: o == other_window or o == wakeups.owner()):
+            mine = reloaded.add(60, "Look again", "Look again.")
+            self.assertEqual(mine["id"], "wake2", "a fresh counter skips an id already set beside the session")
+            records = json.loads(journal.read_text())["records"]
+        self.assertEqual(sorted(r["id"] for r in records), sorted([theirs["id"], mine["id"]]), "and the other window's stays")
+
 class ToolTests(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
@@ -154,10 +173,22 @@ class ToolTests(unittest.TestCase):
         said = tools.execute("wake_later", {"minutes": 30, "why": "Check the tests", "prompt": "Run the suite."}, self.ctx)
         self.assertRegex(said, r"^Set wake\d+: I wake at \d\d:\d\d \(in 30 minutes\) to: Check the tests")
         wid = self.book.items()[0]["id"]
-        self.assertIn(f"Cancelled {wid}", tools.execute("wake_cancel", {"id": wid}, self.ctx))
+        self.assertEqual(tools.execute("wake_cancel", {"id": wid}, self.ctx), f"Cancelled {wid}. No wake-up waits now.")
         self.assertIn("no wake-up", tools.execute("wake_cancel", {"id": wid}, self.ctx))
         self.assertIn("error:", tools.execute("wake_later", {"minutes": 0, "why": "x", "prompt": "y"}, self.ctx))
         self.assertIn("not available", tools.execute("wake_later", {"minutes": 5, "why": "x", "prompt": "y"}, SimpleNamespace()))
+
+    def test_a_cancel_says_what_still_waits(self):
+        # 27 Nov: "remove the wake" with two set: it cancelled tomorrow's, said only "Cancelled wake1.", and the one on
+        # screen stayed. Now the model reads what still waits, and can cancel it too or say so.
+        tools.execute("wake_later", {"minutes": 30, "why": "Final attempt at the totals", "prompt": "Try once more."}, self.ctx)
+        tools.execute("wake_later", {"minutes": 1300, "why": "Tomorrow's window", "prompt": "Try tomorrow."}, self.ctx)
+        later = next(i for i in self.book.items() if i["why"] == "Tomorrow's window")
+        soon = next(i for i in self.book.items() if i["why"] == "Final attempt at the totals")
+        said = tools.execute("wake_cancel", {"id": later["id"]}, self.ctx)
+        self.assertTrue(said.startswith(f"Cancelled {later['id']}. Still waiting: {soon['id']} at "), said)
+        self.assertIn("(Final attempt at the totals)", said)
+        self.assertIn("If the user meant those too, cancel them", said)
 
     def test_setting_a_wake_up_asks_no_approval_but_a_deny_rule_still_holds(self):
         # Found live (11 Nov): Default mode asked "Run wake_later?" with Allow, as for a command. A wake-up changes

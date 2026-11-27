@@ -1129,6 +1129,9 @@ def display_rows(messages) -> list[dict]:
             from .workflows import display_prompt, notice_kind
             if notice_kind(message):
                 continue                # command output DGC delivered; nobody typed it
+            from .wakeups import turn_why
+            if turn_why(text) is not None:
+                continue                # a wake-up the chat set itself (wake_later): DGC's turn text, nobody typed it
             woke = parse_wake_prompt(text)
             if woke is not None:
                 # The editor's notice that a background agent finished: DGC's, never the person's words.

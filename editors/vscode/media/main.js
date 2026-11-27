@@ -4128,6 +4128,19 @@
   const returnedPrompts = [];            // { node, session }
   const returnedIds = new Set();
   const returnedNodes = new Map();       // id -> its bubble, whose own Restore makes a second notice redundant
+  // The "not sent" bubble whose words were last put back in the box (Restore, or by itself into an empty box). Sent again
+  // as they were (or with more added), they are that message: its "not sent" copy goes (27 Nov, a usage limit refused
+  // a steer and both stayed). Words changed first are another message, and the copy stays.
+  let restoredFrom = null;               // { id, node, text }
+  function dropRestoredCopy(sent) {
+    const from = restoredFrom; restoredFrom = null;
+    const words = String(from?.text || "").trim();
+    if (!from || !words || !from.node?.isConnected || !String(sent || "").includes(words)) return;
+    from.node.remove();
+    returnedNodes.delete(from.id);
+    const at = returnedPrompts.findIndex((row) => row.node === from.node); if (at >= 0) returnedPrompts.splice(at, 1);
+    unconfirmedDrafts = unconfirmedDrafts.filter((item) => item.id !== from.id);
+  }
   let reconnectPending = false;
   const draftScope = document.documentElement.dataset.draftScope || "";
   const draftEntries = new Map();
@@ -4395,6 +4408,7 @@
       });
       if (pending.fromReload && outputOffered && pending.output && pending.output !== "auto" && offeredOutputs().some(([value]) => value === pending.output)) setOutput(pending.output);
       unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== id);
+      if (confirmed) restoredFrom = { id, node: pending.node, text: pending.text };   // sent again, its copy goes
       renderAtts(); onInput(); persistDraft(); input.focus();
     };
     // A message that never went no longer says "queued for the next turn · Steer now" under it: there is no turn to
@@ -12028,6 +12042,7 @@ function permissionChoices(ev) {
     vscode.postMessage({ type: "startGoal", text: objective, requestId,
       skills: values("skill"), templates: values("template"), context: values("resource"),
       images: selected.filter(item => item.img).map(item => item.data) });
+    dropRestoredCopy(objective);
     recordComposerEdit(() => { setGoalDraftArmed(false); clearComposer(); attachments.length = 0; });
     renderAtts(); persistDraft(); scroll();
   }
@@ -12235,6 +12250,7 @@ function permissionChoices(ev) {
       ...(outputOffered && outputPick !== "auto" ? { output: outputPick } : {}),
       context: resources.length ? resources : undefined });
     if (outputPick !== "auto") setOutput("auto");
+    dropRestoredCopy(text);
     // One step with the text, so undo right after sending brings back the whole prompt -- the
     // pills and the chips with the words.
     recordComposerEdit(() => { clearComposer(); attachments.length = 0; });

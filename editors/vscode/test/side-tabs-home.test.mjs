@@ -300,7 +300,8 @@ for (const width of [300, 700]) {
         assert.equal(c.actions.filter((a) => a.endsWith("*")).length, 1, `${c.key}: one filled answer (${c.actions})`);
         assert.ok(c.actions.length <= 2, `${c.key}: at most one quiet answer`);
       }
-      assert.deepEqual(by[PIP_WAITS].actions, ["Review*", "Mark read"]); assert.deepEqual(by[PIP_NEW].actions, ["Review*"]);
+      // (27 Nov: a Pip that needs you offers Review alone; Mark read only where reading is all it takes, PIP_READ_1.)
+      assert.deepEqual(by[PIP_WAITS].actions, ["Review*"]); assert.deepEqual(by[PIP_NEW].actions, ["Review*"]);
       assert.deepEqual(by[WORK_WAITS].actions, ["Open*"]); assert.deepEqual(by[WORK_DONE].actions, ["Open*", "Dismiss"]);
       assert.deepEqual(by[PIP_FAILED].actions, ["Open*", "Dismiss"]); assert.deepEqual(by[PIP_READ_1].actions, ["Open*", "Mark read"]);
       // No card runs into another, and none runs under the dock when scrolled to.

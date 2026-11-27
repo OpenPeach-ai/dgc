@@ -70,7 +70,8 @@ class Tools(fixtures.PluginChat):
         wid = book.items()[0]["id"]
         self.say("Never mind.", {"calls": [("wake_cancel", {"id": wid})]}, {"parts": ["Cancelled."]}, chat=chat)
         self.assertEqual(book.items(), [])
-        self.assertEqual(self.told(-1)[0], f"Cancelled {wid}.")
+        # (27 Nov: the answer says what still waits, here nothing, so a cancel never leaves one the model didn't know of.)
+        self.assertEqual(self.told(-1)[0], f"Cancelled {wid}. No wake-up waits now.")
 
     def test_a_fifth_is_refused_in_the_models_words(self):
         self.engine.wake_book = self.book_for

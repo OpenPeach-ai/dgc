@@ -97,7 +97,8 @@ test('a Pip with attention and unread is one card; its count grows in the same c
  const c=x.cards()[0];
  assert.deepEqual([c.group,c.kind,c.waiting,c.unread,c.latest,c.body,c.title],['needs','waiting',2,8,'Traffic report finished.','lens','2 things are waiting for you']);
  assert.deepEqual(c.chips,['8 new'],'what is new is said on the card that needs you');
- assert.equal(c.canRead,true,'and can be marked read from it');
+ // (27 Nov: Mark read on a card that needs you took only itself away and left the line; reading never answers what waits.)
+ assert.equal(c.canRead,false,'it offers Review alone: the line stays until what waits is answered');
  state.unread[0]={...state.unread[0],count:9,latest:'Another report.',latest_message_id:'m2'};
  state.list[0]={...state.list[0],profile:{body:'quill',color:'quill'}};
  await x.poll();

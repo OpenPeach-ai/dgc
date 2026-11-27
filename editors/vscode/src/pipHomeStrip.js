@@ -235,7 +235,9 @@ export function mountHomePips(options) {
     group: needs ? 'needs' : 'new', kind: pip.blocked ? 'blocked' : pip.waiting ? 'waiting' : row ? 'news' : 'unread',
     line, title: one ? one.title : pip.waiting && !pip.blocked ? `${pip.waiting} ${pip.waiting === 1 ? 'thing is' : 'things are'} waiting for you` : line,
     latest: unreadItem ? unreadItem.latest : '', chips, waiting: pip.waiting || 0, unread: unreadItem ? unreadItem.count : 0,
-    canRead: !!unreadItem, canDismiss: !!row && row.dismissible && !unreadItem,
+    // Mark read only where reading is all it takes: a card that needs you stays until what waits is answered, so it
+    // offers Review alone (27 Nov: "Mark read" there took only itself away and left the line).
+    canRead: !!unreadItem && !needs, canDismiss: !!row && row.dismissible && !unreadItem,
     at: (needs ? waits[0]?.created_at : '') || unreadItem?.latest_at || ''});
   };
   for (const row of rows) card(row.pip, row, byUnread.get(row.pip.id) || null);

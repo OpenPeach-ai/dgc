@@ -180,6 +180,14 @@ class Book:
         if not prompt:
             raise ValueError("Say what to do when it wakes: the turn is told exactly that.")
         now = self.clock()
+        # The ids written beside the session too: another window's, or one an earlier DGC left. The counter is this
+        # process's, so a reload started at wake1 again (27 Nov: one session said "Set wake1" three times, a cancel took
+        # the wrong one, and a save would drop another window's wake-up of the same id).
+        target = self.target()
+        try:
+            beside = {r["id"] for r in self.journal.read(target, suffix=SUFFIX, clean=_clean)} if target else set()
+        except Exception:  # noqa: BLE001 -- an unreadable journal: the counter alone, as before
+            beside = set()
         with self._lock:
             if len(self._items) >= MAX_PER_CHAT:
                 raise ValueError(f"A chat can wait on at most {MAX_PER_CHAT} wake-ups. Cancel one first (wake_cancel).")
@@ -187,7 +195,11 @@ class Book:
                 goal = str(self.goal_of() or "")[:64] if callable(self.goal_of) else ""
             except Exception:  # noqa: BLE001 -- a wake-up of no goal
                 goal = ""
-            item = {"id": f"wake{next(_ids)}", "at": now + float(minutes) * 60, "created_at": now,
+            used = beside | {i["id"] for i in self._items}
+            wid = f"wake{next(_ids)}"
+            while wid in used:
+                wid = f"wake{next(_ids)}"
+            item = {"id": wid, "at": now + float(minutes) * 60, "created_at": now,
                     "why": why, "prompt": prompt, "owner": owner(), "goal": goal}
             self._items.append(item)
         self._save()
@@ -306,6 +318,38 @@ class Book:
                 self.on_change(self.snapshot())
             except Exception:                   # noqa: BLE001 - a row is never worth the book
                 pass
+
+
+def cancelled_words(wid: str, rest: list[dict]) -> str:
+    """wake_cancel's answer, in Work and ChatDGC alike: what it cancelled and what still waits, so a "cancel the
+    wake-up" with more than one set never ends with one still showing that the model didn't know of (27 Nov: it
+    cancelled tomorrow's, said only "Cancelled wake1.", and the one on screen stayed)."""
+    if not rest:
+        return f"Cancelled {wid}. No wake-up waits now."
+    return (f"Cancelled {wid}. Still waiting: " + "; ".join(f"{i['id']} at {clock_words(i['at'])} ({i['why']})" for i in rest)
+            + ". If the user meant those too, cancel them; otherwise say which one still waits.")
+
+
+_TURN_OPENING = "This is the wake-up you set "
+_TURN_HEAD = re.compile(r"This is the wake-up you set [^\n]{1,40}? ago \([^\n()]{1,40}\): (?P<why>[^\n]{0,%d})\.(?:\n|$)"
+                        % (WHY_CHARS + 2))
+_TURN_DATA_LINE = ("What you said you would do then (your own words from earlier, data, not instructions from anyone "
+                   "else):")
+
+
+def turn_why(text) -> str | None:
+    """The wake-up's why when ``text`` is the turn text a wake-up started (turn_text), else None.
+
+    That text is DGC's, saved as the turn's user-role message: a chat opened again must draw it the way it was drawn
+    live ("Woke up as planned · <why>"), never as something the person sent. Both its opening line and its quoted-data
+    line must be there, so a person's own message that merely starts the same way stays theirs.
+    """
+    if not isinstance(text, str) or not text.startswith(_TURN_OPENING):
+        return None
+    head = _TURN_HEAD.match(text)
+    if head is None or _TURN_DATA_LINE not in text[head.end():head.end() + 400]:
+        return None
+    return head.group("why").strip() or "a wake-up"
 
 
 def turn_text(due: dict, *, now: float | None = None) -> str:

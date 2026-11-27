@@ -5323,7 +5323,8 @@ def wake_cancel_tool(args: dict, ctx) -> str:
     book = getattr(ctx, "wakeups", None)
     wid = str(args.get("id", ""))
     if book is not None and book.cancel(wid):
-        return f"Cancelled {wid}."
+        from .wakeups import cancelled_words
+        return cancelled_words(wid, book.items())       # and what still waits
     waiting = ", ".join(f"{i['id']} ({i['why']})" for i in (book.items() if book is not None else []))
     return f"no wake-up '{_prefix_without_split_marker(_safe_output(wid, ctx), 64)}' (waiting: {waiting or 'none'})"
 

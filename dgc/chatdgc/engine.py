@@ -2014,7 +2014,8 @@ class ChatEngine:
         if call.name == "wake_cancel":
             wid = str(args.get("id", ""))[:64]
             if book.cancel(wid):
-                return f"Cancelled {wid}."
+                from ..wakeups import cancelled_words
+                return cancelled_words(wid, book.items())   # and what still waits
             waiting = ", ".join(f"{i['id']} ({i['why']})" for i in book.items())
             return f"no wake-up '{' '.join(wid.split())[:64]}' (waiting: {waiting or 'none'})"
         try:

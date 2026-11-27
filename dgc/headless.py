@@ -7518,6 +7518,14 @@ class Backend:
                 open_turn(_goal_scaffold(content, m), "resume")
                 continue
             if role == "user" and isinstance(content, str):
+                # A wake-up the chat set itself (wake_later, dgc/wakeups.py): its turn text is DGC's, never the
+                # person's. Drawn as it was live: "Woke up as planned · <why>".
+                from .wakeups import turn_why
+                why = turn_why(content)
+                if why is not None:
+                    open_turn(f"wake-up: {why}", "monitor")
+                    continue
+            if role == "user" and isinstance(content, str):
                 # A Pip's answer to a job this chat handed it (pip_jobs.notice): DGC's turn, drawn as it was live.
                 from .pip_jobs import notice_label, parse_notice
                 told = parse_notice(content)

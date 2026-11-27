@@ -1456,15 +1456,16 @@ _NOT_THE_USER = {"assistant": "assistant (DGC's own earlier reply, not the user)
 
 
 def _wake_notice(message: dict) -> bool:
-    """Is this user-role message the editor's notice that a background agent finished (agent_reports.wake_prompt), or
-    that a Pip answered a job this chat handed it (pip_jobs.notice)? DGC writes both for the model to read; the person
-    never typed either."""
+    """Is this user-role message the editor's notice that a background agent finished (agent_reports.wake_prompt),
+    that a Pip answered a job this chat handed it (pip_jobs.notice), or the turn text of a wake-up the chat set itself
+    (wakeups.turn_text)? DGC writes all three for the model to read; the person never typed any of them."""
     from .agent_reports import parse_wake_prompt
     from .pip_jobs import parse_notice
+    from .wakeups import turn_why
     if not isinstance(message, dict):
         return False
     text = _message_text(message)
-    return parse_wake_prompt(text) is not None or parse_notice(text) is not None
+    return parse_wake_prompt(text) is not None or parse_notice(text) is not None or turn_why(text) is not None
 
 
 def summariser_role(message: dict) -> str:

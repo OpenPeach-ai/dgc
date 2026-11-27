@@ -134,15 +134,20 @@ test("Home: pointing at an icon shows its pill with the word; moving along the r
     assert.notEqual(no.pill.line, "rgba(0, 0, 0, 0)", "an outline has its line");
     await x.page.hover(act(K.visit, "open")); await settle(x.page);
     assert.equal((await x.page.evaluate(row, HOME(K.visit))).pill.word, "Review");
-    // A word wider than its row grows to the left, over the card's own ground.
-    const mail = await x.page.evaluate(row, HOME(K.mail));
-    await x.page.hover(act(K.mail, "read")); await settle(x.page);
-    const read = await x.page.evaluate(row, HOME(K.mail));
+    // A word wider than its row grows to the left, over the card's own ground. (Mark read is on a Pip with news only,
+    // Core here: a Pip that needs you offers Review alone, 27 Nov.)
+    // What is only new is a row on Recent; its cards, each with its answers, are Recent opened.
+    await x.page.evaluate(() => { document.querySelector("#home-hub .hc-back")?.click(); const c = document.querySelector('#home-hub .hc-grid .hc-card[data-card="recent"]');
+      (c.querySelector(".hc-viewall, .dgc-hub-viewall, .dgc-hub-rest") || c).click(); }); await settle(x.page);
+    await x.page.waitForSelector(act(K.core, "read"), { state: "visible" });
+    const core = await x.page.evaluate(row, HOME(K.core));
+    await x.page.hover(act(K.core, "read")); await settle(x.page);
+    const read = await x.page.evaluate(row, HOME(K.core));
     assert.deepEqual([read.pill.word, read.pill.shown], ["Mark read", true]);
-    assert.ok(read.pill.width > mail.row.width && Math.abs(read.pill.right - mail.row.right) <= 0.5, `wider than its two icons, growing left (${read.pill.width} > ${mail.row.width})`);
+    assert.ok(read.pill.width > core.row.width && Math.abs(read.pill.right - core.row.right) <= 0.5, `wider than its two icons, growing left (${read.pill.width} > ${core.row.width})`);
     assert.equal((await x.page.evaluate(row, HOME(K.visit))).on, false, "the row the pointer left rests again");
     await x.page.mouse.move(2, 2); await settle(x.page);
-    const left = await x.page.evaluate(row, HOME(K.mail));
+    const left = await x.page.evaluate(row, HOME(K.core));
     assert.deepEqual([left.on, left.pill.shown, left.icons.map((i) => i.iconShown)], [false, false, [1, 1]], "leaving the row: icons again");
     assert.deepEqual(x.errors, []);
   } finally { await x.close(); }

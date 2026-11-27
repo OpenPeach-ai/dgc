@@ -2407,6 +2407,48 @@ test("cancelled steering restores its draft and live mode resolves the approval 
   assert.deepEqual(errors, []);
 });
 
+// 27 Nov: a usage limit ended the turn, the steer that waited for it came back "not sent" with its words in the box, and
+// after sending them again both bubbles stayed. Sent again as they were (or added to), they are that message.
+function steerHandedBack() {
+  const x = makeDom();
+  const event = ev => x.send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: { live_steering: true } });
+  event({ type: "turn_start", turn_id: "one", prompt: "Inspect" });
+  const input = x.doc.getElementById("input");
+  input.value = "Also check the October totals"; input.dispatchEvent(new x.dom.window.Event("input"));
+  x.doc.getElementById("send").click();
+  const prompt = x.posted.find(m => m.type === "prompt");
+  event({ type: "prompt_accepted", request_id: prompt.requestId, state: "steered" });
+  event({ type: "turn_end", reason: "error" });
+  event({ type: "steering_update", request_id: prompt.requestId, state: "returned", message: "The model's usage limit was reached." });
+  const notSent = () => [...x.doc.querySelectorAll(".msg.user.rejected")];
+  const copies = (words) => [...x.doc.querySelectorAll(".msg.user")].filter(n => n.querySelector(".bubble")?.textContent.includes(words));
+  return { ...x, input, notSent, copies };
+}
+
+test("a steer handed back at a turn's end, sent again as it was, leaves no 'not sent' copy behind", () => {
+  const x = steerHandedBack();
+  assert.equal(x.notSent().length, 1, "it says it was not sent");
+  assert.equal(x.input.value, "Also check the October totals", "and its words are back in the box");
+  x.doc.getElementById("send").click();
+  assert.equal(x.posted.filter(m => m.type === "prompt").length, 2, "sent again");
+  assert.equal(x.notSent().length, 0, "the 'not sent' copy goes");
+  assert.equal(x.copies("Also check the October totals").length, 1, "one copy of the message in the chat");
+  assert.deepEqual(x.errors, []);
+});
+
+test("a handed-back steer added to before sending is the same message; one changed first keeps its copy", () => {
+  const added = steerHandedBack();
+  added.input.value += " and November's"; added.input.dispatchEvent(new added.dom.window.Event("input"));
+  added.doc.getElementById("send").click();
+  assert.equal(added.notSent().length, 0, "words added to it: still that message");
+  const changed = steerHandedBack();
+  changed.input.value = "Leave October for now"; changed.input.dispatchEvent(new changed.dom.window.Event("input"));
+  changed.doc.getElementById("send").click();
+  assert.equal(changed.notSent().length, 1, "another message: the one that wasn't sent still says so");
+  assert.deepEqual([...added.errors, ...changed.errors], []);
+});
+
 test("delegated and older backends expose queue delivery without claiming live steering", () => {
   for (const capabilities of [{}, { live_steering: true, steering_native: false }]) {
     const { dom, errors, posted, send, doc } = makeDom();

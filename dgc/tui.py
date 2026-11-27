@@ -8390,6 +8390,9 @@ class TUI:
                     blocks.append({"kind": "user", "text": body[:6000]})
                     if marks:
                         made.append((len(blocks) - 1, body.replace("\n", " ")[:70]))   # /jump
+            elif who == "monitor" and row.get("planned"):
+                # A wake-up the chat set itself (wake_later, in the editor): a marker, as the editor draws it.
+                blocks.append(self._rich(f"[{th.faint}]◷ {_esc(body[:200])}[/]"))
             elif who == "monitor":
                 # Command output DGC delivered: a marker, never a band that reads as typed text.
                 from .agent_reports import notice_from_item
@@ -8524,6 +8527,13 @@ class TUI:
                     rows.append({"who": "monitor", "body": str(notice.get("label") or "monitor events"),
                                  "tools": "", "delivery": str(notice.get("delivery") or ""),
                                  "items": list(notice.get("items") or [])})
+                    continue
+                from .wakeups import turn_why
+                why = turn_why(m.get("content"))
+                if why is not None:
+                    # A wake-up the chat set itself (wake_later) in the editor: DGC's turn text, never a prompt.
+                    rows.append({"who": "monitor", "body": f"Woke up as planned · {why}", "tools": "",
+                                 "delivery": "", "items": [], "planned": True})
                     continue
                 from .agent_reports import parse_wake_prompt
                 woke = parse_wake_prompt(m.get("content"))
