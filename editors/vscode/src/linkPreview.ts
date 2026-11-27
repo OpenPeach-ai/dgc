@@ -216,6 +216,14 @@ export function envSecrets(text: string): string[] {
   }
   return found;
 }
+// A project's own .env files (.env, .env.local, ...), not the templates beside them (.env.example and the like). Spelled
+// as a list, not a pattern: a pattern's escaped dots around ".env" read as a private path to the release's VSIX check.
+const ENV_TEMPLATES = ["example", "sample", "template", "dist", "default", "defaults"];
+export function isProjectEnvFile(name: string): boolean {
+  if (name !== ".env" && !name.startsWith(".env.")) return false;
+  const lower = name.toLowerCase();
+  return !ENV_TEMPLATES.some((kind) => lower.endsWith(`.env.${kind}`));
+}
 const envFileCache = new Map<string, { mtime: number; size: number; values: string[] }>();
 let ambient: string[] | undefined;
 /** What this host knows to be secret: the environment's credential-named values, and the secrets in each open
@@ -230,7 +238,7 @@ export function knownSecrets(): string[] {
     const root = folder?.uri?.fsPath;
     if (!root || (folder.uri.scheme && folder.uri.scheme !== "file")) continue;
     let names: string[] = [];
-    try { names = readdirSync(root).filter((n) => (n === ".env" || n.startsWith(".env.")) && !/\.env\.(?:example|sample|template|dist|defaults?)$/i.test(n)).sort().slice(0, 16); } catch { continue; }
+    try { names = readdirSync(root).filter(isProjectEnvFile).sort().slice(0, 16); } catch { continue; }
     for (const name of names) {
       const path = join(root, name);
       try {

@@ -97,6 +97,13 @@ const PAGES = {
   hostile: `<head><title>&lt;img src=x onerror=alert(1)&gt;</title><meta property="og:description" content="a\u0000b‮c  d"><meta property="og:image" content="javascript:alert(1)">
     <link rel="icon" href="data:image/png;base64,AAAA"><script>var x = '<meta property="og:title" content="from a script">';</script><!-- <meta property="og:title" content="from a comment"> --></head>`,
 };
+test("a project's own .env files are read for secrets, never the templates beside them", () => {
+  // (27 Nov: written as a list, not a pattern, so the release's VSIX check never takes it for a private path.)
+  for (const name of [".env", ".env.local", ".env.production", ".env.local.example", ".env.example.local"]) assert.equal(lp.isProjectEnvFile(name), true, name);
+  for (const name of [".env.example", ".env.EXAMPLE", ".env.sample", ".env.template", ".env.dist", ".env.default", ".env.defaults", ".env.x.env.example"]) assert.equal(lp.isProjectEnvFile(name), false, name);
+  for (const name of ["env", ".envrc", "my.env", ".environment", "x.env.local"]) assert.equal(lp.isProjectEnvFile(name), false, name);
+});
+
 test("the head's words: og, then twitter, then <title> and the description, as pages really write them", () => {
   assert.deepEqual(lp.parseHead(PAGES.repo, "https://hub.example.com/acme/rocket"), { title: "acme/rocket: Rockets for everyone", description: "Rockets for everyone. Contribute to acme/rocket development.",
     site: "Acme Hub", image: "https://cards.example-cdn.com/9f86d081884c7d659a2feaa0c55ad015/acme/rocket", icon: "https://hub.example.com/favicons/favicon.png" });

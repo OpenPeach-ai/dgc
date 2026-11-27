@@ -13,13 +13,18 @@ CHECKER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECKER)
 
 
+# One member past the cap's worth of 4 MiB members, whatever the cap is (16 MiB until 0.52, 24 since).
+MEMBER = 4 * 1024 * 1024
+COUNT = CHECKER.TOTAL_UNCOMPRESSED_LIMIT // MEMBER + 1
+
+
 class FakeZip:
     reads = 0
 
     def __init__(self, path):
-        self.infos = [SimpleNamespace(filename=f"member{i}.bin", file_size=4 * 1024 * 1024,
+        self.infos = [SimpleNamespace(filename=f"member{i}.bin", file_size=MEMBER,
                                       external_attr=0o100644 << 16, compress_type=CHECKER.zipfile.ZIP_DEFLATED,
-                                      flag_bits=0) for i in range(5)]
+                                      flag_bits=0) for i in range(COUNT)]
 
     def __enter__(self):
         return self
@@ -42,12 +47,12 @@ class VSIXTotalLimitTests(unittest.TestCase):
             path = Path(temp) / "candidate.vsix"
             path.write_bytes(b"fixture")
             with patch.object(CHECKER.zipfile, "ZipFile", FakeZip), \
-                    patch.object(CHECKER, "EXPECTED_MEMBERS", {f"member{i}.bin" for i in range(5)}), \
+                    patch.object(CHECKER, "EXPECTED_MEMBERS", {f"member{i}.bin" for i in range(COUNT)}), \
                     patch.object(CHECKER, "_scan_credentials"):
                 with self.assertRaisesRegex(CHECKER.ValidationError, "oversized uncompressed VSIX"):
                     CHECKER.validate_artifact(path, extension_root=Path(temp), version="0.34.0",
                                               source_commit="a" * 40, flavor="registry")
-        self.assertEqual(FakeZip.reads, 4)
+        self.assertEqual(FakeZip.reads, COUNT - 1)
 
 
 if __name__ == "__main__":

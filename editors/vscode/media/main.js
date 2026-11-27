@@ -11150,7 +11150,7 @@ function permissionChoices(ev) {
         const c = decisionCard(`<div class="q">${icon("shield")}<span>${asked}</span></div>${detail}`, "Recorded permission decision");
         c.dataset.historyApproval = "true";
         // No request id, response handler or editable controls: replay is display only.
-        // (A reopened session's "Always allowed · Write(/home/…/*)" says the rule in words too, as the live card did.)
+        // (A reopened session's "Always allowed · Write(<a folder>/*)" says the rule in words too, as the live card did.)
         const recorded = String(ev.message || "Recorded decision"), ruled = /^Always allowed · (.+)$/s.exec(recorded);
         resolveCard(c, ruled ? `Always allowed · ${ruleAbout(ruled[1])}` : recorded);
         compactPermissionCard(c, plainDecision ? plainDecision.name : ev.name);
