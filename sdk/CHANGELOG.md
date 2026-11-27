@@ -1,6 +1,6 @@
 # DGC SDK changelog
 
-## 0.10.0 — unreleased (the date goes in on release day)
+## 0.10.0 — 2026-11-27
 
 - **DGC Browser** (the Chrome DGC keeps signed in to the person's accounts) is what the Pips API and the editor protocol
   call it: `get_dgc_browser`, `open_dgc_browser`, `set_dgc_browser_site`, `sign_out_dgc_browser_site`,

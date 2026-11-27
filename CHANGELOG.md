@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## 0.52.0 — unreleased (the date goes in on release day)
+## 0.52.0 — 2026-11-27
 
 - **A goal looks started the moment you send it.** Its time and the turn's first row ("Working", its clock running)
   show at once, as a prompt's do; the goal's turn takes that row's place once DGC has saved the goal. It took a few

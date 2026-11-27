@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.36.0 — unreleased (the date goes in on release day)
+## 0.36.0 — 2026-11-27
 
 - **Work sessions use DGC Browser.** Opening a site there asks **Use example.com in DGC Browser?** with what it may do
   (read and act as you; never a password, never a payment), **Always allow** for that site alone, Deny and Allow once.
