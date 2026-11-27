@@ -438,6 +438,8 @@ def change(registry, row) -> list[dict]:
     if row["kind"] == "work":
         from . import pip_work_agents as work
         return work.changes(registry, row)
+    if not row["copy"]:
+        return []                          # a Pip with no folder: its sub-agent worked with its tools, no files of a copy
     root = copy_root(registry, row["pip_id"], row["copy"])
     base, now = json.loads(row["base"] or "{}"), _tree(root)
     files = []
@@ -457,6 +459,8 @@ def diff_text(registry, row, files) -> str:
     if row["kind"] == "work":
         from . import pip_work_agents as work
         return work.diff_text(registry, row, files)
+    if not row["copy"]:
+        return ""
     root, pip_root = copy_root(registry, row["pip_id"], row["copy"]), _files_root(registry, row["pip_id"]) / row["folder"]
     parts, used = [], 0
     for f in files:
@@ -572,6 +576,12 @@ def send_due(registry, config) -> int:
                 from . import pip_work_agents as work
                 work.folder_of(store, row["pip_id"])
                 work.route_check(store, config, row["pip_id"])
+            elif row["kind"] == TASK and not row["copy"] and not _personal(store, row["pip_id"]):
+                folder, rel, base = _make_copy(store, row["pip_id"], row["id"])
+                with registry.transaction():
+                    db.execute("UPDATE pip_agent_jobs SET folder=?,copy=?,base=?,updated_at=? WHERE id=?",
+                               (folder, rel, json.dumps(base), _now(registry), row["id"]))
+                row = _row(db, row["id"])
             _run(store, config, row["id"], _first_text(store, row))
         except RegistryError as exc:
             if exc.code in ("runner_stopped", "limit"):
@@ -607,6 +617,8 @@ def send_due(registry, config) -> int:
         if row["kind"] == "work":
             from . import pip_work_agents as work
             template = work.CHECK_TEXT                   # its change is in the real folder already
+        elif row["kind"] == TASK:
+            template = TASK_CHECK_TEXT if row["copy"] else TASK_CHECK_TEXT_NO_COPY
         else:
             template = CHECK_TEXT
         text = template.format(try_=row["tries"], most=MAX_TRIES, title=row["title"],
@@ -679,10 +691,12 @@ def _retry_text(row, *, carry=False, store=None) -> str:
     if row["kind"] == "work" and store is not None:
         from . import pip_work_agents as work
         return work.retry_prompt(store, row, carry=carry)
+    kept = "in your copy" if row["copy"] else "done"
     if carry:                                             # a held step was allowed: not a try the Pip sent back
-        return (f"{row['notes']} What you did so far is still in your copy. Finish the job: {row['title']}.\n\n{row['brief']}")
+        return (f"{row['notes']} What you did so far is still {kept}. Finish the job: {row['title']}.\n\n{row['brief']}")
     return (f"Try {row['tries'] + 1} of {MAX_TRIES}. Your Pip checked your last try and sent it back: {row['notes'] or 'it was not right yet'}. "
-            f"Carry on in your copy (what you did so far is still there) and finish the job: {row['title']}.\n\n{row['brief']}")
+            + (f"Carry on in your copy (what you did so far is still there) and finish the job: {row['title']}.\n\n{row['brief']}"
+               if row["copy"] else f"Carry on from what you did so far and finish the job: {row['title']}.\n\n{row['brief']}"))
 
 
 _RESULT = re.compile(r"^\s*RESULT:\s*(PASS|RETRY)\b\s*[—\-:]*\s*(.*)$", re.I | re.M)
@@ -726,6 +740,12 @@ def merge(store, row) -> None:
     import shutil
     registry, db = store.registry, store.db
     if row["kind"] == "work":
+        with registry.transaction():
+            db.execute("UPDATE pip_agent_jobs SET state='merged',updated_at=? WHERE id=?", (_now(registry), row["id"]))
+        _job_ended(store, _row(db, row["id"]))
+        return
+    if not row["copy"]:
+        # A sub-agent of a Pip with no folder: what it did is in its words (the Pip's check said them); nothing to merge.
         with registry.transaction():
             db.execute("UPDATE pip_agent_jobs SET state='merged',updated_at=? WHERE id=?", (_now(registry), row["id"]))
         _job_ended(store, _row(db, row["id"]))
@@ -921,3 +941,124 @@ def commit_model(store, run, result) -> None:
     chosen = agents_model(store.registry, run["pip_id"])
     chosen["model_choice"] = choice
     store.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (MODEL_KEY + run["pip_id"], json.dumps(chosen)))
+
+
+# ---- a Pip starts one itself (27 Nov) -------------------------------------------------------------------------------
+# Decided 27 Nov: a Pip uses its own sub-agents when a job is big enough, with no words of the user's asking for it, as
+# Work's agent does: in its own chat's turns and its routines', at every level. What its reply asks for is kept with
+# that reply (commit_helpers) and starts on the next tick (send_due), in a slot of its sub-agents: in a copy of its
+# folder for a Pip with one (the change reaches its copy only once it has checked it, as a fix's does), with its own
+# tools for a Pip with none. Its tools and level, never more; never a sub-agent's own (no nesting), a check or a fix.
+TASK = "task"
+HELPER_TOOL = "start_subagent"
+HELPER_PIN = "subagents_tool"                  # in a run's manifest (supervisor-made, never stored): the tool is offered
+HELPER_MOST = 2                                # helpers one reply starts
+HELPER_BRIEF_MOST = 8000
+
+TASK_CHECK_TEXT = (
+    "This message is from DGC, not the user. A sub-agent you started has finished try {try_} of {most}. Check its work "
+    "before anything reaches your copy: what it said, and the change below. Tell the user in a few plain sentences what "
+    "it did and what you make of it (don't paste the diff), then go on with what you were doing. End your reply with a "
+    "last line \"RESULT: PASS\" to keep its work (its change goes into your copy), or \"RESULT: RETRY — what it must do "
+    "differently\" to send it back (it carries on in its copy).\n\n"
+    "The job: {title}\n\nWhat the sub-agent said:\n{said}\n\nThe change ({count} file(s)):\n{diff}")
+TASK_CHECK_TEXT_NO_COPY = (
+    "This message is from DGC, not the user. A sub-agent you started has finished try {try_} of {most}. Check its work: "
+    "what it said below. Tell the user in a few plain sentences what it did and what you make of it, then go on with "
+    "what you were doing. End your reply with a last line \"RESULT: PASS\" when its work is right, or \"RESULT: RETRY — "
+    "what it must do differently\" to send it back.\n\n"
+    "The job: {title}\n\nWhat the sub-agent said:\n{said}")
+
+
+def _personal(store, pip_id) -> bool:
+    """A Pip with no folder (Personal): its sub-agent has no copy to work in."""
+    workspace = store.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()
+    try:
+        return workspace is None or store.registry.get(workspace[0])["kind"] == "personal"
+    except RegistryError:
+        return True
+
+
+def _turn_of_its_own(registry, run_id) -> bool:
+    """A Pip's own turn (its chat's or a routine's): never a sub-agent's, the Pip's check of one, or a fix's."""
+    from .pip_fixes import FIX_KEY
+    message = registry.db.execute("SELECT request_key FROM pip_chat_messages WHERE run_id=? AND role='user' ORDER BY seq "
+                                  "LIMIT 1", (run_id,)).fetchone()
+    return not (message is not None and str(message[0] or "").startswith((CHECK_KEY, FIX_KEY, AGENT_KEY)))
+
+
+def helper_runtime(registry, row, manifest) -> dict:
+    """In the supervisor, as a run starts: a Pip's own chat or routine turn is offered start_subagent (the pin)."""
+    if manifest.get("run_kind") != "conversation" or not isinstance(manifest.get("conversation"), dict):
+        return manifest
+    if manifest.get("agent"):
+        return {k: v for k, v in manifest.items() if k != HELPER_PIN}
+    try:
+        own = _turn_of_its_own(registry, row["id"])
+    except Exception:                                 # noqa: BLE001 - can't tell: not offered
+        own = False
+    if not own:
+        return {k: v for k, v in manifest.items() if k != HELPER_PIN}
+    return {**manifest, HELPER_PIN: {"most": HELPER_MOST}}
+
+
+def helper_schema(has_folder: bool) -> dict:
+    where = ("It works in a copy of your folder, with your tools and level; its change reaches your copy only once you "
+             "have checked it. " if has_folder else "It works with your tools and level. ")
+    return {"type": "function", "function": {"name": HELPER_TOOL, "description": (
+        "Start one of your sub-agents on a big independent part of the job (a study across many files or pages, a fix "
+        "with its tests, a draft from a lot of reading), so you can carry on with the rest and keep talking with the "
+        "user. " + where + "It starts as your reply is kept, in a slot of your sub-agents, and cannot see this chat: "
+        "brief it fully. When it ends, DGC shows you its work in your chat to check. Keep quick lookups and small "
+        "steps yourself, and do what the user says about sub-agents (how many, or none)."),
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string", "description": "the job in a few words, like \"Audit the checkout pages\""},
+            "brief": {"type": "string", "description": "what it must do: the goal, what you already know, the files or "
+                                                         "pages, what done looks like and what to report back"}},
+            "required": ["title", "brief"], "additionalProperties": False}}}
+
+
+def helper_tool_result(arguments, already: int) -> tuple[dict | None, str]:
+    """In the worker: (the job to start as the reply is kept, what the tool says)."""
+    args = arguments if isinstance(arguments, dict) else {}
+    title = " ".join(str(args.get("title") or "").split())[:200]
+    brief = str(args.get("brief") or "").strip()[:HELPER_BRIEF_MOST]
+    if already >= HELPER_MOST:
+        return None, f"Not started: one reply starts at most {HELPER_MOST} sub-agents."
+    if not title or not brief:
+        return None, "Not started: give it a title and a brief."
+    return ({"title": title, "brief": brief},
+            "It starts as your reply is kept, in a slot of your sub-agents; you check its work when it ends. Tell the "
+            "user in one short sentence that a sub-agent is working on it.")
+
+
+def valid_helpers(value) -> list[dict] | None:
+    if not isinstance(value, list) or len(value) > HELPER_MOST:
+        return None
+    for item in value:
+        if (not isinstance(item, dict) or set(item) != {"title", "brief"} or not isinstance(item["title"], str)
+                or not isinstance(item["brief"], str) or not item["title"].strip() or not item["brief"].strip()
+                or len(item["title"]) > 200 or len(item["brief"]) > HELPER_BRIEF_MOST):
+            return None
+    return value
+
+
+def commit_helpers(store, run, result) -> None:
+    """In the supervisor, as a chat reply is kept (pip_chat.insert_reply): what its start_subagent asked for, checked
+    again here (never the worker's word): a Pip's own turn, never a sub-agent's, a check or a fix. Each is a queued
+    job; the next tick starts it (send_due)."""
+    asked = result.get("subagents") if isinstance(result, dict) else None
+    if asked is None:
+        return
+    asked = valid_helpers(asked)
+    if asked is None:
+        raise RegistryError("invalid_reply", "This reply's sub-agents are invalid.")
+    manifest = run.get("manifest") if isinstance(run.get("manifest"), dict) else {}
+    # (The pin is made as the run starts and never stored: what offered the tool is checked again here instead.)
+    if manifest.get("agent") or manifest.get("run_kind") != "conversation" or not isinstance(manifest.get("conversation"), dict):
+        return
+    if not _turn_of_its_own(store.registry, run["id"]):
+        return
+    ensure(store.db)
+    for item in asked:
+        insert_queued(store, run["pip_id"], kind=TASK, title=item["title"], brief=item["brief"])

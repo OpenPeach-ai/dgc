@@ -4023,8 +4023,8 @@ class Agent(GoalLifecycle):
         already sits. Depth comes from `self.depth`, which the parent sets when it spawns the
         child, so a child cannot claim to be shallower than it is.
 
-        SHOULD it, on this request -- the tool profile and, under `adaptive`, whether the request
-        asked for something delegation serves.
+        SHOULD it, on this request -- that is the model's to weigh, on every profile: the tool's own
+        description carries the restraint (27 Nov: `adaptive` no longer withholds it on the wording).
 
         It used to answer the first question with the second one's evidence: a child was offered
         `task` only if the regex behind the `delegate` intent matched its brief, so "delegate the
@@ -4040,13 +4040,10 @@ class Agent(GoalLifecycle):
             return False
         if self.depth >= self.max_subagent_depth():
             return False
-        if self.depth > 0:
-            return True                       # inside the cap, a child delegates like the lead
-        profile = str(self.config.get("tool_profile", "standard") or "standard").lower()
-        active = getattr(self, "_active_tool_intents", set())
-        return (profile in ("full", "standard") or "delegate" in active
-                or bool(self.config.get("ultra_mode", False))
-                or "repo_navigation" in active)
+        # Inside the cap, under every profile `adaptive` included: whether a helper makes the job easier is the
+        # model's call, in a goal's turns as in any other, never the request's wording (decided 27 Nov: goals ran
+        # with no sub-agent on an `adaptive` profile, whose "delegate" words a goal's objective never says).
+        return True
 
     def _supervision_exposed(self) -> bool:
         """Are `list_tasks` / `wait_tasks` offered on this request?
@@ -4781,6 +4778,10 @@ class Agent(GoalLifecycle):
             "known or ruled out, and exactly what to return.",
             "When a child returns, tell the user in one or two sentences what came back and name "
             "the files. Do not paste the child's logs.",
+            # (Asked 27 Nov: "don't deploy more than 1 sub agent at a time" must hold even where the session could run
+            # many, and in Ultra, whose batching rules below are firm.)
+            "What the user says about helpers comes before everything below: how many at once (\"one at a time\" "
+            "means one `task` call with one helper, then the next), whether to use them at all, which model.",
         ]
         from .permissions import session_policy
         one_shot = self._non_interactive()

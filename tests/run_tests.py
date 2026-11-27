@@ -14832,11 +14832,14 @@ def test_steering():
     a._mcp_query_text = ""
     _adaptive = a._tool_schemas()
     _adaptive_names = {tool["function"]["name"] for tool in _adaptive}
-    _optional = {"web_fetch", "web_search", "add_skill", "save_memory", "artifact", "task"}
+    # `task` is not optional: every top-level turn offers it under every profile, so using a
+    # sub-agent is the model's call, never a match on the user's wording.
+    _optional = {"web_fetch", "web_search", "add_skill", "save_memory", "artifact"}
     check("adaptive catalog keeps all core coding tools",
           {"read_file", "write_file", "apply_patch", "bash", "glob", "grep", "repo_map",
            "code_intel", "todo"}
           <= _adaptive_names)
+    check("adaptive catalog offers sub-agents on every top-level turn", "task" in _adaptive_names)
     check("adaptive catalog withholds unrelated optional tools",
           not (_optional & _adaptive_names) and "skill" not in _adaptive_names
           and "update_goal" not in _adaptive_names)
@@ -15109,7 +15112,7 @@ def test_steering():
             _adaptive_protocol.split("Available tools:\n", 1)[1])
     }
     check("adaptive text-tool protocol mirrors the filtered native catalog",
-          "read_file" in _adaptive_protocol_names
+          "read_file" in _adaptive_protocol_names and "task" in _adaptive_protocol_names
           and not (_optional & _adaptive_protocol_names))
     _spurious_expansion = False
     for _prompt in ("Update the documentation for the frontend package; remember to run tests",
@@ -15137,12 +15140,14 @@ def test_steering():
     _full = a._tool_schemas()
     _full_names = {tool["function"]["name"] for tool in _full}
     check("full tool profile restores every stateless execution tool",
-          _optional | {"repo_map", "code_intel"} <= _full_names
+          _optional | {"repo_map", "code_intel", "task"} <= _full_names
           and {"skill", "bash_output", "bash_kill"} <= _full_names
           and "present_plan" not in _full_names)
-    check("adaptive catalog removes at least a quarter of repeated schema prefill",
+    # A fifth, not the quarter it was: `task` (about a tenth of the full catalog) now rides on every
+    # adaptive turn. The rest of the optional tools are still filtered.
+    check("adaptive catalog removes at least a fifth of repeated schema prefill",
           len(json.dumps(_adaptive, separators=(",", ":")))
-          < 0.75 * len(json.dumps(_full, separators=(",", ":"))))
+          < 0.80 * len(json.dumps(_full, separators=(",", ":"))))
     check("adaptive skill filtering removes at least a third of the ordinary system prompt",
           len(_plain_prompt) < 0.67 * len(a.system_prompt()))
 

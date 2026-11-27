@@ -3320,6 +3320,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_work_agents
     work_pin = manifest.get(pip_work_agents.PIN) if conversation is not None else None
     work_candidates = []               # sub-agents with Work tools it starts at Do it all (pip_work_agents.commit)
+    from . import pip_agents as _pip_agents
+    helper_pin = manifest.get(_pip_agents.HELPER_PIN) if conversation is not None else None
+    helper_candidates = []             # its own sub-agents it starts (pip_agents.commit_helpers)
     from . import pip_jobs
     jobs_pin = manifest.get(pip_jobs.PIN) if conversation is not None and isinstance(manifest.get(pip_jobs.PIN), list) else None
     job_candidates = []                # jobs it hands other Pips with ask_pip (pip_jobs.commit, Pips API 111)
@@ -3764,7 +3767,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             # One kind of Pip (16 Nov): every Pip's chat has the Personal chat's tools; a Pip with a folder has its
             # project reads (the Agent's own, below) besides. A run that isn't a chat (an audit, a draft, a reviewed
             # execution) pins none of these, so it has only its reviewed tools.
-            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + ([dgc_browser_lane.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None)] if lane_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.PIP_SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_questions.schema()] if conversation is not None and conversation.get('questions') is True and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_work_agents.schema()] if isinstance(work_pin, dict) else []) + ([pip_jobs.schema()] if jobs_pin else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+            own = ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + ([dgc_browser_lane.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None)] if lane_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_library.schemas() + pip_library.doc_schemas() + pip_research.schemas() + [image_keep.PIP_SCHEMA] if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_keys.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None and not (conversation.get('goal') or {}).get('own') else []) + ([pip_questions.schema()] if conversation is not None and conversation.get('questions') is True and not (conversation.get('goal') or {}).get('own') else []) + ([pip_project_copies.UNDO_SCHEMA] if conversation is not None and manifest.get('user_turn') is True and not personal else []) + ([pip_holds.answer_schema(asked_waiting)] if asked_waiting else []) + ([pip_agents.model_schema(helper_connections)] if helper_connections else []) + ([pip_work_agents.schema()] if isinstance(work_pin, dict) else []) + ([_pip_agents.helper_schema(not personal)] if isinstance(helper_pin, dict) else []) + ([pip_jobs.schema()] if jobs_pin else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)], direct=bool(chat_setup and chat_setup['direct']))] if conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([pip_goals.schema()] if conversation is not None and conversation.get('goal') else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             if personal:
                 return own
             schemas = [*super()._tool_schemas(*args, **kwargs), *own]
@@ -4124,6 +4127,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 update, told = pip_goals.tool_result(call.arguments if isinstance(call.arguments, dict) else {})
                 if update is not None:
                     goal_candidate = update
+                return told
+            if isinstance(helper_pin, dict) and call.name == _pip_agents.HELPER_TOOL:
+                candidate, told = _pip_agents.helper_tool_result(call.arguments, len(helper_candidates))
+                if candidate is not None:
+                    helper_candidates.append(candidate)
                 return told
             if isinstance(work_pin, dict) and call.name == pip_work_agents.TOOL:
                 candidate, told = pip_work_agents.tool_result(call.arguments, len(work_candidates))
@@ -4896,6 +4904,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 result['helper_model'] = helper_model['choice']
             if work_candidates:
                 result['work_subagents'] = work_candidates
+            if helper_candidates:
+                result['subagents'] = helper_candidates
             if job_candidates:
                 result['pip_jobs'] = job_candidates
             if goal_candidate is not None:
@@ -5702,6 +5712,7 @@ def _execute_run(registry, row, config):
     manifest = pip_agents.runtime(config, row, manifest)      # their saved connections, by name, for its helpers' model
     from . import pip_work_agents
     manifest = pip_work_agents.runtime(registry, row, manifest)   # at Do it all: start_work_subagent (Pips API 109)
+    manifest = pip_agents.helper_runtime(registry, row, manifest)  # its own turns, every level: start_subagent (27 Nov)
     from . import pip_jobs
     manifest = pip_jobs.runtime(registry, row, manifest)          # ask_pip: hand another Pip a job (Pips API 111)
     brain_pin = manifest["model_settings"].get("brain") if isinstance(manifest.get("model_settings"), dict) else None

@@ -689,6 +689,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # `new`, and it lists `pips` (every Pip the person may choose, never an archived one); get_dgc_browser_recent carries
 # `new_sites` (how many are new). A site the person signs in to in DGC Browser joins the list by itself.
 # get_dgc_browser_lanes {} (R, local only): the Pips working there now and whether any run is live (the dock's look).
+# Also in 113 (27 Nov): a Pip starts its own sub-agents, with no words of the user's asking: its own chat and routine
+# turns, at every level, have the tool start_subagent {title, brief} (never a sub-agent's turn, a check or a fix); a
+# reply that used it carries `subagents`, kept as queued jobs (at most two a reply). list_pip_agents rows of kind "task"
+# are these: in a copy of the Pip's folder for a folder Pip (merged into its copy on PASS, as a fix's), with its own
+# tools for a Pip with none (nothing to merge). Local only.
 PIPS_API_VERSION = 113
 
 

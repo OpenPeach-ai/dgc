@@ -81,17 +81,15 @@ class ExplorerToolGateTests(unittest.TestCase):
     def test_parent_prompt_names_the_specialists(self):
         temp = tempfile.TemporaryDirectory(prefix="dgc-parent-prompt-")
         self.addCleanup(temp.cleanup)
-        # The roster follows the `task` tool. The default profile offers `task` on every top-level
-        # turn, so the roster is there without asking for delegation; the adaptive profile is where
-        # the tool — and with it the roster — can be withheld.
+        # The roster follows the `task` tool, which every top-level turn offers under every profile
+        # (using a sub-agent is the model's call), so it is there without asking for delegation.
         default = Harness(Path(temp.name))
         self.addCleanup(default.close)
         default.agent._activate_tool_intents("rename the helper in utils.py", replace=True)
         self.assertIn("explorer:", default.agent.system_prompt())
         h = Harness(Path(temp.name), tool_profile="adaptive")
         self.addCleanup(h.close)
-        self.assertNotIn("explorer:", h.agent.system_prompt())
-        h.agent._activate_tool_intents("delegate the survey to a sub-agent", replace=True)
+        h.agent._activate_tool_intents("rename the helper in utils.py", replace=True)
         prompt = h.agent.system_prompt()
         self.assertIn("explorer:", prompt)
         self.assertIn("critic:", prompt)

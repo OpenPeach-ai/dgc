@@ -14,6 +14,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   anyway, reading the order for "my browser" as covering it. A Work turn whose message names DGC Browser sends its
   first page opened with the browser tool to DGC Browser instead, once; the step says "Opening it in DGC Browser
   instead", not in red. Messages that don't name it are as before ("check my browser" tries Work's browser first).
+- **Sub-agents are the model's call, in Work and in Pips.** On a config whose tool profile was `adaptive`, Work's
+  agent was offered sub-agents only when the message said words like "delegate", so a goal never got one; now it is
+  offered them on every turn under every profile. A Pip starts its own sub-agents too: its chat and routine turns, at
+  every level, have `start_subagent` (two at most a reply), which runs in a copy of its folder (its change reaches the
+  Pip's copy once the Pip has checked it) or, for a Pip with no folder, with its own tools; the Pip says in its chat
+  what came back. What you say about sub-agents ("one at a time", "none") comes first.
 - **Home's Work, Chats and Pips cards put the latest first**, as Recent does: the session or chat with the newest
   reply on top, a session at work or a chat answering counted as active now, a pinned chat first. The Pips card lists
   Core, then the Pip that spoke or reported last; a Pip waiting for you is no longer lifted over newer ones (Needs you

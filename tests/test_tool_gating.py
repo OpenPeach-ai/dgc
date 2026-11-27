@@ -498,13 +498,14 @@ class DelegationDepthIsASettingNotAPhraseTests(unittest.TestCase):
         bounded._agent_tool_allowlist = frozenset({"read_file"})
         self.assertNotIn("task", self.names(bounded))
 
-    def test_an_adaptive_lead_still_opens_on_the_positive_ask(self):
-        quiet = self.at(0, tool_profile="adaptive")
-        quiet._active_tool_intents = set()
-        self.assertNotIn("task", self.names(quiet))
-        asked = self.at(0, tool_profile="adaptive")
-        asked._active_tool_intents = {"delegate"}
-        self.assertIn("task", self.names(asked))
+    def test_an_adaptive_lead_delegates_whatever_the_wording(self):
+        # Decided 27 Nov: helpers are the model's call in every turn, a goal's included, on every profile. An
+        # `adaptive` lead was offered `task` only when the request said "delegate"-like words, so goals never got one.
+        for intents in (set(), {"delegate"}, {"narrow_scope"}):
+            with self.subTest(intents=intents):
+                agent = self.at(0, tool_profile="adaptive")
+                agent._active_tool_intents = intents
+                self.assertIn("task", self.names(agent))
 
     # ---- and the call itself is refused, not merely unlisted ---------------------------------
     def test_a_call_past_the_cap_is_refused_with_the_depth_and_the_setting(self):

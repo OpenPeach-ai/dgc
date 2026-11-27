@@ -151,29 +151,30 @@ class UltraDelegationTests(unittest.TestCase):
         self.assertNotIn("# DGC Ultra execution profile", agent.system_prompt())
 
     def test_guidance_is_paid_for_only_when_task_is_offered(self):
-        # The default `standard` profile offers `task` on every top-level turn, so the guidance
-        # always travels with it. The adaptive profile is where the tool can be withheld, and the
-        # guidance must not be sent about a tool that is not there.
-        default = self.agent(ultra_mode=False, mode="default")
-        default._activate_tool_intents("Rename the helper in utils.py.", replace=True)
-        self.assertIn("task", self.names(default))
-        self.assertIn("# Delegating work", default.system_prompt())
-
-        agent = self.agent(ultra_mode=False, mode="default", tool_profile="adaptive")
-        agent._activate_tool_intents("Rename the helper in utils.py.", replace=True)
-        self.assertNotIn("task", self.names(agent))
-        self.assertNotIn("# Delegating work", agent.system_prompt())
-
-        for ask in ("Use sub-agents to fix these two bugs.",
-                    "Map how this codebase is structured and explain it."):
-            with self.subTest(ask=ask):
-                agent._activate_tool_intents(ask, replace=True)
-                prompt = agent.system_prompt()
-                self.assertIn("task", self.names(agent))
-                self.assertIn("# Delegating work", prompt)
-                self.assertIn("Delegate when it clearly helps", prompt)
-                self.assertIn("Do small or tightly coupled work yourself", prompt)
-                self.assertNotIn("# DGC Ultra execution profile", prompt)
+        # `task` is offered on every top-level turn under every profile: using a sub-agent is the
+        # model's call, not a match on the user's wording. So the guidance always travels with it,
+        # and where the tool is withheld (plan mode, a child at the depth limit) the guidance about
+        # it must not be sent either.
+        for profile in ("standard", "adaptive"):
+            for ask in ("Rename the helper in utils.py.",
+                        "Use sub-agents to fix these two bugs.",
+                        "Map how this codebase is structured and explain it."):
+                with self.subTest(profile=profile, ask=ask):
+                    agent = self.agent(ultra_mode=False, mode="default", tool_profile=profile)
+                    agent._activate_tool_intents(ask, replace=True)
+                    prompt = agent.system_prompt()
+                    self.assertIn("task", self.names(agent))
+                    self.assertIn("# Delegating work", prompt)
+                    self.assertIn("Delegate when it clearly helps", prompt)
+                    self.assertIn("Do small or tightly coupled work yourself", prompt)
+                    self.assertNotIn("# DGC Ultra execution profile", prompt)
+        plan = self.agent(ultra_mode=False, mode="plan", tool_profile="adaptive")
+        plan._activate_tool_intents("Use sub-agents to map how this codebase is structured.", replace=True)
+        self.assertNotIn("task", self.names(plan))
+        self.assertNotIn("# Delegating work", plan.system_prompt())
+        child = self._at_depth(1, ultra_mode=False, tool_profile="adaptive")
+        self.assertNotIn("task", self.names(child))
+        self.assertNotIn("# Delegating work", child.system_prompt())
 
     def test_task_schema_invites_exploration_parallelism_and_review(self):
         task = next(t for t in TOOL_SCHEMAS if t["function"]["name"] == "task")["function"]

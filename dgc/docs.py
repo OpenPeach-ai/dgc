@@ -1530,9 +1530,10 @@ Five specialists are always available as the `task` tool's `agent` argument:
   would show it, edits nothing, and starts its answer with CONFIRMED, REFUTED or UNSURE.
 - **worker** — implement a bounded change (the default when `agent` is omitted).
 
-The main agent is offered `task` when you ask it to delegate or to survey the codebase, and on
-every turn under Ultra; a sub-agent is offered it only when its own brief asks, so work does not
-fan out recursively. The roster above, plus your own definitions, is listed to the model only
+The main agent is offered `task` on every turn, under every tool profile, in a goal's turns as in
+any other: whether a helper makes the job easier is its call, and what you say about helpers (how
+many at once, or none) comes first. A sub-agent may start its own only within `max_subagent_depth`
+(1 by default: children don't nest), so work does not fan out recursively. The roster above, plus your own definitions, is listed to the model only
 while `task` is offered. After a researcher writes a design or plan file, the main agent should
 spawn critic on that path before implementing, unless you asked it to skip review. When a
 child finishes, the main agent reports in one or two sentences and names the files; the
@@ -2546,8 +2547,8 @@ the model choose; a tool with nothing to act on (no skills installed, no backgro
 active goal) still stays out. `tool_profile: adaptive` instead offers the core read / edit / search
 / shell surface and adds the others only when the request's wording asks for them, which keeps a
 small local context clear at the cost of a differently worded ask being told the tool does not
-exist; DGC's Artifacts tools (`make_artifact`, `edit_artifact`, `find_artifacts`) are offered on every
-turn there too. `tool_profile: full` offers every tool allowed by the current permission mode. Plan mode
+exist; DGC's Artifacts tools (`make_artifact`, `edit_artifact`, `find_artifacts`) and helpers (`task`:
+whether a sub-agent makes the job easier is the model's call) are offered on every turn there too. `tool_profile: full` offers every tool allowed by the current permission mode. Plan mode
 denies mutations. Full-auto omits the blocking options prompt unless your request mentions
 choosing.
 
@@ -4153,6 +4154,11 @@ there, or **came back**. A run with nothing new says nothing new. What happens n
 - **A sub-agent with Work tools.** A fix its copy can't do (it needs your `.env` or a running service) can
   go to a sub-agent that works on your real folder with a Work session's full tools, from the fix card. It
   shows in the Pip's chat, and its change has **Undo** like any other.
+- **Its own sub-agents, when a job is big.** A Pip decides by itself, at every level, to hand a big part
+  of a job to one of its sub-agents (two at most a reply), with no words of yours needed: in a copy of
+  its folder for a folder Pip (its change reaches the Pip's copy once the Pip has checked it), with its
+  own tools for a Pip with none. The Pip says in its chat what came back. Say "one at a time" or "no
+  sub-agents" and it does as you say.
 - **One try per finding.** A finding it fixed that comes back is asked about, at every level, and never
   fixed again by itself. One fix at a time per Pip: while its Allow card waits, a later check updates
   that card; while a change waits at Apply, a later check asks nothing new.
@@ -5596,8 +5602,8 @@ helpers and DGC's artifacts work as on any other model. DGC never reads or reuse
   intact in the owner-private session, preserving exact `/rewind` restoration.
 - `tool_profile` — `standard` (default) offers every product tool on every request and lets the
   model decide (about 3,300 tokens of tool schema, cached by the provider between turns).
-  `adaptive` offers core coding tools always and adds web, artifact, skill-install, memory,
-  delegation and background-monitor tools only when the request's wording asks for them — about
+  `adaptive` offers core coding tools and helpers (`task`) always and adds web, skill-install, memory
+  and background-monitor tools only when the request's wording asks for them — about
   1,500 tokens of schema for a small local context window, at the cost of a differently worded ask
   being refused. `full` also drops the state-based filters and offers every tool on every model
   request. Releases through 0.41.7 wrote their `adaptive` default into every config, so the first
