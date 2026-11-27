@@ -35,6 +35,9 @@ const skipOrFail = (t) => {
 // (Built before any test is declared: a test file whose tests come after a top-level await can see its after() run first.)
 const bundle = await build({ entryPoints: [src + "dgcBrowserTab.js"], bundle: true, write: false, format: "esm", platform: "browser", outdir: "out", target: "chrome108" });
 const pageJs = bundle.outputFiles.find((f) => f.path.endsWith(".js")).text, pageCss = bundle.outputFiles.find((f) => f.path.endsWith(".css")).text;
+// (The Pips view too, here: built further down, after the first test, its await let after() close the browser before
+// the page tests ran whenever the whole suite was busy building, 11 of them failing on a closed browser, 27 Nov.)
+const viewModule = await pipsViewModule();
 before(async () => {
   if (!chromium) return;
   try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] }); } catch { browser = null; }
@@ -57,7 +60,6 @@ test("only your own tab may open, feed or close its screen's stream", () => {
   no(null);
 });
 
-const viewModule = await pipsViewModule();
 function editorWith(caps = {}) {
   const panels = [];
   const vscode = { ViewColumn: { Active: -1, Beside: -2 }, Uri: { joinPath: (...p) => ({ path: p.map((x) => x.path || x).join("/") }), file: (p) => ({ path: p }) },
