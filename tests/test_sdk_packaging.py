@@ -147,6 +147,17 @@ class PackageMetadataTests(unittest.TestCase):
         package = json.loads((ROOT / "sdk/typescript/package.json").read_text(encoding="utf-8"))
         self.assertEqual(package["files"], ["dist", "README.md", "LICENSE"])
 
+    def test_dgc_itself_names_its_license_the_pep_639_way(self):
+        # setuptools stops building the TOML table form (license = { file = ... }) after 2027-02-18, and install.sh builds
+        # DGC from source on every user's machine with the newest setuptools: every new install would fail then.
+        data = _toml(ROOT / "pyproject.toml")
+        project = data["project"]
+        self.assertEqual(project["license"], "Apache-2.0")
+        self.assertEqual(project["license-files"], ["LICENSE"])
+        self.assertFalse([c for c in project.get("classifiers", []) if c.startswith("License ::")],
+                         "PEP 639: the license expression replaces license classifiers")
+        self.assertEqual(data["build-system"]["requires"], ["setuptools>=77"], "the license fields need setuptools 77")
+
     def test_check_dist_accepts_good_artifacts_and_names_each_defect(self):
         check_dist = _load("sdk/scripts/check_dist.py", "dgc_sdk_check_dist")
         with tempfile.TemporaryDirectory() as tmp:

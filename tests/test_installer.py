@@ -107,7 +107,7 @@ def _wheelhouse() -> Path:
         [python3, "-c", "import sys, sysconfig; print(sys.version, sysconfig.get_platform())"],
         capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL, env=fetch_env).stdout
     lock = (PROJECT / "requirements.lock").read_bytes()
-    key = hashlib.sha256(lock + b"setuptools>=68 wheel" + os.path.realpath(python3).encode()
+    key = hashlib.sha256(lock + b"setuptools>=77 wheel" + os.path.realpath(python3).encode()
                          + identity.encode()).hexdigest()[:16]
     target = Path(tempfile.gettempdir()) / f"dgc-installer-wheelhouse-{key}"
     if (target / ".complete").is_file():
@@ -119,7 +119,7 @@ def _wheelhouse() -> Path:
                        timeout=BUILD_TIMEOUT, stdin=subprocess.DEVNULL, env=fetch_env)
         subprocess.run([str(scratch / "venv" / "bin" / "pip"), "download", "-q",
                         "--disable-pip-version-check", "-d", str(staging),
-                        "-r", str(PROJECT / "requirements.lock"), "setuptools>=68", "wheel"],
+                        "-r", str(PROJECT / "requirements.lock"), "setuptools>=77", "wheel"],
                        check=True, timeout=BUILD_TIMEOUT, stdin=subprocess.DEVNULL, env=fetch_env)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)

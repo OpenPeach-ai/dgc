@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]               # PEP 639 license fields (below) need 77
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "dgc"
 dynamic = ["version"]                       # single-sourced from dgc/__init__.py __version__
 description = "Interactive coding-agent CLI harness for local LLMs (Ollama, LM Studio, vLLM, llama.cpp)"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "Apache-2.0"                      # an SPDX expression: the TOML table form stops building after 2027-02-18
+license-files = ["LICENSE"]
 authors = [{ name = "Mohit Kalra" }]
 dependencies = ["rich==15.0.0", "prompt_toolkit==3.0.53", "requests==2.34.2", "ddgs==9.16.1",
                 "pypdf==7.0.0"]
