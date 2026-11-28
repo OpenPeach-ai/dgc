@@ -4758,10 +4758,11 @@
     const words = state === "applied" ? (timed ? "" : "Steered") : state === "pending" ? (timed ? "" : "Steering \u2026")
       : STEER_NOTE[state];
     let note = node.querySelector(":scope > .steer-note");
-    if (!words) { if (note) note.remove(); syncSteerTime(node); return; }
+    // (syncGoalMark after the steer words: they prepend themselves, and a goal's "Goal" stays first, 28 Nov.)
+    if (!words) { if (note) note.remove(); syncSteerTime(node); syncGoalMark(node); return; }
     if (!note) { note = el("div", "steer-note"); node.appendChild(note); }
     note.textContent = words;
-    syncSteerTime(node);
+    syncSteerTime(node); syncGoalMark(node);
     // A queued message can be steered into the running turn instead of waiting for it to end (reported
     // 19 Oct): the same as pressing Enter while the model works, so it keeps going and reads it at its next step.
     if (state === "queued" && steerQueuedLive && !replaying) {
@@ -10869,6 +10870,10 @@ function permissionChoices(ev) {
           if (pending) pending.acknowledged = true;
           if (pending?.node) {
             pending.node.querySelector(".role").textContent = "you · steering pending";
+            // A goal sent while a turn ran has no time yet (submitGoal stamps only an idle start): it gets the one it
+            // was sent at, so "Steering" joins its time row ("Goal · Steering · 12:17 AM") instead of a line of its
+            // own under "Goal" (reported 28 Nov).
+            if (!pending.node.querySelector(":scope > .msg-time")) stampPrompt(pending.node, pending.sentAt || Date.now());
             setSteerState(pending.node, "pending");
           }
         } else {

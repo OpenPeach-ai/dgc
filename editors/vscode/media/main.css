@@ -934,6 +934,13 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
    date is the tooltip. */
 .msg-time { color: var(--muted); font-size: 11px; line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .msg.user > .msg-time { margin-top: 2px; }
+/* A prompt's time row is one line: "Goal", its dot, the steer words and the clock stand on one baseline, and the Goal
+   icon is centred on that line (28 Nov: "Goal" and its icon sat under "Steered · 12:17 AM"; inline, the mark's box sat
+   on the line's bottom, and a centred box with its own line height still drew its words a pixel low). A flex row drops
+   a span's trailing space, so the row keeps its spaces (pre): "Steered · " ends in one. */
+.msg.user > .msg-time { display: flex; align-items: baseline; white-space: pre; }
+.msg-time > .goal-mark.in-time { font: inherit; font-weight: var(--w-med); vertical-align: baseline; }
+.msg-time > .goal-mark.in-time > span, .msg-time > .goal-mark.in-time::after { align-self: baseline; }
 .response-actions > .msg-time { padding: 0 var(--sp-1); }
 .ract { height: var(--control-sm); min-width: var(--control-sm); border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 0 var(--sp-1); border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; transition: background .12s, color .12s; }
 .ract:hover { color: var(--text); background: var(--surface2); }
