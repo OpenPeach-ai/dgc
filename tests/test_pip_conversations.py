@@ -422,8 +422,16 @@ class ComputerTakesTurns(unittest.TestCase):
         self.addCleanup(sock.close)
         said, watched = [], []
         def end_a():
-            time.sleep(1.0)                     # after the first look (0.2 s here) and a patient ask or two
-            watched.append(pip_run_watchdog.is_waiting(b))
+            # Once the step has said it waits (after its first look, 0.2 s here), the watchdog reads it as waiting
+            # while it asks again. Read then, not at a fixed second: a GitHub Mac read it between two asks (28 Nov).
+            deadline = time.monotonic() + 10
+            while not said and time.monotonic() < deadline:
+                time.sleep(0.02)
+            seen = False
+            while not seen and time.monotonic() < deadline:
+                seen = pip_run_watchdog.is_waiting(b)
+                time.sleep(0.01)
+            watched.append(seen)
             host.end(a)
         threading.Thread(target=end_a).start()
         with patch.object(pip_computer, "FIRST_LOOK", 0.2), patch.object(pip_computer, "LEASE_WAIT", 0.3):
