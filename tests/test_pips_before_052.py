@@ -186,6 +186,20 @@ class TheWelcome(unittest.TestCase):
         self.assertEqual([p["name"] for p in said["personal"]], ["Mornings", "Garden notes"], "Core is not news")
         self.assertEqual([p["name"] for p in said["do_it_all"]], ["Mornings"])
 
+    def test_pips_made_in_the_same_instant_are_named_in_the_order_they_were_made(self):
+        # A fast machine makes two Pips within one stamp: the list was then ordered by their random ids (GitHub's runner
+        # said "Garden notes, Mornings" on 27 Nov). It is the order they were made in.
+        def make(registry, store):
+            home = registry.personal()["id"]
+            return [store.create(home, name, None, "editor-user", pip_type="quill")
+                    for name in ("Mornings", "Garden notes", "Allotment", "Bills")]
+        self.made_in_051(make)
+        db = sqlite3.connect(self.directory / "registry.sqlite3")
+        db.execute("UPDATE pips SET created_at=(SELECT MIN(created_at) FROM pips)")
+        db.commit()
+        db.close()
+        self.assertEqual([p["name"] for p in self.welcome()["personal"]], ["Mornings", "Garden notes", "Allotment", "Bills"])
+
     def test_a_new_user_and_core_alone_are_not_welcomed(self):
         self.assertFalse(self.welcome()["had_pips"], "a new database: nothing moved")
         self.made_in_051(lambda registry, store: store.create(registry.personal()["id"], "Core", None, "editor-user",

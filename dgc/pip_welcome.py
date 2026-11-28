@@ -44,7 +44,7 @@ def welcome(registry) -> dict:
         "SELECT p.id,p.workspace_id,w.kind,w.name AS folder,json_extract(v.definition,'$.name') AS name,"
         "json_extract(v.definition,'$.pip_type') AS pip_type FROM pips p JOIN workspaces w ON w.id=p.workspace_id "
         "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
-        "WHERE p.created_at<=? AND p.status<>'archived' ORDER BY p.created_at,p.id LIMIT 500", (at,)).fetchall()
+        "WHERE p.created_at<=? AND p.status<>'archived' ORDER BY p.created_at,p.rowid LIMIT 500", (at,)).fetchall()
     from . import pip_levels
     folders: dict = {}
     personal, full = [], []
