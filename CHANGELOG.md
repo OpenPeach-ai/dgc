@@ -4,6 +4,18 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.52.1 — unreleased (the date goes in on release day)
+
+- **DGC Browser keeps streaming on a busy computer.** When your own tab had sent no picture for a second, DGC asked
+  Chrome for a full screenshot of it on every look, which kept Chrome too busy to draw; now it asks at most once every
+  2 seconds. That picture also gave its size in the screen's own pixels on a high-density screen, so a click on it
+  landed twice as far along; it gives the page's size now, as every frame does.
+- **The safety check sees a Mac's system secrets.** On a Mac, /etc is /private/etc, so reading /etc/sudoers there wasn't
+  seen as reading a credential. It is now, under either spelling.
+- **The Pips welcome lists your Pips in the order you made them**, Pips made in the same instant too.
+- **DGC builds with newer packaging tools.** Its license is written the current way (`license = "Apache-2.0"`). The old
+  form stops building after February 2027, and the installer builds DGC on your computer with the newest tools.
+
 ## 0.52.0 — 2026-11-27
 
 - **A goal looks started the moment you send it.** Its time and the turn's first row ("Working", its clock running)

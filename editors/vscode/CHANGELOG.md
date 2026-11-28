@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.36.1 — unreleased (the date goes in on release day)
+
+- **A goal sent while DGC works says so on one line.** Under its bubble: "Goal · Steering · 12:17 AM", then
+  "Goal · Steered · 12:17 AM". "Steering …" used to take a line of its own under "Goal".
+- **"Goal" and its icon sit on the time's line.** They sat a little lower than "Steered · 12:17 AM"; every word in the
+  row now stands on one line, with the icon centred on it.
+
 ## 0.36.0 — 2026-11-27
 
 - **Work sessions use DGC Browser.** Opening a site there asks **Use example.com in DGC Browser?** with what it may do
