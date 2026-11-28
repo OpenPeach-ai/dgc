@@ -696,12 +696,21 @@ class _RealStream:
             # (Measured once it streams: three frames first. The first can be a picture of the tab while Chrome, busy
             # starting, hasn't sent its stream yet.)
             seq, got, first, deadline = 0, {}, 0, time.monotonic() + 15
+            warm_from, warm_at = ticks(), time.monotonic()
             while time.monotonic() < deadline and first < 3:
                 got = host.view_own("frame", {"seq": seq})
                 if got.get("image"):
                     first += 1
                     seq = got["seq"]
-            self.assertEqual(first, 3, "it streams")
+            self.assertGreaterEqual(first, 1, "it shows the tab")
+            if first < 3:
+                # (The skip rule below, for the warm-up too: a GitHub runner sent 1 frame in 15 s, 28 Nov, and Chrome
+                # itself had hardly drawn the page.)
+                rate = (ticks() - warm_from) * 2.0 / max(0.001, time.monotonic() - warm_at)
+                if rate < 20:
+                    self.skipTest(f"Chrome drew {rate:.0f} frames of the page per 2 s on this machine, and {first} "
+                                  "streamed in 15 s: too busy to measure a stream")
+                self.fail(f"{first} frames streamed in 15 s while Chrome drew {rate:.0f} per 2 s")
             before, frames, started = ticks(), 0, time.monotonic()
             while time.monotonic() - started < 2.0:
                 got = host.view_own("frame", {"seq": seq})

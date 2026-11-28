@@ -21,7 +21,10 @@ class PipsTuiTests(unittest.TestCase):
     def test_pips_runs_the_pips_commands_in_the_transcript(self):
         ui = self.tui()
         self.config.data["pips_enabled"] = True
-        self.assertIn("No Pips yet", self.shown(ui, "/pips"), "a profile without Pips gets no registry")
+        # (A profile without Pips, declared as pips_in_use declares one with them: the default place is shared by every
+        # test in this process, and on a GitHub Mac another test's registry was there first, 28 Nov.)
+        with patch("dgc.workspace_registry.in_use", return_value=False):
+            self.assertIn("No Pips yet", self.shown(ui, "/pips"), "a profile without Pips gets no registry")
         self.assertIn("commit-review", self.shown(ui, "/pips starters"))
 
     def test_a_command_that_would_ask_is_refused_without_yes(self):

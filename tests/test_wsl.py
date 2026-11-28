@@ -402,9 +402,12 @@ class ModelOnWindowsTests(unittest.TestCase):
             self.addCleanup(resource.setrlimit, resource.RLIMIT_NOFILE, (soft, hard))
 
         def numbered_high(sock: socket.socket, number: int) -> socket.socket:
-            os.dup2(sock.fileno(), number)
+            # The lowest free number from there, in one step: dup2 onto a fixed number closed whatever held it, and a
+            # GitHub runner's dup2 said "Device or resource busy" (28 Nov).
+            import fcntl
+            high = fcntl.fcntl(sock.fileno(), fcntl.F_DUPFD, number)
             sock.close()
-            return socket.socket(fileno=number)
+            return socket.socket(fileno=high)
         live_a, live_b = socket.socketpair()
         dead_a, dead_b = socket.socketpair()
         live_a, dead_a = numbered_high(live_a, 1400), numbered_high(dead_a, 1401)
