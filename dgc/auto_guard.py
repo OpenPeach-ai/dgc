@@ -334,6 +334,9 @@ _BROWSER_SECRET_NAMES = frozenset({"cookies", "login data", "login data for acco
                                    "cert9.db", "cookies.binarycookies"})
 _BROWSER_WORDS = ("chrom", "brave", "edge", "vivaldi", "opera", "firefox", "mozilla", "safari", "browser", "arc")
 _SYSTEM_SECRET = ("/etc/shadow", "/etc/gshadow", "/etc/sudoers", "/etc/ssl/private", "/private/etc/master.passwd")
+# macOS's /etc is a link to /private/etc and every path is checked as it really is (realpath), so there "cat /etc/sudoers"
+# read /private/etc/sudoers and wasn't seen as a system secret (GitHub's macOS runner, 27 Nov): both spellings are.
+_SYSTEM_SECRET += tuple("/private" + path for path in _SYSTEM_SECRET if path.startswith("/etc/"))
 
 _PROFILES = (".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zprofile", ".zshenv",
              ".zlogin", ".zlogout", ".inputrc", ".config/fish/config.fish", ".config/fish/conf.d")

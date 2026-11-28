@@ -8,7 +8,9 @@ tests pin which steps the rules stop, the near misses they let through, and the 
 """
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -19,7 +21,8 @@ from dgc.auto_guard import CREDENTIALS, DESTRUCTIVE, OUTSIDE, PUBLISHING, SENDIN
 
 HOME = Path("/home/someone")          # never created: the rules only read paths
 ROOT = HOME / "proj"
-TEMP = (Path("/tmp"),)
+# /tmp, and this machine's own temp folder: "$(mktemp -d)" is read as a folder in it (macOS: /private/var/folders/…/T).
+TEMP = (Path("/tmp"), Path(os.path.realpath(tempfile.gettempdir())))
 
 
 def check(name, args):
@@ -43,6 +46,12 @@ class Base(unittest.TestCase):
 
 
 class Credentials(Base):
+    def test_the_systems_own_secrets_under_either_spelling_of_etc(self):
+        # macOS's /etc is /private/etc: a path is checked as it really is, so both spellings are the same secret.
+        for path in ("/etc/shadow", "/etc/sudoers", "/private/etc/sudoers", "/private/etc/shadow", "/private/etc/master.passwd"):
+            with self.subTest(path=path):
+                self.blocks(f"cat {path}", "Credentials")
+
     def test_reading_or_copying_a_key_is_stopped(self):
         self.blocks("cat ~/.ssh/id_ed25519", CREDENTIALS, "~/.ssh/id_ed25519")
         self.blocks("cp ~/.aws/credentials ./c", CREDENTIALS, "~/.aws/credentials")

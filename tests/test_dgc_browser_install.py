@@ -20,6 +20,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -241,7 +242,8 @@ def _gpg_key(home: Path, name: str) -> tuple[bytes, str]:
     return run("--armor", "--export", fingerprint).stdout, fingerprint
 
 
-@unittest.skipUnless(shutil.which("gpg") and shutil.which("sh"), "needs gpg and sh")
+@unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("gpg") and shutil.which("sh"),
+                     "the install script is for apt systems (Linux), and needs gpg and sh")
 class Script(unittest.TestCase):
     """The same script pkexec runs (and the terminal line wraps), against stand-in curl, dpkg and apt-get on PATH and a
     test signing key: the key is checked against the pinned fingerprint before anything is written or installed."""

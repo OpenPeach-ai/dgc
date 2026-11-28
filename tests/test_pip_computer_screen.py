@@ -7,6 +7,7 @@ dock sits at its foot, the browser's window fills it above the dock, and what th
 """
 import tempfile
 import types
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -24,6 +25,7 @@ class ScreenSize(Store):
     def status(self):
         return self.control("get_pip_computer", pip_id=self.pip["id"])["computer"]
 
+    @unittest.skipIf(sys.platform == "darwin", "on a Mac a Pip's screen is 1280x800 for now (pip_computer)")
     def test_it_starts_at_1280x800_and_takes_a_larger_size(self):
         shown = self.status()
         self.assertEqual(shown["screen"], "1280x800")
@@ -31,6 +33,14 @@ class ScreenSize(Store):
         self.assertEqual(self.control("set_pip_computer_screen", pip_id=self.pip["id"], size="1920x1080")["screen"], "1920x1080")
         self.assertEqual(self.status()["screen"], "1920x1080")
         self.assertEqual(pip_computer.computer_screen(self.registry.db, self.pip["id"]), (1920, 1080))
+
+    @unittest.skipUnless(sys.platform == "darwin", "a Mac's own rule")
+    def test_a_mac_offers_1280x800_and_says_why_it_takes_no_other(self):
+        shown = self.status()
+        self.assertEqual((shown["screen"], shown["screens"]), ("1280x800", ["1280x800"]))
+        with self.assertRaises(RegistryError) as caught:
+            self.control("set_pip_computer_screen", pip_id=self.pip["id"], size="1440x900")
+        self.assertIn("1280x800", str(caught.exception))
 
     def test_only_the_sizes_on_offer_and_only_here(self):
         for bad in ("1000x700", "1920X1080", "", None, 1440):
@@ -40,6 +50,7 @@ class ScreenSize(Store):
             self.control("set_pip_computer_screen", actor="device_1", pip_id=self.pip["id"], size="1440x900")
         self.assertEqual(caught.exception.code, "local_only")
 
+    @unittest.skipIf(sys.platform == "darwin", "on a Mac a Pip's screen is 1280x800 for now (pip_computer)")
     def test_a_host_reads_its_size_as_its_screen_starts(self):
         self.control("set_pip_computer_screen", pip_id=self.pip["id"], size="1440x900")
         host = types.SimpleNamespace(state_directory=self.registry.directory, pip_id=self.pip["id"], desktop=None)

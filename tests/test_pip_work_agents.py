@@ -138,11 +138,23 @@ class Model:
         return sse_text("Nothing to do.")
 
 
+_REAL_POPEN = subprocess.Popen          # (the tests record what the Pip starts by patching subprocess.Popen itself)
+
+
+def _ps(*args) -> str:
+    """ps's answer, never among the commands a test records."""
+    with _REAL_POPEN(["ps", *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True) as proc:
+        return proc.communicate()[0]
+
+
 def process_alive(pid) -> bool:
     try:
         os.kill(pid, 0)
     except OSError:
         return False
+    if not Path("/proc").is_dir():                        # a Mac: ps says whether it is a zombie
+        state = _ps("-o", "stat=", "-p", str(pid)).strip()
+        return bool(state) and not state.startswith("Z")
     try:                                                  # a zombie is gone too
         state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
         return state != "Z"
@@ -152,6 +164,13 @@ def process_alive(pid) -> bool:
 
 def sleepers() -> list[int]:
     found = []
+    if not Path("/proc").is_dir():                        # a Mac has no /proc (GitHub's macOS runner, 27 Nov): ps
+        listed = _ps("-axo", "pid=,command=")
+        for line in listed.splitlines():
+            pid, _, cmd = line.strip().partition(" ")
+            if pid.isdigit() and "sleep 307" in cmd and process_alive(int(pid)):
+                found.append(int(pid))
+        return found
     for entry in Path("/proc").iterdir():
         if entry.name.isdigit():
             try:
@@ -185,6 +204,8 @@ class WorkWorld(AgentWorld):
         (self.root / "data").mkdir()
         (self.root / "data" / "old.csv").write_text("a,b\n1,2\n")
         self.argv: list = []
+        # The Work runs among what was started: on a Mac DGC also asks `ps -o lstart= -p <pid>` (no /proc there).
+        self.work_runs = lambda: [a for a in self.argv if "-p" in a and "--output-format" in a]
         real = subprocess.Popen
         owner = self
 
@@ -275,7 +296,7 @@ class AWorkJobRunsInTheRealFolder(WorkWorld, unittest.TestCase):
     def test_the_child_is_a_real_work_run_on_the_sub_agents_model(self):
         self.start("edit")
         self.run_next()
-        [argv] = [a for a in self.argv if "-p" in a]
+        [argv] = self.work_runs()
         for flag in ("--output-format", "--mode", "--model", "--base-url", "--api-key-env", "--engine"):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index("--mode") + 1], "auto")
@@ -293,7 +314,7 @@ class AWorkJobRunsInTheRealFolder(WorkWorld, unittest.TestCase):
         before = json.loads(config_file.read_text())
         self.start("edit")
         self.run_next()
-        [argv] = [a for a in self.argv if "-p" in a]
+        [argv] = self.work_runs()
         self.assertNotIn("--trust", argv)
         self.assertEqual(self.work_job()["state"], "check_due", "the run worked in the untrusted folder")
         after = json.loads(config_file.read_text())
@@ -392,7 +413,7 @@ class PassUndoAndRetry(WorkWorld, unittest.TestCase):
         self.run_next()
         self.assertEqual(self.job_sessions(), [session], "the same session, continued")
         self.assertIn("SECOND-TRY-SAW-FIRST", self.work_job()["said"], "the second turn sees the first")
-        second = [a for a in self.argv if "-p" in a][-1]
+        second = self.work_runs()[-1]
         self.assertEqual(second[second.index("--resume") + 1], session.stem)
         self.assertIn("clamp the total at zero", self.model.requests[-1]["messages"][-1]["content"])
 

@@ -10,6 +10,7 @@ in the Pip's computer Terminal (INVOICELY_API_KEY), so a script there can use it
 """
 import json
 import os
+import sys
 import unittest
 from unittest import mock
 
@@ -45,6 +46,7 @@ class TerminalKey(Store):
         self.assertEqual(pip_keys.listing(self.registry, self.pip["id"])["keys"][0]["status"], "requested",
                          "nothing saved when the tick is refused")
 
+    @unittest.skipIf(sys.platform == "darwin", "a Mac's Pip Terminal takes no keys yet (pip_keys.terminal_env)")
     def test_only_a_ticked_key_at_do_it_all_reaches_the_terminal(self):
         self.level("full")
         self.save(terminal=True)
@@ -56,6 +58,13 @@ class TerminalKey(Store):
         self.assertEqual(pip_keys.terminal_env(self.registry, self.pip["id"]), {}, "read again at each command")
         self.level("full")
         self.assertEqual(set(pip_keys.terminal_env(self.registry, self.pip["id"])), {"INVOICELY_API_KEY"})
+
+    @unittest.skipUnless(sys.platform == "darwin", "a Mac's own rule")
+    def test_on_a_mac_no_key_reaches_the_terminal_and_the_pip_is_told_of_none(self):
+        self.level("full")
+        self.save(terminal=True)
+        self.assertEqual(pip_keys.terminal_env(self.registry, self.pip["id"]), {})
+        self.assertEqual(pip_keys.terminal_names(self.registry, self.pip["id"]), [])
 
     def test_an_unticked_key_never_does(self):
         self.level("full")
@@ -76,6 +85,7 @@ class TerminalKey(Store):
                                ("1st key", "KEY_1ST_KEY"), ("PATH", "PIP_KEY_PATH"), ("", "PIP_KEY")):
             self.assertEqual(pip_keys.terminal_name(name), expected, name)
 
+    @unittest.skipIf(sys.platform == "darwin", "a Mac's Pip Terminal takes no keys yet (pip_keys.terminal_env)")
     def test_the_pip_is_told_the_names_and_sites_never_a_value(self):
         self.level("full")
         self.save(terminal=True)
@@ -88,6 +98,7 @@ class TerminalKey(Store):
         self.level("approve")
         self.assertEqual(pip_keys.terminal_names(self.registry, self.pip["id"]), [], "below Do it all it is told none")
 
+    @unittest.skipIf(sys.platform == "darwin", "a Mac's Pip Terminal takes no keys yet (pip_keys.terminal_env)")
     def test_two_keys_with_one_name_are_named_the_same_everywhere(self):
         self.level("full")
         self.save(terminal=True)

@@ -64,7 +64,9 @@ class FilesLimit(unittest.TestCase):
     def test_the_terminal_and_background_commands_follow_it(self):
         computer = Path(self.tmp.name) / "computer"
         (computer / "files").mkdir(parents=True)
+        # (A computer that can run, on any machine: a Mac without Apple's container tool says to install it first.)
         with patch.object(files, "files_root", return_value=computer / "files"), \
+                patch.object(files, "available", return_value=(True, "")), \
                 patch.object(files, "folder_bytes", return_value=int(1.5 * GB)):
             with settings(True, 1), self.assertRaises(RegistryError) as caught:
                 files.run_command(computer, "echo hi", "pip")

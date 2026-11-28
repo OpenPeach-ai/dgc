@@ -44,9 +44,13 @@ class Limits(unittest.TestCase):
         (root / "home").mkdir(parents=True)
         desk.files_root(root)
         nearly_full = types.SimpleNamespace(total=500 * 1024 ** 3, used=0, free=desk.DISK_FLOOR_BYTES - 1)
+        # (A computer that can run, on any machine: a Mac without Apple's container tool says to install it first. And a
+        # Mac has no background commands yet: there, only the Terminal's.)
+        starts = (desk.run_command,) if sys.platform == "darwin" else (desk.run_command, desk.start_background)
         with mock.patch.object(desk.shutil, "disk_usage", return_value=nearly_full), \
+             mock.patch.object(desk, "available", return_value=(True, "")), \
              mock.patch.object(desk, "_execute", side_effect=AssertionError("nothing starts")):
-            for start in (desk.run_command, desk.start_background):
+            for start in starts:
                 with self.subTest(start=start.__name__), self.assertRaises(RegistryError) as caught:
                     start(root, "echo hi", "pip")
                 self.assertIn("free", str(caught.exception))
