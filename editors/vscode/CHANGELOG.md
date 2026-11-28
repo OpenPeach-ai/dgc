@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.36.1 — unreleased (the date goes in on release day)
+## 0.36.1 — 2026-11-28
 
 - **A goal sent while DGC works says so on one line.** Under its bubble: "Goal · Steering · 12:17 AM", then
   "Goal · Steered · 12:17 AM". "Steering …" used to take a line of its own under "Goal".

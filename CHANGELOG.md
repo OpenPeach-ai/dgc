@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## 0.52.1 — unreleased (the date goes in on release day)
+## 0.52.1 — 2026-11-28
 
 - **DGC Browser keeps streaming on a busy computer.** When your own tab had sent no picture for a second, DGC asked
   Chrome for a full screenshot of it on every look, which kept Chrome too busy to draw; now it asks at most once every
