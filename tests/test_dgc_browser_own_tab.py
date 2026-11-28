@@ -339,6 +339,41 @@ class OwnFrames(OwnHost):
         self.pump()
         self.assertEqual(len(self.pipe.calls("Page.screencastFrameAck", self.session)), 3)
 
+    def test_a_tab_drawing_no_frames_gets_a_picture_now_and_then_never_one_per_ask(self):
+        # On a busy machine (one core, 28 Nov) a picture took Chrome 4 s and came back empty, and the editor's next ask
+        # asked for another: Chrome spent its time on pictures and drew no frames. A picture at most every 2 s.
+        asked = []
+        with patch.object(self.host, "_own_capture", side_effect=lambda: asked.append(self.now[0])):
+            self.host.view_own("frame", {"seq": 0})                     # the screencast starts; nothing drawn yet
+            for _ in range(20):
+                self.now[0] += 0.25
+                self.host.view_own("frame", {"seq": 0})
+        self.assertEqual(asked, [1001.25, 1003.25], "the first after a second with no frame, then every 2 s")
+        self.frame_from_chrome(self.session, 1)
+        with patch.object(self.host, "_own_capture", side_effect=lambda: asked.append(self.now[0])):
+            self.now[0] += 5
+            got = self.host.view_own("frame", {"seq": 0})
+        self.assertIn("image", got)
+        self.assertEqual(len(asked), 2, "a tab that draws frames needs no picture")
+
+    def test_a_picture_of_a_tab_on_its_own_screen_says_the_pages_size_as_its_frames_do(self):
+        # On a screen of its own a picture has two pixels for each of the page's; the editor tab places clicks by the
+        # size a reply says, so a picture said to be 1800 wide for a 900-wide page sent clicks twice as far along.
+        self.host.view_own("size", {"width": 900, "height": 600})
+        self.host.view_own("frame", {"seq": 0})
+        self.host.browser.virtual = True
+        with patch("dgc.image_views.dimensions", return_value=(1800, 1200)):
+            self.now[0] += 1.5
+            got = self.host.view_own("frame", {"seq": 0})
+        self.assertIn("image", got, "no frame for a second: a picture of the tab")
+        self.assertEqual((got["width"], got["height"]), (900, 600))
+        self.host.browser.virtual = False
+        self.host.own_frame = None
+        with patch("dgc.image_views.dimensions", return_value=(900, 600)):
+            self.now[0] += dgc_browser.CAPTURE_EVERY_SECONDS
+            got = self.host.view_own("frame", {"seq": 0})
+        self.assertEqual((got["width"], got["height"]), (900, 600), "a headless window's picture is the page's size")
+
     def test_your_own_tabs_are_listed_and_never_a_pips(self):
         self.host.open_lane(A, "https://shop.example.com/", dgc_browser.Grants(["example.com"]))
         self.pipe.info("P1", "https://news.example.org/today", "Today")
@@ -605,7 +640,7 @@ class _RealStream:
                 if got.get("image"):
                     frames += 1
                     seq = got["seq"]
-            self.assertGreaterEqual(frames / 2.0, 20, f"{frames} frames in 2 s of a page that moves every 30 ms")
+            self.assertGreater(frames, 0, "your own tab streams (how fast: the test after this)")
             self.assertEqual((got["width"], got["height"]), (800, 500))
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline and got.get("title") != "Form":
@@ -634,6 +669,50 @@ class _RealStream:
 
     def sandboxed(self, host):
         pass
+
+
+    def test_your_own_tab_streams_what_chrome_draws_up_to_thirty_a_second(self):
+        # The stream is held against the frames Chrome drew in the same 2 s (the page's requestAnimationFrame), not a
+        # fixed rate: a GitHub runner sent 1 to 3 frames in 2 s (27 Nov) while this machine sends 48, and a fixed bar
+        # measures the machine. One that can't draw the page at video rates says so as a skip; one that draws it and
+        # doesn't stream it fails.
+        temp = tempfile.TemporaryDirectory(prefix="yb-real-rate-")
+        self.addCleanup(temp.cleanup)
+        site = _OwnSite()
+        self.addCleanup(site.stop)
+        env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+        with patch.dict(os.environ, env, clear=True):
+            host = dgc_browser.DgcBrowserHost(Path(temp.name), chrome=self.chrome(), test_flags=self.flags)
+            self.addCleanup(host.close)
+            host.open(site.url("/form"), None, headless=True)
+            host.view_own("size", {"width": 800, "height": 500})
+
+            def ticks():
+                with host.lock:
+                    session = host.browser._attached[host.own_tab()]
+                    reply = host.browser._session_call(session, "Runtime.evaluate", {"expression": "window.drawn|0",
+                                                                                      "returnByValue": True}, timeout=10)
+                return int(reply.get("result", {}).get("value") or 0)
+            # (Measured once it streams: three frames first. The first can be a picture of the tab while Chrome, busy
+            # starting, hasn't sent its stream yet.)
+            seq, got, first, deadline = 0, {}, 0, time.monotonic() + 15
+            while time.monotonic() < deadline and first < 3:
+                got = host.view_own("frame", {"seq": seq})
+                if got.get("image"):
+                    first += 1
+                    seq = got["seq"]
+            self.assertEqual(first, 3, "it streams")
+            before, frames, started = ticks(), 0, time.monotonic()
+            while time.monotonic() - started < 2.0:
+                got = host.view_own("frame", {"seq": seq})
+                if got.get("image"):
+                    frames += 1
+                    seq = got["seq"]
+            drawn = ticks() - before
+        if drawn < 20:
+            self.skipTest(f"Chrome drew {drawn} frames of the page in 2 s on this machine: too busy to measure a stream")
+        want = min(60, drawn) // 2                 # half of what Chrome drew, up to thirty a second: 15 a second or more
+        self.assertGreaterEqual(frames, want, f"{frames} frames streamed in 2 s while Chrome drew {drawn}")
 
 
 @unittest.skipUnless(_real_chrome(), "needs DGC's downloaded Google Chrome")
@@ -678,7 +757,8 @@ class _OwnSite:
                 body = ("<title>Form</title><form onsubmit=\"document.title='Got: '+q.value;return false\">"
                         "<input id=q style='position:absolute;left:10px;top:10px;width:300px;height:40px'></form>"
                         "<h1 id=t style='position:absolute;top:80px'>0</h1>"
-                        "<script>setInterval(()=>t.textContent=Date.now(),30)</script>").encode()
+                        "<script>setInterval(()=>t.textContent=Date.now(),30);"
+                        "window.drawn=0;(function f(){window.drawn++;requestAnimationFrame(f)})()</script>").encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()

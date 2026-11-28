@@ -1419,6 +1419,7 @@ FRAME_SECONDS = 0.25            # the streamed tab gets at most four pictures a 
 FRESH_SECONDS = 1.0             # a screencast frame this new is the lane as it is
 CAST_SECONDS = 10.0             # a lane nobody has looked at for this long stops being cast
 CAPTURE_SECONDS = 4.0           # a picture that takes longer (a page mid-load) waits for the next ask
+CAPTURE_EVERY_SECONDS = 2.0     # your own tab drawing no frames: a picture of it at most this often, never one per ask
 USER_WRITE_SECONDS = 3.0        # a write right after the person's own click in a Pip's tab is theirs
 LANE_IDLE_SECONDS = 10 * 60     # a Pip's lane with no run and nothing waiting for the person closes after this
 LANE_MARK = " \u00b7 "          # a lane's tab title: "<Pip> · <the page's own title>" (lane_title_script)
@@ -2245,6 +2246,7 @@ class DgcBrowserHost:
         self.screen_size = (OWN_SIZE[0] * VNC_SCALE, OWN_SIZE[1] * VNC_SCALE)   # its VNC screen's, as the last size said
         self.own_cast: tuple | None = None       # (target, size) being cast
         self.own_cast_at = -1e9
+        self.own_capture_at = -1e9               # when the last picture of a tab drawing no frames was asked for
         self.own_info_at = -1e9
         self.own_frame: tuple | None = None
         self.own_seq = 0
@@ -3017,8 +3019,13 @@ class DgcBrowserHost:
         with self.lock:
             if not self.running():
                 return {"ok": False, "closed": True, "error": "DGC Browser is closed. Open it again from the dock."}
-            if frame is None and self.own_cast is not None and self.clock() - self.own_cast_at > 1.0:
-                frame = self._own_capture()        # (a window that draws no frames now: a picture of it)
+            now = self.clock()
+            # (A window that draws no frames now: a picture of it. Now and then, not on every ask: on a busy machine
+            # (one core, 28 Nov) Chrome took 4 s to answer one, with none, and a picture per ask kept it from drawing.)
+            if (frame is None and self.own_cast is not None and now - self.own_cast_at > 1.0
+                    and now - self.own_capture_at >= CAPTURE_EVERY_SECONDS):
+                self.own_capture_at = now
+                frame = self._own_capture()
             reply = {"ok": True, **self._own_state(), "seq": seq}
             if frame is not None and frame[0] > seq:
                 reply.update(seq=frame[0], image="data:image/jpeg;base64," + frame[1], width=frame[2], height=frame[3])
@@ -3106,6 +3113,11 @@ class DgcBrowserHost:
             width, height = image_views.dimensions(base64.b64decode(data or ""))
         except (BrowserError, socket.timeout, OSError, ValueError):
             return None
+        # Its size in the page's own pixels, as a screencast frame says it (its metadata): on a screen of its own the
+        # picture has SCREEN_SCALE pixels for each, and the editor tab places a click by this size, so a click on a
+        # picture said to be 1600 wide for an 800-wide page landed twice as far along (28 Nov).
+        scale = SCREEN_SCALE if getattr(self.browser, "virtual", False) else 1
+        width, height = int(width) // scale, int(height) // scale
         with self.frame_ready:
             self.own_seq += 1
             self.own_frame = (self.own_seq, data, int(width), int(height), self.clock())
